@@ -1,0 +1,37 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-axis-normal-to-a-cylinder-refuses-a-point-on-its-axis",
+  "expected": {
+    "method": "cylinder r 5, h 10 on (60,0,0) along +Z: every radial line passes through (60,0,5), so no one normal: refused",
+    "outcome": "refused",
+    "refusal": "the point is on the face's axis",
+    "source": "analytic",
+    "sources": [],
+    "what": "an axis square to a cylinder's side through a point on the cylinder's axis"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (construct.axis.normal_to_face): the point is on the face's axis",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (construct.axis.normal_to_face): the point is on the face's axis",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "an axis square to a cylinder's side through a point on the cylinder's axis",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.axis.normal_to_face): the point is on the face's axis"
+  ]
+}

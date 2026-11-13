@@ -184,7 +184,8 @@ fn construction_names_follow_renames_in_every_definition() {
 
     let axis = json!({"type": "axis", "name": "Old"});
     let point = json!({"type": "construct_point", "name": "Old"});
-    let plane = json!({"type": "plane", "plane": {"type": "construction", "name": "Old"}});
+    // Construction plane references are keyed by id (#1134): a rename leaves them alone.
+    let plane = json!({"type": "plane", "plane": {"type": "construction", "feature": 7}});
     let definitions = [
         json!({"type": "construction_axis", "def": {"type": "through_face", "face": axis}}),
         json!({"type": "construction_axis", "def": {"type": "normal_to_face", "face": plane, "point": point}}),
@@ -201,6 +202,7 @@ fn construction_names_follow_renames_in_every_definition() {
     let planes = [
         json!({"type": "midplane", "a": plane, "b": plane}),
         json!({"type": "two_edges", "a": axis, "b": axis}),
+        json!({"type": "axis_point", "axis": axis, "point": point}),
         json!({"type": "three_points", "a": point, "b": point, "c": point}),
         json!({"type": "tangent", "face": plane, "at": [0, 0, 0]}),
         json!({"type": "along_path", "path": axis, "t": "0.5"}),
@@ -217,7 +219,7 @@ fn construction_names_follow_renames_in_every_definition() {
         let expected_count = definition.to_string().matches("\"Old\"").count();
         let mut seen = Vec::new();
         kind.walk_refs(&mut |r| {
-            if let Ref::Feature(name) = r {
+            if let Ref::FeatureName(name) = r {
                 seen.push(name.to_string());
             }
         });
@@ -233,13 +235,13 @@ fn construction_reference_walk_keeps_its_depth_limit_across_geometry() {
     use crate::construct::GeoRef;
     use crate::walk::{Ref, Walk};
 
-    let mut plane = crate::PlaneRef::Construction { name: "TooDeep".into() };
+    let mut plane = crate::PlaneRef::Construction { feature: crate::FeatureId(7) };
     for _ in 0..80 {
         plane = crate::PlaneRef::Perpendicular { plane: Box::new(GeoRef::Plane { plane }), line: Box::new(GeoRef::Axis { name: "Side".into() }) };
     }
     let mut seen = Vec::new();
     plane.walk_refs(&mut |r| {
-        if let Ref::Feature(name) = r {
+        if let Ref::FeatureName(name) = r {
             seen.push(name.to_string());
         }
     });
@@ -247,7 +249,7 @@ fn construction_reference_walk_keeps_its_depth_limit_across_geometry() {
     assert!(seen.iter().all(|name| name == "Side"));
     let mut changed = 0;
     plane.walk_refs_mut(&mut |r| {
-        if let Ref::Feature(name) = r {
+        if let Ref::FeatureName(name) = r {
             assert_eq!(name.as_ref(), "Side");
             *name = "Renamed".into();
             changed += 1;

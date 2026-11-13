@@ -13,6 +13,8 @@ pub const BUILD_DATE: &str = env!("SOLIDCRAFT_BUILD_DATE");
 /// The user and developer guide (docs/book, published by .github/workflows/pages.yml).
 pub const DOCS_URL: &str = "https://docs.solidcraft.io/";
 const ATTRIBUTION: &str = include_str!("../../../ATTRIBUTION.md");
+/// ATTRIBUTION.md as Markdown, parsed once: its tables run to a thousand rows (#7776).
+static ATTRIBUTION_BLOCKS: std::sync::LazyLock<Vec<crate::update::Block>> = std::sync::LazyLock::new(|| crate::update::parse_markdown(ATTRIBUTION));
 use solidcraft_engine::licences::{LICENSE_APACHE, LICENSE_MIT, NOTICE, THIRD_PARTY};
 
 #[derive(Default)]
@@ -28,24 +30,39 @@ pub struct HelpState {
 /// One line per fact, for bug reports.
 pub fn diagnostics(app: &SolveApp) -> String {
     let renderer = if app.viewport.gpu.is_some() { "GPU" } else { "CPU" };
+    let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     format!(
-        "SolidCraft {VERSION} ({COMMIT}, built {BUILD_DATE})\nOS: {} {}\nRenderer: {renderer}{}\nWindow: {}\nDesign: {} ({} features, {} bodies)",
+        "SolidCraft {VERSION} ({COMMIT}, built {BUILD_DATE})\nOS: {} {}\nRenderer: {renderer}{}\nWindow: {}\nDesign: {} ({}, {})",
         std::env::consts::OS,
         std::env::consts::ARCH,
         app.help.gpu.as_ref().map(|g| format!(", {g}")).unwrap_or_default(),
         if app.custom_titlebar { "custom title bar" } else { "system title bar" },
         app.session.doc.name,
-        app.session.doc.features.len(),
-        app.session.world_state().bodies.len(),
+        count(app.session.doc.features.len(), "feature", "features"),
+        count(crate::open_meshing::session_world(&app.session).bodies.len(), "body", "bodies"),
     )
 }
 
-/// Run a Help menu item: `docs`, `about`, `shortcuts`, `messages`, `report`, `crashes`, `connect`, `install_cli` (macOS).
+/// Whether a Help menu item can run now: behind an open bug report, the items that open a
+/// window would cover it (#7188). Report an Issue… shows the report.
+pub fn available(app: &SolveApp, item: &str) -> bool {
+    app.issue_report.draft.is_none() || !matches!(item, "about" | "shortcuts" | "messages" | "crashes" | "connect" | "updates")
+}
+
+/// Run a Help menu item: `docs`, `about`, `updates`, `version` (the release notes), `shortcuts`, `messages`, `report`, `crashes`,
+/// `connect`, `install_cli` (macOS).
 pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
     app.help.menu = false;
+    if !available(app, item) {
+        return;
+    }
     match item {
         "docs" => ctx.open_url(egui::OpenUrl::new_tab(DOCS_URL)),
         "about" => app.help.about = true,
+        "version" => {
+            ctx.open_url(egui::OpenUrl::new_tab(crate::update::release_notes_url(crate::update::current_version(), crate::update::release_build())))
+        }
+        "updates" => crate::update::check_now(app, ctx),
         "shortcuts" => {
             app.keymap.open = true;
             app.keymap.read_only = true;
@@ -91,17 +108,20 @@ fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(lines) = app.help.connect.clone() else {
         return;
     };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_connect_assistants"), "help", crate::i18n::tr_label("Connect AI assistants"))
-        .cards(2.0)
-        .actions("", "Close", None)
-        .show(ctx, true, |ui| {
-            ui_kit::text(
-                ui,
-                crate::i18n::tr_label("Restart each assistant to load the SolidCraft server. Each file was backed up as .bak before it changed."),
-                ui_kit::Text::Note("connect_note"),
-            );
-            ui_kit::text(ui, &lines.join("\n"), ui_kit::Text::Report("connect", false));
-        });
+    let (closed, action) =
+        ui_kit::Window::new(egui::Id::unique("sc_connect_assistants"), "help", solidcraft_ui_text::tr_label("Connect AI assistants"))
+            .cards(2.0)
+            .actions("", "Close", None)
+            .show(ctx, true, |ui| {
+                ui_kit::text(
+                    ui,
+                    solidcraft_ui_text::tr_label(
+                        "Restart each assistant to load the SolidCraft server. Each file was backed up as .bak before it changed.",
+                    ),
+                    ui_kit::Text::Note("connect_note"),
+                );
+                ui_kit::text(ui, &lines.join("\n"), ui_kit::Text::Report("connect", false));
+            });
     if closed || action == ui_kit::Action::Cancel {
         app.help.connect = None;
     }
@@ -112,15 +132,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
     if app.help.menu {
         let mut pick: Option<&str> = None;
         let resp = Container::new(ctx, Surface::Popup)
-            .area(egui::Id::new("sc_help_menu"))
+            .area(egui::Id::unique("sc_help_menu"))
             .fixed_pos(anchor)
             .constrain(true)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                crate::context_menu::menu_frame(ui, |ui| {
+                crate::ui_kit::menu::menu_frame(ui, |ui| {
                     for (id, label, icon) in [
                         ("docs", "Documentation", "library"),
                         ("about", "About SolidCraft", "help"),
+                        ("updates", solidcraft_ui_text::tr("update.check_for_updates"), "update"),
                         ("shortcuts", "Keyboard Shortcuts", "list"),
                         ("messages", "Messages…", "list"),
                         ("report", "Report an Issue…", "bug_report"),
@@ -131,8 +152,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                     .into_iter()
                     .filter(|(id, ..)| *id != "install_cli" || cfg!(target_os = "macos"))
                     {
-                        if crate::context_menu::list_row(ui, &crate::context_menu::Item::action(id, label, icon)).is_some() {
+                        let item = crate::ui_kit::Item::action(id, label, icon).on_if(available(app, id));
+                        if crate::ui_kit::menu::list_row(ui, &item).is_some() {
                             pick = Some(id);
+                        }
+                        // A layout without the version in the application bar lists it here.
+                        if id == "about" && app.header.version == crate::toolbar::VersionPlace::HelpMenu {
+                            let label = solidcraft_ui_text::format("help.version", &[("version", crate::update::current_version())]);
+                            if crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::action("version", &label, "update")).is_some() {
+                                pick = Some("version");
+                            }
                         }
                     }
                 })
@@ -141,11 +170,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
             run(app, ctx, p);
         } else if ctx.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Escape)) && !resp.response.contains_pointer() {
             // Pressed elsewhere (the ? button toggles it itself).
-            if !ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_help_opened")).unwrap_or(false)) {
+            if !ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_help_opened")).unwrap_or(false)) {
                 app.help.menu = false;
             }
         }
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_help_opened"), false));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_help_opened"), false));
     }
     about(app, ctx);
     connect(app, ctx);
@@ -157,45 +186,49 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.help.about {
         return;
     }
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_about"), "help", crate::i18n::tr_label("About SolidCraft"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_about"), "help", solidcraft_ui_text::tr_label("About SolidCraft"))
         .cards(2.0)
         .actions("", "Close", None)
         .show(ctx, true, |ui| {
             ui_kit::text(
                 ui,
-                &crate::i18n::format("help.build", &[("version", VERSION), ("commit", COMMIT), ("date", BUILD_DATE)]),
+                &solidcraft_ui_text::format("help.build", &[("version", VERSION), ("commit", COMMIT), ("date", BUILD_DATE)]),
                 ui_kit::Text::Report("version", false),
             );
             ui_kit::text(
                 ui,
-                crate::i18n::tr_label("Open-source parametric 3D CAD in Rust. Licensed MIT OR Apache-2.0."),
+                solidcraft_ui_text::tr_label("Open-source parametric 3D CAD in Rust. Licensed MIT OR Apache-2.0."),
                 ui_kit::Text::Note("description"),
             );
-            let copy = ui_kit::button(ui, crate::i18n::tr_label("Copy diagnostic information"), ui_kit::Button::Normal);
+            let copy = ui_kit::button(ui, solidcraft_ui_text::tr_label("Copy diagnostic information"), ui_kit::Button::Normal);
             crate::scenario::publish_target("about:copy_diagnostics", copy.rect);
             if copy.clicked() {
                 ctx.copy_text(diagnostics(app));
             }
-            egui::ScrollArea::vertical().max_height(crate::theme::Tokens::get().control_height * 15.0).show(ui, |ui| {
-                ui_kit::section(ui, "attributions", crate::i18n::tr("help.attributions"), false, |ui| {
-                    ui_kit::text(ui, ATTRIBUTION, ui_kit::Text::Report("attributions", false));
+            egui::ScrollArea::vertical().max_height(solidcraft_theme::Tokens::get().control_height * 15.0).show(ui, |ui| {
+                ui_kit::section(ui, "attributions", solidcraft_ui_text::tr("help.attributions"), false, |ui| {
+                    crate::update::markdown_blocks(ui, &ATTRIBUTION_BLOCKS, &solidcraft_theme::Tokens::get());
                 });
-                ui_kit::section(ui, "fonts", crate::i18n::tr("help.fonts"), false, |ui| {
-                    ui_kit::text(ui, crate::i18n::tr("help.font_details"), ui_kit::Text::Report("fonts", false));
+                ui_kit::section(ui, "fonts", solidcraft_ui_text::tr("help.fonts"), false, |ui| {
+                    ui_kit::text(ui, solidcraft_ui_text::tr("help.font_details"), ui_kit::Text::Report("fonts", false));
                 });
-                ui_kit::section(ui, "licences", crate::i18n::tr("help.licences"), false, |ui| {
-                    for (id, title, text) in
-                        [("notice", "help.notice", NOTICE), ("mit", "help.mit", LICENSE_MIT), ("apache", "help.apache", LICENSE_APACHE)]
-                    {
-                        ui_kit::section(ui, id, crate::i18n::tr(title), false, |ui| {
-                            ui_kit::text(ui, text, ui_kit::Text::Report(id, false));
-                        });
-                    }
-                    ui_kit::section(ui, "third_party", crate::i18n::tr("help.third_party"), false, |ui| {
-                        if ui_kit::button(ui, crate::i18n::tr_label("Copy all licences"), ui_kit::Button::Normal).clicked() {
-                            ctx.copy_text(solidcraft_engine::licences::all());
+                ui_kit::section(ui, "licences", solidcraft_ui_text::tr("help.licences"), false, |ui| {
+                    // Indented, so the licences read as the children of Licences (#14388).
+                    ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
+                    ui.indent("licence_list", |ui| {
+                        for (id, title, text) in
+                            [("notice", "help.notice", NOTICE), ("mit", "help.mit", LICENSE_MIT), ("apache", "help.apache", LICENSE_APACHE)]
+                        {
+                            ui_kit::section(ui, id, solidcraft_ui_text::tr(title), false, |ui| {
+                                ui_kit::text(ui, text, ui_kit::Text::Report(id, false));
+                            });
                         }
-                        ui_kit::text_lines(ui, "sc_third_party", THIRD_PARTY);
+                        ui_kit::section(ui, "third_party", solidcraft_ui_text::tr("help.third_party"), false, |ui| {
+                            if ui_kit::button(ui, solidcraft_ui_text::tr_label("Copy all licences"), ui_kit::Button::Normal).clicked() {
+                                ctx.copy_text(solidcraft_engine::licences::all());
+                            }
+                            ui_kit::text_lines(ui, "sc_third_party", THIRD_PARTY);
+                        });
                     });
                 });
             });
@@ -210,11 +243,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_attributions_read_as_formatted_text_not_raw_markdown() {
+        use crate::update::{Block, Span};
+        // #7776: every table line of ATTRIBUTION.md is a row, every `|---|` line marks a header,
+        // and no `#`, `**` or `|` is left in what reads as running text.
+        let lines: Vec<&str> = ATTRIBUTION.lines().map(str::trim).filter(|l| l.starts_with('|')).collect();
+        let rules = lines.iter().filter(|l| l.chars().all(|c| matches!(c, '-' | ':' | '|' | ' '))).count();
+        let rows: Vec<_> = ATTRIBUTION_BLOCKS.iter().filter(|b| matches!(b, Block::Row { .. })).collect();
+        let headers = rows.iter().filter(|b| matches!(b, Block::Row { header: true, .. })).count();
+        assert!(rows.len() > 500 && rules > 5, "{} rows, {rules} rules", rows.len());
+        assert_eq!((rows.len(), headers), (lines.len() - rules, rules));
+        assert!(ATTRIBUTION_BLOCKS.iter().any(|b| matches!(b, Block::Heading(s) if s == &[Span::Text("Attribution".into())])));
+        for block in ATTRIBUTION_BLOCKS.iter() {
+            if let Block::Paragraph(spans) | Block::Item(_, spans) = block {
+                for span in spans {
+                    if let Span::Text(t) = span {
+                        assert!(!t.contains("**") && !t.starts_with('#') && !t.starts_with('|'), "{t}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// #14388: the licences inside Licences are indented under its heading, so they read as its
+    /// children rather than as more sections beside it.
+    #[test]
+    fn the_licences_sit_indented_under_their_heading() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.help.about = true;
+        h.frames(2);
+        let key = |id: &str| format!("dialog:section:{}", solidcraft_ui_text::tr(id));
+        h.step(&serde_json::json!({"click": {"handle": key("help.licences")}})).unwrap();
+        h.frames(2);
+        let left = |id: &str| solidcraft_ui_registry::rect_of(&key(id)).map(|r| r.left());
+        let parent = left("help.licences").expect("the Licences heading");
+        assert_eq!(left("help.fonts"), Some(parent), "Fonts stays beside Licences");
+        for child in ["help.notice", "help.mit", "help.apache", "help.third_party"] {
+            let x = left(child).unwrap_or_else(|| panic!("{child} is not shown"));
+            assert!(x >= parent + solidcraft_theme::Tokens::get().space_14 - 0.5, "{child} at {x}, Licences at {parent}");
+        }
+    }
+
+    #[test]
     fn about_knows_its_build_and_diagnostics_say_where_it_runs() {
         assert!(!COMMIT.is_empty() && BUILD_DATE.len() == 10, "{COMMIT} {BUILD_DATE}");
         assert!(ATTRIBUTION.contains("ATTRIBUTION") || ATTRIBUTION.contains("Attribution"));
         let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         let d = diagnostics(&app);
         assert!(d.contains(VERSION) && d.contains(std::env::consts::OS) && d.contains("Renderer: CPU"), "{d}");
+    }
+
+    /// One feature and one body are counted in the singular (#9085), more in the plural.
+    #[test]
+    fn diagnostics_count_one_feature_and_one_body_in_the_singular() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(diagnostics(&app).ends_with("(0 features, 0 bodies)"), "{}", diagnostics(&app));
+        app.session.execute("solid.box", &serde_json::json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        assert!(diagnostics(&app).ends_with("(1 feature, 1 body)"), "{}", diagnostics(&app));
+        app.session.execute("solid.box", &serde_json::json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0]})).unwrap();
+        assert!(diagnostics(&app).ends_with("(2 features, 2 bodies)"), "{}", diagnostics(&app));
     }
 }

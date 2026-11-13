@@ -1,4 +1,4 @@
-//! #1490: the owner's shelled battery case (`battery-tpu-case-v2.solidcraft`, format 21, saved
+//! #1490: the owner's shelled battery case (`battery-tpu-case-v2.sc`, format 21, saved
 //! at `wall = 2.5 mm`) with a pleat loft joined into a window in one end wall. The loft stands on
 //! the case's open rim and its end strips lie in the wall's inner face. At walls of 2.4–2.6 mm
 //! the join failed with "no result": every exact route was refused, and the last resort's
@@ -12,7 +12,7 @@ use super::run;
 use crate::Session;
 
 fn open() -> Session {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tests/fixtures/battery-tpu-case-v2.solidcraft");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tests/fixtures/battery-tpu-case-v2.sc");
     let mut s = Session::default();
     run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
     s

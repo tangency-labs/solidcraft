@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#201",
+  "tangency-labs/solidcraft#3371"
+ ],
+ "what": "a loft from a circle of radius 5 to a circle of radius 10, 20 mm above, guided by one straight rail through (5,0,0) and (10,0,20)",
+ "source": "analytic",
+ "method": "the rail lies on the cone through both circles, so the loft is that cone frustum: V = 20/3 pi (25 + 100 + 50) = 3665.2.",
+ "body_count": 1,
+ "volume_mm3": 3665.191429188092,
+ "faces": 3,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   20
+  ]
+ }
+}

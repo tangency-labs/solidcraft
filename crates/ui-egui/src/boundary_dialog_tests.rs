@@ -5,9 +5,9 @@ use crate::dialogs::Kind;
 use crate::dialogs_surface::Surf;
 use crate::scenario::Harness;
 use serde_json::{Map, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{FeatureKind, Operation, kernel::Continuity};
-use solidcraft_engine::geom::Vec3;
 
 fn ok(h: &mut Harness) {
     h.frames(2);
@@ -34,13 +34,13 @@ fn a_loop_of_sketch_curves_is_the_loop_patch() {
     h.frames(3);
     assert!(h.widget("Cross curves").is_some() && h.widget("Continuity").is_some() && h.widget("Operation").is_some());
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = ["s1", "s2", "s3", "s4"].iter().map(|id| Sel::SketchCurve { id: (*id).into() }).collect();
+    d.inputs[0].items = ["s1", "s2", "s3", "s4"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
     ok(&mut h);
     let f = h.app.session.doc.features.last().unwrap();
     let FeatureKind::SurfaceBoundary { curves, orders, .. } = &f.kind else { panic!("{:?}", f.kind) };
     assert_eq!(curves, &["s1", "s2", "s3", "s4"]);
     assert!(orders.iter().all(|o| *o == Continuity::G1), "{orders:?}");
-    assert_eq!(h.app.session.world_state().bodies.len(), 1);
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
 }
 
 /// A quarter cylinder sheet (its top edge open at y = 10, z = 0) and a 3D line above it.
@@ -68,9 +68,9 @@ fn edges_and_curves_make_a_network_and_come_back_in_an_edit() {
     h.step(&json!({"call":"ui.start","params":{"command":"surface.boundary"}})).unwrap();
     h.frames(3);
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![rim.clone(), Sel::SketchCurve { id: top.clone() }];
+    d.inputs[0].items = vec![rim.clone(), Sel::SketchCurve { id: top.clone(), sketch: None }];
     let Kind::Surface(Surf::Boundary { continuity, join }) = &mut d.kind else { panic!("{:?}", d.kind) };
-    *continuity = 2;
+    *continuity = Continuity::G2;
     *join = true;
     ok(&mut h);
     let name = h.app.session.doc.features.last().unwrap().name.clone();
@@ -84,14 +84,14 @@ fn edges_and_curves_make_a_network_and_come_back_in_an_edit() {
     assert_eq!(u[0].continuity, Continuity::G2);
     assert_eq!(u[1].curves, vec![top.clone()]);
     // Joined into the sheet: one body, two faces.
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     assert_eq!(st.bodies.len(), 1);
     assert_eq!(st.body(&body).map(|b| b.body.face_count()), Some(2));
     drop(st);
     h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
     h.frames(8);
     let d = h.app.dialog.as_ref().unwrap();
-    assert!(matches!(d.kind, Kind::Surface(Surf::Boundary { continuity: 2, join: true })), "{:?}", d.kind);
+    assert!(matches!(d.kind, Kind::Surface(Surf::Boundary { continuity: Continuity::G2, join: true })), "{:?}", d.kind);
     assert_eq!(d.inputs[0].items.len(), 2, "{:?}", d.inputs[0].items);
     ok(&mut h);
     let (u2, v2, op2) = network(&h);
@@ -112,10 +112,10 @@ fn curves_that_meet_are_one_chain() {
     h.app.run("sketch.line", json!({"points":[[10,0],[10,8]],"ids":["d"]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     let sketch = h.app.session.doc.find_feature("Net").unwrap().id;
-    let k = Surf::Boundary { continuity: 0, join: false };
+    let k = Surf::Boundary { continuity: Continuity::G0, join: false };
     let (_, mut inputs) = crate::dialogs_surface::start(&h.app, "surface.boundary").unwrap();
-    inputs[0].items = ["a2", "b", "a1"].iter().map(|id| Sel::SketchCurve { id: (*id).into() }).collect();
-    inputs[1].items = ["c", "d"].iter().map(|id| Sel::SketchCurve { id: (*id).into() }).collect();
+    inputs[0].items = ["a2", "b", "a1"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
+    inputs[1].items = ["c", "d"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
     let cmds = crate::dialogs_surface::commands(&h.app, &k, &inputs, &Map::new()).unwrap();
     let (id, p) = &cmds[0];
     assert_eq!(id, "surface.boundary");
@@ -123,5 +123,5 @@ fn curves_that_meet_are_one_chain() {
     assert_eq!(p["v"], json!([{"sketch": sketch, "curves": ["c"]}, {"sketch": sketch, "curves": ["d"]}]), "{p}");
     // And it builds: the chain a1–a2 is one boundary of the patch.
     h.app.run("surface.boundary", p.clone()).unwrap();
-    assert_eq!(h.app.session.world_state().bodies.len(), 1);
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
 }

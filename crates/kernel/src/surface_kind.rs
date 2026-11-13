@@ -1,12 +1,14 @@
 //! What surface a face lies on (plane, cylinder, cone, sphere, torus), for construction
 //! geometry: axes through round faces, centres of spheres and tori.
 
-use solidcraft_geom::{UnitVec3, Vec3};
-
-use truck_modeling as mt;
+use solidcore_ops::face_surface::{Exact, FaceSurface as ExactSurface};
+use solidcore_record::Vec3;
+use solidcore_record::brep::{Brep, Curve, Surface};
+use solidcraft_geom::UnitVec3;
+use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::prelude::*;
 
 use crate::Body;
-use crate::body::from_p3;
 use crate::offset::{Surf, surf_of};
 
 /// A face's analytic surface.
@@ -33,8 +35,6 @@ pub enum FaceSurface {
         radius: f64,
     },
     /// Centre of the ring, its axis, the ring (major) and tube (minor) radii.
-    /// `major` is signed: negative on a spindle torus's inner sheet, whose tube centre
-    /// lies across the axis from the face (a revolved barrel).
     Torus {
         center: Vec3,
         axis: UnitVec3,
@@ -45,13 +45,24 @@ pub enum FaceSurface {
 
 /// The surface of face `face` (in face order), if it is one of the analytic kinds.
 pub fn face_surface(b: &Body, face: usize) -> Option<FaceSurface> {
-    surface_of(b.solid.face_iter().nth(face)?, b.size())
+    if b.is_mesh() {
+        return None;
+    }
+    surface_of(b.record(), face)
 }
 
-/// The analytic surface of face `f` of a body whose box diagonal is `size`.
-pub(crate) fn surface_of(f: &mt::Face, size: f64) -> Option<FaceSurface> {
-    let tol = (size * 1e-7).max(1e-9) * 100.0;
-    Some(match surf_of(f, tol)? {
+/// The analytic surface of face `face` of the record `b`, as the record holds it; a round kept
+/// as its definition is the torus that definition gives, when it is one.
+pub(crate) fn surface_of(b: &Brep, face: usize) -> Option<FaceSurface> {
+    if matches!(b.faces.get(face)?.surface, Surface::Blend { .. }) {
+        return match *ExactSurface::of(b, face).ok()?.exact() {
+            Exact::Torus { centre, axis, major, minor } => {
+                Some(FaceSurface::Torus { center: Vec3::from(centre), axis: Vec3::from(axis).unit()?, major, minor })
+            }
+            _ => None,
+        };
+    }
+    Some(match surf_of(b, face)? {
         Surf::Plane { n, d } => FaceSurface::Plane { normal: n.unit()?, point: n * d },
         Surf::Cylinder { o, a, r, .. } => FaceSurface::Cylinder { origin: o, axis: a.unit()?, radius: r },
         Surf::Cone { v, a, half, .. } => FaceSurface::Cone { apex: v, axis: a.unit()?, half_angle: half },
@@ -74,25 +85,36 @@ pub struct EdgeCircle {
     pub angle: f64,
 }
 
+/// The record edges that bound face `face` of `b` (none for a face out of range).
+pub fn face_edge_indices(b: &Body, face: usize) -> Vec<usize> {
+    crate::offset::face_edges(b.record(), face).into_iter().map(|e| e as usize).collect()
+}
+
 /// The circle edge `edge` (in the order of [`Body::edges`] and the tessellated mesh's edges)
-/// lies on, if its curve is a circle or an arc of one. `None` for other curves, mesh bodies
-/// and an index out of range.
+/// lies on, if its curve is a circle or an arc of one: exactly from a circle record, and for any
+/// other curve when its points all lie on one circle (a circle held as a rational spline). `None`
+/// for other curves, mesh bodies and an index out of range.
 pub fn edge_circle(b: &Body, edge: usize) -> Option<EdgeCircle> {
-    use mt::{BoundedCurve, ParametricCurve};
-    if b.mesh.is_some() {
+    if b.is_mesh() {
         return None;
     }
-    let e = Body::unique_edges(&b.solid).into_iter().nth(edge)?;
+    let record = b.record();
+    let e = record.edges.get(edge)?;
+    let c = CurveEval::new(e.parameters()).ok()?;
+    let [t0, t1] = e.interval;
+    let (start, end) = (c.point(t0)?, c.point(t1)?);
+    if let Curve::Circle { frame, radius } = &e.curve {
+        // The edge runs counter-clockwise about the frame's z from its start to its end, over the
+        // angles of its interval on the circle itself (a NURBS form is parameterised otherwise).
+        let axis = Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)).unit()?;
+        let closed = e.vertices[0] == e.vertices[1];
+        let [a0, a1] = solidcore_ops::label::edge_curve_interval(e)?;
+        let angle = if closed { std::f64::consts::TAU } else { (a1 - a0).min(std::f64::consts::TAU) };
+        return Some(EdgeCircle { center: Vec3::from(frame.origin), axis, radius: *radius, start, end, angle });
+    }
     let tol = (b.size() * 1e-7).max(1e-9) * 100.0;
-    crate::guard("edge circle", || {
-        let c = e.oriented_curve();
-        let (t0, t1) = c.range_tuple();
-        let at = |f: f64| from_p3(c.subs(t0 + (t1 - t0) * f));
-        let samples: Vec<Vec3> = (0..=24).map(|i| at(f64::from(i) / 24.0)).collect();
-        Ok(circle_through(&samples, tol))
-    })
-    .ok()
-    .flatten()
+    let samples: Vec<Vec3> = (0..=24).map(|i| c.point(t0 + (t1 - t0) * f64::from(i) / 24.0)).collect::<Option<_>>()?;
+    circle_through(&samples, tol)
 }
 
 /// The circle through evenly spaced samples of a curve (first to last), if they all lie on one.

@@ -1,0 +1,276 @@
+//! Render shell composition; all hosting and chrome belong to the shared kit.
+use crate::ui_kit::BackingTooltipExt as _;
+use crate::{
+    SolveApp,
+    ui_kit::{self, Container},
+};
+use egui::{Rect, vec2};
+use solidcraft_theme::Tokens;
+
+pub(crate) fn reset_shell(app: &mut SolveApp) {
+    app.shell.workspace_panels.retain(|id, _| !id.starts_with("render:"));
+    app.shell.browser = None;
+}
+
+pub(crate) fn focused(app: &SolveApp) -> bool {
+    crate::render_workspace::active(app) && app.shell.render_focus
+}
+
+pub(crate) fn focus_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
+    if crate::render_workspace::active(app)
+        && !ctx.text_edit_focused()
+        && !ctx.egui_wants_keyboard_input()
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+    {
+        ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+        app.start("view.render_focus");
+    }
+}
+
+pub(crate) fn canvas(app: &SolveApp, viewport: Rect) -> Rect {
+    crate::shell::content_rect(app, viewport)
+}
+
+/// The toolbar's shared floating Chrome card hosts both rows; there is no Render ribbon.
+pub(crate) fn stage_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    use crate::render_workspace::Stage;
+    crate::scenario::publish_rect("render:stage_bar", rect);
+    ui.ctx().data_mut(|d| d.remove::<Rect>(egui::Id::unique("sc_ribbon_search")));
+    let labels: Vec<_> = Stage::ALL.iter().map(|stage| app.tr(stage.label()).to_string()).collect();
+    let selected = Stage::ALL.iter().position(|s| *s == app.render_workspace.view.stage).unwrap_or(0);
+    let ready = [crate::render_workspace::job_ready(app, "render.start"), crate::render_workspace::job_ready(app, "render.cancel")];
+    let actions = [
+        ui_kit::StageAction {
+            icon: Some("play"),
+            label: app.tr_label("Render"),
+            enabled: ready[0].is_ok(),
+            primary: true,
+            reason: ready[0].as_ref().err().map(String::as_str),
+        },
+        ui_kit::StageAction {
+            icon: None,
+            label: app.tr_label("Cancel"),
+            enabled: ready[1].is_ok(),
+            primary: false,
+            reason: ready[1].as_ref().err().map(String::as_str),
+        },
+    ];
+    let choice = ui_kit::StageBar::row(ui, rect, false, |ui| {
+        ui_kit::StageBar::header(ui, selected, &labels.iter().map(String::as_str).collect::<Vec<_>>(), &actions)
+    });
+    if let Some(choice) = choice {
+        for (stage, chip) in Stage::ALL.iter().zip(choice.chips).filter(|(_, r)| r.is_positive()) {
+            crate::scenario::publish_target(&format!("render:stage:{}", stage.key()), chip);
+        }
+        for (id, action) in ["render.start", "render.cancel"].iter().zip(choice.actions).filter(|(_, r)| r.is_positive()) {
+            crate::scenario::publish_target(&format!("render:stage:{id}"), action);
+        }
+        if let Some(stage) = choice.stage.and_then(|index| Stage::ALL.get(index)) {
+            let _ = app.run("view.render_stage", serde_json::json!({"stage":stage.key()}));
+        }
+        if let Some(id) = choice.action.and_then(|index| ["render.start", "render.cancel"].get(index)) {
+            app.start(id);
+        }
+    }
+    let split = (rect.top() + ui_kit::StageBar::HEADER_HEIGHT).min(rect.bottom());
+    crate::scenario::publish_rect("render:stage_header", Rect::from_min_max(rect.min, egui::pos2(rect.right(), split)));
+    crate::scenario::publish_rect("render:stage_divider", Rect::from_min_size(egui::pos2(rect.left(), split), vec2(rect.width(), 1.0)));
+    crate::scenario::publish_rect("render:stage_tools", Rect::from_min_max(egui::pos2(rect.left(), split), rect.max));
+    ui_kit::StageBar::row(ui, rect, true, |ui| {
+        // Keep the renderer settings reachable before the horizontally scrolling
+        // Look tools and source text, including on a narrow window.
+        if app.render_workspace.view.stage == Stage::Look
+            && !crate::render_workspace::result_active(app)
+            && !crate::render_workspace::comparison_active(app)
+        {
+            let settings = ui_kit::StageBar::icon_action(ui, "settings", app.tr("render.live.source_settings_help"));
+            crate::scenario::publish_target("render:preview:settings", settings.rect);
+            if settings.clicked() {
+                let _ = app.run("view.render_select", serde_json::json!({"kind":"output"}));
+            }
+        }
+        crate::render_workspace::live::controls(app, ui);
+        stage_tools(app, ui);
+    });
+}
+
+fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
+    use crate::render_workspace::Stage;
+    match app.render_workspace.view.stage {
+        Stage::Look => {
+            ui_kit::StageBar::caption(ui, app.tr("render.pick_label"));
+            let modes = ["body", "face", "component"];
+            let mut selected = modes.iter().position(|mode| *mode == app.ui.pick_mode()).unwrap_or(0);
+            let pick = ui.add_enabled_ui(!crate::render_workspace::result_active(app), |ui| {
+                if ui_kit::segmented(
+                    ui,
+                    &mut selected,
+                    &[app.tr("render.pick_body"), app.tr("render.pick_face"), app.tr("render.pick_component")],
+                    ui_kit::Segments {
+                        targets: &["render:pick:body", "render:pick:face", "render:pick:component"],
+                        icons: &["body", "surface", "component"],
+                        workspace_accent: true,
+                        dense: true,
+                        intrinsic: true,
+                        ..Default::default()
+                    },
+                ) && let Some(mode) = modes.get(selected)
+                {
+                    let _ = app.run("select.filter", serde_json::json!({"mode":mode}));
+                }
+            });
+            crate::scenario::publish_target("render:pick", pick.response.rect);
+            pick.response.backing_on_hover_text(app.tr("render.pick_help"));
+            ui_kit::StageBar::tool_gap(ui);
+            for (id, label, icon) in
+                [("appearance.paint", "render.paint_label", "appearance"), ("appearance.pick_up", "render.pick_up_label", "select")]
+            {
+                if let Some(command) = solidcraft_engine::find_command(id) {
+                    let info = crate::render_workspace::interactive_command_info(app, command);
+                    let response = ui_kit::compact_icon_label_button(ui, app.tr(label), icon, info.enabled);
+                    crate::scenario::publish_target(&format!("render:stage:{id}"), response.rect);
+                    let hint = crate::keymap::display_for(app, id)
+                        .map_or_else(|| app.tr_label(command.label).to_string(), |key| format!("{} ({key})", app.tr_label(command.label)));
+                    let response = response.backing_on_hover_text(hint);
+                    if response.clicked() {
+                        app.start(id);
+                    }
+                    if let Some(reason) = info.disabled_reason {
+                        response.backing_on_disabled_hover_text(reason);
+                    }
+                }
+            }
+            crate::render_workspace::assign::banner(app, ui);
+            if !crate::render_workspace::result_active(app) && !crate::render_workspace::comparison_active(app) {
+                ui_kit::StageBar::separator(ui);
+                let (label, help) = crate::render_workspace::live::source_note(app);
+                let t = Tokens::get();
+                let available = (ui.available_width() - (t.control_height - t.space_2) - ui.spacing().item_spacing.x).max(0.0);
+                let note = ui_kit::StageBar::note_bounded(ui, &label, available).backing_on_hover_text(format!("{label}\n\n{}", app.tr(help)));
+                crate::scenario::publish_rect("render:preview_note", note.rect);
+            }
+            if ui_kit::StageBar::icon_action(ui, "camera", app.tr("render.preview_image_settings_help")).clicked() {
+                app.start("render.settings.get");
+            }
+        }
+        Stage::Light => {
+            // Light geometry is authored in world coordinates, including the implicit studio.
+            // This describes the existing rig; it is not an editable coordinate-frame setting.
+            let note = ui_kit::StageBar::note_bounded(ui, app.tr("render.light_space_world"), ui.available_width())
+                .backing_on_hover_text(app.tr("render.light_space_world_help"));
+            crate::scenario::publish_rect("render:light_space_note", note.rect);
+        }
+        Stage::Frame => {
+            let mut projection = usize::from(app.cam.fov == 0.0);
+            if ui_kit::segmented(
+                ui,
+                &mut projection,
+                &[app.tr("render.perspective"), app.tr("render.stage_orthographic")],
+                ui_kit::Segments { intrinsic: true, ..Default::default() },
+            ) && let Err(error) = crate::render_workspace::stage_projection(app, projection == 0)
+            {
+                app.set_status(error, true);
+            }
+            if let Some(command) = solidcraft_engine::find_command("render.settings.set") {
+                let info = crate::render_workspace::interactive_command_info(app, command);
+                let response = ui_kit::compact_icon_label_button(ui, app.tr("render.shots_save"), command.icon, info.enabled);
+                crate::scenario::publish_target("render:stage:save_shot", response.rect);
+                if response.clicked() {
+                    app.start(command.id);
+                }
+                if let Some(reason) = info.disabled_reason {
+                    response.backing_on_disabled_hover_text(reason);
+                }
+            }
+        }
+        Stage::Output => crate::render_workspace::output_stage_tools(app, ui),
+    }
+}
+
+/// Draw render controls and status above the active model or image viewport.
+pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::render_workspace::show_shader_preparation(app, ui.ctx());
+    crate::shell::register_panel(app, "render:focus:exit", None);
+    if focused(app) {
+        focus_exit(app, ui);
+    }
+    let Some(viewport) = app.viewport.rect else { return };
+    let free = crate::shell::workspace_content(app, crate::shell::panel_bounds(app, viewport));
+    if !free.is_positive() {
+        return;
+    }
+    if crate::render_workspace::job_busy(app) {
+        let pill = Container::navigation_card(ui.ctx(), egui::Id::unique("sc_render_progress"), free.center_top(), egui::Align2::CENTER_TOP, |ui| {
+            // Bound the row by the canvas, not by the card's size last frame: a longer status or
+            // name would otherwise squeeze Cancel or cut a name that has room (#11222).
+            let t = Tokens::get();
+            ui.set_max_width((free.width() - t.space_24).min(t.form_card_width * 2.0).max(0.0));
+            crate::render_workspace::progress_pill(app, ui, "render:progress");
+        });
+        crate::shell::register_panel(app, "render:progress-pill", Some(pill.response.rect));
+        crate::scenario::publish_rect("render:progress-pill", pill.response.rect);
+    } else {
+        crate::shell::register_panel(app, "render:progress-pill", None);
+    }
+    crate::render_workspace::environment_overlay(app, ui, viewport);
+    crate::render_workspace::assign::selection_bar(app, ui, free);
+    crate::render_workspace::assign::replacement_dialog(app, ui.ctx());
+    crate::shell::register_panel(app, "render:compare-controls", None);
+    if !crate::render_workspace::result_active(app) && app.session.render_selected_result().is_some() {
+        let free = if crate::render_workspace::job_busy(app) { Container::below_navigation_row(free) } else { free };
+        let card =
+            Container::navigation_card(ui.ctx(), egui::Id::unique("sc_render_compare_controls"), free.center_top(), egui::Align2::CENTER_TOP, |ui| {
+                crate::render_workspace::comparison_controls(app, ui)
+            });
+        crate::shell::register_panel(app, "render:compare-controls", Some(card.response.rect));
+    }
+    if !focused(app) {
+        shots_pill(app, ui, free);
+    }
+    // The Design viewport is not drawn here: its frame-rate readout's anchor is from another
+    // workspace (or none), so the panel would stack on nothing in this one.
+    app.frame_rate.top = None;
+    crate::operations::show(app, ui, viewport);
+    crate::viewport::transient_messages(app, ui, viewport, None);
+}
+
+fn focus_exit(app: &mut SolveApp, ui: &mut egui::Ui) {
+    const ID: &str = "render:focus:exit";
+    let bounds = crate::shell::panel_bounds(app, ui.max_rect());
+    let tokens = Tokens::get();
+    if bounds.width() < tokens.control_height || bounds.height() < tokens.control_height {
+        return;
+    }
+    let position = bounds.left_top() + vec2(tokens.space_8, 0.0);
+    let chip = Container::navigation_card(ui.ctx(), egui::Id::unique(ID), position, egui::Align2::LEFT_TOP, |ui| {
+        let response = ui_kit::choice_chip(ui, ID, app.tr("render.exit_focus"), false);
+        crate::scenario::publish_target(ID, response.rect);
+        if response.clicked() {
+            let _ = app.run("view.render_focus", serde_json::json!({"on":false}));
+        }
+    });
+    crate::shell::register_panel(app, ID, Some(chip.response.rect));
+}
+
+fn shots_pill(app: &mut SolveApp, ui: &mut egui::Ui, free: Rect) {
+    crate::shell::register_panel(app, "render:shots:show", None);
+    if app.preferences.render_shots_strip {
+        return;
+    }
+    let ctx = ui.ctx().clone();
+    let pill = Container::navigation_card(
+        &ctx,
+        egui::Id::unique("sc_render_shots_pill"),
+        free.left_bottom() + vec2(Tokens::get().space_8, -Tokens::get().space_8),
+        egui::Align2::LEFT_BOTTOM,
+        |ui| {
+            let response = ui_kit::strip_toggle(ui, false, solidcraft_ui_text::tr_label("Shots"))
+                .backing_on_hover_text(solidcraft_ui_text::tr_label("Show Shots strip"));
+            crate::scenario::publish_target("render:shots:show", response.rect);
+            if response.clicked() {
+                let _ = app.run("view.shots_strip", serde_json::json!({"visible":true}));
+            }
+        },
+    );
+    crate::shell::register_panel(app, "render:shots:show", Some(pill.response.rect));
+}

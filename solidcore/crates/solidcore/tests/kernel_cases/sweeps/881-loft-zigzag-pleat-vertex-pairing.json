@@ -1,0 +1,592 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "loft",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "degree": 1,
+        "sections": [
+          [
+            {
+              "line": {
+                "end": [
+                  -26.0,
+                  3.0,
+                  0.0
+                ],
+                "start": [
+                  -24.76384,
+                  3.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -26.0,
+                  0.0,
+                  0.0
+                ],
+                "start": [
+                  -26.0,
+                  3.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -23.23616,
+                  0.0,
+                  0.0
+                ],
+                "start": [
+                  -26.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -15.9432,
+                  10.02783,
+                  0.0
+                ],
+                "start": [
+                  -23.23616,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -8.0,
+                  0.09883,
+                  0.0
+                ],
+                "start": [
+                  -15.9432,
+                  10.02783,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  0.0,
+                  10.09883,
+                  0.0
+                ],
+                "start": [
+                  -8.0,
+                  0.09883,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  8.0,
+                  0.09883,
+                  0.0
+                ],
+                "start": [
+                  0.0,
+                  10.09883,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  15.9432,
+                  10.02783,
+                  0.0
+                ],
+                "start": [
+                  8.0,
+                  0.09883,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  23.23616,
+                  0.0,
+                  0.0
+                ],
+                "start": [
+                  15.9432,
+                  10.02783,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  26.0,
+                  0.0,
+                  0.0
+                ],
+                "start": [
+                  23.23616,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  26.0,
+                  3.0,
+                  0.0
+                ],
+                "start": [
+                  26.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  24.76384,
+                  3.0,
+                  0.0
+                ],
+                "start": [
+                  26.0,
+                  3.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  16.0568,
+                  14.97217,
+                  0.0
+                ],
+                "start": [
+                  24.76384,
+                  3.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  8.0,
+                  4.90117,
+                  0.0
+                ],
+                "start": [
+                  16.0568,
+                  14.97217,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  0.0,
+                  14.90117,
+                  0.0
+                ],
+                "start": [
+                  8.0,
+                  4.90117,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -8.0,
+                  4.90117,
+                  0.0
+                ],
+                "start": [
+                  0.0,
+                  14.90117,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -16.0568,
+                  14.97217,
+                  0.0
+                ],
+                "start": [
+                  -8.0,
+                  4.90117,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -24.76384,
+                  3.0,
+                  0.0
+                ],
+                "start": [
+                  -16.0568,
+                  14.97217,
+                  0.0
+                ]
+              }
+            }
+          ],
+          [
+            {
+              "line": {
+                "end": [
+                  -26.0,
+                  3.0,
+                  90.0
+                ],
+                "start": [
+                  -24.02812,
+                  3.0,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -26.0,
+                  0.0,
+                  90.0
+                ],
+                "start": [
+                  -26.0,
+                  3.0,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -23.97188,
+                  0.0,
+                  90.0
+                ],
+                "start": [
+                  -26.0,
+                  0.0,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -16.0,
+                  0.29895,
+                  90.0
+                ],
+                "start": [
+                  -23.97188,
+                  0.0,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -8.0,
+                  -0.00105,
+                  90.0
+                ],
+                "start": [
+                  -16.0,
+                  0.29895,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  0.0,
+                  0.29895,
+                  90.0
+                ],
+                "start": [
+                  -8.0,
+                  -0.00105,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  8.0,
+                  -0.00105,
+                  90.0
+                ],
+                "start": [
+                  0.0,
+                  0.29895,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  16.0,
+                  0.29895,
+                  90.0
+                ],
+                "start": [
+                  8.0,
+                  -0.00105,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  23.97188,
+                  0.0,
+                  90.0
+                ],
+                "start": [
+                  16.0,
+                  0.29895,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  26.0,
+                  0.0,
+                  90.0
+                ],
+                "start": [
+                  23.97188,
+                  0.0,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  26.0,
+                  3.0,
+                  90.0
+                ],
+                "start": [
+                  26.0,
+                  0.0,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  24.02812,
+                  3.0,
+                  90.0
+                ],
+                "start": [
+                  26.0,
+                  3.0,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  16.0,
+                  3.30105,
+                  90.0
+                ],
+                "start": [
+                  24.02812,
+                  3.0,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  8.0,
+                  3.00105,
+                  90.0
+                ],
+                "start": [
+                  16.0,
+                  3.30105,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  0.0,
+                  3.30105,
+                  90.0
+                ],
+                "start": [
+                  8.0,
+                  3.00105,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -8.0,
+                  3.00105,
+                  90.0
+                ],
+                "start": [
+                  0.0,
+                  3.30105,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -16.0,
+                  3.30105,
+                  90.0
+                ],
+                "start": [
+                  -8.0,
+                  3.00105,
+                  90.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -24.02812,
+                  3.0,
+                  90.0
+                ],
+                "start": [
+                  -16.0,
+                  3.30105,
+                  90.0
+                ]
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ],
+  "case": "881-loft-zigzag-pleat-vertex-pairing",
+  "expected": {
+    "bbox": {
+      "max": [
+        26,
+        14.97217,
+        90
+      ],
+      "min": [
+        -26,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 20,
+    "method": "vertex i of the bottom section is joined to vertex i of the top, so the solid is ruled and the section at height t is the polygon of the interpolated vertices; its area is quadratic in t, so Simpson is exact: V = h/6 (A0 + 4 Am + A1) with h = 90 and Am the shoelace area of the polygon of averaged vertices. Faces: 18 ruled sides + 2 planar caps.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#881",
+      "tangency-labs/solidcraft#956"
+    ],
+    "volume_mm3": 17914.43472,
+    "what": "a ruled loft between two 18-vertex zig-zag sections with the same start vertex and winding, whose first-vertex direction is ambiguous from the section centroid"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 54,
+      "faces": 20,
+      "vertices": 36
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 12390.612130134914,
+      "body_count": 1,
+      "edges": 54,
+      "faces": 20,
+      "vertices": 36,
+      "volume_mm3": 17914.43471999999
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#881",
+    "tangency-labs/solidcraft#956"
+  ],
+  "traced_ops": [
+    "loft"
+  ],
+  "ungraded": [],
+  "what": "a ruled loft between two 18-vertex zig-zag sections with the same start vertex and winding, whose first-vertex direction is ambiguous from the section centroid",
+  "why_not": []
+}

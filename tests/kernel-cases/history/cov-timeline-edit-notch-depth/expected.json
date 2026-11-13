@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "timeline.edit of a cut's depth from 5 to 8",
+ "method": "the 10x10 notch 8 deep: V = 12000 - 800; faces 6 + 4 = 10",
+ "body_count": 1,
+ "volume_mm3": 11200.0,
+ "faces": 10,
+ "source": "analytic"
+}

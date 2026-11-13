@@ -1,0 +1,11 @@
+#### WR-409. A sheet sweep's profile wires don't share the vertices where the curves meet
+- **Severity:** Failure (`SM_ERR`) on valid input
+- **Area:** Primitive creation / sweeps
+- **Location:** `source/SMLib/src/SmPrimitiveCreation.cpp`. When `CreatePlanarFacesWith3DCurves` fails (an open profile, swept into a sheet), these functions make each profile curve a wire edge of its own (`CreateWireEdgeFromCurve`): `CreateLinearSweep` (curves, repetitions), `CreateRotationalSweep` (partial turn) and `CreateDraftSweep`.
+- **What happens:** two curves meeting at a point leave two coincident vertices there. The topology sweep needs a profile with no stitchable parts. The copies swept from those two vertices come out coincident, each with a preimage, so `SmSweepStitchCallback::SelectTopologyToKeep` refuses them and the sweep fails with `SM_ERR`.
+- **Trigger:** `SmApiCreateRotationalSweep` of an open chain of two or more curves through a partial turn without caps, e.g. a line from r 6 to 8, then up 2, turned 100, 180 or 270 degrees.
+- **How found:** reported by jyviko (tangency-labs/solidcore#1113, SolidCraft rig booleans/4879). Fixed in the SolidCraft fork ("a sheet sweep's profile curves share their meeting vertices", `sm_CreateJoinedWireEdges`).
+- **Confirmed:** no (read at c9c5979 `source/SMLib/src/SmPrimitiveCreation.cpp:1903`, `:2895`, `:3149`; reported and fixed in the SolidCraft fork, not independently reproduced)
+- **Fix:** make the wires, and glue an end that lies within the B-rep's tolerance of an earlier curve's end to that curve's vertex (`GlueVertices`).
+- **Rust port:** `crates/solidcore/src/primitive/primitive_creation/p3/sweeps.rs` (`join_profile_wire_ends`, after the wire loops of `create_repeated_linear_sweep` and `create_partial_rotational_sweep`). Opt-in `Kernel::fixes.sheet_sweep_joins_profile_wires`; it is off by default, which keeps upstream's separate wires, so the sweep difftest units keep matching the C++. `CreateDraftSweep` is not ported. Test: `issue_1113_open_chain_revolves_into_a_joined_sheet` in the same file: two faces joined at the shared profile vertex (6 vertices, 7 edges). The area (30 pi) is printed, not asserted: the port integrates it 7.7e-5 high (94.25506), which is not caused by the join and is not yet explained.
+- Fixes tangency-labs/solidcore#1113.

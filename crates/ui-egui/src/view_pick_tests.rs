@@ -3,8 +3,8 @@
 
 use serde_json::json;
 
-use solidcraft_engine::geom::Vec3;
-use solidcraft_engine::render::Camera;
+use solidcore_record::Vec3;
+use solidcraft_viewport::Camera;
 
 use crate::scenario::Harness;
 
@@ -81,7 +81,7 @@ fn world_rays_pick_without_a_pixel() {
 #[test]
 fn a_hidden_body_is_not_picked() {
     let mut h = top_view();
-    let name = h.app.session.world_state().bodies[0].name.clone();
+    let name = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
     h.app.session.visibility.hidden_bodies.push(name);
     let r = pick(&mut h, json!({"pixels": [[480, 300]]}));
     assert_eq!(r["hits"][0], serde_json::Value::Null);
@@ -200,4 +200,77 @@ fn all_lists_the_faces_along_the_ray_and_the_cap_is_enforced() {
     let v = h.call("ui.pick", json!({"pixels": pixels}));
     assert_eq!(v["ok"], false);
     assert!(v["error"].as_str().is_some_and(|e| e.contains("1024")), "{v}");
+}
+
+/// The pointer over a section's cap picks nothing behind it (#6328): hovering the cut used to
+/// pick the removed top face, whose highlighted outline then showed dimmed through the cap
+/// wherever it ran behind it, so the cut looked see-through. Through the pocket the cut opens,
+/// the pointer still finds the pocket's floor.
+#[test]
+fn the_mouse_picker_stops_at_a_section_cap() {
+    use crate::viewport::{Hit, pick, pick_all, projection};
+    let mut h = top_view();
+    h.call(
+        "engine.execute",
+        json!({"command": "solid.box", "params": {"length": 4, "width": 4, "height": 4, "corner": [3, 3, 6], "operation": "cut"}}),
+    );
+    h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 0, 8], "normal": [0, 0, 1]}}}));
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 600.0));
+    let proj = projection(&h.app, rect);
+    let faces = |hits: &[Hit]| hits.iter().filter(|x| matches!(x, Hit::Face { .. })).cloned().collect::<Vec<_>>();
+    // Over the cut material, between the pocket and the box's side: no face, and no edge or
+    // corner behind the cap.
+    let solid = proj.to_screen(Vec3::new(1.5, 5.0, 8.0)).unwrap();
+    let hits = pick(&h.app, &proj, solid);
+    assert!(hits.iter().all(|x| !matches!(x, Hit::Face { .. } | Hit::Edge { .. } | Hit::Vertex { .. })), "{hits:?}");
+    assert!(faces(&pick_all(&h.app, &proj, solid)).is_empty());
+    // Over the pocket: its floor at z = 6, below the cut.
+    let pocket = proj.to_screen(Vec3::new(5.0, 5.0, 8.0)).unwrap();
+    match faces(&pick(&h.app, &proj, pocket)).first() {
+        Some(Hit::Face { point, .. }) => assert!((point.z - 6.0).abs() < 1e-6, "{point:?}"),
+        other => panic!("the pocket's floor: {other:?}"),
+    }
+    // Without the section, the box's top face answers there.
+    h.call("engine.execute", json!({"command": "inspect.section", "params": {"clear": true}}));
+    match faces(&pick(&h.app, &proj, solid)).first() {
+        Some(Hit::Face { point, .. }) => assert!((point.z - 10.0).abs() < 1e-6, "{point:?}"),
+        other => panic!("the top face: {other:?}"),
+    }
+}
+
+/// With a Section Analysis on, `view.pick` must not answer with edges or vertices in the
+/// half the section removes: the mouse picker has skipped them since #6722, and an agent
+/// must not get an answer the user cannot see (#10704).
+#[test]
+fn a_section_pick_skips_edges_and_vertices_in_the_removed_half() {
+    let mut h = Harness::new();
+    h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}));
+    h.app.cam = Camera {
+        target: Vec3::new(20.0, 15.0, 10.0),
+        yaw: 0.0,
+        pitch: std::f64::consts::FRAC_PI_2,
+        roll: 0.0,
+        distance: 200.0,
+        fov: 0.0,
+        up: Default::default(),
+    };
+    // Section XZ at 15 mm: keeps y 0..15, removes y 15..30.
+    h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 15, 0], "normal": [0, 1, 0]}}}));
+    // The same projection the model-frame pick builds, so a world point's pixel can be picked.
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(960.0, 600.0));
+    let cam = h.app.cam;
+    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(960.0 / 600.0, crate::viewport::scene_radius(&h.app)), rect };
+    let px = |p: [f64; 3]| {
+        let sp = proj.to_screen(Vec3::new(p[0], p[1], p[2])).unwrap();
+        json!([sp.x as f64, sp.y as f64])
+    };
+    // Top-view pixels on the removed half's top edge, corner, and mid-edge: nothing is drawn
+    // there, so the pick answers with nothing (it used to return the edge, with `body: null`).
+    for w in [[40.0, 25.0, 20.0], [40.0, 30.0, 20.0], [20.0, 30.0, 20.0]] {
+        let r = pick(&mut h, json!({"pixels": [px(w)]}));
+        assert_eq!(r["hits"][0], serde_json::Value::Null, "the removed half must pick nothing at {w:?}: {}", r["hits"][0]);
+    }
+    // The same pick on the kept half's edge (y < 15) still answers with that edge.
+    let r = pick(&mut h, json!({"pixels": [px([40.0, 5.0, 20.0])]}));
+    assert!(r["hits"][0]["edge"].get("index").is_some(), "the kept half's edge must still pick: {}", r["hits"][0]);
 }

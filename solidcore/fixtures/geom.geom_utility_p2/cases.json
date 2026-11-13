@@ -1,0 +1,1731 @@
+{
+ "cases": [
+  {
+   "name": "triangle_interior",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:404 (smgu_TrianglePointDistance)",
+   "inputs": {
+    "op": "triangle_point_distance",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.25,
+     0.25,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "triangle_beyond_hypotenuse",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:404 (smgu_TrianglePointDistance)",
+   "inputs": {
+    "op": "triangle_point_distance",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "triangle_beyond_vertex",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:404 (smgu_TrianglePointDistance)",
+   "inputs": {
+    "op": "triangle_point_distance",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     -1.0,
+     -2.0,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "triangle_collinear",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:404 (smgu_TrianglePointDistance)",
+   "inputs": {
+    "op": "triangle_point_distance",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     0.5,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "triangle_all_coincident",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:404 (smgu_TrianglePointDistance)",
+   "inputs": {
+    "op": "triangle_point_distance",
+    "x": [
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "llad_skew",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:824 (smgu_LineLineAtDistance)",
+   "inputs": {
+    "op": "line_line_at_distance",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     1.0,
+     0.0,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "llad_too_far",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:824 (smgu_LineLineAtDistance)",
+   "inputs": {
+    "op": "line_line_at_distance",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     0.0,
+     1.0,
+     0.0,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "llad_parallel",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:824 (smgu_LineLineAtDistance)",
+   "inputs": {
+    "op": "line_line_at_distance",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "llad_zero_vec",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:824 (smgu_LineLineAtDistance)",
+   "inputs": {
+    "op": "line_line_at_distance",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "pos_interior",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:959 (smgu_IsPointOnSegment)",
+   "inputs": {
+    "op": "is_point_on_segment",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     1e-07,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "pos_off",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:959 (smgu_IsPointOnSegment)",
+   "inputs": {
+    "op": "is_point_on_segment",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     1e-05,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "pos_beyond_end",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:959 (smgu_IsPointOnSegment)",
+   "inputs": {
+    "op": "is_point_on_segment",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     3.0,
+     0.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "pos_degenerate",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:959 (smgu_IsPointOnSegment)",
+   "inputs": {
+    "op": "is_point_on_segment",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     2.0,
+     3.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "ssi_cross",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1371 (smgu_SegmentSegmentIntersect)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     -1.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "ssi_overlap",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1371 (smgu_SegmentSegmentIntersect)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     3.0,
+     0.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "ssi_touch_end",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1371 (smgu_SegmentSegmentIntersect)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     3.0,
+     5.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "ssi_parallel",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1371 (smgu_SegmentSegmentIntersect)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     2.0,
+     1.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "ssi_skew_miss",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1371 (smgu_SegmentSegmentIntersect)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     -1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "ssi_zero_tol",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1371 (smgu_SegmentSegmentIntersect)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     -1.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_parallel_B380",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1371 (smgu_SegmentSegmentIntersect)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     10.0,
+     0.0,
+     0.0,
+     10.0,
+     1e-07,
+     0.0,
+     20.0,
+     2e-07,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "sscp_skew",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1517 (smgu_SegmentSegmentClosestPoint)",
+   "inputs": {
+    "op": "segment_segment_closest",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     -1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "sscp_parallel_overlap",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1517 (smgu_SegmentSegmentClosestPoint)",
+   "inputs": {
+    "op": "segment_segment_closest",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     3.0,
+     1.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "sscp_degenerate_first",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1517 (smgu_SegmentSegmentClosestPoint)",
+   "inputs": {
+    "op": "segment_segment_closest",
+    "x": [
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "sscp_degenerate_second",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1517 (smgu_SegmentSegmentClosestPoint)",
+   "inputs": {
+    "op": "segment_segment_closest",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     5.0,
+     5.0,
+     5.0,
+     5.0,
+     5.0,
+     5.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "ssproj_cross",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:987 (smgu_SegmentSegmentProjectedIntersect)",
+   "inputs": {
+    "op": "segment_segment_projected",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     -1.0,
+     3.0,
+     1.0,
+     1.0,
+     3.0,
+     0.0,
+     0.0,
+     1.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "ssproj_both_points",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:987 (smgu_SegmentSegmentProjectedIntersect)",
+   "inputs": {
+    "op": "segment_segment_projected",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     5.0,
+     0.0,
+     0.0,
+     6.0,
+     0.0,
+     0.0,
+     1.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "ssproj_point_line",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:987 (smgu_SegmentSegmentProjectedIntersect)",
+   "inputs": {
+    "op": "segment_segment_projected",
+    "x": [
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     5.0,
+     2.0,
+     0.0,
+     6.0,
+     0.0,
+     0.0,
+     1.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "sspersp_cross",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:1121 (smgu_SegmentSegmentPerpspectiveIntersect)",
+   "inputs": {
+    "op": "segment_segment_perspective",
+    "x": [
+     0.0,
+     0.0,
+     1.0,
+     2.0,
+     0.0,
+     1.0,
+     1.0,
+     -1.0,
+     2.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     10.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "cp_cross",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2119 (smgu_CirclePlaneIntersect)",
+   "inputs": {
+    "op": "circle_plane",
+    "x": [
+     1e-06,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cp_on_plane",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2119 (smgu_CirclePlaneIntersect)",
+   "inputs": {
+    "op": "circle_plane",
+    "x": [
+     1e-06,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     5.0,
+     5.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "cp_parallel_off",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2119 (smgu_CirclePlaneIntersect)",
+   "inputs": {
+    "op": "circle_plane",
+    "x": [
+     1e-06,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     5.0,
+     5.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "cp_non_unit",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2119 (smgu_CirclePlaneIntersect)",
+   "inputs": {
+    "op": "circle_plane",
+    "x": [
+     1e-06,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "le_cross",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2597 (smgu_LineCoPlanarEllipseIntersect)",
+   "inputs": {
+    "op": "line_ellipse",
+    "x": [
+     -5.0,
+     0.5,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     3.0,
+     1.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "le_tangent",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2597 (smgu_LineCoPlanarEllipseIntersect)",
+   "inputs": {
+    "op": "line_ellipse",
+    "x": [
+     -5.0,
+     1.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     3.0,
+     1.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "scsc_crossing",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2977 (smgu_SphereCircleSphereCircleIntersect)",
+   "inputs": {
+    "op": "sphere_circles",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "scsc_coincident",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2977 (smgu_SphereCircleSphereCircleIntersect)",
+   "inputs": {
+    "op": "sphere_circles",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     3.0,
+     4.0,
+     1.0,
+     0.0,
+     0.0,
+     -1.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "scsc_parallel_disjoint",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2977 (smgu_SphereCircleSphereCircleIntersect)",
+   "inputs": {
+    "op": "sphere_circles",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     -1.0,
+     0.0,
+     0.0,
+     1.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "scsc_tangent",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2977 (smgu_SphereCircleSphereCircleIntersect)",
+   "inputs": {
+    "op": "sphere_circles",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "scsc_miss",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:2977 (smgu_SphereCircleSphereCircleIntersect)",
+   "inputs": {
+    "op": "sphere_circles",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.9,
+     0.0,
+     0.0,
+     1.0,
+     0.9,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "tp_orthogonal",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:3235 (smgu_IntersectTwoPlanes)",
+   "inputs": {
+    "op": "two_planes",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "tp_parallel_coincident",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:3235 (smgu_IntersectTwoPlanes)",
+   "inputs": {
+    "op": "two_planes",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     5.0,
+     5.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "tp_parallel_offset",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:3235 (smgu_IntersectTwoPlanes)",
+   "inputs": {
+    "op": "two_planes",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     5.0,
+     5.0,
+     1.0,
+     0.0,
+     0.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "tp_non_unit",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:3235 (smgu_IntersectTwoPlanes)",
+   "inputs": {
+    "op": "two_planes",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.1,
+     5.0,
+     5.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "bfp_empty",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:4478 (smgu_BestFitPlaneToPoints)",
+   "inputs": {
+    "op": "best_fit_plane",
+    "x": [
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "bfp_square",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:4478 (smgu_BestFitPlaneToPoints)",
+   "inputs": {
+    "op": "best_fit_plane",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "bfp_line",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:4478 (smgu_BestFitPlaneToPoints)",
+   "inputs": {
+    "op": "best_fit_plane",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     1.0,
+     2.0,
+     2.0,
+     2.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "bfp_scattered",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:4478 (smgu_BestFitPlaneToPoints)",
+   "inputs": {
+    "op": "best_fit_plane",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "m4_mult_test_matrix",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix, padded to 4x4)",
+   "inputs": {
+    "op": "mult_4x4",
+    "x": [
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     2.0,
+     4.0,
+     -3.0,
+     0.0,
+     3.0,
+     6.0,
+     -5.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     2.0,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "m4_mult_identity",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5314 (smgu_4x4Mult)",
+   "inputs": {
+    "op": "mult_4x4",
+    "x": [
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     2.0,
+     4.0,
+     -3.0,
+     0.0,
+     3.0,
+     6.0,
+     -5.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "m4_inverse_test_matrix",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix, padded to 4x4)",
+   "inputs": {
+    "op": "inverse_4x4",
+    "x": [
+     1.0,
+     1.0,
+     2.0,
+     0.0,
+     2.0,
+     4.0,
+     -3.0,
+     0.0,
+     3.0,
+     6.0,
+     -5.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "m4_inverse_singular",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3161 (my_test_matrix, padded to 4x4)",
+   "inputs": {
+    "op": "inverse_4x4",
+    "x": [
+     1.0,
+     1.0,
+     0.0,
+     0.0,
+     2.0,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "m4_inverse_identity",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5393 (smgu_4x4Inverse)",
+   "inputs": {
+    "op": "inverse_4x4",
+    "x": [
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "frenet_helix_n0",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5599 (smgu_FrenetFromDerivatives)",
+   "inputs": {
+    "op": "frenet",
+    "x": [
+     0.7648421872844885,
+     0.644217687237691,
+     0.35,
+     -0.644217687237691,
+     0.7648421872844885,
+     0.5,
+     -0.7648421872844885,
+     -0.644217687237691,
+     0.0,
+     0.644217687237691,
+     -0.7648421872844885,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "frenet_helix_n1",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5599 (smgu_FrenetFromDerivatives)",
+   "inputs": {
+    "op": "frenet",
+    "x": [
+     0.7648421872844885,
+     0.644217687237691,
+     0.35,
+     -0.644217687237691,
+     0.7648421872844885,
+     0.5,
+     -0.7648421872844885,
+     -0.644217687237691,
+     0.0,
+     0.644217687237691,
+     -0.7648421872844885,
+     0.0
+    ],
+    "n": 1
+   }
+  },
+  {
+   "name": "frenet_helix_n2",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5599 (smgu_FrenetFromDerivatives)",
+   "inputs": {
+    "op": "frenet",
+    "x": [
+     0.7648421872844885,
+     0.644217687237691,
+     0.35,
+     -0.644217687237691,
+     0.7648421872844885,
+     0.5,
+     -0.7648421872844885,
+     -0.644217687237691,
+     0.0,
+     0.644217687237691,
+     -0.7648421872844885,
+     0.0
+    ],
+    "n": 2
+   }
+  },
+  {
+   "name": "frenet_helix_n3",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5599 (smgu_FrenetFromDerivatives)",
+   "inputs": {
+    "op": "frenet",
+    "x": [
+     0.7648421872844885,
+     0.644217687237691,
+     0.35,
+     -0.644217687237691,
+     0.7648421872844885,
+     0.5,
+     -0.7648421872844885,
+     -0.644217687237691,
+     0.0,
+     0.644217687237691,
+     -0.7648421872844885,
+     0.0
+    ],
+    "n": 3
+   }
+  },
+  {
+   "name": "frenet_zero_tangent",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5599 (smgu_FrenetFromDerivatives)",
+   "inputs": {
+    "op": "frenet",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0
+    ],
+    "n": 2
+   }
+  },
+  {
+   "name": "frenet_line_torsion",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5599 (smgu_FrenetFromDerivatives)",
+   "inputs": {
+    "op": "frenet",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0
+    ],
+    "n": 3
+   }
+  },
+  {
+   "name": "frenet_zero_second",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5599 (smgu_FrenetFromDerivatives)",
+   "inputs": {
+    "op": "frenet",
+    "x": [
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0
+    ],
+    "n": 3
+   }
+  },
+  {
+   "name": "frenet_circle_n2",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5599 (smgu_FrenetFromDerivatives)",
+   "inputs": {
+    "op": "frenet",
+    "x": [
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     -4.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "n": 2
+   }
+  },
+  {
+   "name": "cont_c1c2",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5697 (smgu_EvaluateCurveContinuity)",
+   "inputs": {
+    "op": "continuity",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cont_discontinuous",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5697 (smgu_EvaluateCurveContinuity)",
+   "inputs": {
+    "op": "continuity",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     2.0,
+     3.1,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cont_zero_tangent",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5697 (smgu_EvaluateCurveContinuity)",
+   "inputs": {
+    "op": "continuity",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cont_g1",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5697 (smgu_EvaluateCurveContinuity)",
+   "inputs": {
+    "op": "continuity",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     5.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cont_g1g2",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5697 (smgu_EvaluateCurveContinuity)",
+   "inputs": {
+    "op": "continuity",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     2.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cont_c1g2",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5697 (smgu_EvaluateCurveContinuity)",
+   "inputs": {
+    "op": "continuity",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     -2.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cont_kink",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5697 (smgu_EvaluateCurveContinuity)",
+   "inputs": {
+    "op": "continuity",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.1,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cont_kink_wide_angle",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5697 (smgu_EvaluateCurveContinuity)",
+   "inputs": {
+    "op": "continuity",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.01,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     5.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "cont_third_both",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5697 (smgu_EvaluateCurveContinuity)",
+   "inputs": {
+    "op": "continuity",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "n": 3
+   }
+  },
+  {
+   "name": "cont_third_one",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp:5697 (smgu_EvaluateCurveContinuity)",
+   "inputs": {
+    "op": "continuity",
+    "x": [
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     2.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "n": 1
+   }
+  }
+ ]
+}

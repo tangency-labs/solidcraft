@@ -9,7 +9,8 @@ use crate::test_support::sample_app;
 use std::collections::BTreeSet;
 
 use crate::browser;
-use crate::context_menu::{self, Item, Target};
+use crate::context_menu::{self, Target};
+use crate::ui_kit::Item;
 use crate::{Services, SolveApp};
 use serde_json::json;
 use solidcraft_engine::Session;
@@ -33,7 +34,19 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
     let components: Vec<u64> = app.session.doc.components.iter().map(|c| c.id).collect();
     let groups: Vec<u64> = app.session.doc.browser_groups.iter().map(|g| g.id).collect();
 
-    for target in [Target::Viewport, Target::Origin, Target::Units, Target::Toolbar, Target::Workspace, Target::NamedViews] {
+    for target in [
+        Target::Viewport,
+        Target::Origin,
+        Target::Units,
+        Target::Toolbar,
+        Target::HistoryControls,
+        Target::Workspace,
+        Target::NamedViews,
+        Target::ViewGizmo,
+        Target::InsertDesign,
+        Target::VisualStyle,
+        Target::ViewTool,
+    ] {
         take_items(out, &context_menu::items(app, &target));
     }
     for name in &bodies {
@@ -45,6 +58,7 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
     for id in &features {
         take_items(out, &context_menu::items(app, &Target::Sketch { id: *id }));
         take_items(out, &context_menu::items(app, &Target::Plane { id: *id }));
+        take_items(out, &context_menu::items(app, &Target::Timeline { feature: *id }));
     }
     for id in &components {
         take_items(out, &context_menu::items(app, &Target::Component { id: *id }));
@@ -92,6 +106,16 @@ fn every_menu_label_is_in_the_english_catalog() {
     app.session.visibility.hidden_bodies.clear();
     take(&app, &mut seen);
 
+    // Linked components offer source-file actions absent from the sample design.
+    let linked = app.session.execute("component.create", &json!({"name": "Linked part"})).expect("linked component");
+    let component = linked["component"].as_u64().expect("component id");
+    app.session
+        .doc_mut()
+        .links
+        .insert(component, solidcraft_engine::doc::DesignLink { path: "part.solidcraft".into(), feature: 0, ..Default::default() });
+    take(&app, &mut seen);
+    assert!(seen.contains("Open Linked Design"));
+
     // A menu that stops yielding labels would empty `seen` and turn the
     // whole test into a tautology, so the sweep has to stay broad.
     assert!(seen.len() > 40, "the sweep only reached {} label(s)", seen.len());
@@ -117,7 +141,7 @@ fn command_done_echo_follows_the_language_preference_without_a_render_scope() {
     app.preferences.language = "zh".into();
     app.run("solid.box", json!({ "length": 5, "width": 5, "height": 5 })).expect("box");
     let echo = app.session.log.last().expect("the echo is logged");
-    let zh = crate::i18n::Locale::for_language("zh");
+    let zh = solidcraft_ui_text::Locale::for_language("zh");
     let expected = zh.format("ui.command_done", &[("command", zh.label(crate::command_label("solid.box")))]);
     assert_eq!(echo, &expected);
     assert!(echo.contains("完成"), "{echo}");

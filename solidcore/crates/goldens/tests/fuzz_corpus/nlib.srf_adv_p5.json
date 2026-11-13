@@ -1,0 +1,6 @@
+{
+  "unit": "nlib.srf_adv_p5",
+  "cases": [
+    {"name": "fuzz00415_ffi_rejected_bad_index_count_flag", "origin": "fuzz-out/n2000/nlib.srf_adv_p5/fuzz00415.json (crash: rust: killed by signal 6 (memory allocation of 68719476744 bytes failed))", "cpp": "harness: ffi rejected: bad index/count/flag 4294967296", "rust": "ok", "inputs": {"bnd": [2, 1], "cmp": true, "cnt": [1, 1], "curves": [{"cpts": [[0.889, 0.609, 0.572, -1.7976931348623157e+308], [2.22, -0.902, 0.585, -1.7976931348623157e+308]], "p": 4294967296, "u": [4.39]}, {"cpts": [[2.27, -0.99, 3.02, -1.7976931348623157e+308]], "p": 2, "u": [4.39]}], "deg": 1, "dir": 2}}
+  ]
+}

@@ -5,10 +5,13 @@
 //! have a direction (planar faces, straight edges), the angle.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Mesh, UnitVec3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Mesh, UnitVec3};
 
 use super::measure_shape::{Shape, Slot, add_round, centre};
 use crate::params::bad;
+use crate::schema::inspect::{MeasureKind, MeasureResult, Measured, MeasuredItems};
 use crate::{Result, Sel, Session};
 
 /// Geometry of a picked item, as points or triangles.
@@ -104,15 +107,27 @@ fn fit_circle(pts: &[Vec3], tol: f64) -> Option<(Vec3, UnitVec3, f64)> {
 }
 
 /// The round shape of mesh edge `index` of body `b`: from the kernel's exact curve when it
-/// is the same edge (its ends on the polyline), else fitted to the polyline's points.
-fn edge_round(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool) -> Option<Shape> {
+/// is the same edge (its ends on the polyline), else fitted to the polyline's points; and
+/// whether it is the exact one.
+fn edge_round(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool) -> Option<(Shape, bool)> {
+    edge_round_within(b, m, index, whole, edge_tolerance(m))
+}
+
+/// How far a point may lie from an exact curve and still count as on it, for mesh `m`.
+fn edge_tolerance(m: &Mesh) -> f64 {
+    (m.bounds().diagonal().max(1.0) * 1e-6).max(1e-9)
+}
+
+/// [`edge_round`] with the mesh's tolerance already worked out: finding it reads every vertex of
+/// the mesh, which a caller going through many edges should do once.
+fn edge_round_within(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool, tol: f64) -> Option<(Shape, bool)> {
     let pts = m.edges.get(index)?;
-    let tol = (m.bounds().diagonal().max(1.0) * 1e-6).max(1e-9);
     let exact = solidcraft_kernel::edge_circle(&b.body, index).filter(|c| {
         let ends = [pts.first(), pts.last()].into_iter().flatten().all(|p| p.dist(c.start).min(p.dist(c.end)) <= tol * 10.0);
         let on = pts.iter().all(|p| (p.dist(c.center) - c.radius).abs() <= tol * 10.0);
         ends && on
     });
+    let is_exact = exact.is_some();
     let (center, axis, radius, angle) = match exact {
         Some(c) => (c.center, c.axis, c.radius, if whole { std::f64::consts::TAU } else { c.angle }),
         None => {
@@ -123,7 +138,17 @@ fn edge_round(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool
             (center, axis, radius, angle)
         }
     };
-    Some(Shape::Round { center, axis, radius, angle, planar: true, lo: 0.0, hi: 0.0 })
+    Some((Shape::Round { center, axis, radius, angle, planar: true, lo: 0.0, hi: 0.0 }, is_exact))
+}
+
+/// The length of a measured curve: an exact circle's or arc's own (radius times angle, as its
+/// circumference and arc length are), else that of the polyline drawn for it, which runs inside
+/// a curve (#9086).
+fn curve_len(shape: &Shape, exact: bool, polyline: f64) -> f64 {
+    match *shape {
+        Shape::Round { radius, angle, .. } if exact => radius * angle,
+        _ => polyline,
+    }
 }
 
 /// Points along a circle or arc (`angle` from `start` about `axis`).
@@ -141,7 +166,7 @@ fn arc_points(center: Vec3, axis: UnitVec3, start: Vec3, angle: f64) -> Vec<Vec3
 
 /// The solved sketch holding a picked curve or point: `sketch` when given, else the active
 /// sketch, else the last sketch with that id.
-fn sketch_of<'a>(
+pub(super) fn sketch_of<'a>(
     s: &Session,
     st: &'a solidcraft_doc::ModelState,
     sketch: Option<u64>,
@@ -150,7 +175,7 @@ fn sketch_of<'a>(
     if let Some(id) = sketch {
         return st.sketch(id);
     }
-    if let Some(ss) = s.active_sketch.and_then(|id| st.sketch(id)).filter(|ss| has(&ss.sketch)) {
+    if let Some(ss) = super::sketch_store::active(s).and_then(|id| st.sketch(id)).filter(|ss| has(&ss.sketch)) {
         return Some(ss);
     }
     st.sketches.iter().rev().map(|ss| &**ss).find(|ss| has(&ss.sketch))
@@ -159,7 +184,8 @@ fn sketch_of<'a>(
 fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
     use solidcraft_sketch::CurveKind;
     let sk = &ss.sketch;
-    let c = sk.curves.get(sk.curve_index(id)?)?;
+    let Some(index) = sk.curve_index(id) else { return sketch_wire(sk, id) };
+    let c = sk.curves.get(index)?;
     let at = |i: usize| sk.points.get(i).map(|p| ss.plane.to_world(p.pos));
     let normal = ss.plane.normal().unit()?;
     let (shape, pts) = match c.kind {
@@ -192,7 +218,8 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
             (b - a).normalized()
         }
         _ => {
-            json["length_mm"] = json!(polyline_len(&pts));
+            // A sketch's circle or arc is exact.
+            json["length_mm"] = json!(curve_len(&shape, true, polyline_len(&pts)));
             add_round(&mut json, &shape);
             None
         }
@@ -200,10 +227,42 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
     Some(Item { geo: Geo::Points(pts), dir, json, shape, slot: None })
 }
 
+/// A curve drawn in a 3D sketch, or a linked 3D curve (a wire, #14051), whose points are in world
+/// coordinates: a line measures as a line, an exact arc as its circle, and any other curve along
+/// its points. A single point is not a curve.
+fn sketch_wire(sk: &solidcraft_sketch::Sketch, id: &str) -> Option<Item> {
+    let w = sk.wires.get(sk.wire_index(id)?)?;
+    let mut json = json!({"type": "sketch_curve", "id": id});
+    if let Some(arc) = w.arc {
+        let axis = arc.normal.unit()?;
+        let (x, y) = ((arc.start - arc.center).normalized()?, axis.cross((arc.start - arc.center).normalized()?));
+        let mut angle = (arc.end - arc.center).dot(y).atan2((arc.end - arc.center).dot(x));
+        if angle <= 0.0 {
+            angle += std::f64::consts::TAU;
+        }
+        let shape = Shape::Round { center: arc.center, axis, radius: arc.radius, angle, planar: true, lo: 0.0, hi: 0.0 };
+        json["length_mm"] = json!(curve_len(&shape, true, 0.0));
+        add_round(&mut json, &shape);
+        let pts = arc_points(arc.center, axis, arc.start, angle);
+        return Some(Item { geo: Geo::Points(pts), dir: None, json, shape, slot: None });
+    }
+    match w.pts.as_slice() {
+        [] | [_] => None,
+        [a, b] => {
+            json["length_mm"] = json!(a.dist(*b));
+            Some(Item { geo: Geo::Points(densify(&[*a, *b])), dir: (*b - *a).normalized(), json, shape: Shape::Line { a: *a, b: *b }, slot: None })
+        }
+        pts => {
+            json["length_mm"] = json!(polyline_len(pts));
+            Some(Item { geo: Geo::Points(pts.to_vec()), dir: None, json, shape: Shape::Other, slot: None })
+        }
+    }
+}
+
 /// A profile (closed region of a sketch): its area, and when it is a circle or a slot, its
 /// sizes.
 fn profile(ss: &solidcraft_doc::SolvedSketch, index: usize) -> Option<Item> {
-    use solidcraft_geom::{Seg2, Vec2};
+    use solidcore_record::{Seg2, Vec2};
     let pr = ss.profiles.get(index)?;
     let outline: Vec<Vec3> = pr.region.outer.polyline(1e-3).iter().map(|p| ss.plane.to_world(*p)).collect();
     let mut json = json!({"type": "profile", "area_mm2": pr.region.area()});
@@ -269,10 +328,35 @@ fn face_slot(b: &solidcraft_doc::ModelBody, m: &Mesh, shape: &Shape, pts: &[Vec3
     super::measure_shape::slot_from_faces(shape, pts, &surfaces)
 }
 
-fn describe(s: &Session, sel: &Sel) -> Option<Item> {
-    let st = s.world_state();
+/// `sel` in the placed model `st`.
+fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<Item> {
     let plain = |geo, dir, json| Some(Item { geo, dir, json, shape: Shape::Other, slot: None });
     match sel {
+        Sel::Plane { name } => {
+            let (point, normal) = plane_named(s, name)?;
+            Some(Item {
+                geo: Geo::Points(vec![point]),
+                dir: Some(normal),
+                json: json!({"type": "plane", "point": point, "normal": normal}),
+                shape: Shape::Plane { point, normal: UnitVec3::new(normal)? },
+                slot: None,
+            })
+        }
+        Sel::Axis { name } => {
+            let (origin, dir) = axis_named(s, name)?;
+            let (a, b) = (origin - dir * 1e6, origin + dir * 1e6);
+            Some(Item {
+                geo: Geo::Points(vec![origin, a, b]),
+                dir: Some(dir),
+                json: json!({"type": "axis", "origin": origin, "direction": dir}),
+                shape: Shape::Line { a, b },
+                slot: None,
+            })
+        }
+        Sel::ConstructionPoint { name } => {
+            let p = crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)?;
+            Some(Item { geo: Geo::Points(vec![p]), dir: None, json: json!({"type": "point", "position": p}), shape: Shape::Point(p), slot: None })
+        }
         Sel::Vertex { point, .. } => Some(Item {
             geo: Geo::Points(vec![*point]),
             dir: None,
@@ -290,19 +374,18 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
                 let pieces: Vec<&Vec<Vec3>> = rim.iter().filter_map(|&i| m.edges.get(i)).collect();
                 let len: f64 = pieces.iter().map(|p| polyline_len(p)).sum();
                 let points = pieces.iter().flat_map(|p| densify(p)).collect();
-                let mut json = json!({"type": "edge", "length_mm": len});
-                let shape = edge_round(b, &m, index, true).unwrap_or(Shape::Other);
+                let (shape, exact) = edge_round(b, &m, index, true).unwrap_or((Shape::Other, false));
+                let mut json = json!({"type": "edge", "length_mm": curve_len(&shape, exact, len)});
                 add_round(&mut json, &shape);
                 return Some(Item { geo: Geo::Points(points), dir: None, json, shape, slot: None });
             }
             let (a, z) = (*pts.first()?, *pts.last()?);
             let straight = (z - a).normalized().filter(|d| pts.iter().all(|p| (*p - a).cross(*d).len() < 1e-6 * (1.0 + a.dist(z))));
-            let len = polyline_len(pts);
-            let mut json = json!({"type": "edge", "length_mm": len});
-            let shape = match straight {
-                Some(_) => Shape::Line { a, b: z },
-                None => edge_round(b, &m, index, false).unwrap_or(Shape::Other),
+            let (shape, exact) = match straight {
+                Some(_) => (Shape::Line { a, b: z }, false),
+                None => edge_round(b, &m, index, false).unwrap_or((Shape::Other, false)),
             };
+            let mut json = json!({"type": "edge", "length_mm": curve_len(&shape, exact, polyline_len(pts))});
             add_round(&mut json, &shape);
             Some(Item { geo: Geo::Points(densify(pts)), dir: straight, json, shape, slot: None })
         }
@@ -311,12 +394,30 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
             let m = b.mesh();
             let patch = m.surface_patch(*index);
             let tris = patch.iter().flat_map(|f| face_tris(&m, *f)).collect::<Vec<_>>();
-            let area: f64 = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).len() * 0.5).sum();
+            let on_mesh: f64 = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).len() * 0.5).sum();
+            // A face is measured on the surface it lies on and the exact edges around it, not
+            // on the triangles of the display mesh, which run inside every curve: a curved
+            // face's and a round hole's alike.
+            let area = super::measure_exact::patch_area(&b.body, &m, &patch).unwrap_or(on_mesh);
             let normals: Vec<UnitVec3> = tris.iter().filter_map(|[a, b, c]| (*b - *a).cross(*c - *a).unit()).collect();
             let planar = normals.first().copied().filter(|n0| normals.iter().all(|n| n.dot(*n0) > 1.0 - 1e-6));
             let mut json = json!({"type": "face", "area_mm2": area, "planar": planar.is_some()});
+            // Each border edge counts for what Measure shows for that edge on its own.
+            let tol = edge_tolerance(&m);
+            let edge_len = |edge: usize| {
+                let polyline = m.edges.get(edge).map_or(0.0, |pts| polyline_len(pts));
+                edge_round_within(b, &m, edge, false, tol).map_or(polyline, |(shape, exact)| curve_len(&shape, exact, polyline))
+            };
+            if let Some(perimeter) = super::measure_exact::patch_perimeter(&m, &patch, planar.is_some(), edge_len) {
+                json["perimeter_mm"] = json!(perimeter.total);
+                if let Some((outer, inner)) = perimeter.outer_inner {
+                    json["outer_perimeter_mm"] = json!(outer);
+                    json["inner_perimeter_mm"] = json!(inner);
+                }
+            }
             let verts: Vec<Vec3> = tris.iter().flat_map(|t| t.iter().copied()).collect();
-            let shape = match solidcraft_kernel::face_surface(&b.body, *index) {
+            let surface = solidcraft_kernel::face_surface(&b.body, *index);
+            let shape = match surface {
                 Some(solidcraft_kernel::FaceSurface::Cylinder { origin, axis, radius }) => {
                     super::measure_shape::cylinder(origin, axis, radius, &verts).unwrap_or(Shape::Other)
                 }
@@ -328,6 +429,7 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
                 _ => Shape::Other,
             };
             add_round(&mut json, &shape);
+            super::measure_shape::add_curved(&mut json, surface);
             let slot = if matches!(shape, Shape::Round { .. }) && !shape.full() { face_slot(b, &m, &shape, &verts) } else { None };
             if let Some(sl) = &slot {
                 json["slot"] = sl.json();
@@ -335,13 +437,22 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
             Some(Item { geo: Geo::Tris(tris), dir: planar.map(Vec3::from), json, shape, slot })
         }
         Sel::Body { name } => {
-            let m = st.body(name)?.mesh();
+            let body = st.body(name)?;
+            let closed = crate::cmd::inspect::encloses_volume(&body.body);
+            let m = body.mesh();
             let tris: Vec<[Vec3; 3]> = m.triangles.iter().filter_map(|t| m.tri(t)).collect();
-            let v = m.measure().volume;
-            plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "volume_mm3": v}))
+            let definitions = s.model.state();
+            let v = if definitions.sheets.iter().any(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
+                super::inspect::measure_body(body, Some(&definitions)).ok()?.volume
+            } else {
+                m.measure().volume
+            };
+            plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "closed": closed, "volume_mm3": closed.then_some(v)}))
         }
-        Sel::SketchCurve { id } => sketch_curve(sketch_of(s, &st, None, |sk| sk.curve_index(id).is_some())?, id),
-        Sel::ExternalSketchCurve { sketch, id } => sketch_curve(sketch_of(s, &st, Some(*sketch), |_| true)?, id),
+        Sel::SketchCurve { id, sketch } => {
+            sketch_curve(sketch_of(s, st, *sketch, |sk| sk.curve_index(id).is_some() || sk.wire_index(id).is_some())?, id)
+        }
+        Sel::ExternalSketchCurve { sketch, id } => sketch_curve(sketch_of(s, st, Some(*sketch), |_| true)?, id),
         Sel::SketchPoint { id } | Sel::ExternalSketchPoint { id, .. } => {
             let given = match sel {
                 Sel::ExternalSketchPoint { sketch, .. } => Some(*sketch),
@@ -352,7 +463,7 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
                 Some((k, p)) if given.is_none() => (Some(k), p),
                 _ => (given, id.as_str()),
             };
-            let ss = sketch_of(s, &st, given, |sk| sk.point_index(id).is_some())?;
+            let ss = sketch_of(s, st, given, |sk| sk.point_index(id).is_some())?;
             let p = ss.plane.to_world(ss.sketch.points.get(ss.sketch.point_index(id)?)?.pos);
             Some(Item {
                 geo: Geo::Points(vec![p]),
@@ -370,11 +481,29 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
 /// A picked item's exact shape with its points (an edge's polyline) and triangles (a face's),
 /// as Measure sees it: what [`crate::snap`] takes an item's centres, middle and ends from.
 pub(crate) fn shape_of(s: &Session, sel: &Sel) -> Option<(Shape, Vec<Vec3>, Vec<[Vec3; 3]>)> {
-    let item = describe(s, sel)?;
+    let world = s.world_state().ok()?;
+    let item = describe(s, &world, sel)?;
     Some(match item.geo {
         Geo::Points(p) => (item.shape, p, Vec::new()),
         Geo::Tris(t) => (item.shape, Vec::new(), t),
     })
+}
+
+/// What `selection.get` reports of a picked item beyond its identity: the measurement
+/// `inspect.measure` gives it (length, area, volume, radius…), its direction where it has one
+/// (a planar face's normal, a straight edge's direction) and, for an edge, whether it is a line,
+/// a circle, an arc or another curve.
+pub(super) fn resolve(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<(Value, Option<Vec3>)> {
+    let item = describe(s, st, sel)?;
+    let mut json = item.json;
+    if matches!(sel, Sel::Edge { .. }) {
+        json["curve"] = match item.shape {
+            Shape::Line { .. } => json!("line"),
+            Shape::Round { .. } => json.get("round").cloned().unwrap_or_else(|| json!("arc")),
+            _ => json!("other"),
+        };
+    }
+    Some((json, item.dir))
 }
 
 fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
@@ -383,6 +512,114 @@ fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
 }
 
 /// Closest pair of points between two pieces of geometry.
+/// An origin plane (XY, XZ, YZ) or a construction plane's point and normal.
+fn plane_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
+    match name {
+        "XY" => Some((Vec3::ZERO, Vec3::Z)),
+        "XZ" => Some((Vec3::ZERO, Vec3::Y)),
+        "YZ" => Some((Vec3::ZERO, Vec3::X)),
+        _ => crate::view::construction_planes(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| (p.origin, p.x.cross(p.y))),
+    }
+}
+
+/// An origin axis (X, Y, Z) or a construction axis's point and unit direction.
+fn axis_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
+    match name {
+        "X" => Some((Vec3::ZERO, Vec3::X)),
+        "Y" => Some((Vec3::ZERO, Vec3::Y)),
+        "Z" => Some((Vec3::ZERO, Vec3::Z)),
+        _ => crate::view::construction_axes(s).into_iter().find(|(_, n, _, _)| n == name).map(|(_, _, origin, dir)| (origin, dir)),
+    }
+}
+
+/// The closest points of two exact shapes, where the sampled points would be wrong: a plane or
+/// an axis runs on, so a point set of it is not the object. `anchor` is a point of `a` to
+/// measure from where any point would do (two parallel planes); `unbounded` says whether `a`
+/// and `b` run on for ever (datum planes and axes) rather than ending (faces and edges).
+fn exact_min(a: &Shape, b: &Shape, anchor: Option<Vec3>, unbounded: (bool, bool)) -> Option<(f64, Vec3, Vec3)> {
+    use Shape::*;
+    let to_plane = |p: Vec3, point: Vec3, normal: UnitVec3| {
+        let n = normal.vec();
+        let h = (p - point).dot(n);
+        (h.abs(), p, p - n * h)
+    };
+    let to_line = |p: Vec3, a: Vec3, b: Vec3| {
+        let d = b - a;
+        let t = if d.len() > 1e-12 { ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0) } else { 0.0 };
+        let q = a + d * t;
+        (p.dist(q), p, q)
+    };
+    match (a, b) {
+        (Point(p), Plane { point, normal }) => Some(to_plane(*p, *point, *normal)),
+        (Plane { point, normal }, Point(p)) => {
+            let (d, f, t) = to_plane(*p, *point, *normal);
+            Some((d, t, f))
+        }
+        (Point(p), Line { a: la, b: lb }) => Some(to_line(*p, *la, *lb)),
+        (Line { a: la, b: lb }, Point(p)) => {
+            let (d, f, t) = to_line(*p, *la, *lb);
+            Some((d, t, f))
+        }
+        (Point(p), Point(q)) => Some((p.dist(*q), *p, *q)),
+        (Plane { point: p1, normal: n1 }, Plane { point: p2, normal: n2 }) => {
+            super::measure_shape::plane_plane(*p1, *n1, *p2, *n2, anchor.unwrap_or(*p1), unbounded.0 && unbounded.1)
+        }
+        (Plane { point, normal }, Line { a: la, b: lb }) => {
+            let d = *lb - *la;
+            let den = d.dot(normal.vec());
+            if den.abs() < 1e-9 {
+                let (dist, _, q) = {
+                    let h = (*la - *point).dot(normal.vec());
+                    (h.abs(), *la, *la - normal.vec() * h)
+                };
+                Some((dist, q, *la))
+            } else {
+                let t = (*point - *la).dot(normal.vec()) / den;
+                let p = *la + d * t;
+                Some((0.0, p, p))
+            }
+        }
+        (Line { a: la, b: lb }, Plane { point, normal }) => {
+            let d = *lb - *la;
+            let den = d.dot(normal.vec());
+            if den.abs() < 1e-9 {
+                let h = (*la - *point).dot(normal.vec());
+                Some((h.abs(), *la, *la - normal.vec() * h))
+            } else {
+                let t = (*point - *la).dot(normal.vec()) / den;
+                let p = *la + d * t;
+                Some((0.0, p, p))
+            }
+        }
+        (Line { a: a1, b: b1 }, Line { a: a2, b: b2 }) => {
+            let (d1, d2) = (*b1 - *a1, *b2 - *a2);
+            let n = d1.cross(d2);
+            if n.len() < 1e-9 {
+                let (dist, _, q) = {
+                    let dd = d1;
+                    let t = if dd.len() > 1e-12 { ((*a2 - *a1).dot(dd) / dd.dot(dd)).clamp(0.0, 1.0) } else { 0.0 };
+                    let q = *a1 + dd * t;
+                    ((*a2).dist(q), *a2, q)
+                };
+                Some((dist, q, *a2))
+            } else {
+                let w = *a1 - *a2;
+                let a = d1.dot(d1);
+                let b = d1.dot(d2);
+                let c = d2.dot(d2);
+                let d = d1.dot(w);
+                let e = d2.dot(w);
+                let den = a * c - b * b;
+                let (t, s) = if den.abs() < 1e-12 { (0.0, e / c) } else { ((b * e - c * d) / den, (a * e - b * d) / den) };
+                let p = *a1 + d1 * t;
+                let q = *a2 + d2 * s;
+                Some((p.dist(q), p, q))
+            }
+        }
+        _ => None,
+    }
+}
+
 fn closest(a: &Geo, b: &Geo) -> Option<(Vec3, Vec3)> {
     let pts_to_tris = |pts: &[Vec3], tris: &[[Vec3; 3]]| -> Option<(Vec3, Vec3)> {
         let pts = sample(pts, MAX_POINTS);
@@ -438,12 +675,14 @@ fn corner_cos(a: Shape, b: Shape) -> Option<f64> {
     Some((end_a - p).normalized()?.dot((end_b - q).normalized()?))
 }
 
-/// A face or edge as `inspect.measure` takes it: the body and a point on the item; `index` is
-/// optional (the point finds the item).
+/// A face or edge as `inspect.measure` takes it: the body and a point on the item, its index, or
+/// both (the point finds the item without an index; an index alone names it, as `model.faces`
+/// and `model.edges` list it, even after a joint has moved the body) (#14011).
 #[derive(serde::Deserialize)]
 struct Pick {
     body: String,
-    point: Vec3,
+    #[serde(default)]
+    point: Option<Vec3>,
     #[serde(default)]
     index: Option<usize>,
 }
@@ -454,6 +693,12 @@ fn resolve_pick(st: &solidcraft_doc::ModelState, face: bool, value: &Value) -> s
     let Pick { body, point, index } = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
     let b = st.body(&body).ok_or_else(|| format!("no body named '{body}'"))?;
     let m = b.mesh();
+    let point = match (point, index) {
+        (Some(p), _) => p,
+        (None, Some(i)) if face => face_tris(&m, i).first().map(|t| t[0]).ok_or_else(|| format!("'{body}' has no face {i}"))?,
+        (None, Some(i)) => m.edges.get(i).and_then(|e| e.get(e.len() / 2).copied()).ok_or_else(|| format!("'{body}' has no edge {i}"))?,
+        (None, None) => return Err("give a `point` on the item or its `index`".into()),
+    };
     if face {
         let index = match index {
             Some(i) => i,
@@ -477,7 +722,7 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
     if list.is_empty() || list.len() > 1000 {
         return Err(bad(cmd, "measure one or two items"));
     }
-    let st = s.world_state();
+    let st = s.world_state()?;
     let mut sels = Vec::new();
     for value in list {
         let sel = match value.get("type").and_then(Value::as_str) {
@@ -496,22 +741,28 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
             return Err(bad(cmd, "measure one or two items"));
         }
     }
+    let world = s.world_state()?;
     let mut described = Vec::new();
     for x in &sels {
         described.push(
-            describe(s, x).ok_or_else(|| bad(cmd, "an item can't be measured (pick vertices, edges, faces, bodies, sketch curves or profiles)"))?,
+            describe(s, &world, x)
+                .ok_or_else(|| bad(cmd, "an item can't be measured (pick vertices, edges, faces, bodies, sketch curves or profiles)"))?,
         );
     }
-    let mut out = json!({"items": described.iter().map(|d| d.json.clone()).collect::<Vec<_>>()});
+    let mut out =
+        MeasuredItems { items: described.iter().map(|d| d.json.as_object().cloned().unwrap_or_default()).collect(), ..MeasuredItems::default() };
     if let [one] = described.as_slice() {
-        for k in ["diameter", "radius", "circumference", "angle_deg", "arc_length", "center", "slot"] {
-            if let Some(v) = one.json.get(k) {
-                out[k] = v.clone();
-            }
-        }
+        let copy = |k: &str| one.json.get(k).cloned();
+        out.diameter = copy("diameter");
+        out.radius = copy("radius");
+        out.circumference = copy("circumference");
+        out.angle_deg = copy("angle_deg");
+        out.arc_length = copy("arc_length");
+        out.center = copy("center");
+        out.slot = copy("slot");
         if let Some(sl) = &one.slot {
-            out["center_from"] = json!(sl.centres.0);
-            out["center_to"] = json!(sl.centres.1);
+            out.center_from = Some(sl.centres.0.into());
+            out.center_to = Some(sl.centres.1.into());
         }
     }
     if let [a, b] = described.as_slice() {
@@ -535,32 +786,45 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
             max = Some(exact);
         }
         if let (Some((p, q)), Some(d)) = (near, min) {
-            out["distance_mm"] = json!(d);
-            out["from"] = json!(p);
-            out["to"] = json!(q);
-            out["delta"] = json!(q - p);
-            out["min"] = json!(d);
+            out.set_closest(d, p, q);
+        }
+        let unbounded = |i: usize| matches!(sels.get(i), Some(Sel::Plane { .. } | Sel::Axis { .. }));
+        if let Some((d, p, q)) = exact_min(&a.shape, &b.shape, near.map(|(p, _)| p), (unbounded(0), unbounded(1)))
+            .filter(|(d, p, q)| d.is_finite() && p.is_finite() && q.is_finite())
+        {
+            out.set_closest(d, p, q);
         }
         if let (Some((p, q)), Some(d)) = (far, max) {
-            out["max"] = json!(d);
-            out["max_from"] = json!(p);
-            out["max_to"] = json!(q);
-            out["max_delta"] = json!(q - p);
+            out.max = Some(d);
+            out.max_from = Some(p.into());
+            out.max_to = Some(q.into());
+            out.max_delta = Some((q - p).into());
         }
         if let Some(c) = c {
-            out["center_distance"] = json!(c.distance);
-            out["center_from"] = json!(c.from);
-            out["center_to"] = json!(c.to);
-            out["center_delta"] = json!(c.to - c.from);
+            out.center_distance = Some(c.distance);
+            out.center_from = Some(c.from.into());
+            out.center_to = Some(c.to.into());
+            out.center_delta = Some((c.to - c.from).into());
         }
-        out["measure"] = json!(if c.is_some() { "center" } else { "min" });
+        out.measure = Some(if c.is_some() { MeasureKind::Center } else { MeasureKind::Min });
         if let (Some(da), Some(db)) = (a.dir, b.dir) {
             let both_faces = matches!(sels.as_slice(), [Sel::Face { .. }, Sel::Face { .. }]);
             let cos = if both_faces { da.dot(db) } else { corner_cos(a.shape, b.shape).unwrap_or_else(|| da.dot(db).abs()) };
-            out["angle_deg"] = json!(cos.clamp(-1.0, 1.0).acos().to_degrees());
+            out.angle_deg = Some(json!(cos.clamp(-1.0, 1.0).acos().to_degrees()));
         }
     }
-    Ok(out)
+    serde_json::to_value(MeasureResult { measured: Measured::Items(Box::new(out)), param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+}
+
+impl MeasuredItems {
+    /// The closest distance between two items and where it is: `distance_mm` and `min` are one.
+    fn set_closest(&mut self, d: f64, p: Vec3, q: Vec3) {
+        self.distance_mm = Some(d);
+        self.min = Some(d);
+        self.from = Some(p.into());
+        self.to = Some(q.into());
+        self.delta = Some((q - p).into());
+    }
 }
 
 /// Farthest pair of points between two pieces of geometry (on their samples and vertices).

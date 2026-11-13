@@ -1,0 +1,966 @@
+{
+ "coverage": "Curved primitives (SmApiCreateCylinder, SmApiCreateSphere) and the box through the extend-corner, rounded and direct extended offsets: the cylinder seam and the sphere's closed face are tangent sectors, which only the extend-corner pass of DoExtendedOffset mates.",
+ "cases": [
+  {
+   "name": "member_cylinder_extend_outset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "member_cylinder_round_outset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (rounded)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extended_cylinder_outset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "extended",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "member_cylinder_extend_inset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "member_cylinder_round_inset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (rounded)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extended_cylinder_inset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "extended",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.5,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "member_sphere_extend_outset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      1,
+      -1
+     ],
+     "radius": 2.5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.4,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "member_sphere_round_outset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (rounded)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      1,
+      -1
+     ],
+     "radius": 2.5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.4,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extended_sphere_outset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "extended",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      1,
+      -1
+     ],
+     "radius": 2.5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.4,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "member_sphere_extend_inset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      1,
+      -1
+     ],
+     "radius": 2.5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.4,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "member_sphere_round_inset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (rounded)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      1,
+      -1
+     ],
+     "radius": 2.5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.4,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extended_sphere_inset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "extended",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      1,
+      -1
+     ],
+     "radius": 2.5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.4,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "member_box_extend_outset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      4,
+      6,
+      8
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.25,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "member_box_round_outset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (rounded)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      4,
+      6,
+      8
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.25,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extended_box_outset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "extended",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      4,
+      6,
+      8
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.25,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "member_box_extend_inset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      4,
+      6,
+      8
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.25,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "member_box_round_inset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (rounded)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      4,
+      6,
+      8
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.25,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extended_box_inset",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "extended",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      4,
+      6,
+      8
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.25,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "api_offset_cylinder_out",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2745-2758",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 0.5,
+     "extend_convex": true,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "api_offset_cylinder_in",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2745-2758",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -0.5,
+     "extend_convex": true,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "api_offset_sphere_out",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2745-2758",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      1,
+      -1
+     ],
+     "radius": 2.5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 0.5,
+     "extend_convex": true,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "api_offset_sphere_in",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2745-2758",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      1,
+      -1
+     ],
+     "radius": 2.5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -0.5,
+     "extend_convex": true,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "api_shell_cylinder_top_face",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2548-2563",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -0.5,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "api_shell_cylinder_r5_top_open_tol_1e6",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2548-2563 (the tangency-labs/solidcore#1453 cylinder at source tolerance 1e-6: inner floor circle, seam and rim marched)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 5,
+     "height": 10
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "member_cylinder_extend_inset_past_radius",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 4
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 1.5,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "member_cylinder_round_inset_past_radius",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (rounded)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 4
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 1.5,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "member_sphere_round_inset_past_radius",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (rounded)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 1.5,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extended_sphere_inset_past_radius",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "extended",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 1.5,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "member_cylinder_extend_inset_at_radius",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 4
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 1.0,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "member_cylinder_extend_outset_large",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 0.5,
+     "height": 0.25
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 10.0,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "member_sphere_round_outset_large",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (rounded)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      2,
+      2,
+      2
+     ],
+     "radius": 0.25
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 20.0,
+     "member_approx_tol": 1e-06,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "member_cylinder_extend_outset_tiny",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      0.001,
+      0,
+      0
+     ],
+     "radius": 0.001,
+     "height": 0.002
+    },
+    "tolerance": 1e-10,
+    "config": {
+     "member_distance": 0.0002,
+     "member_approx_tol": 1e-10,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "member_cylinder_round_outset_huge",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (rounded)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1000.0,
+      -1000.0,
+      0
+     ],
+     "radius": 1000.0,
+     "height": 500.0
+    },
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 100.0,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "extended_sphere_outset_huge",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
+   "inputs": {
+    "operation": "extended",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      10000.0
+     ],
+     "radius": 1000.0
+    },
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 50.0,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "member_shell_cylinder_side",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (shell faces)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 2,
+     "height": 3
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.25,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "member_shell_cylinder_base_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (shell faces)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 2,
+     "height": 3
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.25,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "member_shell_sphere",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (shell faces)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 2
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "member_distance": 0.25,
+     "member_approx_tol": 1e-06,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  }
+ ]
+}

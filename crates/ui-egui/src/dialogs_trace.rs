@@ -3,17 +3,17 @@
 //! and drawn in the viewport; OK keeps it as a 3D sketch spline (`motion.trace.keep`).
 
 use crate::ui_kit::{choice_row, expr_row, text_row};
-use egui::{Pos2, RichText, Stroke};
+use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{IDENTITY, Mat, apply_point, mat_inverse, mat_mul};
-use solidcraft_engine::geom::Vec3;
 use solidcraft_engine::{Sel, Session};
 
 use super::{Hover, body_of, capital, movable, num, pt, sel_items, snap_of};
 use crate::dialogs::{combo, form_row};
 use crate::selection::SelInput;
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug)]
 pub struct TraceForm {
@@ -86,10 +86,13 @@ pub fn params(s: &Session, f: &TraceForm, inputs: &[SelInput]) -> Result<Value, 
     {
         let mut reference = snap.param;
         reference["occurrence"] = json!(path.last().copied().unwrap_or(0));
-        for key in ["point", "face", "circle", "edge"] {
+        for key in ["point", "face", "circle", "edge", "corner"] {
             if let Some(at) = reference.get(key).and_then(solidcraft_engine::params::vec3) {
                 reference[key] = pt(apply_point(&placed, apply_point(&inverse, at)));
             }
+        }
+        if let Some(z) = reference.get("z").and_then(solidcraft_engine::params::vec3) {
+            reference["z"] = pt(solidcraft_engine::doc::apply_vector(&placed, solidcraft_engine::doc::apply_vector(&inverse, z)));
         }
         p["point_ref"] = reference;
     }
@@ -109,6 +112,15 @@ pub fn params(s: &Session, f: &TraceForm, inputs: &[SelInput]) -> Result<Value, 
     Ok(p)
 }
 
+/// The preview's `motion.trace` parameters: OK's, less `point_ref`, which only
+/// `motion.trace.keep` reads.
+pub(crate) fn preview_params(mut p: Value) -> Value {
+    if let Some(o) = p.as_object_mut() {
+        o.remove("point_ref");
+    }
+    p
+}
+
 /// The picked point as `motion.trace` and `motion.plot` take it: `{occurrence, point}`.
 pub fn picked_point(s: &Session, inputs: &[SelInput]) -> Result<Value, String> {
     let (path, at, shown, placed) = placement(s, inputs).ok_or("select a point on a component")?;
@@ -124,15 +136,14 @@ pub(crate) fn stop_text(v: &Value) -> Option<String> {
     // The values come from the engine: a missing key is an empty name, never a panic.
     let name = |m: &serde_json::Map<String, Value>, key: &str| m.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
     if let Some(l) = v["stopped_by_loop"].as_object() {
-        return Some(crate::i18n::format("trace.stopped_by_loop", &[("sample", &at), ("joint", &name(l, "joint"))]));
+        return Some(solidcraft_ui_text::format("trace.stopped_by_loop", &[("sample", &at), ("joint", &name(l, "joint"))]));
     }
     let c = v["stopped_by_contact"].as_object()?;
-    Some(crate::i18n::format("trace.stopped_by_contact", &[("sample", &at), ("a", &name(c, "a")), ("b", &name(c, "b"))]))
+    Some(solidcraft_ui_text::format("trace.stopped_by_contact", &[("sample", &at), ("a", &name(c, "a")), ("b", &name(c, "b"))]))
 }
 
 /// The dialog's rows; true when Enter was pressed in a value.
 pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inputs: &[SelInput]) -> bool {
-    let t = Tokens::get();
     let s = &app.session;
     let mut enter = false;
     let studies: Vec<&str> = s.doc.assembly.studies.iter().map(|m| m.name.as_str()).collect();
@@ -149,9 +160,7 @@ pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inp
     } else {
         let list = movable(s);
         if list.is_empty() {
-            form_row(ui, "", |ui| {
-                ui.label(RichText::new(crate::i18n::tr_label("no joint that moves yet")).color(t.text_dim));
-            });
+            crate::ui_kit::status_line(ui, "no joint that moves yet", crate::ui_kit::StatusTone::Dim);
             return false;
         }
         let labels: Vec<&str> = list.iter().filter_map(|i| s.doc.assembly.joints.get(*i)).map(|j| j.name.as_str()).collect();
@@ -183,21 +192,19 @@ pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inp
     let p = params(s, f, inputs);
     let key = format!("{}:{p:?}", s.revision);
     if f.shown.as_ref().is_none_or(|(k, _)| *k != key) {
-        let r = p.and_then(|p| s.scratch().execute("motion.trace", &p).map_err(|e| e.to_string()));
+        let r = p.and_then(|p| s.scratch().execute("motion.trace", &preview_params(p)).map_err(|e| e.to_string()));
         f.shown = Some((key, r));
         f.view = placement(s, inputs).and_then(|(_, _, shown, placed)| Some((shown, mat_inverse(&placed)?)));
     }
     if let Some((_, r)) = &f.shown {
-        let (text, colour) = match r {
+        let (text, tone) = match r {
             Ok(v) => match stop_text(v) {
-                Some(why) => (why, t.warning),
-                None => (crate::i18n::format("trace.points", &[("count", &v["samples"].to_string())]), t.text_dim),
+                Some(why) => (why, crate::ui_kit::StatusTone::Warning),
+                None => (solidcraft_ui_text::format("trace.points", &[("count", &v["samples"].to_string())]), crate::ui_kit::StatusTone::Dim),
             },
-            Err(e) => (e.clone(), t.text_dim),
+            Err(e) => (solidcraft_ui_text::tr_label(e).to_string(), crate::ui_kit::StatusTone::Dim),
         };
-        form_row(ui, "", |ui| {
-            ui.add(egui::Label::new(RichText::new(text).color(colour)).wrap());
-        });
+        crate::ui_kit::status_line(ui, &text, tone);
     }
     enter
 }
@@ -237,15 +244,15 @@ mod shared_status_baseline_tests {
         }
         assert_eq!(
             stop_text(&json!({"stopped_at":3,"stopped_by_loop":{"joint":"Hinge"},"stopped_by_contact":{"a":"A","b":"B"}})),
-            Some(crate::i18n::format("trace.stopped_by_loop", &[("sample", "3"), ("joint", "Hinge")]))
+            Some(solidcraft_ui_text::format("trace.stopped_by_loop", &[("sample", "3"), ("joint", "Hinge")]))
         );
         assert_eq!(
             stop_text(&json!({"stopped_at":4,"stopped_by_contact":{"a":"A","b":"B"}})),
-            Some(crate::i18n::format("trace.stopped_by_contact", &[("sample", "4"), ("a", "A"), ("b", "B")]))
+            Some(solidcraft_ui_text::format("trace.stopped_by_contact", &[("sample", "4"), ("a", "A"), ("b", "B")]))
         );
         assert_eq!(
             stop_text(&json!({"stopped_at":0,"stopped_by_contact":{"a":1,"b":null}})),
-            Some(crate::i18n::format("trace.stopped_by_contact", &[("sample", "0"), ("a", ""), ("b", "")]))
+            Some(solidcraft_ui_text::format("trace.stopped_by_contact", &[("sample", "0"), ("a", ""), ("b", "")]))
         );
     }
 }

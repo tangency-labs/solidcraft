@@ -103,6 +103,55 @@ name_type!(
     FeatureName
 );
 
+/// A feature, by its id. Pattern and mirror seeds and construction planes name features by id
+/// (#1134); a reference that resolves to nothing keeps id 0, which no feature ever has.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FeatureId(pub u64);
+
+impl FeatureId {
+    /// A reference that names no feature: a name that could not be resolved when an older
+    /// design was migrated (#1134). Evaluation reports it like today's dangling name.
+    pub const DANGLING: FeatureId = FeatureId(0);
+}
+
+impl Deref for FeatureId {
+    type Target = u64;
+    fn deref(&self) -> &u64 {
+        &self.0
+    }
+}
+
+impl From<u64> for FeatureId {
+    fn from(id: u64) -> Self {
+        FeatureId(id)
+    }
+}
+
+impl From<FeatureId> for u64 {
+    fn from(id: FeatureId) -> u64 {
+        id.0
+    }
+}
+
+impl PartialEq<u64> for FeatureId {
+    fn eq(&self, other: &u64) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<FeatureId> for u64 {
+    fn eq(&self, other: &FeatureId) -> bool {
+        *self == other.0
+    }
+}
+
+impl std::fmt::Display for FeatureId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// A sketch, by its feature id.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -142,5 +191,30 @@ impl PartialEq<SketchId> for u64 {
 impl std::fmt::Display for SketchId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+/// The name of a copy of `name` (a pasted body, feature or component): the name and the next
+/// number in brackets that `taken` doesn't hold — `Cube` → `Cube (2)`, another copy of `Cube` →
+/// `Cube (3)`. A name that already ends in brackets takes the number right after them: a copy of
+/// `Cube (2)` → `Cube (2)(2)`.
+pub fn copy_name(name: &str, taken: impl Fn(&str) -> bool) -> String {
+    let name = name.trim();
+    let gap = if name.ends_with(')') { "" } else { " " };
+    (2..100_002u64).map(|i| format!("{name}{gap}({i})")).find(|c| !taken(c)).unwrap_or_else(|| format!("{name}{gap}(2)"))
+}
+
+#[cfg(test)]
+mod copy_name_tests {
+    use super::copy_name;
+
+    #[test]
+    fn a_copy_takes_the_next_free_number() {
+        let taken = |names: &'static [&'static str]| move |n: &str| names.contains(&n);
+        assert_eq!(copy_name("Cube", taken(&["Cube"])), "Cube (2)");
+        assert_eq!(copy_name("Cube", taken(&["Cube", "Cube (2)"])), "Cube (3)");
+        assert_eq!(copy_name("Cube (2)", taken(&["Cube", "Cube (2)", "Cube (3)"])), "Cube (2)(2)");
+        assert_eq!(copy_name("Cube (2)", taken(&["Cube (2)", "Cube (2)(2)"])), "Cube (2)(3)");
+        assert_eq!(copy_name("Sketch1", taken(&["Sketch1"])), "Sketch1 (2)");
     }
 }

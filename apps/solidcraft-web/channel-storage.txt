@@ -1,0 +1,2 @@
+This build keeps its designs and settings apart per release channel (src/channel.rs).
+packaging/web-channels.sh only offers a release candidate that has this file.

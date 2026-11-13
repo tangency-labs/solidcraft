@@ -1,0 +1,532 @@
+{
+  "cases": [
+    {
+      "name": "issue711_overlapping_holes",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [6, 0, -1, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [3, 5.196, -1, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.9166666666666666, 0, 0.0, 1, 1.0],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_overlapping_holes_reversed",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [3, 5.196, -1, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, -1, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.0, 1, 1.0, 0, 0.08333333333333333, 1, 0.9166666666666666],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags0",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags1",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0.08333333333333333, 0, 0.75, 1, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags2",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.25, 1, 0.9166666666666666, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags3",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0.25, 0, 0.9166666666666666, 1, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags4",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0.25, 0, 0.8333333333333334, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags5",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 1],
+        "domains": [0.08333333333333333, 0, 0.75, 1, 0.25, 0, 0.8333333333333334, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags6",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 1],
+        "domains": [0, 0.25, 1, 0.9166666666666666, 0.25, 0, 0.8333333333333334, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags7",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 1],
+        "domains": [0.25, 0, 0.9166666666666666, 1, 0.25, 0, 0.8333333333333334, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags8",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0, 0.16666666666666666, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags9",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 1],
+        "domains": [0.08333333333333333, 0, 0.75, 1, 0, 0.16666666666666666, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags10",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 1],
+        "domains": [0, 0.25, 1, 0.9166666666666666, 0, 0.16666666666666666, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags11",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 1],
+        "domains": [0.25, 0, 0.9166666666666666, 1, 0, 0.16666666666666666, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags12",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0.16666666666666666, 0, 0.75, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags13",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 1],
+        "domains": [0.08333333333333333, 0, 0.75, 1, 0.16666666666666666, 0, 0.75, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags14",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 1],
+        "domains": [0, 0.25, 1, 0.9166666666666666, 0.16666666666666666, 0, 0.75, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class1_flags15",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 1],
+        "domains": [0.25, 0, 0.9166666666666666, 1, 0.16666666666666666, 0, 0.75, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags0",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 0],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags1",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 0],
+        "domains": [0.08333333333333333, 0, 0.75, 1, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags2",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 0],
+        "domains": [0, 0.25, 1, 0.9166666666666666, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags3",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 0],
+        "domains": [0.25, 0, 0.9166666666666666, 1, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags4",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 0],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0.25, 0, 0.8333333333333334, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags5",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 0],
+        "domains": [0.08333333333333333, 0, 0.75, 1, 0.25, 0, 0.8333333333333334, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags6",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 0],
+        "domains": [0, 0.25, 1, 0.9166666666666666, 0.25, 0, 0.8333333333333334, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags7",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 0],
+        "domains": [0.25, 0, 0.9166666666666666, 1, 0.25, 0, 0.8333333333333334, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags8",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 0],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0, 0.16666666666666666, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags9",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 0],
+        "domains": [0.08333333333333333, 0, 0.75, 1, 0, 0.16666666666666666, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags10",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 0],
+        "domains": [0, 0.25, 1, 0.9166666666666666, 0, 0.16666666666666666, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags11",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 0],
+        "domains": [0.25, 0, 0.9166666666666666, 1, 0, 0.16666666666666666, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags12",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 0],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0.16666666666666666, 0, 0.75, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags13",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 0, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 0],
+        "domains": [0.08333333333333333, 0, 0.75, 1, 0.16666666666666666, 0, 0.75, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags14",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 1, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 0],
+        "domains": [0, 0.25, 1, 0.9166666666666666, 0.16666666666666666, 0, 0.75, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_both_trims_class0_flags15",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 1, 1, 0],
+        "domains": [0.25, 0, 0.9166666666666666, 1, 0.16666666666666666, 0, 0.75, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_opposite_axis_flags0",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 12, 1, 0, 0, 0, -1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0, 0.16666666666666666, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_opposite_axis_flags1",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 12, 1, 0, 0, 0, -1, 0, 5, 5, 12, 0, 360, 1, 0, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0.16666666666666666, 0, 0.75, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_opposite_axis_flags2",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 12, 1, 0, 0, 0, -1, 0, 5, 5, 12, 0, 360, 0, 1, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_opposite_axis_flags3",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 12, 1, 0, 0, 0, -1, 0, 5, 5, 12, 0, 360, 1, 1, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0.25, 0, 0.8333333333333334, 1],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_upper_trim_crossing_1",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.0, 1, 0.3333333333333333, 0, 0.0, 1, 1.0],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_upper_trim_crossing_0",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.0, 1, 1.0, 0, 0.0, 1, 0.3333333333333333],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_upper_trim_tangent_1",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [10, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.0, 1, 0.3333333333333333, 0, 0.0, 1, 1.0],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_upper_trim_tangent_0",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [10, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.0, 1, 1.0, 0, 0.0, 1, 0.3333333333333333],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_touch_or_disjoint_4",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.3333333333333333, 0, 0.3333333333333333, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_touch_or_disjoint_5",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.3333333333333333, 0, 0.4166666666666667, 1, 0.75],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_scale_small",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0.0, 0.0, 0.0, 1, 0, 0, 0, 1, 0, 5e-05, 5e-05, 0.00012000000000000002, 0, 360, 0, 0, 1],
+        "other": [6.000000000000001e-05, 0.0, 0.0, 1, 0, 0, 0, 1, 0, 5e-05, 5e-05, 0.00012000000000000002, 0, 360, 0, 0, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-12
+      }
+    },
+    {
+      "name": "issue711_scale_large",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0.0, 0.0, 0.0, 1, 0, 0, 0, 1, 0, 5000000.0, 5000000.0, 12000000.0, 0, 360, 0, 0, 1],
+        "other": [6000000.0, 0.0, 0.0, 1, 0, 0, 0, 1, 0, 5000000.0, 5000000.0, 12000000.0, 0, 360, 0, 0, 1],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 0.09999999999999999
+      }
+    },
+    {
+      "name": "issue711_full_domain_control",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 0,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 1],
+        "domains": [0, 0.0, 1, 1.0, 0, 0.0, 1, 1.0],
+        "tolerance": 1e-07
+      }
+    },
+    {
+      "name": "issue711_global_equal_radius_cones",
+      "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/711; source/SMLib/src/SmCone.cpp:2791-2810",
+      "inputs": {
+        "op": 3,
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 0],
+        "other": [6, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 12, 0, 360, 0, 0, 0],
+        "domains": [0, 0.08333333333333333, 1, 0.75, 0, 0.25, 1, 0.8333333333333334],
+        "tolerance": 1e-07
+      }
+    }
+  ]
+}

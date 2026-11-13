@@ -1,8 +1,12 @@
 //! Copy and Paste from the keyboard and the context menu (#1480).
 
 use serde_json::{Value, json};
-use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::{
+    Sel,
+    doc::{FeatureKind, PlaneRef},
+};
 
 use crate::scenario::Harness;
 
@@ -49,7 +53,7 @@ fn start(h: &Harness, id: &str) -> Vec2 {
 }
 
 fn clipboard_frame(h: &mut Harness, ctx: &egui::Context, events: Vec<egui::Event>) {
-    let _ = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| super::handle(&mut h.app, ui.ctx()));
+    ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| super::handle(&mut h.app, ui.ctx())).textures_delta.clear();
 }
 
 fn middle_button(pressed: bool) -> egui::Event {
@@ -128,7 +132,7 @@ fn ctrl_c_ctrl_v_pastes_the_sketch_selection_at_the_cursor_selected_in_one_undo_
     assert!(start(&h, &rect[0]).dist(Vec2::ZERO) < 1e-9);
     // Selected, ready to move.
     let selected: Vec<String> =
-        h.app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id } = s { Some(id.clone()) } else { None }).collect();
+        h.app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None }).collect();
     assert_eq!(selected, pasted);
     // One undo step.
     assert_eq!(h.app.session.undo.len(), undo + 1);
@@ -204,6 +208,82 @@ fn ctrl_c_ctrl_v_outside_a_sketch_copies_and_pastes_timeline_features() {
     clipboard_event(&mut h, egui::Event::Copy, None);
     clipboard_event(&mut h, egui::Event::Paste("x".into()), None);
     assert_eq!(h.app.session.doc.features.len(), 2, "{:?}", h.app.status);
+}
+
+#[test]
+fn completed_sketch_copies_and_pastes_into_a_new_design() {
+    let (mut h, _) = rectangle();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let id = h.app.session.doc.features[0].id;
+    select(&mut h.app, json!({"type": "feature", "id": id}));
+    clipboard_event(&mut h, egui::Event::Copy, None);
+    crate::documents::new_tab(&mut h.app);
+    clipboard_event(&mut h, egui::Event::Paste("SolidCraft features".into()), None);
+    assert_eq!(h.app.session.doc.features.len(), 1, "{:?}", h.app.status);
+    let copied = &h.app.session.doc.features[0];
+    let sketch = h.app.session.doc.sketch(copied.id).unwrap();
+    assert_eq!(sketch.curves.len(), 4);
+    assert!(h.app.session.model.result(copied.id).unwrap().error.is_none());
+}
+
+/// Sketch geometry copied in a sketch pastes into a sketch of another design (tab) with Ctrl+V,
+/// at the cursor, with its constraints and dimensions, in one undo step; the context menu offers
+/// it there too. A copy made since in that design is what pastes back in the first (#9258).
+#[test]
+fn sketch_geometry_copies_into_a_sketch_of_another_design() {
+    let (mut h, _) = rectangle();
+    clipboard_event(&mut h, egui::Event::Copy, Some([10.0, 5.0]));
+    crate::documents::new_tab(&mut h.app);
+    assert!(!super::can_paste(&h.app), "outside a sketch, sketch geometry has nowhere to go");
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [20, 10, 0], "distance": 150}));
+    h.frames(4);
+    assert!(super::can_paste(&h.app));
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(menu.iter().any(|i| i.id == "ui.paste" && i.enabled), "the sketch menu's Paste is on");
+    let undo = h.app.session.undo.len();
+    clipboard_event(&mut h, egui::Event::Paste("SolidCraft sketch geometry".into()), Some([60.0, 40.0]));
+    let pasted = curves(&h);
+    assert_eq!(pasted.len(), 4, "{:?}", h.app.status);
+    let corner = start(&h, &pasted[0]);
+    assert!(corner.dist(Vec2::new(50.0, 35.0)) < 1.0, "{corner:?}");
+    let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert_eq!(sk.constraints.iter().filter(|c| c.param.is_some()).count(), 2, "both dimensions came along");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    // A copy in this design is now the last: the first design pastes it.
+    let items: Vec<Value> = pasted.iter().take(1).map(|id| json!({"type": "sketch_curve", "id": id})).collect();
+    h.app.run("select.set", json!({ "items": items })).unwrap();
+    assert!(super::copy(&mut h.app));
+    crate::documents::switch(&mut h.app, 0);
+    let before = curves(&h).len();
+    assert!(super::paste(&mut h.app, None), "{:?}", h.app.status);
+    assert_eq!(curves(&h).len(), before + 1, "the one line copied last, not the rectangle copied here before");
+}
+
+#[test]
+fn copied_sketch_survives_source_close_and_pastes_from_a_sketch_group_menu() {
+    use crate::context_menu::{Target, items, run_item};
+    let (mut h, _) = rectangle();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    select(&mut h.app, json!({"type":"feature","id":1}));
+    assert!(super::copy(&mut h.app));
+    crate::documents::new_tab(&mut h.app);
+    crate::documents::close(&mut h.app, 0, true);
+    assert!(super::can_paste(&h.app) && super::pasting_features(&h.app));
+    assert!(!super::pasting_bodies(&h.app) && !super::pasting_components(&h.app));
+    let group = h.app.run("browser.group", json!({"folder":"sketches","name":"Copied"})).unwrap()["group"].as_u64().unwrap();
+    let item = items(&h.app, &Target::Group { id: group, scope: "c0".into() }).into_iter().find(|i| i.id == "ui.paste").unwrap();
+    assert!(item.enabled);
+    run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    let id = h.app.session.doc.find_feature("Sketch1").unwrap().id;
+    assert_eq!(h.app.session.doc.sketch(id).unwrap().curves.len(), 4);
+    assert!(h.app.session.doc.browser_groups.iter().any(|g| g.id == group && g.has_item(&id.to_string())));
+    // A later copy in this design replaces the cross-design snapshot everywhere.
+    select(&mut h.app, json!({"type":"feature","id":id}));
+    assert!(super::copy(&mut h.app));
+    assert!(super::paste(&mut h.app, None));
+    assert!(h.app.session.doc.find_feature("Sketch1 (2)").is_some());
 }
 
 #[test]
@@ -292,7 +372,7 @@ fn contribution_occurrence_move_panel_belongs_to_its_document() {
 
 #[test]
 fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let file = ContributionPart::new();
     let mut h = crate::scenario::Harness::new();
     h.app = contribution_saved_part(&file);
@@ -335,7 +415,8 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
 
 #[test]
 fn contribution_paste_pointer_uses_parent_coordinates_and_safe_fallbacks() {
-    use solidcraft_engine::{doc, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::doc;
     let mut h = crate::scenario::Harness::new();
     let parent = h.app.run("component.create", json!({"name":"Parent","grounded":false})).unwrap();
     h.app
@@ -366,6 +447,7 @@ fn contribution_linked_clipboard_refuses_unsaved_dirty_self_and_missing_sources(
     assert!(!super::copy_design(&mut app));
     app = contribution_saved_part(&file);
     assert!(super::copy_design(&mut app));
+    assert!(!super::can_paste(&app), "Paste is off in the design copied: it can't go into itself");
     let doc = app.session.doc.clone();
     assert!(!super::paste(&mut app, None));
     assert_eq!(app.session.doc, doc);
@@ -402,4 +484,486 @@ fn contribution_native_copy_paste_events_insert_the_saved_design_in_another_tab(
     clipboard_event(&mut h, egui::Event::Paste("SolidCraft linked design".into()), None);
     assert_eq!(h.app.session.doc.links.len(), 1, "{:?}", h.app.status);
     assert_eq!(h.app.session.undo.len(), 1);
+}
+
+/// A copy that fails (here, with nothing selected) leaves the clipboard empty: Paste is off, and
+/// what was copied before is not pasted.
+#[test]
+fn a_failed_copy_empties_the_clipboard() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Cube"})).unwrap();
+    app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
+    assert!(super::copy(&mut app));
+    assert!(super::can_paste(&app));
+    app.run("select.clear", json!({})).unwrap();
+    assert!(!super::copy(&mut app));
+    assert!(app.copied_bodies.is_empty());
+    assert!(!super::can_paste(&app), "nothing is left to paste");
+    assert!(!super::paste(&mut app, None));
+    assert_eq!(app.session.model.state().bodies.len(), 1);
+}
+
+/// Cut on a body only marks it; Paste moves it into the active component (where it is), and the
+/// clipboard empties. Esc before that leaves it where it was; a locked body is not cut.
+#[test]
+fn a_cut_body_moves_into_the_component_it_is_pasted_in() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Cube"})).unwrap();
+    let part = app.run("component.create", json!({"name":"Part","activate":false})).unwrap()["component"].as_u64().unwrap();
+    let owner = |app: &crate::SolveApp| {
+        let state = app.session.model.state();
+        app.session.doc.model_body_component(state.body("Cube").unwrap())
+    };
+    app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
+    assert!(super::can_cut(&app));
+    assert!(super::cut(&mut app));
+    assert_eq!(owner(&app), 0, "a cut body stays until it is pasted");
+    super::drop_cut(&mut app);
+    assert!(!super::can_paste(&app), "Esc left it where it was");
+    app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
+    assert!(super::cut(&mut app));
+    app.run("component.activate", json!({"component": part})).unwrap();
+    assert!(super::paste(&mut app, None));
+    assert_eq!(owner(&app), part);
+    assert_eq!(app.session.model.state().bodies.len(), 1, "moved, not copied");
+    assert!(app.cut.is_empty() && !super::can_paste(&app));
+    app.session.visibility.locked_bodies.push("Cube".into());
+    app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
+    assert!(!super::can_cut(&app) && !super::cut(&mut app), "a locked body stays");
+}
+
+/// A component placed once cuts and pastes into another component, where it is; it never pastes
+/// into itself, and an instance (a component placed more than once) isn't cut.
+#[test]
+fn a_cut_component_moves_into_the_component_it_is_pasted_in() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    let made = |app: &mut crate::SolveApp, name: &str| {
+        let out = app.run("component.create", json!({"name": name, "activate": false})).unwrap();
+        (out["component"].as_u64().unwrap(), out["occurrence"].as_u64().unwrap())
+    };
+    let (part, part_at) = made(&mut app, "Part");
+    let (holder, holder_at) = made(&mut app, "Holder");
+    app.run("select.set", json!({"items": [{"type": "occurrence", "path": [part_at]}]})).unwrap();
+    assert!(super::can_cut(&app));
+    assert!(super::cut(&mut app));
+    assert!(!super::can_paste_into(&app, part), "not into itself");
+    assert!(super::can_paste_into(&app, holder));
+    assert!(super::paste_into(&mut app, None, false, Some((holder, vec![holder_at]))));
+    assert_eq!(app.session.doc.occurrences.iter().find(|o| o.id == part_at).unwrap().parent, holder);
+    assert_eq!(app.session.selection, vec![solidcraft_engine::Sel::Occurrence { path: vec![holder_at, part_at] }]);
+    assert!(!crate::browser::is_open(&app, &format!("o:{holder_at}/{part_at}"), true), "it arrives folded");
+    assert!(app.cut.is_empty() && !super::can_paste(&app));
+    app.run("occurrence.copy", json!({"component": holder})).unwrap();
+    app.run("select.set", json!({"items": [{"type": "occurrence", "path": [holder_at]}]})).unwrap();
+    assert!(!super::can_cut(&app) && !super::cut(&mut app), "an instance isn't cut");
+}
+
+/// Features and the body they made, selected together, are cut together: the body is left out of
+/// the cut set (it moves with the features, never on its own) and Paste moves the lot in one undo
+/// step.
+#[test]
+fn cut_features_and_their_body_move_in_one_step() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("sketch.create", json!({"plane": "XY", "name": "S"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch": "S", "distance": 5, "body_name": "Block"})).unwrap();
+    let part = app.run("component.create", json!({"name": "Part", "activate": false})).unwrap()["component"].as_u64().unwrap();
+    let ids: Vec<u64> = ["S", "Extrude1"].iter().map(|n| app.session.doc.find_feature(n).unwrap().id).collect();
+    let items: Vec<Sel> = ids.iter().map(|id| Sel::Feature { id: *id }).chain([Sel::Body { name: "Block".into() }]).collect();
+    app.run("select.set", json!({ "items": items })).unwrap();
+    assert!(super::can_cut(&app) && super::cut(&mut app));
+    assert!(app.session.selection.is_empty(), "the cut set is what is marked, not the selection that chose it");
+    assert_eq!(app.cut.features, ids);
+    assert!(app.cut.bodies.is_empty(), "the body moves with the features that made it, not on its own");
+    assert!(!super::body_is_cut(&app, "Block"), "and is not marked as cut");
+    app.run("component.activate", json!({"component": part})).unwrap();
+    let steps = app.session.undo.len();
+    assert!(super::paste(&mut app, None));
+    assert!(ids.iter().all(|id| app.session.doc.feature(*id).is_some_and(|f| f.component == part)));
+    assert_eq!(app.session.undo.len(), steps + 1);
+    assert!(app.cut.is_empty() && !super::can_paste(&app));
+}
+
+/// A component takes what it holds: marking it leaves its features and bodies unmarked, so they
+/// are not outlined and the user need not select them.
+#[test]
+fn a_cut_component_leaves_what_it_holds_unmarked() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    let made = app.run("component.create", json!({"name": "Part"})).unwrap();
+    let (part, at) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Inner", "name": "InnerBox"})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    app.run("component.create", json!({"name": "Holder", "activate": false})).unwrap();
+    let inner = app.session.doc.find_feature("InnerBox").unwrap().id;
+    app.run("select.set", json!({"items": [Sel::Occurrence { path: vec![at] }, Sel::Feature { id: inner }, Sel::Body { name: "Inner".into() }]}))
+        .unwrap();
+    assert!(super::cut(&mut app));
+    assert_eq!(app.cut.placements, vec![vec![at]]);
+    assert!(app.cut.features.is_empty() && app.cut.bodies.is_empty());
+    assert!(!super::body_is_cut(&app, "Inner"));
+    let _ = part;
+}
+
+/// A paste that can't be done says so and keeps the cut, to paste somewhere else.
+#[test]
+fn a_cut_that_cannot_move_stays_cut() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("sketch.create", json!({"plane": "XY", "name": "S1"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch": "S1", "distance": 10, "body_name": "Block"})).unwrap();
+    app.run("sketch.create", json!({"plane": "XY", "name": "S2"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [10, 10]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch": "S2", "distance": 4, "operation": "cut", "name": "Cut1"})).unwrap();
+    let part = app.run("component.create", json!({"name": "Part", "activate": false})).unwrap()["component"].as_u64().unwrap();
+    let ids: Vec<u64> = ["S2", "Cut1"].iter().map(|n| app.session.doc.find_feature(n).unwrap().id).collect();
+    app.run("select.set", json!({"items": ids.iter().map(|id| Sel::Feature { id: *id }).collect::<Vec<_>>()})).unwrap();
+    assert!(super::cut(&mut app));
+    app.run("component.activate", json!({"component": part})).unwrap();
+    let before = app.session.doc.to_json();
+    assert!(!super::paste(&mut app, None), "the cut would be left without its body");
+    assert_eq!(app.session.doc.to_json(), before);
+    assert_eq!(app.cut.features, ids, "the cut is kept");
+}
+
+/// A copied body pastes into a component's Bodies folder from the folder's menu: the copy goes
+/// into that component. With nothing copied, the folder's Paste is off.
+#[test]
+fn a_copied_body_pastes_into_a_bodies_folder() {
+    use crate::context_menu::{Target, items, run_item};
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Cube"})).unwrap();
+    let out = app.run("component.create", json!({"name":"Part","activate":false})).unwrap();
+    let (part, at) = (out["component"].as_u64().unwrap(), out["occurrence"].as_u64().unwrap());
+    let folder = Target::Folder { component: part, folder: "bodies".into(), scope: format!("o:{at}") };
+    let paste = |app: &crate::SolveApp| items(app, &folder).into_iter().find(|i| i.id == "ui.paste").unwrap();
+    assert!(!paste(&app).enabled, "nothing copied yet");
+    app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
+    assert!(super::copy(&mut app));
+    let item = paste(&app);
+    assert!(item.enabled);
+    run_item(&mut app, &item, egui::Pos2::ZERO);
+    let state = app.session.model.state();
+    let copy = state.body("Cube (2)").expect("the copy");
+    assert_eq!(app.session.doc.model_body_component(copy), part);
+}
+
+/// A copied sketch pastes into a component's Sketches folder from the folder's menu: the copy,
+/// named after it, goes into that component.
+#[test]
+fn a_copied_sketch_pastes_into_a_sketches_folder() {
+    use crate::context_menu::{Target, items, run_item};
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("sketch.create", json!({"plane": "XY", "name": "S"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let out = app.run("component.create", json!({"name":"Part","activate":false})).unwrap();
+    let (part, at) = (out["component"].as_u64().unwrap(), out["occurrence"].as_u64().unwrap());
+    let folder = Target::Folder { component: part, folder: "sketches".into(), scope: format!("o:{at}") };
+    let paste = |app: &crate::SolveApp| items(app, &folder).into_iter().find(|i| i.id == "ui.paste").unwrap();
+    let id = app.session.doc.find_feature("S").unwrap().id;
+    app.run("select.set", json!({"items": [{"type": "feature", "id": id}]})).unwrap();
+    assert!(super::copy(&mut app));
+    let item = paste(&app);
+    assert!(item.enabled);
+    run_item(&mut app, &item, egui::Pos2::ZERO);
+    let copy = app.session.doc.find_feature("S (2)").expect("the copy");
+    assert_eq!(copy.component, part);
+}
+
+fn plain_app() -> crate::SolveApp {
+    crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default())
+}
+
+fn select(app: &mut crate::SolveApp, item: Value) {
+    app.run("select.set", json!({"items": [item]})).unwrap();
+}
+
+/// A session named `name` with a 2 mm cube "Cube", raised 10 mm.
+fn design_with_cube(name: &str) -> solidcraft_engine::Session {
+    let mut s = solidcraft_engine::Session::default();
+    s.doc_mut().name = name.into();
+    s.execute("solid.box", &json!({"length":2,"width":2,"height":2,"body_name":"Cube","translate":[0,0,10]})).unwrap();
+    s
+}
+
+/// Bodies copied in one design paste into another (tab) as imported bodies, where they were in
+/// the world, numbered when the name is taken there; their own design still pastes them as
+/// copies with history when it is back.
+#[test]
+fn copied_bodies_paste_into_another_design_as_imported_bodies() {
+    let mut app = crate::SolveApp::new(design_with_cube("Bracket"), crate::Services::default());
+    let was = crate::open_meshing::session_world(&app.session).body("Cube").unwrap().mesh().bounds();
+    select(&mut app, json!({"type": "body", "name": "Cube"}));
+    assert!(super::copy(&mut app));
+    crate::documents::open_tab(&mut app, design_with_cube("Frame")).unwrap();
+    assert!(super::can_paste(&app) && super::pasting_bodies(&app));
+    assert!(super::paste(&mut app, None));
+    let is = crate::open_meshing::session_world(&app.session).body("Cube (2)").unwrap().mesh().bounds();
+    assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
+    let feature = app.session.doc.find_feature("Import1").expect("one Import feature");
+    assert!(matches!(feature.kind, solidcraft_engine::doc::FeatureKind::Import { .. }));
+    assert!(app.session.selection.contains(&Sel::Body { name: "Cube (2)".into() }));
+    crate::documents::switch(&mut app, 0);
+    assert!(super::paste(&mut app, None));
+    assert!(app.session.doc.find_feature("Import1").is_none(), "its own design pastes a copy with history");
+    assert!(app.session.model.state().body("Cube (2)").is_some());
+}
+
+/// The last copy in any design is what pastes: a copy in another tab replaces this tab's own.
+#[test]
+fn the_last_copy_in_any_design_is_what_pastes() {
+    let mut app = crate::SolveApp::new(design_with_cube("Bracket"), crate::Services::default());
+    select(&mut app, json!({"type": "body", "name": "Cube"}));
+    assert!(super::copy(&mut app));
+    let mut frame = solidcraft_engine::Session::default();
+    frame.doc_mut().name = "Frame".into();
+    frame.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Pin"})).unwrap();
+    crate::documents::open_tab(&mut app, frame).unwrap();
+    select(&mut app, json!({"type": "body", "name": "Pin"}));
+    assert!(super::copy(&mut app));
+    crate::documents::switch(&mut app, 0);
+    assert!(app.copied_bodies.is_empty(), "Bracket's own copy is stale");
+    assert!(super::paste(&mut app, None));
+    assert!(app.session.model.state().body("Pin").is_some(), "Frame's body pasted");
+    assert!(app.session.model.state().body("Cube (2)").is_none());
+    // A copy that fails anywhere leaves nothing for any design.
+    app.run("select.clear", json!({})).unwrap();
+    assert!(!super::copy(&mut app));
+    crate::documents::switch(&mut app, 1);
+    assert!(!super::can_paste(&app));
+}
+
+/// Bodies cut in one design paste into another as copies: the originals stay. Esc on the cut
+/// leaves nothing to paste anywhere.
+#[test]
+fn bodies_cut_in_another_design_paste_as_copies() {
+    let mut app = crate::SolveApp::new(design_with_cube("Bracket"), crate::Services::default());
+    select(&mut app, json!({"type": "body", "name": "Cube"}));
+    assert!(super::cut(&mut app));
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    assert!(super::paste(&mut app, None));
+    assert!(app.session.model.state().body("Cube").is_some());
+    crate::documents::switch(&mut app, 0);
+    assert!(app.session.model.state().body("Cube").is_some(), "the original stays");
+    super::drop_cut(&mut app);
+    crate::documents::switch(&mut app, 1);
+    assert!(!super::can_paste(&app), "Esc left nothing to paste");
+}
+
+/// Features never leave their design: a cut that holds one leaves another design nothing to paste,
+/// while its own design still pastes it.
+#[test]
+fn a_cut_with_a_feature_leaves_another_design_nothing_to_paste() {
+    let mut app = crate::SolveApp::new(design_with_cube("Bracket"), crate::Services::default());
+    app.run("solid.box", json!({"length":1,"width":1,"height":1,"body_name":"Pin","operation":"new_body","translate":[10,0,0]})).unwrap();
+    let first = app.session.doc.features[0].id;
+    app.run("select.set", json!({"items": [Sel::Feature { id: first }, Sel::Body { name: "Pin".into() }]})).unwrap();
+    assert!(super::cut(&mut app));
+    assert_eq!((app.cut.features.clone(), app.cut.bodies.clone()), (vec![first], vec!["Pin".to_string()]));
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    assert!(!super::can_paste(&app), "a feature stays in its design");
+    crate::documents::switch(&mut app, 0);
+    assert!(super::can_paste(&app), "its own design still pastes the cut");
+}
+
+/// Components copied in one design paste into another as independent copies with their history
+/// (Paste and Paste New alike), named as they were, folded and selected; the original stays.
+#[test]
+fn components_copied_in_another_design_paste_as_independent_copies() {
+    let mut app = plain_app();
+    app.session.doc_mut().name = "Bracket".into();
+    let at = app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    app.run("solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Cube"})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    select(&mut app, json!({"type": "occurrence", "path": [at]}));
+    assert!(super::copy(&mut app));
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    assert!(super::can_paste(&app) && super::pasting_components(&app));
+    let features = app.session.doc.features.len();
+    assert!(super::paste_as(&mut app, None, true));
+    let part = app.session.doc.components.iter().find(|c| c.name == "Part").expect("the pasted component").id;
+    assert!(app.session.doc.features.len() > features, "with its history");
+    let state = app.session.model.state();
+    assert_eq!(app.session.doc.model_body_component(state.body("Cube").expect("its body")), part);
+    drop(state);
+    assert!(matches!(app.session.selection.as_slice(), [Sel::Occurrence { .. }]));
+    crate::documents::switch(&mut app, 0);
+    assert_eq!(app.session.doc.components.len(), 1, "the original stays as it was");
+}
+
+/// Whatever was copied last is what pastes: a component copied after a body replaces it, and a
+/// body copied after that replaces the component.
+#[test]
+fn the_last_copy_is_what_pastes() {
+    let mut app = plain_app();
+    app.run("solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Cube"})).unwrap();
+    let at = app.run("component.create", json!({"name":"Part","activate":false})).unwrap()["occurrence"].as_u64().unwrap();
+    select(&mut app, json!({"type": "body", "name": "Cube"}));
+    assert!(super::copy(&mut app));
+    select(&mut app, json!({"type": "occurrence", "path": [at]}));
+    assert!(super::copy(&mut app));
+    assert!(app.copied_bodies.is_empty() && app.copied_placements == vec![vec![at]]);
+    let placements = app.session.doc.occurrences.len();
+    assert!(super::paste(&mut app, None));
+    assert_eq!(app.session.doc.occurrences.len(), placements + 1, "the component pasted");
+    assert!(app.session.model.state().body("Cube (2)").is_none(), "not the body");
+    select(&mut app, json!({"type": "body", "name": "Cube"}));
+    assert!(super::copy(&mut app));
+    assert!(app.copied_placements.is_empty());
+    assert!(super::paste(&mut app, None));
+    assert!(app.session.model.state().body("Cube (2)").is_some(), "now the body");
+    assert_eq!(app.session.doc.occurrences.len(), placements + 1);
+}
+
+/// Paste on a group puts what was pasted in that group: a body in a Bodies group, a sketch in a
+/// Sketches group.
+#[test]
+fn pasting_on_a_group_puts_the_copy_in_it() {
+    use crate::context_menu::{Target, items, run_item};
+    let mut app = plain_app();
+    app.run("solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Cube"})).unwrap();
+    app.run("sketch.create", json!({"plane": "XY", "name": "S"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let bodies = app.run("browser.group", json!({"folder": "bodies", "name": "Kept"})).unwrap()["group"].as_u64().unwrap();
+    let sketches = app.run("browser.group", json!({"folder": "sketches", "name": "Drawn"})).unwrap()["group"].as_u64().unwrap();
+    let paste_on = |app: &mut crate::SolveApp, group: u64| {
+        let item = items(app, &Target::Group { id: group, scope: "c0".into() }).into_iter().find(|i| i.id == "ui.paste").unwrap();
+        assert!(item.enabled);
+        run_item(app, &item, egui::Pos2::ZERO);
+    };
+    let holds = |app: &crate::SolveApp, group: u64, key: &str| app.session.doc.browser_groups.iter().any(|g| g.id == group && g.has_item(key));
+    select(&mut app, json!({"type": "body", "name": "Cube"}));
+    assert!(super::copy(&mut app));
+    paste_on(&mut app, bodies);
+    assert!(holds(&app, bodies, "Cube (2)"));
+    let id = app.session.doc.find_feature("S").unwrap().id;
+    select(&mut app, json!({"type": "feature", "id": id}));
+    assert!(super::copy(&mut app));
+    paste_on(&mut app, sketches);
+    let copy = app.session.doc.find_feature("S (2)").unwrap().id;
+    assert!(holds(&app, sketches, &copy.to_string()));
+}
+
+/// While a component is cut, Paste moves it and Paste New (an independent copy) is off.
+#[test]
+fn paste_new_is_off_while_a_component_is_cut() {
+    use crate::context_menu::{Target, items};
+    let mut app = plain_app();
+    let at = app.run("component.create", json!({"name":"Part","activate":false})).unwrap()["occurrence"].as_u64().unwrap();
+    let holder = app.run("component.create", json!({"name":"Holder","activate":false})).unwrap()["component"].as_u64().unwrap();
+    select(&mut app, json!({"type": "occurrence", "path": [at]}));
+    assert!(super::cut(&mut app));
+    let menu = items(&app, &Target::Component { id: holder });
+    let find = |id: &str| menu.iter().find(|i| i.id == id).unwrap();
+    assert!(find("ui.paste").enabled);
+    assert!(!find("ui.pasteNew").enabled);
+}
+
+/// Paste New from a parent component's menu keeps face-attached sketches in a copied child.
+#[test]
+fn paste_new_into_selected_parent_keeps_child_face_attachment() {
+    use crate::context_menu::{Target, items, run_item};
+
+    let mut app = plain_app();
+    let parent = app.run("component.create", json!({"name":"Component1"})).unwrap();
+    let parent_component = parent["component"].as_u64().unwrap();
+    let parent_occurrence = parent["occurrence"].as_u64().unwrap();
+    let child = app.run("component.create", json!({"name":"Component2"})).unwrap();
+    let child_component = child["component"].as_u64().unwrap();
+    let child_occurrence = child["occurrence"].as_u64().unwrap();
+
+    app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
+    app.run("sketch.circle.center", json!({"center":[0,0],"diameter":32})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch":"Sketch1","distance":10,"operation":"new_body","body_name":"Disc"})).unwrap();
+    let source_path = vec![parent_occurrence, child_occurrence];
+    let placed = app.session.placed_document();
+    let body_name = placed.body_frames_with_source(&app.session.model.state()).into_iter().find(|(_, _, _, path, _)| path == &source_path).unwrap().0;
+    let world = app.session.world_state().unwrap();
+    let body = world.body(&body_name).unwrap();
+    let face = body
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .find(|face| body.body.face_plane(face.index).is_some_and(|plane| plane.normal().dot(solidcore_record::Vec3::Z) > 0.999))
+        .unwrap();
+    let uncut_volume = app.run("inspect.measure", json!({"bodies":[body_name]})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    app.run("sketch.create", json!({"plane":{"body":body_name,"face":face.centroid,"index":face.index,"path":source_path},"name":"Sketch2"}))
+        .unwrap();
+    app.run("sketch.circle.center", json!({"center":[0,0],"diameter":16})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch":"Sketch2","distance":-10,"operation":"cut","targets":["Disc"]})).unwrap();
+    let cut_volume = app.run("inspect.measure", json!({"bodies":[body_name]})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(cut_volume < uncut_volume, "the face-attached sketch must cut Disc: {cut_volume} >= {uncut_volume}");
+
+    select(&mut app, json!({"type":"occurrence","path":source_path}));
+    assert!(super::copy(&mut app));
+    assert!(super::paste_into(&mut app, None, false, Some((parent_component, vec![parent_occurrence]))));
+    select(&mut app, json!({"type":"occurrence","path":[parent_occurrence,child_occurrence]}));
+    assert!(super::copy(&mut app));
+    select(&mut app, json!({"type":"occurrence","path":[parent_occurrence]}));
+    assert_eq!(app.session.active_component, child_component);
+    let paste_new = items(&app, &Target::Occurrence { path: vec![parent_occurrence] }).into_iter().find(|item| item.id == "ui.pasteNew").unwrap();
+    assert!(paste_new.enabled);
+    run_item(&mut app, &paste_new, egui::Pos2::ZERO);
+    assert!(!app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", app.status);
+
+    let [Sel::Occurrence { path: copied_path }] = app.session.selection.as_slice() else { panic!("Paste New did not select one occurrence") };
+    assert_eq!(copied_path.first(), Some(&parent_occurrence));
+    let copied_occurrence = *copied_path.last().unwrap();
+    let copied_component = app.session.doc.occurrences.iter().find(|occurrence| occurrence.id == copied_occurrence).unwrap().component;
+    let copied_body = app
+        .session
+        .placed_document()
+        .body_frames_with_source(&app.session.model.state())
+        .into_iter()
+        .find(|(_, _, _, body_path, _)| body_path == copied_path)
+        .unwrap()
+        .0;
+    let copied_anchor = app
+        .session
+        .doc
+        .features
+        .iter()
+        .find_map(|feature| {
+            if feature.component != copied_component {
+                return None;
+            }
+            let FeatureKind::Sketch { plane: PlaneRef::Face { anchor: Some(anchor), .. }, .. } = &feature.kind else { return None };
+            Some(anchor)
+        })
+        .expect("copied Sketch2 has no face anchor");
+    assert_eq!(copied_anchor.target.body, copied_body);
+}
+
+/// A body of a component's second placement is that component's body seen there: it isn't cut on
+/// its own (that would take it out of every placement), but it copies, and pastes where that
+/// placement shows it.
+#[test]
+fn a_second_placements_body_copies_but_is_not_cut() {
+    let mut app = plain_app();
+    let made = app.run("component.create", json!({"name":"B"})).unwrap();
+    let b = made["component"].as_u64().unwrap();
+    app.run("solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Cube"})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    let second = app.run("occurrence.copy", json!({"component": b, "translate": [30, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let placed = app.session.occurrence_placement(&[second]).unwrap();
+    let seen = placed.bodies.first().unwrap().world.clone();
+    assert_ne!(seen, "Cube", "the second placement shows it under a name of its own");
+    select(&mut app, json!({"type": "body", "name": seen}));
+    assert!(!super::can_cut(&app));
+    assert!(!super::cut(&mut app));
+    assert!(app.cut.is_empty() && !super::can_paste(&app));
+    assert!(app.status.as_ref().is_some_and(|(text, _, error)| *error && text.contains("placed copy")), "{:?}", app.status);
+    select(&mut app, json!({"type": "body", "name": seen}));
+    assert!(super::copy(&mut app));
+    assert!(super::paste(&mut app, None), "{:?}", app.status);
+    let world = app.session.world_state().unwrap();
+    let (there, copy) = (world.body(&seen).unwrap().mesh().bounds(), world.body("Cube (2)").expect("the copy").mesh().bounds());
+    assert!(there.min.dist(copy.min) < 1e-6 && there.max.dist(copy.max) < 1e-6, "{there:?} vs {copy:?}");
 }
