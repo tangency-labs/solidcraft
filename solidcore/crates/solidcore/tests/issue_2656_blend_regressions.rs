@@ -366,7 +366,7 @@ fn second_pass_runs_on_into_the_first_without_its_faces() {
     blend(&mut k, &mut b, Kind::Round, &second, 8.0).unwrap();
     let ((faces, _, _), v) = measured(&mut k, &mut b);
     assert_eq!(faces, 13, "1080");
-    assert_rel(v, 10_198.718_249, 1e-9, "1080");
+    assert_rel(v, 10_198.718_038_884, 1e-9, "1080");
 }
 
 /// fillets/every-fillet-after-fillet-curvature-front-then-side-r3-partial-chain:

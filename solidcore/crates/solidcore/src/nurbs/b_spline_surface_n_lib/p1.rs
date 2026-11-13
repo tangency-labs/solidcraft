@@ -1894,9 +1894,12 @@ impl BSplineSurface {
             return Ok(());
         }
 
+        // clamped to the natural domain as `evaluate_simple` clamps it (upstream's
+        // `EvaluateSimple`, whatever the out-of-bounds flag); not within the mass
+        // integration's scope where a face's continuation is certified (#14170)
         let mut s_uv = uv;
         let natural_uv_domain = self.natural_uv_domain();
-        if !natural_uv_domain.contains_point(s_uv, 0.0) {
+        if !natural_uv_domain.contains_point(s_uv, 0.0) && !self.continues_past_domain() {
             s_uv = natural_uv_domain.clamp_point(s_uv);
         }
 

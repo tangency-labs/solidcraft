@@ -210,12 +210,14 @@ fn tilt_20_is_refused_naming_the_largest_radius() {
 
 /// The radii below the bound build, as the fork's, 11 faces each. The fork removes
 /// -0.576293096943 and -0.635789174601 with the cylinder's trims fitted; with them exact
-/// (WR-680) solidcore removes -0.576120035475 and -0.635614755905, 1.73e-4 and 1.74e-4
-/// less (it was -0.576293104474 and -0.635789178705 with the fitted trims, the fork's to
-/// 7.5e-9 and 4.1e-9).
+/// (WR-680) solidcore removes -0.576118862649 and -0.635617732194, the faces' flux closed
+/// across their gaps (#14170): with the fitted trims it gave the same to 2.2e-11, and with
+/// the exact trims but the faces' flux alone -0.576120035475 and -0.635614755905, the
+/// round's own gaps open (it was -0.576293104474 and -0.635789178705 with the fitted trims,
+/// the fork's to 7.5e-9 and 4.1e-9).
 #[test]
 fn tilt_20_below_the_bound_builds() {
-    for (r, removed) in [(0.25, -0.576_120_035_475), (0.2625, -0.635_614_755_905)] {
+    for (r, removed) in [(0.25, -0.576_118_862_649), (0.2625, -0.635_617_732_194)] {
         let (got, faces) = rounded(20.0, r).unwrap();
         assert!((got - removed).abs() <= 5e-9, "{r}: {got}");
         assert_eq!(faces, 11);
@@ -232,12 +234,14 @@ fn tilt_20_below_the_bound_builds() {
 /// plane extended for the round is now an exactly widened plane (the fork's path handed the
 /// round the plane's fitted B-spline), and the faces, rails and rounds are exact; then
 /// -33.432934267425 with the integration split at the surface's knots (WR-494; -3.2e-8).
-/// With the cylinder's trims exact (WR-680) it is -33.432512368854, 4.2e-4 less removed
-/// than with the fitted trims; the faces and the rails' ends are unchanged.
+/// With the cylinder's trims exact (WR-680) it was -33.432512368854, 4.2e-4 less removed
+/// than with the fitted trims; the faces and the rails' ends are unchanged. With the faces'
+/// flux closed across their gaps (#14170) -33.432507111167, as the fitted trims give it
+/// closed (to 3e-11).
 #[test]
 fn tilt_40_rail_continued_across_the_seam_vertex() {
     let (got, faces, points) = rounded_seam(40.0, 125.13, 1.5).unwrap();
-    assert!((got - -33.432_512_368_854).abs() <= 5e-9, "{got}");
+    assert!((got - -33.432_507_111_167).abs() <= 5e-9, "{got}");
     assert_eq!(faces, 10);
     for y in [-4.664_695_271, 4.664_695_271] {
         let want = Point3::new(-4.176_377_478, y, 0.893_582_223);
@@ -254,7 +258,8 @@ fn tilt_40_rail_continued_across_the_seam_vertex() {
 /// rail ends past the seam's vertex). The fork: 1001, fit 0.262514174; at 0.262514174, 10
 /// faces and -0.636117736700 removed. With the fitted trims solidcore removed
 /// -0.636117743787, the fork's to 7.1e-9; with the cylinder's trims exact (WR-680)
-/// -0.635683901346, 4.3e-4 less.
+/// -0.635683901346, 4.3e-4 less, and with the faces' flux closed across their gaps
+/// (#14170) -0.635686884307, as the fitted trims give it closed (to 7.1e-10).
 #[test]
 fn tilt_20_seam_over_the_rim_refused_on_the_whole_rim() {
     let err = rounded_seam(20.0, 170.0, 1.5).unwrap_err();
@@ -264,7 +269,7 @@ fn tilt_20_seam_over_the_rim_refused_on_the_whole_rim() {
     assert_eq!(code, 1001);
     assert!((fit.size - 0.262_514_174).abs() <= 1e-9, "{}", fit.size);
     let (got, faces, _) = rounded_seam(20.0, 170.0, 0.262_514_174).unwrap();
-    assert!((got - -0.635_683_901_346).abs() <= 1e-8, "{got}");
+    assert!((got - -0.635_686_884_307).abs() <= 1e-8, "{got}");
     assert_eq!(faces, 10);
 }
 

@@ -233,7 +233,9 @@ fn the_neighbours_keep_their_rounds() {
             0.214_601_836_334_623 + 2.0 * RUN_ON,
             2e-6,
         ),
-        ([0.0, -25.0, 2.0], 7.958_672_926_831_696, 1e-10),
+        // the fork's 7.958672926831696 is its faces' flux alone: this differs by the
+        // faces' gap flux (#14170)
+        ([0.0, -25.0, 2.0], 7.958_672_912_139_264, 1e-10),
     ] {
         let mut k = kernel(true);
         let mut b = plate(&mut k);

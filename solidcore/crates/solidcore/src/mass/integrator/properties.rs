@@ -41,6 +41,10 @@
 //! An edge's tube area, volume and moments each have an error scale of their own size
 //! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
 use super::{OdeIntegrator, OdeOptions};
+use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
+use crate::blend::fillet_section::interval::Ivl;
+use crate::blend::fillet_section::series::V3;
+use crate::blend::fillet_section::station::{span, Nurbs};
 use crate::curve::curve::Curve;
 use crate::error::mass::MassFailure;
 use crate::geom::attribute::{ids, AttributeStore, AttributeValue, ObjectKey};
@@ -49,11 +53,12 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tol::are_same;
 use crate::kernel::Kernel;
+use crate::mass::closure::{Closure, ClosureRefusal, ClosureRefused, ClosureStrip};
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::face::p2::{
     surface_knots_inside, trim_curve_breaks, OdeArea, OdeIsoCurveLength, PrecisePropertyLayout,
     PPF_ALL, PPF_AREA, PPF_AREA_FIRST_MOMENTS,
@@ -80,6 +85,82 @@ pub struct PreciseProperties {
     pub mass: f64,
     /// Area first, second, products, axial; then volume/mass equivalents.
     pub moments: [Vec3; 8],
+    /// Whether a B-rep's volume is the flux of a closed surface, and the bound on what is
+    /// still open (not upstream, #14170; [`VolumeClosure`]).
+    pub closure: VolumeClosure,
+}
+
+/// Whether a B-rep's volume and volume moments are fluxes out of a closed surface (not
+/// upstream, #14170).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum VolumeClosure {
+    /// Not a B-rep's: an edge's or a face's own properties.
+    #[default]
+    NotABrep,
+    /// The faces are closed by their strips; what is open is bounded ([`ClosureBound`]).
+    Bounded(ClosureBound),
+    /// A face cannot be part of a closed surface: the volume is the faces' flux alone, and
+    /// its accuracy is not proved (the integration's estimate does not see an open
+    /// surface's dependence on the origin).
+    Refused(ClosureRefused),
+    /// The faces are closed by their strips, but what is open is not bounded: this face, a
+    /// procedural blend, is integrated as its definition (no [`NetScope`] around the call
+    /// takes its net), while the strips and caps are built on its net, which is within the
+    /// net's certified bound of the definition but not it (#14170). The strips are added;
+    /// no bound is reported.
+    ///
+    /// [`NetScope`]: crate::surface::procedural_blend::NetScope
+    NetNotDefinition(FaceId),
+}
+
+/// Proved bounds on the flux through the caps that close a solid's faces (not upstream,
+/// #14170).
+///
+/// A body's volume and its volume moments are fluxes of fields `F = (0, 0, f)` out of its
+/// faces (`df/dz` the integrand: `f = z` for the volume, `x z`, `y z`, `z^2 / 2` for the
+/// first moments, and so on, `z` taken from the origin of computation). Where two faces'
+/// boundaries along an edge are apart, that is the flux of an open surface, which depends
+/// on the origin. [`brep_properties`] closes it as [`crate::mass::enclosure`] does
+/// (`mass::closure`): along every edge the ruled strip between the two faces' boundaries,
+/// whose flux it adds. What is still open (the strips' ends, the loops' closing uv
+/// segments, the pcurves' parts past their common parameters) is a set of closed curves of
+/// total length at most `L`, every point within `L` of a point recorded on them: capped by
+/// cones of area at most `L^2 / 4`, whose flux is at most `max |f|` over the box of those
+/// points widened by `L`, times `L^2 / 4`. Each field here is that bound, proved (rounded
+/// interval arithmetic). It is not the integration's error, which the integrator estimates
+/// and does not bound; the property's error is that estimate plus this bound. Never
+/// clamped: a bound larger than the accuracy asked is reported as it is.
+///
+/// The faces are integrated as the closure builds them (#14170), as [`crate::mass::enclosure`]
+/// encloses them: each loop closed in uv, and each surface continued past its domain. The
+/// trim boundary (`create_oriented_trim_boundary`) leaves a loop open where two trims' ends
+/// are within its gap test, and an open loop loses the shadow of its gap down to the
+/// integration's base line, not a cap: the `issue_1476` shell's wall, open by 1.5e-6 in uv
+/// at two corners, lost a strip of 2.3e-4 and its volume moved by 2.3e-4 per unit of the
+/// origin's z. So [`brep_properties`] closes each face's loops with uv lines across those
+/// gaps before it integrates the face. A surface clamps its evaluation to the domain it is
+/// defined on (a plane its analytic domain, a NURB its knots' range), while the closure
+/// continues it; a face whose trims may leave that domain is integrated with the surface's
+/// out-of-bounds evaluation on, so on the surface the closure is built on (where the trims
+/// stay inside, the clamp never acts and the integral is the same to the bit). The bound is
+/// the caps' alone.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ClosureBound {
+    /// The bound on the volume's caps (`f = z`).
+    pub volume: f64,
+    /// The same weighted by the largest density of the faces (the mass).
+    pub mass: f64,
+    /// The bounds on the volume moments' caps, as [`PreciseProperties::moments`]' last four
+    /// (first, second, products, axial), weighted by the largest density.
+    pub moments: [Vec3; 4],
+    /// The openings' total 3D length bound `L`.
+    pub open_length: f64,
+    /// What the strips added to the volume (integrated, not bounded): the faces' flux alone
+    /// is the volume less it.
+    pub strip_volume: f64,
+    /// The strips' `int n_z dA` (integrated): the faces' open vector area along z is its
+    /// negative, so the faces' flux alone moves by it per unit of `O_z`.
+    pub strip_area_z: f64,
 }
 /// Edge length and tube properties.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -254,7 +335,11 @@ pub fn curve_properties(
 /// `SmFace::CreateOrientedTrimBoundary(ctx, TRUE, TRUE, ..)` (unit `topology.face_p1`) on
 /// the caller's B-rep: the UV trim curves it makes stay there, as upstream. The returned
 /// curves' edge-use owners are not read here.
-fn boundary(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Curve>> {
+fn boundary(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+) -> Result<crate::topology::face::p1::OrientedTrimBoundary> {
     let key_of = |e: EntityRef| crate::geom::object::ObjectRef {
         type_code: 0,
         key: ObjectKey(match e {
@@ -263,7 +348,6 @@ fn boundary(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Curve>> {
         }),
     };
     crate::topology::face::p1::create_oriented_trim_boundary(k, b, f, true, true, None, &key_of)
-        .map(|t| t.curves)
 }
 /// `SmFace::ComputePreciseProperties`; the default property mask is `PPF_ALL`. Missing UV
 /// trim curves of the face are made on `b`.
@@ -280,16 +364,60 @@ pub fn face_properties(
 ) -> Result<PreciseProperties> {
     valid_flags(flags)?;
     let trims = boundary(k, b, f)?;
+    face_properties_over(
+        k,
+        b,
+        f,
+        &trims.curves,
+        orientation,
+        accuracy,
+        origin,
+        estimated_area,
+        thickness,
+        flags,
+        None,
+    )
+}
+/// [`face_properties`] over the face's oriented trim boundary `trims`, made already.
+#[allow(clippy::too_many_arguments)] // face_properties' inputs and the trims
+fn face_properties_over(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    trims: &[Curve],
+    orientation: OrientType,
+    accuracy: f64,
+    origin: Point3,
+    estimated_area: f64,
+    thickness: f64,
+    flags: u64,
+    unclamp: Option<&mut Vec<ClosureRefused>>,
+) -> Result<PreciseProperties> {
+    valid_flags(flags)?;
     let fbox = face_box(k, b, f)?;
     let surface = b
         .face(f)?
         .surface
         .as_ref()
         .ok_or_else(|| SolidError::mass_missing(OP, "the face's surface"))?;
+    // the surface continued past the domain its evaluation clamps to, where the trims may
+    // leave it and the continuation is certified, as the closure builds the face (#14170);
+    // set for the integration alone (after the face's box, which may fill the surface's
+    // caches), and restored when the guard drops, on every path
+    let _unclamped = match unclamp {
+        Some(refused) => {
+            let (guard, refusal) = Unclamped::where_trims_may_leave(k, surface, trims)?;
+            if let Some(why) = refusal {
+                refused.push(ClosureRefused { face: Some(f), why });
+            }
+            Some(guard)
+        }
+        None => None,
+    };
     boundary_properties(
         k,
         surface,
-        &trims,
+        trims,
         &b.face(f)?.uv_domain,
         &fbox,
         orientation,
@@ -958,6 +1086,17 @@ pub fn brep_properties(
     let estimated = size.z.max(size.x.max(size.y));
     let estimated = estimated * estimated / 100.0;
     let mut total = PreciseProperties::default();
+    // why the volume is not the flux of the faces alone (a face not separating, or thick;
+    // the policy), which the closure strips close (#14170)
+    let mut not_flux = (behavior.face_volume != 0).then_some(ClosureRefused {
+        face: None,
+        why: ClosureRefusal::VolumePolicy,
+    });
+    // each integrated face's oriented trim boundary, made once (#14170)
+    let mut face_trims = std::collections::BTreeMap::new();
+    // the first face integrated clamped because its continuation is not certified (#14170)
+    // the faces integrated clamped, their continuation not certified, and why
+    let mut uncertified: Vec<ClosureRefused> = Vec::new();
     for f in faces(b)? {
         k.check_cancelled(OP)?;
         let mut mass = attributes.mass_vector(
@@ -976,6 +1115,16 @@ pub fn brep_properties(
             .mate
             .ok_or_else(|| SolidError::mass_missing(OP, "the faceuse's mate"))?;
         let mut separating = faceuse_region(b, up)? != faceuse_region(b, mate)?;
+        if not_flux.is_none() && (!separating || mass.y > EFF_ZERO) {
+            not_flux = Some(ClosureRefused {
+                face: Some(f),
+                why: if separating {
+                    ClosureRefusal::Thick
+                } else {
+                    ClosureRefusal::NotOneMaterialSide
+                },
+            });
+        }
         for (j, fu) in [up, mate].into_iter().enumerate() {
             let mut do_area = false;
             let mut do_volume = false;
@@ -1013,16 +1162,31 @@ pub fn brep_properties(
             }
             if separating || mass.y > EFF_ZERO {
                 let orientation = b.faceuse(fu)?.orientation;
-                let delta = face_properties(
+                // the face's trim boundary, made once and kept for the closure, which finds
+                // the loops it leaves open from it (#14170)
+                if let std::collections::btree_map::Entry::Vacant(slot) = face_trims.entry(f) {
+                    // its loops closed: the uv lines across the gaps the trim boundary leaves
+                    // open, integrated with the trims (#14170: an open loop loses its gap's
+                    // shadow down to the integration's base)
+                    let mut trims = boundary(k, b, f)?;
+                    close_loops(k, &mut trims)?;
+                    slot.insert(trims);
+                }
+                let trims = face_trims
+                    .get(&f)
+                    .ok_or_else(|| SolidError::mass_failed(OP, "the face's trims"))?;
+                let delta = face_properties_over(
                     k,
                     b,
                     f,
+                    &trims.curves,
                     orientation,
                     accuracy,
                     origin,
                     estimated,
                     if separating { 0.0 } else { mass.y },
                     PPF_ALL,
+                    Some(&mut uncertified),
                 )?;
                 if separating {
                     // Not upstream (WR-535, the fork's tangency-labs/smlib@d2d9586): the
@@ -1040,6 +1204,28 @@ pub fn brep_properties(
             }
         }
     }
+    // a face integrated clamped (its continuation not certified) refuses the bound, by
+    // name, and only its own strips: the body's other strips still close their gaps; a
+    // volume that is no flux skips the closure
+    let closed = match not_flux {
+        Some(r) => VolumeClosure::Refused(r),
+        None => close_faces(
+            k,
+            b,
+            accuracy,
+            origin,
+            &bbox,
+            estimated,
+            attributes,
+            behavior,
+            &uncertified,
+            &mut total,
+        )?,
+    };
+    total.closure = match uncertified.first() {
+        Some(&r) => VolumeClosure::Refused(r),
+        None => closed,
+    };
     for e in edges(b)? {
         if !edge::is_wire(b, e)? {
             continue;
@@ -1092,6 +1278,675 @@ pub fn brep_properties(
     }
     Ok(total)
 }
+/// The number of volume components a strip adds: the volume, then the volume moments
+/// (first 3, second 3, products 3, axial 3), as
+/// [`crate::topology::face::p2::OdeIsoCurveLength`]'s layout orders them.
+const CLOSURE_COMPONENTS: usize = 13;
+
+/// The components a strip integrates: the volume components, then `int n_z dA` (the
+/// strips' vector area along z, reported in [`ClosureBound::strip_area_z`]).
+const STRIP_COMPONENTS: usize = CLOSURE_COMPONENTS + 1;
+
+/// The strips' sense on the closed surface, derived. A face's flux is integrated round its
+/// loops by Green's theorem: each loop walked with the face on its left about `S_u x S_v`
+/// (`create_oriented_trim_boundary`), the result times the face's sign, `-1` where its
+/// material side is its upward use (`mass::closure`'s `ClosureFace::sign`). That is the flux
+/// with the normal `sign (S_u x S_v)` pointing out of the material, whose boundary (Stokes'
+/// orientation: the face on the left about that normal) runs along the edge parameter `t`
+/// where `dir sign > 0` (`dir` the walk along the pcurve): the strip's first side `X_1`.
+/// The second face's boundary runs against `t` along `X_2`. A strip
+/// `X(t, s) = X_1 + s (X_2 - X_1)` closes them when its own boundary runs opposite to
+/// both: against `t` along `X_1` (`s = 0`), along `t` along `X_2` (`s = 1`). The boundary of the `(t, s)` square
+/// with the normal `X_t x X_s` runs along `t` at `s = 0`, so the strip's outward normal is
+/// the opposite, `-(X_t x X_s)`: the sense is -1. (The tilted box of #14170's test checks
+/// it: the other sign doubles the origin dependence instead of cancelling it.)
+const STRIP_SENSE: f64 = -1.0;
+
+/// The fields `f` of the volume components at `p` (relative to the origin of
+/// computation): their flux `int f n_z dA` out of the faces is each component, as
+/// [`crate::topology::face::p2::OdeIsoCurveLength`] integrates it (`f` its integrand
+/// over `n_z dA`).
+fn volume_fields(p: Vec3) -> [f64; CLOSURE_COMPONENTS] {
+    let (x, y, z) = (p.x, p.y, p.z);
+    [
+        z,
+        x * z,
+        y * z,
+        z * z / 2.0,
+        (x * x) * z,
+        (y * y) * z,
+        (z * z / 3.0) * z,
+        (y * z) * z / 2.0,
+        (z * x) * z / 2.0,
+        (x * y) * z,
+        (y * y + z * z / 3.0) * z,
+        (x * x + z * z / 3.0) * z,
+        (x * x + y * y) * z,
+    ]
+}
+
+/// Bounds on `|f|` of [`volume_fields`] over the box `p`, rounded up.
+fn volume_field_bounds(p: [Ivl; 3]) -> [f64; CLOSURE_COMPONENTS] {
+    let [x, y, z] = p;
+    let (two, three) = (Ivl::from(2.0), Ivl::from(3.0));
+    [
+        z,
+        x * z,
+        y * z,
+        z * z / two,
+        (x * x) * z,
+        (y * y) * z,
+        (z * z / three) * z,
+        (y * z) * z / two,
+        (z * x) * z / two,
+        (x * y) * z,
+        (y * y + z * z / three) * z,
+        (x * x + z * z / three) * z,
+        (x * x + y * y) * z,
+    ]
+    .map(Ivl::mag)
+}
+
+/// Not upstream (#14170): closes the faces' flux surface as [`crate::mass::enclosure`]
+/// does (`mass::closure`): adds each strip's flux to `total`'s volume, mass and volume
+/// moments, and returns the caps' [`ClosureBound`]; or the face that cannot be closed and
+/// why ([`VolumeClosure::Refused`]: `total` is then the faces' flux alone, its accuracy not
+/// proved); or, with `clamped` faces (integrated clamped, their continuation not
+/// certified), the first of them refused, the strips of the others added; or, with the strips added, the procedural blend taken as its definition
+/// ([`VolumeClosure::NetNotDefinition`]). An edge whose sides do not pair is an opening, not
+/// a refusal.
+#[allow(clippy::too_many_arguments)] // brep_properties' state, passed on
+fn close_faces(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    origin: Point3,
+    bbox: &Extent3d,
+    estimated: f64,
+    attributes: &PropertyAttributes<'_>,
+    behavior: MassPropertyBehavior,
+    clamped: &[ClosureRefused],
+    total: &mut PreciseProperties,
+) -> Result<VolumeClosure> {
+    let refused = |why| VolumeClosure::Refused(ClosureRefused { face: None, why });
+    let closure = match Closure::of(k, b)? {
+        Ok(c) => c,
+        Err(r) => return Ok(VolumeClosure::Refused(r)),
+    };
+    // a face integrated clamped: its strips, built on its surface continued, are not its
+    // integration's edges, and are left out; no bound is given, so no openings are found
+    let is_clamped = |i: usize| {
+        closure
+            .faces
+            .get(i)
+            .is_some_and(|cf| clamped.iter().any(|r| r.face == Some(cf.face)))
+    };
+    let openings = if clamped.is_empty() {
+        match closure.openings() {
+            Ok(o) => Some(o),
+            Err(SolidError::InvalidInput { .. } | SolidError::Unsupported { .. }) => {
+                return Ok(refused(ClosureRefusal::Unbounded))
+            }
+            Err(e) => return Err(e),
+        }
+    } else {
+        None
+    };
+    // each face's density, as the face loop reads it
+    let mut density = Vec::with_capacity(closure.faces.len());
+    for cf in &closure.faces {
+        let mut m = attributes.mass_vector(
+            EntityRef::Face(cf.face),
+            Vec3::new(behavior.density, behavior.face_thickness, 0.0),
+        )?;
+        if m.x < EFF_ZERO {
+            m.x = 1.0;
+        }
+        density.push(m.x);
+    }
+    // a procedural blend taken as its definition, which no bound covers yet (#15022)
+    let mut net_not_definition = None;
+    for cf in &closure.faces {
+        if let SurfaceKind::ProceduralBlend(pb) = b
+            .face(cf.face)?
+            .surface
+            .as_ref()
+            .ok_or_else(|| SolidError::mass_missing(OP, "the face's surface"))?
+            .kind()
+        {
+            if !pb.net_answers(k) {
+                net_not_definition = net_not_definition.or(Some(cf.face));
+            }
+        }
+    }
+    let scale = closure_scale(k, bbox, origin, estimated);
+    // the strips' volume, mass and volume moments, added once all are integrated
+    let mut volume = 0.0;
+    let mut mass = 0.0;
+    let mut moments = [Vec3::ZERO; 4];
+    let mut area_z = 0.0;
+    for strip in &closure.strips {
+        k.check_cancelled(OP)?;
+        if strip.sides.iter().any(|s| is_clamped(s.face)) {
+            continue;
+        }
+        let y = match strip_flux(k, &closure, strip, origin, accuracy, &scale) {
+            Ok(y) => y,
+            Err(SolidError::Unsupported { .. }) => return Ok(refused(ClosureRefusal::Unbounded)),
+            Err(e) => return Err(e),
+        };
+        // a strip's mass at the mean density of its two faces
+        let d = 0.5
+            * (strip.sides.iter())
+                .map(|s| density.get(s.face).copied().unwrap_or(1.0))
+                .sum::<f64>();
+        let [v, rest @ .., nz] = y;
+        volume += v;
+        mass += v * d;
+        area_z += nz;
+        for (m, c) in moments.iter_mut().zip(rest.chunks(3)) {
+            if let &[cx, cy, cz] = c {
+                *m += Vec3::new(cx, cy, cz) * d;
+            }
+        }
+    }
+    total.volume += volume;
+    total.mass += mass;
+    for (t, m) in total.moments.iter_mut().skip(4).zip(moments) {
+        *t += m;
+    }
+    if let Some(&r) = clamped.first() {
+        return Ok(VolumeClosure::Refused(r));
+    }
+    // found above wherever no face is clamped
+    let Some(openings) = openings else {
+        return Ok(refused(ClosureRefusal::Unbounded));
+    };
+    // the caps: in the box of the openings' points widened by L
+    let l = openings.length.hi;
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for p in &openings.points {
+        for (i, c) in p.iter().enumerate() {
+            if let (Some(a), Some(z)) = (lo.get_mut(i), hi.get_mut(i)) {
+                *a = a.min(c.lo);
+                *z = z.max(c.hi);
+            }
+        }
+    }
+    let o = [origin.x, origin.y, origin.z];
+    let mut bound = ClosureBound {
+        open_length: l,
+        strip_volume: volume,
+        strip_area_z: area_z,
+        ..ClosureBound::default()
+    };
+    if !openings.points.is_empty() {
+        let axis = |i: usize| -> Ivl {
+            let (a, z, c) = (
+                lo.get(i).copied().unwrap_or(f64::NAN),
+                hi.get(i).copied().unwrap_or(f64::NAN),
+                o.get(i).copied().unwrap_or(f64::NAN),
+            );
+            Ivl::new(a, z) + Ivl::new(-l, l) - Ivl::from(c)
+        };
+        let fb = volume_field_bounds([axis(0), axis(1), axis(2)]);
+        let area = Ivl::from(l) * Ivl::from(l) / Ivl::from(4.0);
+        let dmax = density.iter().copied().fold(1.0_f64, f64::max);
+        let cap = |f: f64| (Ivl::from(f) * area).hi;
+        let [v, rest @ ..] = fb;
+        bound.volume = cap(v);
+        bound.mass = (Ivl::from(bound.volume) * Ivl::from(dmax)).hi;
+        for (m, c) in bound.moments.iter_mut().zip(rest.chunks(3)) {
+            if let &[cx, cy, cz] = c {
+                let w = |f: f64| (Ivl::from(cap(f)) * Ivl::from(dmax)).hi;
+                *m = Vec3::new(w(cx), w(cy), w(cz));
+            }
+        }
+    }
+    Ok(match net_not_definition {
+        Some(face) => VolumeClosure::NetNotDefinition(face),
+        None => VolumeClosure::Bounded(bound),
+    })
+}
+
+/// Where a trim of `trims` may leave the parameter box `[u0, u1] x [v0, v1]`, where its
+/// surface's evaluation clamps it: `None` where every curve's control points are proved
+/// inside (their homogeneous coordinates over their weights in rounded interval arithmetic),
+/// else the uv box of all the curves' control points, `(u0, u1, v0, v1)`. A NURB curve with
+/// positive weights lies in the convex hull of its control points, and a box is convex, so
+/// the curve lies in the box when they do; the loops' closing uv lines are among the curves
+/// (`close_loops`), and run between two curve ends. A trim along the box's edge has its
+/// control points on it and is inside. A weight not proved positive, or a curve with no
+/// B-spline form, is taken as leaving, over the whole parameter plane.
+fn trims_past(
+    trims: &[Curve],
+    u: (f64, f64),
+    v: (f64, f64),
+) -> Result<Option<(f64, f64, f64, f64)>> {
+    let mut hull = (u.0, u.1, v.0, v.1);
+    let mut leaves = false;
+    for c in trims {
+        let Some(bs) = c.b_spline_base() else {
+            return Ok(Some((
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+            )));
+        };
+        let cn = NurbsCurve::of(bs)?;
+        for p in cn.pw.chunks(4) {
+            let &[xw, yw, _, w] = p else {
+                return Ok(Some((
+                    f64::NEG_INFINITY,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::INFINITY,
+                )));
+            };
+            if w.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                return Ok(Some((
+                    f64::NEG_INFINITY,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::INFINITY,
+                )));
+            }
+            let (x, y) = (Ivl::from(xw) / Ivl::from(w), Ivl::from(yw) / Ivl::from(w));
+            if x.lo < u.0 || x.hi > u.1 || y.lo < v.0 || y.hi > v.1 {
+                leaves = true;
+            }
+            hull = (
+                hull.0.min(x.lo),
+                hull.1.max(x.hi),
+                hull.2.min(y.lo),
+                hull.3.max(y.hi),
+            );
+        }
+    }
+    Ok(leaves.then_some(hull))
+}
+
+/// A face's surface with out-of-bounds evaluation on for the face's integration, where its
+/// trims may leave the domain its evaluation clamps to and its continuation is certified
+/// (#14170); restored when dropped, so on every path out of the integration (as upstream's
+/// `SmTemporaryChangeValue` on `GetOutOfBoundsEnabled()`). With it the scope's own
+/// continuation (`BSplineSurface::continues_past_domain`), which the B-spline evaluation of
+/// the integration reads: upstream's `EvaluateSimple` clamps whatever the out-of-bounds flag,
+/// and so does that evaluation outside this scope. The flags are the B-spline part's
+/// that the evaluation reads: a plane's base, a B-spline, an analytic kind's NURB
+/// (`Surface::analytic_base_with_nurb`), a blend's or a ball patch's net. A kind with no such
+/// part (an offset, curve-bounded, STEP or in-volume surface) has no NURB form either, and
+/// the closure refuses its face (`ClosureRefusal::NoNurbsForm`). The faces are integrated one
+/// at a time, so a surface shared by two faces is toggled for one integration at a time.
+///
+/// The domain tested is the one the integration's evaluation clamps to: a plane's analytic
+/// domain (`Plane::evaluate`), else the NURB's natural (knot) domain, which every other kind
+/// is evaluated through (`Surface::evaluate_simple_first_into` reads `analytic_base_with_nurb`
+/// for the analytic kinds and the net for a ball patch, at the face's uv, so the face's
+/// pcurves are in the NURB's parameters).
+///
+/// What the flag reaches, and no cache: the guard is set inside `face_properties_over` after
+/// the face's box (`face_box`, which can fill the trimmed cache) and covers
+/// `boundary_properties` alone, whose evaluations are `Curve::calculate_bounding_box` and the
+/// trims' own evaluation (`trims_v_range`, `trim_curve_breaks`, `OdeArea::evaluate`), the
+/// surface's knots (`surface_knots_inside`, `Surface::knots_with_nurb`, which reads or makes
+/// the NURB from the surface's own data), and its point and partials
+/// (`OdeIsoCurveLength::evaluate` -> `Surface::evaluate_simple_first_into` ->
+/// `BSplineSurface::evaluate_simple_first_into` or `Plane::evaluate_simple` or
+/// `ProceduralBlend::evaluate_simple`, the net's while the net answers). None reads or fills
+/// the trimmed cache (`TrimCacheSlot`) or `BoundaryMemo` (`CoincidenceCheck`'s).
+struct Unclamped<'a> {
+    /// The surface toggled, with the two flags' values before.
+    base: Option<(
+        &'a crate::nurbs::b_spline_surface::BSplineSurface,
+        bool,
+        bool,
+    )>,
+}
+
+impl<'a> Unclamped<'a> {
+    /// Turns `surface`'s out-of-bounds evaluation on where `trims` may leave its domain and
+    /// its continuation over the trims' box is certified: a non-rational NURB, or a rational
+    /// one whose weights are proved positive over that box, piece by piece (as the enclosure
+    /// proves them, [`continuation_certified`]). Where the trims may leave but the
+    /// continuation is not certified, nothing is toggled and the refusal is returned.
+    fn where_trims_may_leave(
+        k: &Kernel,
+        surface: &'a Surface,
+        trims: &[Curve],
+    ) -> Result<(Self, Option<ClosureRefusal>)> {
+        let none = Self { base: None };
+        let (base, domain) = match surface.kind() {
+            SurfaceKind::Plane(plane) => (plane.base(), Some(plane.step_uv_domain())),
+            SurfaceKind::BSpline(s) => (s, None),
+            SurfaceKind::BallPatch(s) => (s.net(), None),
+            // a blend answers from its net only where a scope takes the net; integrated as its
+            // definition it has no bound yet (#15022), and its station solves are left alone
+            SurfaceKind::ProceduralBlend(s) if s.net_answers(k) => (s.net(), None),
+            SurfaceKind::Cone(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_) => (surface.analytic_base_with_nurb(k)?, None),
+            _ => return Ok((none, None)),
+        };
+        if base.is_out_of_bounds_enabled() {
+            return Ok((none, None));
+        }
+        let domain = domain.unwrap_or_else(|| base.natural_uv_domain());
+        let (u, v) = (
+            (domain.u_min(), domain.u_max()),
+            (domain.v_min(), domain.v_max()),
+        );
+        let Some(hull) = trims_past(trims, u, v)? else {
+            return Ok((none, None));
+        };
+        // a plane is a bilinear, non-rational patch: its continuation is itself
+        if !matches!(surface.kind(), SurfaceKind::Plane(_)) && !continuation_certified(base, hull)?
+        {
+            let unbounded = hull.0.is_infinite() || hull.1.is_infinite();
+            return Ok((
+                none,
+                Some(if unbounded {
+                    ClosureRefusal::TrimNotBounded
+                } else {
+                    ClosureRefusal::WeightsNotProved
+                }),
+            ));
+        }
+        let was = (
+            base.is_out_of_bounds_enabled(),
+            base.continues_past_domain(),
+        );
+        base.set_out_of_bounds_enabled_in_place(true);
+        base.set_continues_past_domain_in_place(true);
+        Ok((
+            Self {
+                base: Some((base, was.0, was.1)),
+            },
+            None,
+        ))
+    }
+}
+
+/// The times a box is cut in halves along any path while [`continuation_certified`] proves
+/// its weights, as [`crate::mass::enclosure`] cuts a trim's (`g_integral`, 2^16 parts).
+const CERTIFY_CUTS: u32 = 16;
+
+/// Whether `base`'s continuation over the uv box `hull` (`(u0, u1, v0, v1)`) is certified:
+/// non-rational (every weight 1), or its weights proved positive over the box as the
+/// enclosure proves them (`mass::enclosure::partials_over`: within a span by its control
+/// weights, past the knots by the continued piece's Taylor enclosure), the box cut in
+/// halves where that is too coarse, along the side longer against the domain's, at most
+/// [`CERTIFY_CUTS`] times along any path. Not certified where a box's middle is not proved
+/// positive (the weight is not, or not provably, positive there) or the cuts run out.
+fn continuation_certified(
+    base: &crate::nurbs::b_spline_surface::BSplineSurface,
+    hull: (f64, f64, f64, f64),
+) -> Result<bool> {
+    use crate::mass::enclosure::partials_over;
+    let cn = Nurbs::of(base)?;
+    if cn.pw.chunks(4).all(|p| p.get(3) == Some(&1.0)) {
+        return Ok(true);
+    }
+    let (u0, u1, v0, v1) = hull;
+    if !(u0.is_finite() && u1.is_finite() && v0.is_finite() && v1.is_finite()) {
+        return Ok(false);
+    }
+    // the weights proved positive over the box
+    let proved = |a: f64, b: f64, c: f64, d: f64| -> Result<bool> {
+        match partials_over(&cn, Ivl::new(a, b), Ivl::new(c, d), 0) {
+            Ok(p) => Ok(p.is_some()),
+            Err(SolidError::Unsupported { .. }) => Ok(false),
+            Err(e) => Err(e),
+        }
+    };
+    let domain = base.natural_uv_domain();
+    let (du, dv) = (
+        domain.u_max() - domain.u_min(),
+        domain.v_max() - domain.v_min(),
+    );
+    let mut stack = vec![(u0, u1, v0, v1, 0u32)];
+    while let Some((a, b, c, d, cuts)) = stack.pop() {
+        if proved(a, b, c, d)? {
+            continue;
+        }
+        let (um, vm) = (0.5 * (a + b), 0.5 * (c + d));
+        if cuts >= CERTIFY_CUTS || !proved(um, um, vm, vm)? {
+            return Ok(false);
+        }
+        let (cut_u, cut_v) = (a < um && um < b, c < vm && vm < d);
+        if cut_u && (!cut_v || (b - a) * dv >= (d - c) * du) {
+            stack.push((um, b, c, d, cuts + 1));
+            stack.push((a, um, c, d, cuts + 1));
+        } else if cut_v {
+            stack.push((a, b, vm, d, cuts + 1));
+            stack.push((a, b, c, vm, cuts + 1));
+        } else {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+impl Drop for Unclamped<'_> {
+    fn drop(&mut self) {
+        if let Some((base, was_oob, was_cont)) = self.base {
+            base.set_out_of_bounds_enabled_in_place(was_oob);
+            base.set_continues_past_domain_in_place(was_cont);
+        }
+    }
+}
+
+/// The uv line from `a` to `z` as a degree 1 B-spline on `[0, 1]`: a gap may be as short as a
+/// rounding, which a line's unit direction cannot take (`Line::create_line_segment` refuses
+/// coincident ends).
+fn gap_segment(a: Point3, z: Point3) -> Result<Curve> {
+    use crate::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
+    BSplineCurve::create_canonical(&CanonicalData {
+        dim: 2,
+        degree: 1,
+        control_points: &[a, z],
+        form: BSplineCurveForm::default(),
+        knot_multiplicities: &[2, 2],
+        knots: &[0.0, 1.0],
+        knot_type: KnotType::default(),
+        weights: None,
+        trim: None,
+    })
+    .map(Curve::from)
+}
+
+/// Closes a trim boundary's loops where it leaves them open, in place: after a curve whose
+/// end is apart from the next one's start, round each loop, the uv line between them, where
+/// the two are within the gap test of `create_oriented_trim_boundary`
+/// (`|d|^2 <= EFF_ZERO (1 + |p|)`, `p` the next start, a squared length against a length),
+/// which fills every gap past it with such a line itself. The loop counts take the lines in.
+fn close_loops(
+    k: &Kernel,
+    trims: &mut crate::topology::face::p1::OrientedTrimBoundary,
+) -> Result<()> {
+    let mut curves = Vec::with_capacity(trims.curves.len());
+    let mut loops = Vec::with_capacity(trims.loops.len());
+    let mut start = 0;
+    for &n in &trims.loops {
+        let lp = trims
+            .curves
+            .get(start..start + n)
+            .ok_or_else(|| SolidError::mass_failed(OP, "the trim boundary's loop counts"))?;
+        let mut count = n;
+        for (i, c) in lp.iter().enumerate() {
+            curves.push(c.clone());
+            let next = lp
+                .get((i + 1) % n)
+                .ok_or_else(|| SolidError::mass_failed(OP, "the trim boundary's loop counts"))?;
+            let end = c.evaluate_point(k, c.natural_interval().max())?;
+            let first = next.evaluate_point(k, next.natural_interval().min())?;
+            let d = first - end;
+            if end != first && d.length_squared() <= EFF_ZERO * (1.0 + first.max_dimension()) {
+                curves.push(gap_segment(end, first)?);
+                count += 1;
+            }
+        }
+        loops.push(count);
+        start += n;
+    }
+    trims.curves = curves;
+    trims.loops = loops;
+    Ok(())
+}
+
+/// The strips' error scales: the faces' ([`boundary_properties`]) for the body's area
+/// estimate, about the body's box.
+fn closure_scale(
+    k: &Kernel,
+    bbox: &Extent3d,
+    origin: Point3,
+    estimated: f64,
+) -> [f64; STRIP_COMPONENTS] {
+    // the volume moment groups' extra length dimensions, as the faces'
+    const POWERS: [i32; 4] = [2, 3, 3, 3];
+    let area_scale = estimated / 10.0;
+    let origin_distance = bbox.min_distance(&Extent3d::from_point(origin));
+    let length = if k.fixes.precise_properties_body_length_scale {
+        (10.0 * estimated.sqrt()).max(origin_distance)
+    } else {
+        estimated.sqrt().max(origin_distance / 10.0)
+    };
+    let mut scale = [area_scale * length; STRIP_COMPONENTS];
+    for (group, power) in POWERS.iter().enumerate() {
+        for c in 0..3 {
+            if let Some(s) = scale.get_mut(1 + 3 * group + c) {
+                *s = area_scale * length.powi(*power);
+            }
+        }
+    }
+    // the strips' area along z: an area
+    if let Some(s) = scale.last_mut() {
+        *s = area_scale;
+    }
+    scale
+}
+
+/// A strip side's point relative to `origin` and its derivative along the edge
+/// parameter, at `t` on the curve's polynomial piece `span`.
+fn strip_side_at(
+    cn: &Nurbs,
+    pc: &NurbsCurve,
+    span: usize,
+    t: f64,
+    origin: Point3,
+) -> Result<(Vec3, Vec3)> {
+    let d = curve_derivs_over(pc, Ivl::from(t), 1, Some(span))?;
+    let (p, dp) = (
+        d.first()
+            .copied()
+            .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))?,
+        d.get(1)
+            .copied()
+            .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no derivative"))?,
+    );
+    let s = crate::mass::enclosure::partials_at(cn, p.x, p.y, 1)?;
+    let mid = |v: V3<Ivl>| Vec3::new(v.x.mid(), v.y.mid(), v.z.mid());
+    let (x, su, sv) = (mid(s.at(0, 0)), mid(s.at(1, 0)), mid(s.at(0, 1)));
+    Ok((x - origin, su * dp.x.mid() + sv * dp.y.mid()))
+}
+
+/// The flux of the volume components' fields out of a strip `X_1 + s (X_2 - X_1)`:
+/// exact in `s` (3-point Gauss-Legendre: the integrand is a polynomial of degree at most 4
+/// in `s`), adaptive in `t` piece by piece between both curves' knots, as the faces.
+fn strip_flux(
+    k: &Kernel,
+    closure: &Closure,
+    strip: &ClosureStrip,
+    origin: Point3,
+    accuracy: f64,
+    scale: &[f64; STRIP_COMPONENTS],
+) -> Result<[f64; STRIP_COMPONENTS]> {
+    let (fa, ca) = closure.side(strip, 0)?;
+    let (fc, cc) = closure.side(strip, 1)?;
+    let (t0, t1) = strip.t;
+    let mut cuts = vec![t0, t1];
+    for cn in [ca, cc] {
+        for &x in &cn.u {
+            if x > t0 && x < t1 {
+                cuts.push(x);
+            }
+        }
+    }
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup();
+    // Gauss-Legendre on [0, 1]
+    let r = 0.5 * (0.6_f64).sqrt();
+    let gauss = [
+        (0.5 - r, 5.0 / 18.0),
+        (0.5, 8.0 / 18.0),
+        (0.5 + r, 5.0 / 18.0),
+    ];
+    let mut total = [0.0; STRIP_COMPONENTS];
+    for pair in cuts.windows(2) {
+        let &[a, z] = pair else {
+            continue;
+        };
+        let tm = 0.5 * (a + z);
+        let (sa, sc) = (span(&ca.u, ca.p, ca.n, tm), span(&cc.u, cc.p, cc.n, tm));
+        let mut status = Err(SolidError::mass_failed(
+            OP,
+            "the strip piece was not integrated",
+        ));
+        let mut y = [0.0; STRIP_COMPONENTS];
+        for divisor in [2.0, 8.0, 64.0, 512.0, 4096.0] {
+            k.check_cancelled(OP)?;
+            // (a failed integration leaves `y` as it was: zero)
+            status = OdeIntegrator::default().integrate(
+                &mut y,
+                a,
+                z,
+                OdeOptions {
+                    accuracy: accuracy / 10.0,
+                    initial_step: (z - a) / divisor,
+                    minimum_step: 0.0,
+                    scale: Some(scale.as_slice()),
+                    quadrature: true,
+                    rounding: None,
+                    rate: None,
+                },
+                |t, _, dy| {
+                    let (x1, d1) = strip_side_at(&fa.cn, ca, sa, t, origin)?;
+                    let (x2, d2) = strip_side_at(&fc.cn, cc, sc, t, origin)?;
+                    let (dd, ddt) = (x2 - x1, d2 - d1);
+                    dy.fill(0.0);
+                    for (s, w) in gauss {
+                        let p = x1 + dd * s;
+                        let nz = (d1 + ddt * s).cross(dd).z;
+                        let fields = volume_fields(p).into_iter().chain([1.0]);
+                        for (v, f) in dy.iter_mut().zip(fields) {
+                            *v += STRIP_SENSE * w * f * nz;
+                        }
+                    }
+                    Ok(())
+                },
+            );
+            if status.is_ok()
+                || status
+                    .as_ref()
+                    .is_err_and(SolidError::is_unported_or_cancelled)
+            {
+                break;
+            }
+        }
+        status?;
+        for (t, v) in total.iter_mut().zip(y) {
+            *t += v;
+        }
+    }
+    Ok(total)
+}
+
 /// `SmApiEdgeComputeLength` (the curve's virtual Length). The edge's curve is owned by
 /// the edge, so its zone tolerance (`SmTol::GetZoneTol3d(pCurve)`) is the edge's.
 pub fn edge_length(k: &Kernel, b: &Brep, e: EdgeId, accuracy: f64) -> Result<f64> {
@@ -1800,6 +2655,152 @@ mod tests {
                     .unwrap(),
                 value
             );
+        }
+    }
+    /// #14170: the out-of-bounds flag set for a face's integration is restored on every
+    /// path out of it, an error included: a cube's top cut short of its trims turns it on,
+    /// and an integration that fails while it is on leaves it off.
+    #[test]
+    fn the_unclamped_flag_is_restored_when_the_integration_fails() {
+        use crate::geom::extent2d::Extent2d;
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0)
+                .unwrap();
+        let top = faces(&b)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                let face = b.face(f).unwrap();
+                face.surface
+                    .as_ref()
+                    .unwrap()
+                    .evaluate_point(&k, face.uv_domain.mid())
+                    .is_ok_and(|p| (p.z - 10.0).abs() < 1e-9)
+            })
+            .unwrap();
+        let mut trims = boundary(&k, &mut b, top).unwrap();
+        close_loops(&k, &mut trims).unwrap();
+        let surface = b.face_mut(top).unwrap().surface.as_mut().unwrap();
+        let SurfaceKind::Plane(plane) = surface.kind_mut() else {
+            panic!("the top is not a plane")
+        };
+        let d = plane.step_uv_domain();
+        let short = Extent2d::from_bounds(d.u_min(), d.v_min(), d.u_max() - 1.0, d.v_max());
+        plane.adjust_step_uv_domain(&short).unwrap();
+        let surface = b.face(top).unwrap().surface.as_ref().unwrap();
+        let flag = || match surface.kind() {
+            SurfaceKind::Plane(p) => p.base().is_out_of_bounds_enabled(),
+            _ => panic!("the top is not a plane"),
+        };
+        let failing = || -> Result<()> {
+            let (_guard, refusal) = Unclamped::where_trims_may_leave(&k, surface, &trims.curves)?;
+            assert!(refusal.is_none());
+            assert!(flag(), "on for the integration");
+            Err(SolidError::mass(OP, MassFailure::Integrand))
+        };
+        assert!(failing().is_err());
+        assert!(!flag(), "restored after the error");
+    }
+    /// Outside the mass integration's scope the face integration's B-spline evaluation
+    /// clamps to the natural domain whatever the out-of-bounds flag, as upstream's
+    /// `EvaluateSimple` does (and `evaluate_simple`); within it, it continues.
+    #[test]
+    fn the_integration_s_evaluation_continues_only_within_its_scope() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        let corners = [
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.5),
+            Point3::new(1.0, 0.0, -0.5),
+            Point3::new(1.0, 1.0, 2.0),
+        ];
+        let mut s = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &corners,
+            form: BSplineSurfaceForm::default(),
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::default(),
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        *s.out_of_bounds_enabled_mut() = true;
+        let uv = crate::geom::vector2d::Point2::new(1.25, 0.5);
+        let clamped = s.evaluate_simple(uv, 1, 1, true, true, true).unwrap();
+        let mut d = [[Vec3::ZERO; 2]; 2];
+        s.evaluate_simple_first_into(uv, true, true, true, &mut d)
+            .unwrap();
+        for (row, full) in d.iter().zip(&clamped) {
+            for (x, y) in row.iter().zip(full) {
+                assert_eq!(x, y, "clamped as evaluate_simple, the flag on");
+            }
+        }
+        s.set_continues_past_domain_in_place(true);
+        s.evaluate_simple_first_into(uv, true, true, true, &mut d)
+            .unwrap();
+        // the bilinear map continued: x = u
+        assert!((d[0][0].x - 1.25).abs() < 1e-12, "continued: {:?}", d[0][0]);
+    }
+    /// A cylinder's and a cone's NURBS forms (rational, their circles' interior knots
+    /// doubled) certify their continuation over a box past their domain by rounding, and
+    /// their faces, with the trims they are integrated with, are not refused: the certificate
+    /// takes the spans the integration evaluates, not the empty spans of repeated knots
+    /// (walking those refused every circle-based face, `WeightsNotProved`).
+    #[test]
+    fn circle_based_faces_certify_their_continuation_past_their_domain_by_rounding() {
+        use crate::blend::fillet_section::station::knot;
+        use crate::primitive::api_primitives::{create_cone, create_cylinder};
+        let mut k = Kernel::default();
+        let bodies = [
+            create_cylinder(&mut k, Point3::new(3.0, -2.0, 1.0), 8.0, 20.0).unwrap(),
+            create_cone(&mut k, Point3::new(3.0, -2.0, 1.0), 8.0, 3.0, 20.0).unwrap(),
+        ];
+        for mut b in bodies {
+            let mut seen = 0;
+            for f in faces(&b).unwrap() {
+                let trims = boundary(&k, &mut b, f).unwrap();
+                let surface = b.face(f).unwrap().surface.as_ref().unwrap();
+                if !matches!(surface.kind(), SurfaceKind::Cone(_)) {
+                    continue;
+                }
+                seen += 1;
+                let base = surface.analytic_base_with_nurb(&k).unwrap();
+                let cn = Nurbs::of(base).unwrap();
+                assert!(
+                    cn.pw.chunks(4).any(|p| p[3] != 1.0),
+                    "the NURBS form is rational"
+                );
+                let doubled = |u: &[f64], p: usize, n: usize| {
+                    (p + 1..n).any(|i| knot(u, i as isize) == knot(u, i as isize + 1))
+                };
+                assert!(
+                    doubled(&cn.u, cn.p, cn.nu) || doubled(&cn.v, cn.q, cn.nv),
+                    "a repeated interior knot"
+                );
+                let d = base.natural_uv_domain();
+                let out = |x: f64| 4.0 * f64::EPSILON * (1.0 + x.abs());
+                let hull = (
+                    d.u_min() - out(d.u_min()),
+                    d.u_max() + out(d.u_max()),
+                    d.v_min() - out(d.v_min()),
+                    d.v_max() + out(d.v_max()),
+                );
+                assert!(
+                    continuation_certified(base, hull).unwrap(),
+                    "the continuation past {hull:?} is certified"
+                );
+                let (_guard, refusal) =
+                    Unclamped::where_trims_may_leave(&k, surface, &trims.curves).unwrap();
+                assert_eq!(refusal, None, "face {f:?} is not refused");
+            }
+            assert!(seen > 0, "a circle-based face");
         }
     }
     #[test]

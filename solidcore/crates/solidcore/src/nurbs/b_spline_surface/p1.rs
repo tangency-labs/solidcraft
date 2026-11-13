@@ -433,6 +433,14 @@ pub struct BSplineSurface {
     /// as upstream's `SmTemporaryChangeValue` does on a `const` one (no copy of the
     /// surface).
     pub(crate) out_of_bounds_enabled: AtomicBool,
+    /// Not upstream (#14170): within the mass integration's scope alone, the face
+    /// integration's evaluation ([`BSplineSurface::evaluate_simple_first_into`]) continues
+    /// past the natural domain instead of clamping, as upstream's `EvaluateSimple` clamps
+    /// whatever `m_bOutOfBoundsEnabled` says. Interior-mutable as that flag is; never
+    /// copied (a scope's, not the surface's). A scope's flag on a shared surface, as that
+    /// flag is: integrations of one surface must not overlap (on two threads they would
+    /// change each other's evaluation).
+    pub(crate) continues_past_domain: AtomicBool,
     /// `m_eKnotType`.
     pub(crate) knot_type: KnotType,
     /// `m_eBSplineSurfaceForm`.
@@ -756,6 +764,7 @@ impl BSplineSurface {
             nurb: NurbSlot::none(),
             nurb_is_borrowed: false,
             out_of_bounds_enabled: AtomicBool::new(false),
+            continues_past_domain: AtomicBool::new(false),
             knot_type: KnotType::Unspecified,
             form: BSplineSurfaceForm::Unspecified,
         }
@@ -861,6 +870,7 @@ impl BSplineSurface {
             out_of_bounds_enabled: AtomicBool::new(
                 self.out_of_bounds_enabled.load(Ordering::Relaxed),
             ),
+            continues_past_domain: AtomicBool::new(false),
             knot_type: self.knot_type,
             form: self.form,
         }
@@ -896,6 +906,7 @@ impl BSplineSurface {
             out_of_bounds_enabled: AtomicBool::new(
                 self.out_of_bounds_enabled.load(Ordering::Relaxed),
             ),
+            continues_past_domain: AtomicBool::new(false),
             knot_type: self.knot_type,
             form: self.form,
         }
@@ -1005,6 +1016,19 @@ impl BSplineSurface {
     /// `GetOutOfBoundsEnabled()` of a `const` surface).
     pub(crate) fn set_out_of_bounds_enabled_in_place(&self, enabled: bool) {
         self.out_of_bounds_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    /// Whether the face integration's evaluation continues past the natural domain (not
+    /// upstream, #14170: the mass integration's scope).
+    #[must_use]
+    pub(crate) fn continues_past_domain(&self) -> bool {
+        self.continues_past_domain.load(Ordering::Relaxed)
+    }
+
+    /// Sets [`BSplineSurface::continues_past_domain`] through a shared reference, for a
+    /// scope that restores it (not upstream, #14170).
+    pub(crate) fn set_continues_past_domain_in_place(&self, on: bool) {
+        self.continues_past_domain.store(on, Ordering::Relaxed);
     }
 
     /// Whether the NURB is borrowed (`IsNurbBorrowed`).
@@ -2469,6 +2493,7 @@ impl BSplineSurface {
             nurb: Some(sur).into(),
             nurb_is_borrowed: false,
             out_of_bounds_enabled: AtomicBool::new(false),
+            continues_past_domain: AtomicBool::new(false),
             knot_type,
             form,
         })

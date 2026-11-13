@@ -128,11 +128,12 @@ fn rounds_in_turn_match_both_together(first: Point3, together_volume: f64, in_tu
     );
 }
 
-/// The arc's top edge first: 9452.927851913 in turn against 9452.927826170 together
-/// (2.7e-9 relative).
+/// The arc's top edge first: 9452.927851913 in turn against 9452.927854289 together
+/// (2.5e-10 relative; 9452.927826170 together, 2.7e-9, before #14170 closed the faces'
+/// flux across their gaps).
 #[test]
 fn the_tip_rounded_after_the_arc_top_matches_both_together() {
-    rounds_in_turn_match_both_together(ARC_TOP, 9452.927826170264, 9452.927851913100);
+    rounds_in_turn_match_both_together(ARC_TOP, 9452.927854288933, 9452.927851913100);
 }
 
 /// The back top edge first: 9428.557343079310 in turn against 9428.557343079308 together.

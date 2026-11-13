@@ -80,7 +80,8 @@ pub use p9::{make_vertex_loop, orient_sheet_surfaces, OrientSheetNote};
 /// A sign the enclosure leaves undecided (its interval still holds 0 when refinement ends:
 /// a gap between faces as large as the volume, or the cell budget spent) is "not a solid" on
 /// purpose: a solid is what is proved one, so ops' `finish` refuses the body as `NotSolid`.
-/// A body the enclosure cannot read at all is an error, not `false`: a face with no NURBS form
+/// A body the enclosure cannot read at all is an error, not `false`: an edge whose face sides
+/// do not pair in opposite senses (or whose pcurves share no parameters), a face with no NURBS form
 /// (an offset surface, as the offset of a round keeps; a curve-bounded or in-volume surface),
 /// a face without trim loops, or weights not proved positive.
 ///
@@ -232,7 +233,20 @@ pub fn valid_and_outward_failure(
         return Ok(Some(SolidTest::Invalid));
     }
     crate::mass::integrator::properties::no_unsure_region(b)?;
-    Ok(match crate::mass::enclosure::volume_sign(k, b)? {
+    let sign = crate::mass::enclosure::volume_sign(k, b)?;
+    let (crate::mass::enclosure::VolumeSign::Positive(e)
+    | crate::mass::enclosure::VolumeSign::Negative(e)
+    | crate::mass::enclosure::VolumeSign::Undecided(e)) = sign;
+    // an edge whose sides do not pair is refused, as before the enclosure took it as an
+    // opening (#14170): a caller reading `false` as "not a solid input" would otherwise
+    // take another path (ops' `Expect::of`)
+    if e.counts.unpaired > 0 {
+        return Err(crate::SolidError::invalid_input(
+            "mass::enclosure",
+            "an edge whose face sides do not pair in opposite senses",
+        ));
+    }
+    Ok(match sign {
         crate::mass::enclosure::VolumeSign::Positive(_) => None,
         crate::mass::enclosure::VolumeSign::Negative(_) => Some(SolidTest::VolumeNegative),
         crate::mass::enclosure::VolumeSign::Undecided(_) => Some(SolidTest::VolumeUndecided),

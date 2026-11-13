@@ -245,12 +245,17 @@ fn cliff_round(mut k: Kernel, r0: f64, r1: f64) -> Result<f64, (String, Option<N
 fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
     // the fork's 5e8c9c1 build (SmFilletExecutive as SmApiVariableRadiusFillet runs it),
     // the exact circles: here to the last digit printed
+    // the fork's values are its faces' flux alone; where they differ it is by the faces'
+    // gap flux (#14170: the strips across their gaps close the flux surface), so those are
+    // the values measured here (2 -> 11: the fork's 5802.4435349841779; 11 -> 2: its
+    // 5802.4435208241775; 2 -> 20: its 5503.8871700927575; 2 -> 30: its 5184.0573578203966;
+    // 2 -> 50: its 4693.6093103438334)
     for (r0, r1, fork) in [
-        (2.0, 11.0, 5802.4435349841779),
-        (11.0, 2.0, 5802.4435208241775),
-        (2.0, 20.0, 5503.8871700927575),
-        (2.0, 30.0, 5184.0573578203966),
-        (2.0, 50.0, 4693.6093103438334),
+        (2.0, 11.0, 5802.443146073276),
+        (11.0, 2.0, 5802.44314615945),
+        (2.0, 20.0, 5503.887122665565),
+        (2.0, 30.0, 5184.057276032226),
+        (2.0, 50.0, 4693.608894390278),
     ] {
         let v = cliff_round(kernel(true), r0, r1);
         eprintln!("{r0} -> {r1}: {v:?} fork {fork}");

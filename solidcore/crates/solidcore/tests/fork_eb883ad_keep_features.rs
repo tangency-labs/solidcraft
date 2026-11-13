@@ -204,15 +204,16 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// Pins solidcore's own volume (at accuracy 1e-7, on Linux, printed with 17 digits) and face
 /// count of the block with `feature`, rounded `r`; these are not the fork's figures. They were
 /// checked against two references. Against the fork's `smlib_brep_volume` at the same
-/// accuracy: the face counts and statuses are the fork's; the prism boss's volume is the fork's
-/// bit for bit, the prism pocket's and the taken features' within a last bit, and those of a
-/// body with a cylinder or a cone face within the 1e-7 they are integrated to (by -2.4e-7 at
-/// most, 1e-11 of it), since solidcore's precise properties integrate each iso-u line from the
-/// trims' lowest v (WR-563, #1556) where the fork starts at the face UV domain's, and its steps
-/// read a fifth-order error estimate (#1556, 5.0e-13 at most). Against the closed forms: the
-/// r 1.9 boss and hole are off by +2.0e-7 and -3.6e-7 (the fork's +4.4e-7 and -1.9e-7), and the
-/// r 8 kept cylinder boss and hole, cone boss and 19 degree lean stay 3.4e-5 to 4.8e-5 above
-/// theirs, the crease's fit, as the fork's do; the cone pit has none.
+/// accuracy: the face counts and statuses are the fork's; the prisms' volumes and the taken
+/// features' are the fork's within a last bit. Since #14170 the volume is the flux of the faces
+/// closed by the strips across their gaps along the edges, where the fork's is its faces' flux
+/// alone: the r 8 kept cylinder boss and hole, cone boss and 19 degree lean moved down by
+/// 3.4e-5, 4.8e-5, 3.4e-5 and 4.0e-5, the gap flux they stood above their closed forms by (put
+/// down to the crease's fit before). Against [`TAKEN`] plus the feature's part (its
+/// cylinder above or below the top, and [`column_under_footprint`]), the r 8 kept cylinder boss
+/// is now -9.5e-8 off and the hole +5.7e-8 (+3.4e-5 and +4.8e-5 before, as the fork's are); the
+/// cone pit stays within 1.5e-11 of its own (the round less the pit's frustum below the
+/// round's surface).
 fn assert_pinned(feature: Feature, r: f64, volume: f64, faces: usize) {
     let (v, n) = rounded_with(feature, r).unwrap();
     // Bit for bit where the figures were taken (Linux). Elsewhere the platform's libm can move
@@ -267,24 +268,24 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
-    assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 9);
-    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 9);
-    assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 9);
-    assert_pinned(cylinder_hole, 1.9, 23906.179641369188, 9);
+    assert_pinned(cylinder_boss, 8.0, 23528.16549376935, 9);
+    assert_pinned(cylinder_hole, 8.0, 23402.501787778296, 9);
+    assert_pinned(cylinder_boss, 1.9, 24031.843348068327, 9);
+    assert_pinned(cylinder_hole, 1.9, 23906.179641369185, 9);
 }
 
 /// Planar walls: each crease is an exact section.
 #[test]
 fn prisms_keep_their_pinned_volumes() {
-    assert_pinned(prism_boss, 8.0, 23549.896259768986, 12);
-    assert_pinned(prism_pocket, 8.0, 23389.896259952173, 12);
+    assert_pinned(prism_boss, 8.0, 23549.896259768982, 12);
+    assert_pinned(prism_pocket, 8.0, 23389.89625995217, 12);
 }
 
 /// Walls that lean: kept as the fork keeps them, the boss's with no refusal.
 #[test]
 fn cones_keep_their_pinned_volumes() {
-    assert_pinned(cone_boss, 8.0, 23501.985588856085, 11);
-    assert_pinned(cone_pit, 8.0, 23427.54088939281, 9);
+    assert_pinned(cone_boss, 8.0, 23501.985554871946, 11);
+    assert_pinned(cone_pit, 8.0, 23427.540828246823, 9);
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
@@ -303,7 +304,7 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 1.0)?;
         boolean_union(k, block, c)
     }
-    assert_pinned(lean_19, 8.0, 23486.59179069601, 11);
+    assert_pinned(lean_19, 8.0, 23486.59175105619, 11);
     for steep in [lean_30 as Feature, lean_45] {
         assert!(rounded_with(steep, 8.0).is_err());
     }
@@ -328,7 +329,7 @@ fn a_pocket_astride_the_contact_line_matches_the_fork() {
         let c = create_box(k, Point3::new(18.0, 6.0, 15.0), 4.0, 4.0, 6.0)?;
         boolean_difference(k, block, c)
     }
-    assert_pinned(astride, 8.0, 23371.292359915951, 12);
+    assert_pinned(astride, 8.0, 23371.292359915948, 12);
 }
 
 // ---- Work ----

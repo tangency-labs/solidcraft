@@ -18,7 +18,9 @@
 //! 6316.944421027456, each with 11 faces. They are within the fork's capi test bound (1e-7
 //! of `ops_kernel.cpp`'s Simpson closed form, 6382.568731366 less the end rib's certified
 //! residual, and 6316.944424728): the input cases come from that test (fork capi test of
-//! tangency-labs/solidcore#453, 41a39ec).
+//! tangency-labs/solidcore#453, 41a39ec). Since #14170 (the faces' flux closed across their
+//! gaps) solidcore's are 6382.568731365768 and 6316.944424727606, 3.9e-14 and 3.7e-14 off
+//! those closed forms (the fork's, its faces' flux alone, 4.5e-8 and 5.9e-10).
 //!
 //! The touching line is a non-manifold edge of the input, so the result's closed-manifold
 //! check (`fillet_refuse_non_manifold_result`, WR-212, solidcore-only) is off here.
@@ -123,7 +125,7 @@ fn the_holed_cube_is_the_forks() {
 #[test]
 fn the_round_builds_as_the_forks() {
     let (v, faces) = blended(1).unwrap();
-    assert!((v - 6_382.568_447_649_069).abs() <= 1e-8, "{v}");
+    assert!((v - 6_382.568_731_365_768).abs() <= 1e-8, "{v}");
     assert_eq!(faces, 11);
 }
 
@@ -131,6 +133,6 @@ fn the_round_builds_as_the_forks() {
 #[test]
 fn the_chamfer_builds_as_the_forks() {
     let (v, faces) = blended(0).unwrap();
-    assert!((v - 6_316.944_421_027_456).abs() <= 1e-8, "{v}");
+    assert!((v - 6_316.944_424_727_606).abs() <= 1e-8, "{v}");
     assert_eq!(faces, 11);
 }

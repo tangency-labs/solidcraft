@@ -150,9 +150,10 @@ fn a_round_ending_on_a_tangent_seam_ends_on_the_end_face() {
 
 /// The plate's hole-side edge (-15, 0, 2) overflows and goes first; the other edge's round
 /// then meets it as one blend. The fork: 1681.903764986359 (the closed form 1681.903758348;
-/// with the cap, 1682.853610631, the shoulder 2 pi - 16/3 more). Here 1681.903764966137,
-/// 2.0e-8 less: the first pass already measures 1706.889016313 against the fork's
-/// 1706.889016333346 (that round runs into the hole, a fitted band), as before smlib#130.
+/// with the cap, 1682.853610631, the shoulder 2 pi - 16/3 more). Here 1681.903758368217
+/// (#14170: the faces' flux closed across their gaps), 1.2e-11 above the closed form; before
+/// it 1681.903764966137, 2.0e-8 less than the fork's: the first pass already measures
+/// 1706.889016313 against the fork's 1706.889016333346 (that round runs into the hole, a fitted band), as before smlib#130.
 #[test]
 fn the_plate_s_second_round_meets_the_first() {
     let mut k = kernel();
@@ -161,12 +162,14 @@ fn the_plate_s_second_round_meets_the_first() {
     round(&mut k, &mut b, &[[0.0, 15.5, 2.0]], 2.0, &first);
     let (faces, v) = measured(&k, &mut b);
     assert_eq!(faces, 8);
-    assert!((v - 1_681.903_764_986).abs() <= 1e-9 * v, "{v}");
+    assert!((v - 1_681.903_758_368).abs() <= 1e-9 * v, "{v}");
 }
 
 /// The notched block's front and right edges (over the notch) go first, then the back and
-/// left. The fork: 10198.718249145, 13 faces (here 10198.718249145044) (the closed form 10198.718038816; with the
-/// caps, 10320.299091700, 15 faces, two shoulders 256 pi - 2048/3 more).
+/// left. The fork: 10198.718249145, 13 faces (here 10198.718038884 since #14170, 6.7e-12
+/// off the closed form 10198.718038816, where the faces' flux alone gave
+/// 10198.718249145044; with the caps, 10320.299091700, 15 faces, two shoulders
+/// 256 pi - 2048/3 more).
 #[test]
 fn the_notched_block_s_second_rounds_meet_the_first() {
     let mut k = kernel();
@@ -187,5 +190,5 @@ fn the_notched_block_s_second_rounds_meet_the_first() {
     );
     let (faces, v) = measured(&k, &mut b);
     assert_eq!(faces, 13);
-    assert!((v - 10_198.718_249_145).abs() <= 1e-9 * v, "{v}");
+    assert!((v - 10_198.718_038_884).abs() <= 1e-9 * v, "{v}");
 }

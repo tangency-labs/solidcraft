@@ -176,32 +176,40 @@ fn check(v: f64, want: f64, without_flag: f64) {
 }
 
 /// With SolidCraft's fixes (the reported configuration; the trimmed cache stub before).
-/// Pinned since #2890 (precise properties integrate from the trims' base): against the
-/// closed form, without the flag +4.26e-4 (it was 10400.212787697543, +4.14e-4), with it
-/// +4.26e-4, within the volume's accuracy. With the flag it was 10400.212354107192
-/// (-1.97e-5) before the certified offset became the default (#13827): the shell's
-/// non-analytic offsets are certified nets, not `N_SrfOffset`'s fits, and the flag now
-/// moves the volume by 1.5e-12 relative. The shell still runs the flag through the
-/// face-owned surfaces.
+/// Pinned since #14170 (the faces' flux closed by the strips across their gaps): against the
+/// closed form, without the flag +6.10e-5 (it was 10400.212799740975, +4.26e-4, the gap flux
+/// included, and 10400.212787697543, +4.14e-4, before #2890), within the volume's accuracy.
+/// With the flag it was 10400.212354107192 (-1.97e-5) before the certified offset became the
+/// default (#13827): the shell's non-analytic offsets are certified nets, not
+/// `N_SrfOffset`'s fits, and the flag now moves the volume by 1.7e-15 relative (+6.10e-5
+/// against the closed form with it, 1.5e-12 relative before #14170). The shell
+/// still runs the flag through the face-owned surfaces.
 #[test]
 fn shelled_plate_with_solidcraft_fixes() {
     let mut fixes = solidcraft_fixes();
     let without_flag = shelled_volume(&fixes);
-    assert!((without_flag - 10400.212799740975).abs() <= 1e-9 * without_flag);
+    assert!(
+        (without_flag - 10400.212434877847).abs() <= 1e-9 * without_flag,
+        "{without_flag}"
+    );
     fixes.shell_edges_on_analytics_exact = true;
-    check(shelled_volume(&fixes), 10400.212799756418, without_flag);
+    check(shelled_volume(&fixes), 10400.212434877865, without_flag);
 }
 
-/// With only the flag on. Pinned since #2890: against the closed form, without the flag
-/// +4.84e-4 (it was 10400.212793536877, +4.20e-4), with it +4.80e-4, each within the
-/// volume's accuracy. With the flag it was 10400.212413698822 (+3.99e-5) before the
-/// certified offset became the default (#13827), as above; the flag now moves the volume
-/// by 3.1e-10 relative.
+/// With only the flag on. Pinned since #14170, as above: against the closed form, without the
+/// flag +5.89e-5 (it was 10400.212857439197, +4.84e-4, and 10400.212793536877, +4.20e-4,
+/// before #2890), within the volume's accuracy. With the flag it was 10400.212413698822
+/// (+3.99e-5) before the certified offset became the default (#13827), as above; the flag
+/// now moves the volume by 1.6e-10 relative (+6.05e-5 against the closed form with it;
+/// 3.1e-10 before #14170).
 #[test]
 fn shelled_plate_with_the_flag_alone() {
     let mut fixes = UpstreamFixes::default();
     let without_flag = shelled_volume(&fixes);
-    assert!((without_flag - 10400.212857439197).abs() <= 1e-9 * without_flag);
+    assert!(
+        (without_flag - 10400.212432741957).abs() <= 1e-9 * without_flag,
+        "{without_flag}"
+    );
     fixes.shell_edges_on_analytics_exact = true;
-    check(shelled_volume(&fixes), 10400.212854198868, without_flag);
+    check(shelled_volume(&fixes), 10400.212434383564, without_flag);
 }

@@ -28,10 +28,13 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
-use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
-use solidcore::math::Point3;
+use solidcore::mass::integrator::properties::{
+    brep_properties, MassPropertyBehavior, PropertyAttributes, VolumeClosure,
+};
+use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::{brep_is_manifold_solid, edge_closest_point};
+use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
 use solidcore::topology::brep::p1::regions;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{Brep, EdgeId};
@@ -94,13 +97,42 @@ fn both_rounds(k: &mut Kernel) -> (Brep, solidcore::Result<()>) {
     (b, r)
 }
 
-fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+/// The body's volume at 1e-8 about `origin` and its faces' flux alone, the volume less the
+/// strips across the faces' gaps (#14170): the C++ reference is the faces' flux
+/// (`SmApiBrepComputeVolume`), which the gaps' flux, 1.4e-4 here, does not reach.
+fn volume_about(k: &Kernel, b: &mut Brep, origin: Point3) -> (f64, f64, f64) {
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    brep_volume(k, b, 1e-8, &attrs).unwrap()
+    let p = brep_properties(k, b, 1e-8, origin, MassPropertyBehavior::default(), &attrs).unwrap();
+    let VolumeClosure::Bounded(c) = p.closure else {
+        panic!("the closure is not bounded: {:?}", p.closure)
+    };
+    (p.volume, p.volume - c.strip_volume, c.strip_area_z)
+}
+
+/// The origin's rise in [`volume`].
+const RISE: f64 = 1e3;
+
+/// [`volume_about`] the body's box's middle (`brep_volume`'s origin), and with that origin
+/// raised [`RISE`]: the volume's move, the faces' flux's, and the faces' flux's predicted move,
+/// `RISE` times the strips' vector area along z (the field `(0, 0, z - O_z)` loses `RISE`
+/// times a surface's area along z, so a closed surface's flux does not move and the faces'
+/// alone moves by what the strips' does not).
+fn volume(k: &Kernel, b: &mut Brep) -> (f64, f64, [f64; 3]) {
+    let mid = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())
+        .unwrap()
+        .mid();
+    let (v, faces, area_z) = volume_about(k, b, mid);
+    let (up, faces_up, _) = volume_about(k, b, mid + Vec3::new(0.0, 0.0, RISE));
+    let moves = [up - v, faces_up - faces, RISE * area_z];
+    println!(
+        "origin raised {RISE}: the volume moves {:e}, the faces' flux {:e} (predicted {:e})",
+        moves[0], moves[1], moves[2]
+    );
+    (v, faces, moves)
 }
 
 /// The arc round fails as upstream does: `SmFilletExecutive` status 1001.
@@ -111,8 +143,10 @@ fn assert_refused(r: solidcore::Result<()>) {
     }
 }
 
-/// The arc round built one manifold solid that checks clean, of the C++ volume `want` within
-/// `tol` relative.
+/// The arc round built one manifold solid that checks clean, its faces' flux the C++ volume
+/// `want` within `tol` relative (the volume is that and the gaps' flux, #14170), its volume
+/// the same about an origin 1e3 higher to the two integrations' accuracy (its surface
+/// closed).
 fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: f64, want: f64) {
     r.unwrap();
     let infinite = b.infinite_region();
@@ -125,11 +159,23 @@ fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: 
     assert!(brep_is_manifold_solid(b).unwrap());
     let lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
     assert!(lines.is_empty(), "{lines:?}");
-    let v = volume(k, b);
-    println!("volume {v:.10} (reference: {want})");
+    let (v, faces, [moved, faces_moved, predicted]) = volume(k, b);
+    println!("volume {v:.10}, faces' flux {faces:.10} (reference: {want})");
     assert!(
-        (v - want).abs() <= tol * want,
-        "volume {v}, expected {want}"
+        (faces - want).abs() <= tol * want,
+        "faces' flux {faces} (volume {v}), expected {want}"
+    );
+    // each of the two integrations to its accuracy, 1e-8
+    let scale = 2e-8 * want;
+    assert!(
+        moved.abs() <= scale,
+        "the volume moves {moved:e} with its origin raised {RISE}"
+    );
+    // and the test tells: the faces' flux alone moves, by the strips' predicted share, far
+    // past that accuracy
+    assert!(
+        predicted.abs() >= 10.0 * scale && (faces_moved - predicted).abs() <= scale,
+        "the faces' flux moves {faces_moved:e}, predicted {predicted:e}, accuracy {scale:e}"
     );
 }
 

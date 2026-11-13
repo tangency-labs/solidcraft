@@ -238,8 +238,8 @@ fn a_mixed_convexity_end_s_rail_ends_on_the_end_face_s_surface() {
     clean(&mut k, &mut b);
     assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
     assert!(off <= 1e-13, "{off}");
-    let fork = 21407.602511807886913;
-    assert!((v - fork).abs() <= 1e-10, "{v} vs the fork's {fork}");
+    // the fork's 21407.602511807887 is its faces' flux alone: `want` differs from it by the
+    // faces' gap flux (#14170: the strips across their gaps close the flux surface)
 }
 
 /// The step with its upper block's profile (0, 10), (20, 10), (17, 20), (0, 20) swept
@@ -531,11 +531,13 @@ fn teardrop_boss(k: &mut Kernel) -> Brep {
 /// volumes moved by 5.5e-7 (r 0.5, from 7133.840421559223614) and 8.9e-6 (r 1, from
 /// 7140.722593330715): each net, sampled at 401 x 9 points of each face, is within its
 /// bound of its definition (r 0.5: 2.3e-6 of 3.9e-6; r 1: 3.2e-6 of 4.0e-6), and the
-/// areas times the bounds (1.3e-4 and 2.7e-4) hold both moves.
+/// areas times the bounds (1.3e-4 and 2.7e-4) hold both moves. Since #14170 the faces' flux
+/// is closed across their gaps by the strips: +4.7e-6 (r 0.5, from 7133.840421010035243) and
+/// +2.4e-6 (r 1, from 7140.722584425828245).
 #[test]
 fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_turn() {
     let foot = [[15.5, 0.0, 0.0]];
-    for (r, want) in [(0.5, 7133.840421010035243), (1.0, 7140.722584425828245)] {
+    for (r, want) in [(0.5, 7133.840425757075536), (1.0, 7140.722586811006295)] {
         let mut k = all_fixes();
         let mut b = teardrop_boss(&mut k);
         let cs = corners(&mut k, &mut b.clone_standing_for_self().unwrap(), &foot, r);
