@@ -6,9 +6,8 @@
 //! or a profile can be built stays the handler's to check. A key the handler refuses when it is
 //! left out (`profile`, and `sketch` when there are no `pairs`) is optional in the type and
 //! required in the schema, so that the handler's message, not the check's "is required", is what
-//! a caller sees. A call with several
-//! problems may get a different one first in strict than with the check off (the check goes key
-//! by key, the handlers in their own order).
+//! a caller sees. A call with several problems may get a different one first in strict than with
+//! the check off (the check goes key by key, the handlers in their own order).
 //!
 //! `frame.member` reads some keys only in some cases. With `profile` (a built-in profile) it
 //! never reads `profiles` or `exact_regions`, which pick among a section sketch's profiles; with

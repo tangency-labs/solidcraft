@@ -1411,6 +1411,17 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if std::mem::discriminant(&nf.kind) != std::mem::discriminant(&f.kind) {
         return Err(bad(cmd, "the feature type cannot change"));
     }
+    // A removed pair's id is never given again: `next_pair` can't go down, and every pair's id is
+    // a `pair<N>` below it, given once.
+    if let (FeatureKind::FrameMember { next_pair: was, .. }, FeatureKind::FrameMember { next_pair, pairs, .. }) = (&f.kind, &nf.kind) {
+        if next_pair < was {
+            return Err(bad(cmd, format!("`next_pair` can't go below {was}: a removed pair's id is never given again")));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(p) = pairs.iter().find(|p| !solidcraft_doc::frame::parse_pair_id(&p.id).is_some_and(|n| n < *next_pair && seen.insert(n))) {
+            return Err(bad(cmd, format!("pair id `{}` must be a pair<N> given once, below `next_pair` ({next_pair})", p.id)));
+        }
+    }
     // serde drops fields the definition doesn't have without a word: refuse them, or a typo
     // would report success and change nothing.
     let after = serde_json::to_value(&nf).map_err(|e| EngineError::Other(e.to_string()))?;
@@ -2156,14 +2167,25 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("old_surface_start").or_insert_with(|| json!(true));
     }
-    // Members keep their names through an edit, unless it gives them another name. Pair ids are
-    // never reused, so `next_pair` is kept whatever the edit says about the names.
-    if let FeatureKind::FrameMember { names, body_name, next_pair, .. } = &old.kind
+    // Members keep their names through an edit, unless it gives them another name. A copy names
+    // its members by position: they are pinned to their members first, so a member taken out
+    // doesn't hand its name to the next. Pair ids are never reused, so `next_pair` never goes
+    // below the feature's own, nor to an id it has, whatever the edit says.
+    if let FeatureKind::FrameMember { names, body_name, next_pair, pairs, .. } = &old.kind
         && cid == "frame.member"
         && let Some(parameters) = params.as_object_mut()
     {
-        parameters.entry("next_pair").or_insert_with(|| json!(next_pair));
+        let past_ids = pairs.iter().filter_map(|p| solidcraft_doc::frame::parse_pair_id(&p.id)).max().map_or(0, |n| n.saturating_add(1));
+        let given = match parameters.get("next_pair") {
+            None | Some(Value::Null) => Some(0),
+            // Anything else is `frame.member`'s to refuse.
+            Some(v) => v.as_u64().and_then(|n| u32::try_from(n).ok()),
+        };
+        if let Some(given) = given {
+            parameters.insert("next_pair".into(), json!(given.max(*next_pair).max(past_ids)));
+        }
         if parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref() {
+            let names = (!old.body_names.is_empty()).then(|| super::browser::member_pins(s, id)).flatten().unwrap_or_else(|| names.clone());
             parameters.entry("names").or_insert_with(|| json!(names));
         }
     }
@@ -2404,6 +2426,10 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         slot.suppressed = old.suppressed;
         if let Some((names, _)) = cap_names {
             slot.body_names = names;
+        }
+        // A frame member names its members by their lines and pairs from now on (pinned above).
+        if matches!(new.kind, FeatureKind::FrameMember { .. }) {
+            slot.body_names.clear();
         }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;

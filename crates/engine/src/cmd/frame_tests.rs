@@ -1433,8 +1433,10 @@ fn removing_the_last_member_deletes_the_frame_member() {
     let made = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright()]}));
     let fid = made["feature"].clone();
     let kind = member_kind(&s, &fid);
+    let undo_steps = s.undo.len();
     let r = remove(&mut s, json!([{"feature": made["name"], "line": "pair1"}]));
     assert_eq!(r["deleted"], made["name"], "{r}");
+    assert_eq!(s.undo.len(), undo_steps + 1, "one undo step");
     assert!(s.doc.feature(fid.as_u64().unwrap()).is_none());
     assert!(member_boxes(&mut s).is_empty());
     run(&mut s, "edit.undo", json!({}));
@@ -1511,4 +1513,114 @@ fn remove_member_refuses() {
     }
     assert_eq!(serde_json::to_value(&*s.doc).unwrap(), serde_json::to_value(&*doc).unwrap(), "nothing changed");
     assert_eq!(s.undo.len(), undo_steps);
+}
+
+/// The bounding boxes of the bodies feature `fid` made, by name.
+fn feature_boxes(s: &mut Session, fid: u64) -> std::collections::BTreeMap<String, ([f64; 3], [f64; 3])> {
+    let made: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == fid).map(|b| b.name.clone()).collect();
+    boxes(s).into_iter().filter(|(name, _)| made.contains(name)).collect()
+}
+
+/// A pasted Frame Member names its tubes by position: removing one, by Remove Tube or by Edit
+/// Feature, leaves every other tube its name, so what refers to them stays on them.
+#[test]
+fn removing_a_tube_from_a_pasted_frame_member_keeps_the_other_tubes_names() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail(), bottom_rail()]}))["feature"].clone();
+    run(&mut s, "timeline.copy", json!({"features": [fid]}));
+    let copy = run(&mut s, "timeline.paste", json!({}))["pasted"][0]["id"].as_u64().unwrap();
+    assert!(!s.doc.feature(copy).unwrap().body_names.is_empty(), "a copy names its bodies by position");
+    let before = feature_boxes(&mut s, copy);
+    assert_eq!(before.len(), 3, "{before:?}");
+    remove(&mut s, json!([{"feature": copy, "line": "pair1"}]));
+    let after = feature_boxes(&mut s, copy);
+    assert_eq!(after.len(), 2, "{after:?}");
+    for (name, bb) in &after {
+        assert_eq!(before.get(name), Some(bb), "{name} moved or was renamed: {before:?} → {after:?}");
+    }
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(feature_boxes(&mut s, copy), before);
+    // Edit Feature dropping the first pair: the same.
+    let kept = |pair: Value, id: &str| {
+        let mut pair = pair;
+        pair["id"] = json!(id);
+        pair
+    };
+    let params = json!({"profile": tube(), "pairs": [kept(top_rail(), "pair2"), kept(bottom_rail(), "pair3")]});
+    run(&mut s, "timeline.redefine", json!({"feature": copy, "command": "frame.member", "params": params}));
+    let after = feature_boxes(&mut s, copy);
+    assert_eq!(after.len(), 2, "{after:?}");
+    for (name, bb) in &after {
+        assert_eq!(before.get(name), Some(bb), "{name} moved or was renamed: {before:?} → {after:?}");
+    }
+}
+
+/// A removed pair's id is never given again: not by an Edit Feature that names a lower
+/// `next_pair`, not by a new Frame Member that names ids, and `timeline.edit` can't lower it.
+#[test]
+fn a_removed_pair_id_cannot_be_brought_back() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    remove(&mut s, json!([{"feature": fid, "line": "pair1"}]));
+    let kept = json!({"id": "pair2", "a": top_rail()["a"], "b": top_rail()["b"]});
+    let params = json!({"profile": tube(), "pairs": [kept, upright()], "next_pair": 1});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, next_pair, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2", "pair3"]);
+    assert_eq!(next_pair, 4);
+    let mut given = upright();
+    given["id"] = json!("pair1");
+    let e = s.execute("frame.member", &json!({"profile": tube(), "pairs": [given]})).unwrap_err().to_string();
+    assert!(e.contains("given by the command"), "{e}");
+    let doc = s.doc.clone();
+    let mut past = stored_pairs(&s, &fid)[1].clone();
+    past["id"] = json!("pair4");
+    for set in [json!({"next_pair": 2}), json!({"next_pair": 3}), json!({"pairs": [past]})] {
+        let e = s.execute("timeline.edit", &json!({"feature": fid, "set": set})).unwrap_err().to_string();
+        assert!(e.contains("next_pair"), "{set}: {e}");
+    }
+    assert_eq!(serde_json::to_value(&*s.doc).unwrap(), serde_json::to_value(&*doc).unwrap(), "nothing changed");
+}
+
+/// A pair on a vertex of a body in another component follows that component when its
+/// occurrence moves: the cached member is not served at its old place.
+#[test]
+fn a_pair_member_follows_a_vertex_in_a_moved_component() {
+    let mut s = Session::default();
+    let b = run(&mut s, "component.create", json!({"name": "B", "grounded": false}))["component"].as_u64().unwrap();
+    box_frame(&mut s);
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright()]}));
+    let members = member_boxes(&mut s);
+    assert!(has_box(&members, [580.0, -20.0, 0.0], [620.0, 20.0, 400.0]), "{members:?}");
+    let o = s.doc.occurrence_of(b).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "translate": [0, 0, 100]}));
+    let members = member_boxes(&mut s);
+    assert!(has_box(&members, [580.0, -20.0, 100.0], [620.0, 20.0, 500.0]), "the upright moved with B: {members:?}");
+    let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(member_boxes(&mut cold), members, "as a model built from scratch");
+}
+
+/// In a rotated component a pair between two body vertices comes out as the 3D sketch line
+/// member between the same points does, turned the same way.
+#[test]
+fn a_vertex_pair_in_a_rotated_component_turns_like_a_line_member() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Tilted", "grounded": false}))["component"].as_u64().unwrap();
+    box_frame(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 400], [600, 0, 400]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let bar = json!({"kind": "bar", "width": 60, "height": 10});
+    run(&mut s, "frame.member", json!({"sketch": "Path", "profile": bar, "body_name": "Line"}));
+    run(&mut s, "frame.member", json!({"profile": bar, "pairs": [top_rail()], "body_name": "Pair"}));
+    let o = s.doc.occurrence_of(c).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "axis": [1, 0, 0], "angle": "30 deg"}));
+    let (line, pair) = (measured(&mut s, "Line"), measured(&mut s, "Pair"));
+    // Tilted 30° about X with its component: the bar's 60 mm width rises 30 mm out of the XY plane.
+    assert!(line.3[2] - line.2[2] > 30.0, "{line:?}");
+    assert!(near3(line.2, pair.2) && near3(line.3, pair.3), "{line:?} vs {pair:?}");
 }

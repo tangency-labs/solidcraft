@@ -2811,6 +2811,13 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         }
         _ => {}
     }
+    // A Frame Member's pairs join points on bodies, sketches and construction points of any
+    // component, found again in its own frame (#15705): moving any of them moves the member.
+    // ponytail: read as everything, so any placement change rebuilds it; collect the bodies and
+    // sketches its pairs name if that shows in a large assembly.
+    if matches!(&f.kind, FeatureKind::FrameMember { pairs, .. } if !pairs.is_empty()) {
+        reads.all = true;
+    }
     reads.paths.extend(datums);
     if reads.is_empty() {
         return 0;

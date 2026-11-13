@@ -396,9 +396,10 @@ pub struct Preview {
     pub after: Arc<ModelState>,
     /// What each command replied (as `execute` returns it).
     pub replies: Vec<Value>,
-    /// The document after the commands, and its evaluation (each feature's state before it):
-    /// for what a front end works out of a previewed feature (Frame Member's centrelines).
+    /// The document after the commands: for what a front end works out of a previewed feature
+    /// (Frame Member's centrelines).
     pub doc: Arc<Document>,
+    /// The evaluation of `doc`, which gives each feature's state before it (`Model::state_before`).
     pub model: Model,
 }
 

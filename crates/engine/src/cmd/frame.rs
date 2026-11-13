@@ -55,7 +55,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MEMBER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
-        "sketch?: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); pairs?: [{a, b}] (one straight member from point a to point b each, after the lines' members, found again whenever the design changes; a and b are point references: {vertex: [x,y,z]}, {sketch, point} (a 3D sketch node as `wire:index`), {construct_point: name}, a snap point or the origin, as saved ({type, …}) too; typed coordinates are not points here; each pair is named pair1, pair2… and a pair's id is never given again; Edit Feature gives back the pairs it keeps with their `id` and `next_pair`); give `sketch`, `pairs` or both; ",
+        "sketch?: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); pairs?: [{a, b}] (one straight member from point a to point b each, after the lines' members, found again whenever the design changes; a and b are point references: {vertex: [x,y,z]}, {sketch, point} (a 3D sketch node as `wire:index`), {construct_point: name}, a snap point or the origin, as saved ({type, …}) too; typed coordinates are not points here; each pair is named pair1, pair2… and a pair's id is never given again; Edit Feature gives back the pairs it keeps with their `id` and `next_pair`, and an `id` without `next_pair` is refused); give `sketch`, `pairs` or both; ",
         profile_doc!(),
         " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); locate?: [x,y] (the profile point that sits on each line, in mm from the profile's own origin: a bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of other profiles; takes precedence over `anchor` and keeps the member attached at that point when the profile size changes); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the size's name, `RSC 203x89`, the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line or pair id: name} (names to keep, as Edit Feature keeps them). One body per line or pair, from its start to its end; each member keeps its name when other lines or pairs are added or deleted. Returns the feature and the bodies it made"
     )),
@@ -273,8 +273,9 @@ fn is_point(g: &GeoRef) -> bool {
 }
 
 /// `pairs` and `next_pair`: each pair `{id?, a, b}`, its ends point references as `construct`
-/// reads them. A given id is kept when it is a `pair<N>` given once and, with `next_pair`, below
-/// it (Edit Feature gives back the pairs it keeps); the others take `pair<next>` on from the
+/// reads them. A given id is kept when it is a `pair<N>` given once, below `next_pair` (Edit
+/// Feature gives back the pairs it keeps, and the feature's `next_pair`); without `next_pair`, a
+/// new Frame Member, ids are the command's to give. The others take `pair<next>` on from the
 /// highest, so no id is given twice. Returns the pairs and the next pair's number.
 fn member_pairs(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<MemberPair>, u32)> {
     let given_next = match p.get("next_pair") {
@@ -298,7 +299,10 @@ fn member_pairs(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<MemberPair>, u
             None | Some(Value::Null) => None,
             Some(id) => {
                 let id = id.as_str().unwrap_or_default();
-                let n = frame::parse_pair_id(id).filter(|n| given_next.is_none_or(|next| *n < next)).ok_or_else(|| {
+                let Some(next) = given_next else {
+                    return Err(bad(cmd, format!("`pairs[{i}].id` `{id}`: ids are given by the command, not the caller")));
+                };
+                let n = frame::parse_pair_id(id).filter(|n| *n < next).ok_or_else(|| {
                     bad(cmd, format!("`pairs[{i}].id` `{id}` is not one of the feature's pair ids (pair1, pair2… below `next_pair`)"))
                 })?;
                 if !taken.insert(n) {
@@ -483,13 +487,20 @@ fn remove_member(s: &mut Session, p: &Value) -> Result<Value> {
     let FeatureKind::FrameMember { path_sketch, lines, names, pairs, .. } = &mut kind else {
         return Err(bad(cmd, format!("`{}` is not a Frame Member", f.name)));
     };
+    // A copy names its tubes by position: each keeps the name it has now on its member, or every
+    // tube after the one taken out would take the name of the one before.
+    let pins = super::browser::member_pins(s, f.id).filter(|_| !f.body_names.is_empty());
+    let by_position = pins.is_some();
+    if let Some(pins) = pins {
+        *names = pins;
+    }
     let gone: std::collections::BTreeSet<&str> = members.iter().map(|(_, line)| line.as_str()).collect();
     let is_pair = |line: &str, pairs: &[MemberPair]| pairs.iter().any(|p| p.id == line);
     // No `lines` means every line of the sketch: they are listed as they are now before one goes,
     // with the rule evaluation uses.
     if lines.is_empty() && path_sketch.is_some() && gone.iter().any(|line| !is_pair(line, pairs)) {
         let mut every = frame::member_line_ids(&s.model.state_before(f.id), &f.kind).map_err(|e| bad(cmd, e.to_string()))?;
-        every.truncate(every.len().saturating_sub(pairs.len()));
+        every.retain(|l| !is_pair(l, pairs));
         *lines = every;
     }
     if let Some(line) = gone.iter().find(|line| !is_pair(line, pairs) && !lines.iter().any(|l| l == *line)) {
@@ -513,6 +524,9 @@ fn remove_member(s: &mut Session, p: &Value) -> Result<Value> {
     let before = s.model.state();
     if let Some(slot) = s.doc_mut().feature_mut(f.id) {
         slot.kind = kind;
+        if by_position {
+            slot.body_names.clear();
+        }
     }
     s.refresh();
     super::features::feature_reply(s, f.id, &before)
