@@ -903,6 +903,7 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         points: Vec::new(),
         placed: None,
         layer: None,
+        centrelines: Vec::new(),
     }
 }
 
