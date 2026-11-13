@@ -1118,6 +1118,9 @@ pub struct Cache {
     bodies: Option<Bodies>,
     /// The picture being drawn.
     picturing: Option<Picturing>,
+    /// The pixel tests a view's pictures may cost together, as the files' pictures carry theirs
+    /// ([`crate::drawing_picture::ViewPictures`]): the renderer's [`MAX_PICTURE_PIXEL_TESTS`] when None.
+    max_pixel_tests: Option<u64>,
     /// Views drawn, for tests: a move draws none.
     #[cfg(test)]
     projections: usize,
@@ -2151,6 +2154,8 @@ struct PictureJob {
     scene: std::result::Result<Arc<ProductScene>, String>,
     /// The pixel tests its view's other pictures cost, as they are now.
     others: u64,
+    /// The pixel tests its view's pictures may cost together.
+    max_pixel_tests: u64,
 }
 
 /// What a picture's setup was asked from: its request, its view, what the picture is drawn from,
@@ -2175,7 +2180,7 @@ impl PictureJob {
     /// Sets the picture up from the frame and the parts its lines were drawn by ([`view_pictures`],
     /// centred on the view), within its view's pixel-test limit.
     fn run(self) -> PictureDone {
-        let PictureJob { copy, ticket, resolved, grid, scene, others } = self;
+        let PictureJob { copy, ticket, resolved, grid, scene, others, max_pixel_tests } = self;
         let started = grid.and_then(|grid| {
             let fail = |why: String| (grid, why);
             let scene = scene.map_err(fail)?;
@@ -2185,8 +2190,8 @@ impl PictureJob {
             let (_, wanted) = pictures.into_iter().find(|(s, _)| *s == source).ok_or_else(|| fail("its view no longer draws it".into()))?;
             let mut rows = PictureRows::new(&scene, &wanted, &grid, GridWindow { x0: 0, y0: 0, x1: grid.width, y1: grid.height }).map_err(fail)?;
             let tests = rows.pixel_tests();
-            if others.saturating_add(tests) > MAX_PICTURE_PIXEL_TESTS {
-                return Err(fail(over_budget(MAX_PICTURE_PIXEL_TESTS)));
+            if others.saturating_add(tests) > max_pixel_tests {
+                return Err(fail(over_budget(max_pixel_tests)));
             }
             rows.prepare().map_err(fail)?;
             Ok((grid, tests, rows))
@@ -2202,6 +2207,7 @@ fn picture_job(s: &mut Session, waiting: (u64, Picture, DrawnFrom), state: &Arc<
     let entry = s.drawing_scenes.views.get(&view)?;
     let resolved = entry.view.clone();
     let others = entry.pixels.iter().filter(|(source, p)| **source != picture.source && p.current(&from)).map(|(_, p)| p.tests).sum();
+    let max_pixel_tests = s.drawing_scenes.max_pixel_tests.unwrap_or(MAX_PICTURE_PIXEL_TESTS);
     let same = |p: &Picturing| p.view == view && p.source == picture.source && p.from.same(&from);
     if s.drawing_scenes.picturing.as_ref().is_some_and(same) {
         return None;
@@ -2211,7 +2217,7 @@ fn picture_job(s: &mut Session, waiting: (u64, Picture, DrawnFrom), state: &Arc<
     let request = REQUEST.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     s.drawing_scenes.requested = Some(request);
     let ticket = PictureTicket { request, revision: s.revision, state: state.clone(), view, picture, from };
-    Some(PictureJob { copy: designed(s), ticket, resolved, grid, scene, others })
+    Some(PictureJob { copy: designed(s), ticket, resolved, grid, scene, others, max_pixel_tests })
 }
 
 /// [`finish`] for a picture's setup: nothing it was asked from has changed, the design, the model,

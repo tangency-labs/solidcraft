@@ -3808,6 +3808,33 @@ fn a_step_draws_a_pictures_bands_within_its_budget() {
     }
 }
 
+/// A view's pictures share one pixel-test limit on the page, as in the files: on a limit the first
+/// fits and the two don't, the reference parts' picture, set up first, is drawn, and the model's is
+/// refused with the files' message. Refused, it is current, so it isn't tried again.
+#[test]
+fn a_views_second_picture_is_refused_past_its_limit() {
+    let page = |limit: Option<u64>| {
+        let (mut design, over) = under_and_over();
+        run(&mut design, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
+        let (mut s, sheet, [front, _]) = front_and_top_of(design);
+        let set = json!({"visual_style": "shaded", "reference_style": "shaded", "reference_shown_percent": 100});
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": set}));
+        s.drawing_scenes.max_pixel_tests = limit;
+        let answer = settled(&mut s, sheet);
+        let tests: u64 = s.drawing_scenes.views[&front].pixels.values().map(|p| p.tests).sum();
+        let pictures: Vec<SheetPicture> = answer.pictures.iter().filter(|p| p.view == front).cloned().collect();
+        (front, tests, pictures)
+    };
+    let (front, both, pictures) = page(None);
+    assert!(pictures.len() == 2 && pictures.iter().all(|p| p.rows.is_some() && p.why.is_none()), "within the renderer's limit: {pictures:?}");
+    let limit = both - 1;
+    let (_, _, pictures) = page(Some(limit));
+    let [under, model] = &pictures[..] else { panic!("{pictures:?}") };
+    assert!(under.source != front && under.rows.is_some() && under.why.is_none() && !under.stale, "{under:?}");
+    assert_eq!((model.source, model.rows.is_none(), model.stale), (front, true, false), "{model:?}");
+    assert_eq!(model.why.as_deref(), Some(over_budget(limit).as_str()));
+}
+
 /// Once a shaded view's lines are drawn, `begin` hands on its picture's setup to do beside the
 /// window, its triangles placed there too, and `step` then only draws its bands. A setup done for a
 /// design changed since is dropped and asked for again; once one is taken, `begin` has nothing more,
