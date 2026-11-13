@@ -19,23 +19,28 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
     let mut h = Harness::new();
     crate::keymap::bind(&mut h.app, "panel.sash.left", "Ctrl+Left", false).unwrap();
     crate::keymap::bind(&mut h.app, "panel.sash.right", "", false).unwrap();
+    h.app.preferences.live_panel_drag_preview = false;
     run(&mut h, "settings.profile.save", json!({"name":"Panels"}));
     let profile = run(&mut h, "settings.profile.export", json!({"name":"Panels"}))["profile"].clone();
     assert_eq!(profile["shortcuts"]["panel.sash.left"], "Ctrl+Left");
     assert_eq!(profile["shortcuts"]["panel.sash.right"], "");
+    assert_eq!(profile["preferences"]["live_panel_drag_preview"], false);
+    h.app.preferences.live_panel_drag_preview = true;
     crate::keymap::reset(&mut h.app, None);
     run(&mut h, "settings.profile.import", json!({"profile":profile,"name":"Imported panels"}));
     run(&mut h, "settings.profile.apply", json!({"name":"Imported panels"}));
     assert_eq!(crate::keymap::keys(&h.app, "panel.sash.left"), ["Ctrl+Left"]);
     assert!(crate::keymap::keys(&h.app, "panel.sash.right").is_empty());
+    assert!(!h.app.preferences.live_panel_drag_preview);
 }
 
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 103, "Appearance includes its two system-theme slots");
+    assert_eq!(keys.len(), 97, "include the live panel drag preference among the current portable settings");
     for key in [
         "nav",
+        "maya_horizontal_zoom",
         "mouse_gestures",
         "radial_context_menu",
         "zoom_reverse",
@@ -86,7 +91,7 @@ fn profile_panel_layout_is_checked_separately_from_ordinary_preferences() {
 
     let h = Harness::new();
     let mut doc = capture(&h.app, "Layout");
-    assert!(doc.get("panel_layout").is_none(), "Classic does not acquire an opt-in layout through profile capture");
+    assert_eq!(doc["panel_layout"]["version"], 2, "Classic captures the shared workspace layout");
     let envelope = LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()));
     let bytes = encode(&envelope, &PanelRegistry::default()).unwrap();
     let layout = json!({"version":1,"envelope":String::from_utf8(bytes).unwrap()});
@@ -406,10 +411,10 @@ fn cancel_in_preferences_takes_a_switch_back() {
 fn starting_a_profile_command_opens_preferences_instead_of_failing() {
     let mut h = Harness::new();
     h.app.start("settings.profile.save");
-    assert!(h.app.prefs_window.open);
-    assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GENERAL);
+    assert!(h.app.prefs_window.shell.open);
+    assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GENERAL);
     h.frames(2);
-    assert!(h.app.prefs_window.open);
+    assert!(h.app.prefs_window.shell.open);
 }
 
 #[test]
@@ -426,7 +431,7 @@ fn typing_a_profile_name_keeps_focus_out_of_preferences_search() {
     for text in ["Lap", "top"] {
         h.step(&json!({"text": text})).expect("type a profile name");
         h.frames(2);
-        assert_eq!(h.app.prefs_window.filter, "profiles", "profile-name text went to Preferences search");
+        assert_eq!(h.app.prefs_window.shell.filter, "profiles", "profile-name text went to Preferences search");
         assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(name_focus), "the name field keeps focus");
     }
     assert!(h.widget("Laptop").is_some(), "the name field contains the typed name");
@@ -434,7 +439,7 @@ fn typing_a_profile_name_keeps_focus_out_of_preferences_search() {
     h.frames(2);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
     assert_eq!(h.app.settings_profiles.names(), ["Laptop"]);
-    assert_eq!(h.app.prefs_window.filter, "profiles");
+    assert_eq!(h.app.prefs_window.shell.filter, "profiles");
 }
 
 #[test]
@@ -642,8 +647,8 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
             Some("Laptop"),
             "replacement keeps the typed name too"
         );
-        assert!(h.app.prefs_window.filter.is_empty(), "name entry must not type into search");
-        assert!(h.app.prefs_window.open);
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "name entry must not type into search");
+        assert!(h.app.prefs_window.shell.open);
     }
 }
 
@@ -687,7 +692,7 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
     assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk"]);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
     assert!(!h.app.preferences.zoom_reverse);
-    assert!(h.app.prefs_window.open && h.app.prefs_window.filter.is_empty());
+    assert!(h.app.prefs_window.shell.open && h.app.prefs_window.shell.filter.is_empty());
     assert_eq!(
         h.output
             .accesskit_update
@@ -703,7 +708,12 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
 
     h.step(&json!({"choose_file":"Laptop.solidcraft-profile.json"})).unwrap();
     h.step(&json!({"click":{"handle":"prefs:profile:import"}})).unwrap();
-    h.frames(6);
+    for _ in 0..600 {
+        if h.app.settings_profiles.names() == ["Travel", "Desk", "Laptop"] {
+            break;
+        }
+        h.frames(1);
+    }
     assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk", "Laptop"]);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
     assert!(!h.app.preferences.zoom_reverse, "import keeps the active settings");
@@ -759,7 +769,7 @@ fn general_profile_row_rename_commits_or_cancels_without_closing_preferences() {
         let committed = matches!(action, "Enter" | "Tab" | "ok");
         assert_eq!(h.app.settings_profiles.names(), [if committed { "Travel" } else { "Laptop" }, "Desk"], "{action}");
         assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
-        assert!(h.app.prefs_window.open && h.app.prefs_window.filter.is_empty(), "{action}");
+        assert!(h.app.prefs_window.shell.open && h.app.prefs_window.shell.filter.is_empty(), "{action}");
         assert!(crate::scenario::rect_of("prefs:profile:rename_popup").is_none());
     }
 }
@@ -781,7 +791,7 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
         h.frames(3);
         assert_eq!(h.app.settings_profiles.names(), ["Laptop", "Desk"]);
         assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
-        assert!(h.app.prefs_window.open);
+        assert!(h.app.prefs_window.shell.open);
         if to == "Desk" {
             assert!(h.widget("another settings profile is called `Desk`").is_some(), "the existing act outcome surfaces duplicates");
         }
@@ -789,19 +799,13 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
 }
 
 #[test]
-fn profile_keys_preserve_the_baseline_and_explicit_additions() {
+fn profile_keys_cover_the_current_portable_preferences() {
     let expected = [
         "browser_bodies_folders",
-        "browser_collapsed",
         "browser_eye_left",
-        "browser_float",
-        "browser_share",
-        "browser_show",
-        "browser_width",
         "center_arc_follows_cursor",
         "color_vision",
         "dialog_buttons",
-        "dialog_place",
         "direct_interaction",
         "escape_twice_finishes_sketch",
         "free_orbit",
@@ -813,15 +817,18 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "history_sketches",
         "home_fit_size",
         "invert_navigator_arrows",
+        "keep_hover_while_navigating",
         "keep_work_on_tab_switch",
         "language",
         "layout",
         "line_drag_draws_one",
         "line_hover_tangent_arc",
+        "live_panel_drag_preview",
         "logo_accent",
         "look_at_anim",
         "look_at_speed",
         "manipulator_free_alt",
+        "maya_horizontal_zoom",
         "middle_double_click",
         "mouse_gestures",
         "nav",
@@ -860,6 +867,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "sketch_face_activates_part",
         "sketch_open_look_at",
         "sketch_recent_snap",
+        "sketch_snap_to_visible_grid",
         "sketch_state_icons",
         "sketch_tab_always",
         "sketch_tracking_guides",
@@ -872,14 +880,10 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "theme_follow",
         "theme_night",
         "theme_options",
-        "timeline_collapsed",
-        "timeline_left",
-        "timeline_left_browser_collapsed",
-        "timeline_left_width",
         "timeline_origin_bodies",
-        "timeline_under_browser",
         "toast_place",
         "trackpad_pan",
+        "trackpad_twist_turns",
         "trackpad_zoom_modifier",
         "ui_font",
         "ui_scale",
@@ -897,7 +901,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 103);
+    assert_eq!(expected.len(), 97);
     assert_eq!(actual, expected);
 }
 
@@ -1013,7 +1017,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.frames(2);
     assert!(crate::scenario::rect_of("dialog:list:Laptop").is_some(), "the card's padding opens its real menu");
     h.step(&json!({"key":"Escape"})).unwrap();
-    assert!(h.app.prefs_window.open);
+    assert!(h.app.prefs_window.shell.open);
     assert!(crate::scenario::rect_of("dialog:list:Laptop").is_none(), "Escape dismisses the sidebar menu itself");
     h.step(&json!({"key":"Enter"})).unwrap();
     h.frames(2);
@@ -1044,7 +1048,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.step(&json!({"widget":"Save"})).unwrap();
     h.frames(3);
     assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
-    assert!(h.app.prefs_window.open, "saving a profile keeps Preferences open");
+    assert!(h.app.prefs_window.shell.open, "saving a profile keeps Preferences open");
     let saved = run(&mut h, "settings.profile.export", json!({"name":"Laptop"}));
     assert_eq!(saved["profile"]["preferences"]["direct_interaction"], true);
     h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
@@ -1052,7 +1056,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     let profiles_label = h.app.tr("prefs.profiles").to_string();
     h.step(&json!({"widget":profiles_label})).unwrap();
     h.frames(3);
-    assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GENERAL);
+    assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GENERAL);
     assert_eq!(
         h.output
             .accesskit_update

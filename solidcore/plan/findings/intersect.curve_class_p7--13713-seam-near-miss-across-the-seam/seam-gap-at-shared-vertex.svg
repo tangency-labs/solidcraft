@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="480" viewBox="0 0 760 480">
+  <title>seam-gap-at-shared-vertex</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="760" height="480" fill="#ffffff"/>
+    <circle id="a_tolerance" data-name="a tolerance" cx="200" cy="240" r="80" fill="#dce9f5"/>
+    <line id="a_cylinder_seam" data-name="a cylinder seam" x1="200" y1="430" x2="200" y2="240" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="a_dome_seam" data-name="a dome seam" x1="260" y1="70" x2="260" y2="180" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="a_off_surface" data-name="a off surface" x1="260" y1="180" x2="200" y2="180" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <line id="a_along_seam" data-name="a along seam" x1="200" y1="180" x2="200" y2="240" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <line id="a_whole_gap" data-name="a whole gap" x1="260" y1="180" x2="200" y2="240" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <circle id="a_seam_end" data-name="a seam end" cx="260" cy="180" r="5" fill="#1f6fb2"/>
+    <circle id="a_vertex" data-name="a vertex" cx="200" cy="240" r="5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 20 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">(a) Dome joined to a cylinder</tspan></text>
+    <text transform="matrix(1 0 0 1 270 100)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">dome&apos;s seam (r = 10 + 1.01e-8)</tspan></text>
+    <text transform="matrix(1 0 0 1 210 420)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">cylinder&apos;s seam (r = 10)</tspan></text>
+    <text transform="matrix(1 0 0 1 272 176)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">seam end</tspan></text>
+    <text transform="matrix(1 0 0 1 98 258)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">shared vertex V</tspan></text>
+    <text transform="matrix(1 0 0 1 138 172)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">off the surface 1.01e-8</tspan></text>
+    <text transform="matrix(1 0 0 1 60 214)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">along the seam 1.01e-8</tspan></text>
+    <text transform="matrix(1 0 0 1 236 228)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">whole gap 1.43e-8</tspan></text>
+    <text transform="matrix(1 0 0 1 60 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">vertex tolerance 2e-5</tspan></text>
+    <circle id="b_tolerance" data-name="b tolerance" cx="580" cy="240" r="80" fill="#dce9f5"/>
+    <line id="b_dome_seam" data-name="b dome seam" x1="580" y1="70" x2="580" y2="180" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="b_mirror_seam" data-name="b mirror seam" x1="580" y1="430" x2="580" y2="300" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="b_along_seam" data-name="b along seam" x1="580" y1="180" x2="580" y2="300" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <line id="b_mirror_plane" data-name="b mirror plane" x1="470" y1="240" x2="690" y2="240" fill="none" stroke="#999999" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <circle id="b_mirror_seam_end" data-name="b mirror seam end" cx="580" cy="300" r="5" fill="#555555"/>
+    <circle id="b_vertex" data-name="b vertex" cx="580" cy="180" r="5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 400 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">(b) Dome joined to its mirror</tspan></text>
+    <text transform="matrix(1 0 0 1 590 100)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">dome&apos;s seam</tspan></text>
+    <text transform="matrix(1 0 0 1 590 420)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">mirror&apos;s seam</tspan></text>
+    <text transform="matrix(1 0 0 1 592 176)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">V = dome&apos;s seam end</tspan></text>
+    <text transform="matrix(1 0 0 1 592 304)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">mirror&apos;s seam end</tspan></text>
+    <text transform="matrix(1 0 0 1 420 214)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">along the seam 2.03e-8</tspan></text>
+    <text transform="matrix(1 0 0 1 640 230)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">y = 0</tspan></text>
+    <text transform="matrix(1 0 0 1 440 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">vertex tolerance 2e-5</tspan></text>
+    <text transform="matrix(1 0 0 1 20 458)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Seen in the seams&apos; plane z = 0. Gaps drawn at 60 pt per 1e-8, the tolerance not to scale. Face test 36 counted the whole gap</tspan></text>
+    <text transform="matrix(1 0 0 1 20 474)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">against 1e-9; the fix counts only the part across the seam, out of the page, which is 0 in both.</tspan></text>
+  </g>
+</svg>

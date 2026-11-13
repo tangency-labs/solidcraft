@@ -66,6 +66,9 @@ pub const TABLE: &[(&str, Class)] = &[
     ("gpu", Class::Layer(5)),
     ("mcp", Class::Layer(5)),
     ("testkit", Class::Testkit),
+    // App-agnostic plugin contracts and the component runtime (RFC 0002 §6b).
+    ("craft-plugin", Class::Shared),
+    ("craft-plugin-wasm", Class::Shared),
     // the sRGB transfer rule and the surface-analysis palette, read by the renderer and the theme (#13291)
     ("color", Class::Shared),
     // the widget handle and rect registry UI components publish into and scenarios/the control channel read (#12936)
@@ -74,12 +77,24 @@ pub const TABLE: &[(&str, Class)] = &[
     ("ui-text", Class::Shared),
     // the MCP server machinery: JSON-RPC over stdio, lifecycle, tool schemas and argument checks; apps register their tools (#12947)
     ("mcp-server", Class::Shared),
+    // versioned file formats: the format tag, the version registry and its upgrade, a newer file told; apps register their versions
+    ("format", Class::Shared),
     // the token contract UI components draw with: light and dark tokens, colour vision, tab accents, theme state (#13304)
     ("theme", Class::Shared),
+    // the UI kit and its components (ribbon, app bar, history and navigation bars, view compass, window chrome, theme files), drawn from host data (#14251)
+    ("ui-kit", Class::Shared),
+    // SolidCraft's look, ready to install into the kit: icon masters and roles, code-drawn glyphs, IBM Plex faces, built-in themes
+    ("look", Class::Shared),
     // the control channel: the per-launch token and its files, what a request still running does (#12946)
     ("control", Class::Shared),
     // the window's own control requests over egui: ui.screenshot and ui.resize (#12946)
     ("control-egui", Class::Shared),
+    // the viewport renderer: camera, picture description and CPU rasterizer, shading models, hatches (#12943)
+    ("viewport", Class::Shared),
+    // its GPU work on wgpu: pipelines, offscreen pictures, adapter selection, plan evaluation (#12943)
+    ("viewport-gpu", Class::Shared),
+    // the viewport in an egui window: egui-wgpu paint callbacks and install (#12943)
+    ("viewport-egui", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
@@ -151,12 +166,45 @@ pub struct Crate {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Violation {
-    Unregistered { krate: String },
-    Upward { krate: String, dep: String, from: u8, to: u8, kind: DepKind },
-    StandaloneHasWorkspaceDep { krate: String, dep: String },
-    TestkitAsNormalDep { krate: String },
-    UiBelowL5 { krate: String, dep: String, layer: u8 },
-    SharedDependsOnApp { krate: String, dep: String },
+    Unregistered {
+        krate: String,
+    },
+    Upward {
+        krate: String,
+        dep: String,
+        from: u8,
+        to: u8,
+        kind: DepKind,
+    },
+    StandaloneHasWorkspaceDep {
+        krate: String,
+        dep: String,
+    },
+    TestkitAsNormalDep {
+        krate: String,
+    },
+    UiBelowL5 {
+        krate: String,
+        dep: String,
+        layer: u8,
+    },
+    /// A UI crate reached below L5 through a workspace crate on the way (a Shared one: those may
+    /// use UI toolkits), which [`Violation::UiBelowL5`] does not see.
+    UiReachedBelowL5 {
+        krate: String,
+        via: String,
+        dep: String,
+        layer: u8,
+    },
+    SharedDependsOnApp {
+        krate: String,
+        dep: String,
+    },
+    PluginDependsOnSolidCraft {
+        krate: String,
+        via: String,
+        dep: String,
+    },
 }
 
 impl std::fmt::Display for Violation {
@@ -177,8 +225,14 @@ impl std::fmt::Display for Violation {
             Violation::UiBelowL5 { krate, dep, layer } => {
                 write!(f, "{krate} (L{layer}) depends on UI crate `{dep}`; UI toolkits are only allowed in L5+")
             }
+            Violation::UiReachedBelowL5 { krate, via, dep, layer } => {
+                write!(f, "{krate} (L{layer}) reaches UI crate `{dep}` through {via}; UI toolkits are only allowed in L5+, directly or not")
+            }
             Violation::SharedDependsOnApp { krate, dep } => {
                 write!(f, "{krate}: shared crate must depend only on other shared crates, solidcore and external crates, not workspace crate {dep}")
+            }
+            Violation::PluginDependsOnSolidCraft { krate, via, dep } => {
+                write!(f, "{krate}: plugin host reaches SolidCraft crate `{dep}` through {via}; plugin crates must be app-agnostic (RFC 0002 §6b)")
             }
         }
     }
@@ -246,8 +300,64 @@ fn check_with(crates: &[Crate], classify: impl Fn(&str) -> Option<Class>) -> Vec
             }
         }
     }
+    out.extend(ui_reached_below_l5(crates, &classify));
+    out.extend(plugin_reaches_solidcraft(crates));
     out.sort_by_key(|v| v.to_string());
     out.dedup();
+    out
+}
+
+/// Plugin contracts and runtimes must remain independent of every SolidCraft crate, including
+/// shared crates and test dependencies. Follow workspace dependencies to catch indirect uses too.
+fn plugin_reaches_solidcraft(crates: &[Crate]) -> Vec<Violation> {
+    let by_name: std::collections::HashMap<&str, &Crate> = crates.iter().map(|c| (c.name.as_str(), c)).collect();
+    let mut out = Vec::new();
+    for c in crates.iter().filter(|c| matches!(c.name.as_str(), "craft-plugin" | "craft-plugin-wasm")) {
+        let (mut seen, mut todo) = (std::collections::BTreeSet::new(), vec![c.name.as_str()]);
+        while let Some(name) = todo.pop() {
+            let Some(k) = by_name.get(name) else { continue };
+            for d in &k.deps {
+                if d.name == "solidcraft" || d.name.starts_with("solidcraft-") {
+                    out.push(Violation::PluginDependsOnSolidCraft { krate: c.name.clone(), via: name.to_owned(), dep: d.name.clone() });
+                }
+                if d.workspace && seen.insert(d.name.as_str()) {
+                    todo.push(d.name.as_str());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The dependencies `c` builds with (normal and build, not dev), itself left out.
+fn built_with(c: &Crate) -> impl Iterator<Item = &Dep> {
+    c.deps.iter().filter(move |d| d.kind != DepKind::Dev && d.name != c.name)
+}
+
+/// Every UI crate a crate below L5 reaches through the workspace crates it builds with (normal
+/// and build dependencies, any depth): egui or wgpu must not come in through a Shared crate either.
+fn ui_reached_below_l5(crates: &[Crate], classify: &impl Fn(&str) -> Option<Class>) -> Vec<Violation> {
+    let by_name: std::collections::HashMap<&str, &Crate> = crates.iter().map(|c| (c.name.as_str(), c)).collect();
+    let mut out = Vec::new();
+    for c in crates {
+        let Some(Class::Layer(layer)) = classify(&c.name) else { continue };
+        if layer >= UI_MIN_LAYER {
+            continue;
+        }
+        let (mut seen, mut todo) = (std::collections::BTreeSet::new(), vec![c.name.as_str()]);
+        while let Some(name) = todo.pop() {
+            let Some(k) = by_name.get(name) else { continue };
+            for d in built_with(k) {
+                if d.workspace {
+                    if seen.insert(d.name.as_str()) {
+                        todo.push(d.name.as_str());
+                    }
+                } else if name != c.name && is_ui_crate(&d.name) {
+                    out.push(Violation::UiReachedBelowL5 { krate: c.name.clone(), via: name.to_owned(), dep: d.name.clone(), layer });
+                }
+            }
+        }
+    }
     out
 }
 
@@ -294,7 +404,7 @@ pub const SEAM_LIST: &str = "xtask/solidcore-seam.txt";
 pub const SEAM_PUBLIC: &[&str] = &["solidcore/public-crates.txt", "xtask/solidcore-public.txt"];
 
 /// The crate names in a public-crates file (`#` comments, blank lines skipped).
-fn parse_public(text: &str) -> Vec<String> {
+pub fn parse_public(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
@@ -379,6 +489,110 @@ pub fn seam_check(crates: &[Crate], allow: &str, public: &str) -> Vec<String> {
     errors
 }
 
+/// One rule, one message: solidcore must build from its own tree alone.
+const STANDALONE_RULE: &str = "solidcore must build on its own; see solidcore/docs/layers.md";
+
+/// Collapse `.` and `..` in a relative path without touching the disk. `None` when it climbs above its start.
+fn normalize_rel(path: &str) -> Option<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    for part in path.replace('\\', "/").split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                out.pop()?;
+            }
+            p => out.push(p.to_owned()),
+        }
+    }
+    Some(out)
+}
+
+/// The dependency entries of a manifest: (table description, key, spec) for every dependency table (workspace,
+/// target-specific, dev, build and the old spellings) and for `[patch]`/`[replace]`.
+fn manifest_dep_entries(doc: &toml::Table) -> Vec<(String, String, toml::Value)> {
+    const KINDS: [&str; 5] = ["dependencies", "dev-dependencies", "build-dependencies", "dev_dependencies", "build_dependencies"];
+    let mut out = Vec::new();
+    let mut add = |what: String, t: Option<&toml::Value>| {
+        for (k, v) in t.and_then(toml::Value::as_table).into_iter().flatten() {
+            out.push((what.clone(), k.clone(), v.clone()));
+        }
+    };
+    for kind in KINDS {
+        add(format!("[{kind}]"), doc.get(kind));
+        add(format!("[workspace.{kind}]"), doc.get("workspace").and_then(|w| w.get(kind)));
+    }
+    for (cfg, t) in doc.get("target").and_then(toml::Value::as_table).into_iter().flatten() {
+        for kind in KINDS {
+            add(format!("[target.{cfg}.{kind}]"), t.get(kind));
+        }
+    }
+    for (source, t) in doc.get("patch").and_then(toml::Value::as_table).into_iter().flatten() {
+        add(format!("[patch.{source}]"), Some(t));
+    }
+    add("[replace]".into(), doc.get("replace"));
+    out
+}
+
+/// The standalone rule: every manifest under `solidcore/` (`manifests`: repo-relative path, text) builds from
+/// solidcore's own tree. No dependency, `[workspace.dependencies]` entry or `[patch]` may point with `path` outside
+/// `solidcore/`, and none may be a SolidCraft crate (`solidcraft-*`, also behind `package = ...`).
+pub fn standalone_check(manifests: &[(String, String)]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for (file, text) in manifests {
+        let doc = match text.parse::<toml::Table>() {
+            Ok(d) => d,
+            Err(e) => {
+                errors.push(format!("{file}: cannot parse the manifest ({e}); {STANDALONE_RULE}"));
+                continue;
+            }
+        };
+        let dir: Vec<String> = file.rsplit_once('/').map(|(d, _)| d).and_then(normalize_rel).unwrap_or_default();
+        for (what, key, spec) in manifest_dep_entries(&doc) {
+            let real = spec.get("package").and_then(toml::Value::as_str).unwrap_or(&key);
+            if real.starts_with("solidcraft-") || key.starts_with("solidcraft-") {
+                errors.push(format!("{file}: {what} dependency `{key}` is a SolidCraft crate; {STANDALONE_RULE}"));
+            }
+            if let Some(path) = spec.get("path").and_then(toml::Value::as_str) {
+                let joined = normalize_rel(&format!("{}/{path}", dir.join("/")));
+                if !joined.is_some_and(|p| p.first().map(String::as_str) == Some("solidcore")) {
+                    errors.push(format!("{file}: {what} dependency `{key}` has path `{path}`, which leaves solidcore/; {STANDALONE_RULE}"));
+                }
+            }
+        }
+    }
+    errors.sort();
+    errors.dedup();
+    errors
+}
+
+/// Every `Cargo.toml` under `root/solidcore`, as (repo-relative path, text). Skips build output and the
+/// upstream checkout.
+pub fn read_solidcore_manifests(root: &std::path::Path) -> Result<Vec<(String, String)>, String> {
+    fn walk(root: &std::path::Path, rel: &str, out: &mut Vec<(String, String)>) -> Result<(), String> {
+        let dir = root.join(rel);
+        let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(()) };
+        let mut entries: Vec<_> = rd.flatten().collect();
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+        for e in entries {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let child = format!("{rel}/{name}");
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_dir() {
+                if !matches!(name.as_str(), "target" | "upstream" | ".git" | "node_modules") {
+                    walk(root, &child, out)?;
+                }
+            } else if name == "Cargo.toml" {
+                let text = std::fs::read_to_string(e.path()).map_err(|e| format!("{child}: {e}"))?;
+                out.push((child, text));
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    walk(root, "solidcore", &mut out)?;
+    Ok(out)
+}
+
 pub fn describe(class: Option<Class>) -> String {
     match class {
         Some(Class::Layer(l)) => format!("L{l}"),
@@ -436,6 +650,41 @@ mod tests {
     fn upward_dev_dependency_flagged() {
         let v = check(&[c("solidcraft-geom", &[("solidcraft-doc", Dev, true)])]);
         assert!(matches!(v[..], [Violation::Upward { kind: Dev, .. }]));
+    }
+
+    /// egui or wgpu that a Shared crate brings in is caught below L5 too, at any depth, naming the
+    /// crate it comes through; dev-dependencies and L5 crates are not.
+    #[test]
+    fn ui_crates_reached_through_a_shared_crate_below_l5_flagged() {
+        let classes = |pkg: &str| if short_name(pkg).starts_with("view") { Some(Class::Shared) } else { classify(pkg) };
+        let g = [
+            c("solidcraft-engine", &[("solidcraft-doc", Normal, true), ("solidcraft-viewtest", Dev, true)]),
+            c("solidcraft-doc", &[("solidcraft-viewbase", Normal, true)]),
+            c("solidcraft-viewbase", &[("solidcraft-viewgpu", Normal, true), ("serde", Normal, false)]),
+            c("solidcraft-viewgpu", &[("wgpu", Normal, false), ("egui", Normal, false)]),
+            c("solidcraft-viewtest", &[("egui-wgpu", Normal, false)]),
+            c("solidcraft-ui-egui", &[("solidcraft-viewgpu", Normal, true)]),
+        ];
+        let v = check_with(&g, classes);
+        let reached: Vec<(&str, &str, &str)> = v
+            .iter()
+            .filter_map(|v| match v {
+                Violation::UiReachedBelowL5 { krate, via, dep, .. } => Some((krate.as_str(), via.as_str(), dep.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            reached,
+            [
+                ("solidcraft-doc", "solidcraft-viewgpu", "egui"),
+                ("solidcraft-doc", "solidcraft-viewgpu", "wgpu"),
+                ("solidcraft-engine", "solidcraft-viewgpu", "egui"),
+                ("solidcraft-engine", "solidcraft-viewgpu", "wgpu"),
+            ]
+        );
+        assert!(v[0].to_string().contains("reaches UI crate `egui` through solidcraft-viewgpu"), "{}", v[0]);
+        let clean = [c("solidcraft-engine", &[("solidcraft-viewbase", Normal, true)]), c("solidcraft-viewbase", &[("serde", Normal, false)])];
+        assert!(check_with(&clean, classes).is_empty());
     }
 
     #[test]
@@ -506,6 +755,49 @@ mod tests {
     fn shared_crate_must_not_use_testkit_even_in_tests() {
         let v = check(&[c("solidcraft-ui-registry", &[("solidcraft-testkit", Dev, true)])]);
         assert!(matches!(v[..], [Violation::SharedDependsOnApp { .. }]));
+    }
+
+    #[test]
+    fn plugin_crates_are_shared_and_may_use_each_other() {
+        assert_eq!(classify("craft-plugin"), Some(Class::Shared));
+        assert_eq!(classify("craft-plugin-wasm"), Some(Class::Shared));
+        let g =
+            [c("craft-plugin", &[("serde", Normal, false)]), c("craft-plugin-wasm", &[("craft-plugin", Normal, true), ("wasmtime", Normal, false)])];
+        assert!(check(&g).is_empty());
+    }
+
+    #[test]
+    fn plugin_crates_must_not_use_any_solidcraft_crate() {
+        for plugin in ["craft-plugin", "craft-plugin-wasm"] {
+            for kind in [Normal, Dev, Build] {
+                // Even shared SolidCraft crates and dependencies outside the workspace are forbidden.
+                for dep in ["solidcraft-ui-text", "solidcraft-engine", "solidcraft-testkit", "solidcraft"] {
+                    for workspace in [true, false] {
+                        let v = check(&[c(plugin, &[(dep, kind, workspace)])]);
+                        assert!(
+                            v.iter().any(
+                                |v| matches!(v, Violation::PluginDependsOnSolidCraft { krate, dep: found, .. } if krate == plugin && found == dep)
+                            ),
+                            "{plugin}: {dep} [{kind:?}], workspace={workspace}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn plugin_crates_must_not_reach_solidcraft_indirectly() {
+        let classes = |pkg: &str| if pkg == "generic-helper" { Some(Class::Shared) } else { classify(pkg) };
+        let g = [
+            c("craft-plugin-wasm", &[("craft-plugin", Normal, true)]),
+            c("craft-plugin", &[("generic-helper", Dev, true)]),
+            c("generic-helper", &[("solidcraft-ui-text", Build, true), ("craft-plugin", Normal, true)]),
+        ];
+        let v = check_with(&g, classes);
+        for plugin in ["craft-plugin", "craft-plugin-wasm"] {
+            assert!(v.iter().any(|v| matches!(v, Violation::PluginDependsOnSolidCraft { krate, via, dep } if krate == plugin && via == "generic-helper" && dep == "solidcraft-ui-text")));
+        }
     }
 
     const PUB: &str = "# public\nsolidcore-ops\nsolidcore-tess\nsolidcore-record\n";
@@ -615,5 +907,48 @@ mod tests {
         assert!(doc.deps[0].workspace && !doc.deps[1].workspace);
         assert_eq!(doc.deps[2].kind, Dev);
         assert!(check(&g).is_empty());
+    }
+
+    fn sc(name: &str, body: &str) -> Vec<String> {
+        standalone_check(&[(name.into(), body.into())])
+    }
+
+    #[test]
+    fn standalone_clean_manifest_passes() {
+        let m = "[package]\nname = \"solidcore-ops\"\n[dependencies]\nthiserror = \"2\"\nsolidcore = { path = \"../solidcore\" }\n[dev-dependencies]\ngoldens = { path = \"../goldens\" }\n";
+        assert!(sc("solidcore/crates/solidcore-ops/Cargo.toml", m).is_empty());
+        let root = "[workspace]\nmembers = [\"crates/a\"]\n[workspace.dependencies]\nlocal = { path = \"crates/a\" }\n";
+        assert!(sc("solidcore/Cargo.toml", root).is_empty());
+    }
+
+    #[test]
+    fn standalone_path_outside_solidcore_fails() {
+        let m = "[dependencies]\ngeom = { path = \"../../../crates/geom\" }\n";
+        let e = sc("solidcore/crates/ops/Cargo.toml", m);
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].contains("solidcore/crates/ops/Cargo.toml") && e[0].contains("`geom`") && e[0].contains("solidcore must build on its own"));
+        // From the workspace root, one step up is already outside.
+        assert_eq!(sc("solidcore/Cargo.toml", "[workspace.dependencies]\nx = { path = \"../crates/x\" }\n").len(), 1);
+    }
+
+    #[test]
+    fn standalone_solidcraft_crate_fails() {
+        let e = sc("solidcore/crates/ops/Cargo.toml", "[dependencies]\nsolidcraft-geom = \"0.1\"\n");
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].contains("solidcraft-geom"));
+        let renamed = "[dependencies]\ng = { package = \"solidcraft-geom\", version = \"0.1\" }\n";
+        assert_eq!(sc("solidcore/crates/ops/Cargo.toml", renamed).len(), 1);
+    }
+
+    #[test]
+    fn standalone_dev_build_target_and_patch_leaks_fail() {
+        let dev = "[dev-dependencies]\ngeom = { path = \"../../../crates/geom\" }\n";
+        assert_eq!(sc("solidcore/crates/ops/Cargo.toml", dev).len(), 1);
+        let build = "[build-dependencies]\nsolidcraft-testkit = { path = \"../../../crates/testkit\" }\n";
+        assert!(!sc("solidcore/crates/ops/Cargo.toml", build).is_empty());
+        let target = "[target.'cfg(unix)'.dependencies]\ngeom = { path = \"../../../crates/geom\" }\n";
+        assert_eq!(sc("solidcore/crates/ops/Cargo.toml", target).len(), 1);
+        let patch = "[patch.crates-io]\nfoo = { path = \"../crates/foo\" }\n";
+        assert_eq!(sc("solidcore/Cargo.toml", patch).len(), 1);
     }
 }

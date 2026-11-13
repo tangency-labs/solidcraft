@@ -171,10 +171,7 @@ fn corner_fails_with_upstream_behaviour() {
     for radius in [1.0, 2.0] {
         let (_, _, r) = round(false, radius);
         let (e, code) = r.unwrap_err();
-        assert!(
-            matches!(e, solidcore::SolidError::Upstream { code: 1001, .. }),
-            "{e:?}"
-        );
+        assert!(solidcore::error::upstream_status(&e) == Some(1001), "{e:?}");
         // SM_FILERR_VERTEX_PROBLEM: "Corner Geometry Computation Failure"
         assert_eq!(code, 3);
     }

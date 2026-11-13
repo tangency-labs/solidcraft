@@ -18,11 +18,14 @@ mod layers;
 mod licences;
 mod lists;
 mod mesh_decisions;
+mod parallel;
 mod params;
 mod pending;
 mod render_assets;
+mod rustfmt;
 mod shared;
 mod skills;
+mod solidcore_paths;
 mod test;
 mod test_nextest;
 mod ui_containers;
@@ -37,8 +40,10 @@ const USAGE: &str = "\
 usage: cargo xtask <command>
 
 commands:
-  ui-containers   enforce the universal container for all UI hosts
+  ui-containers   enforce the universal container for all UI hosts and the kit's tooltips
   layers          enforce the crate dependency layering (plan/architecture.md §3)
+                  and the per-crate count of paths into solidcore internals (xtask/solidcore-paths.txt);
+                  `layers --paths [crate]` lists those paths
   shared          check that each shared crate (layers' Shared class) has workspace lints, a licence,
                   a README and no includes from outside its directory, then build and test it in a
                   scratch workspace holding only it and the shared crates it uses
@@ -47,7 +52,7 @@ commands:
   app-icons       regenerate shared app-icon exports for Linux, FreeBSD and Windows
   icons           validate UI icon standards, discovery and review-tool behavior (Python 3.11+)
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
-  i18n [--check | --add-missing]
+  i18n [--check | --add-missing] [--no-registry | --cli <solidcraft-cli>]
                   report how complete the message catalogs in assets/locales are:
                   which messages a locale has not translated and which command labels the English
                   catalog cannot translate (so they stay English everywhere). --check fails when
@@ -82,7 +87,7 @@ commands:
                   kernel operations, operand records, fix set and expected values in
                   DIR/<area>/<case>.json and DIR/manifest.json, every case not expressible as
                   kernel input listed with its reasons; with --ladder too
-  known-failing --junit PATH... [--list FILE]
+  known-failing --junit PATH... [--list FILE] [--quarantine FILE]
                   grade a nextest run's junit report (a file, or every .xml under a directory)
                   against the tests known to fail today on the default kernel,
                   tests/KNOWN_FAILING_TESTS (or FILE): fails
@@ -111,6 +116,9 @@ commands:
   fold-pending    fold assets/locales/pending/*.json into the catalogs and attribution/pending/*.md
                   into ATTRIBUTION.md, and delete them (the Generated files workflow runs this on
                   main; pull requests add the pending files instead of editing the shared ones)
+  fmt [--check]   rustfmt over the workspace and its path dependencies (what `cargo fmt --all`
+                  formats), a few files at a time: `cargo fmt --all` itself cannot start on
+                  Windows, where its one command line is too long; --check only reports
   lists [--fix]   check that files many changes add to are sorted one item per line (the
                   message catalogs in assets/locales, tests/KNOWN_FAILING_TESTS); --fix sorts
                   the catalogs
@@ -145,7 +153,10 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
     let result = match args.first().map(String::as_str) {
-        Some("layers") => cmd_layers(),
+        Some("layers") => match rest.first() {
+            Some(&"--paths") => cmd_solidcore_paths(rest.get(1).copied()),
+            _ => cmd_layers(),
+        },
         Some("shared") => shared::run(&root()),
         Some("ui-containers") => ui_containers::run(&root()),
         Some("assets") => assets::run(&root()),
@@ -166,6 +177,12 @@ fn main() -> ExitCode {
         Some("fold-pending") => pending::run(&root()),
         Some("skills") => skills::run(&root()),
         Some("mesh-decisions") => mesh_decisions::run(&root()),
+        Some("fmt") => match rest[..] {
+            [] => rustfmt::run(&root(), false),
+            ["--check"] => rustfmt::run(&root(), true),
+            // A mistyped --check must not rewrite files.
+            _ => Err("usage: cargo xtask fmt [--check]".into()),
+        },
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
@@ -291,6 +308,18 @@ fn cmd_layers() -> Result<(), String> {
     let mut violations: Vec<String> = layers::check(&crates).iter().map(ToString::to_string).collect();
     let allow = std::fs::read_to_string(root().join(layers::SEAM_LIST)).map_err(|e| format!("{}: {e}", layers::SEAM_LIST))?;
     violations.extend(layers::seam_check(&crates, &allow, &layers::read_public(&root())?));
+    violations.extend(layers::standalone_check(&layers::read_solidcore_manifests(&root())?));
+    let paths = solidcore_paths::counts(&solidcore_paths::scan(
+        &root(),
+        &solidcore_paths::solidcore_idents(&layers::read_solidcore_manifests(&root())?),
+        &layers::parse_public(&layers::read_public(&root())?),
+    )?);
+    let baseline = std::fs::read_to_string(root().join(solidcore_paths::BASELINE)).map_err(|e| format!("{}: {e}", solidcore_paths::BASELINE))?;
+    println!("\nPaths into solidcore internals, by crate ({}):", solidcore_paths::BASELINE);
+    for (c, n) in &paths {
+        println!("  {c:<26} {n}");
+    }
+    violations.extend(solidcore_paths::check(&paths, &baseline));
     println!();
     if violations.is_empty() {
         println!("OK: {} crates, no layering or solidcore seam violations.", crates.len());
@@ -302,6 +331,26 @@ fn cmd_layers() -> Result<(), String> {
         }
         Err(format!("{} layering violation(s)", violations.len()))
     }
+}
+
+/// `cargo xtask layers --paths [crate path]`: every path into solidcore internals the layers check
+/// counts, `file:line path`, for one crate or all.
+fn cmd_solidcore_paths(only: Option<&str>) -> Result<(), String> {
+    let sites = solidcore_paths::scan(
+        &root(),
+        &solidcore_paths::solidcore_idents(&layers::read_solidcore_manifests(&root())?),
+        &layers::parse_public(&layers::read_public(&root())?),
+    )?;
+    for (c, list) in &sites {
+        if only.is_some_and(|o| o.trim_end_matches('/') != c) {
+            continue;
+        }
+        println!("{c}: {}", list.len());
+        for s in list {
+            println!("  {}:{} {}", s.file, s.line, s.path);
+        }
+    }
+    Ok(())
 }
 
 /// Features with no reference case yet, and the tests that check them against hand-computed
@@ -465,9 +514,7 @@ fn wasm_check() -> Result<(Command, usize), String> {
 /// The quick gates first, so they fail fast; the wasm check (and doc tests) run while the test
 /// binaries do, which leaves cargo's build lock free.
 fn cmd_ci() -> Result<(), String> {
-    let mut c = cargo();
-    c.args(["fmt", "--all", "--", "--check"]);
-    run(c, "cargo fmt --check")?;
+    rustfmt::run(&root(), true)?;
     assets::run(&root())?;
     icons::run(&root())?;
     licences::run(&root(), true)?;

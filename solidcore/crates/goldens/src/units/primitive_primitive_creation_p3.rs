@@ -47,7 +47,9 @@ struct Inputs {
 }
 fn error(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         SolidError::InvalidInput { .. } => 1007.,
         _ => 1001.,
     }

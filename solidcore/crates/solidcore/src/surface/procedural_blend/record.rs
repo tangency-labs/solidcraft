@@ -569,6 +569,44 @@ impl ExactRoundRecord {
     }
 }
 
+/// A face's blend definition without its net, which is the face's surface: what a body's
+/// record keeps of a procedural blend's face or of a round of an exact class's
+/// (`solidcore-record`'s `brep::blend::BlendDefinition` holds the same fields, and
+/// `solidcore-convert` copies them). [`super::convert::face_definition`] reads one off a face,
+/// [`super::convert::adopt_definitions`] gives it back, rebuilt and re-certified.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FaceDefinition {
+    /// A procedural blend's definition S.
+    Procedural(Box<BlendDefinitionRecord>),
+    /// A round of an exact class's definition.
+    ExactRound(Box<ExactRoundDefinition>),
+}
+
+/// An [`ExactRoundRecord`] without its net's form, which is the face's surface: the definition
+/// and the net's analytic kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExactRoundDefinition {
+    /// The class.
+    pub class: ExactClassRecord,
+    /// The supports S1, S2, by value.
+    pub supports: [SupportRecord; 2],
+    /// The ball's radius (0 for the chord).
+    pub radius: f64,
+    /// The section's order: 1, the ball's circle; 0, the chord.
+    pub order: u32,
+    /// The leader (the centre line), where the class's construction makes one.
+    pub leader: Option<NurbsCurveRecord>,
+    /// What the class is read with beside the supports.
+    pub inputs: ClassInputsRecord,
+    /// A chamfer's sizes (the chord, #2486).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chamfer: Option<ChamferRecord>,
+    /// How the net's parameter runs along the leader.
+    pub leader_map: LeaderMapRecord,
+    /// The net's analytic kind.
+    pub net_kind: ExactNetKindRecord,
+}
+
 /// A face of a blend corner's (#2488): its corner kind's definition and its net.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CornerRecord {
@@ -982,6 +1020,93 @@ impl DraftRecord {
             || !self.angle.is_finite()
         {
             return Err(refuse("draft", "a draft's numbers are finite"));
+        }
+        Ok(())
+    }
+}
+
+/// One station of a multi-section blend's cross-section (`sweep::section_blend`): its point
+/// and how the blend leaves it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectionFrameRecord {
+    /// The point.
+    pub p: [f64; 3],
+    /// The direction the blend leaves in.
+    pub leave: [f64; 3],
+    /// The curvature vector along `leave`.
+    pub bend: [f64; 3],
+    /// The arc-length derivative of `bend` along `leave`.
+    pub bend_change: [f64; 3],
+}
+
+/// The continuity a multi-section blend holds at an end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EndOrderRecord {
+    /// Position.
+    G0,
+    /// And tangent direction.
+    G1,
+    /// And curvature.
+    G2,
+    /// And change of curvature.
+    G3,
+}
+
+/// A motion a net took (`Transform`'s arguments): the placement's origin and axes as
+/// stored, and the scale applied first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MotionRecord {
+    /// The placement's origin.
+    pub origin: [f64; 3],
+    /// The placement's x axis.
+    pub x_axis: [f64; 3],
+    /// The placement's y axis.
+    pub y_axis: [f64; 3],
+    /// The scale, when given.
+    pub scale: Option<[f64; 3]>,
+}
+
+/// A multi-section blend's surface (`sweep::section_blend`, #3140): its cross-sections, end
+/// orders and crowns, the motions its net took since it was made, and the net.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectionBlendRecord {
+    /// The cross-sections in order, each its stations.
+    pub sections: Vec<Vec<SectionFrameRecord>>,
+    /// The continuity at the first and the last section.
+    pub orders: [EndOrderRecord; 2],
+    /// The crowns at the first and the last section.
+    pub crown: [f64; 2],
+    /// The motions, in order.
+    pub motions: Vec<MotionRecord>,
+    /// The net.
+    pub net: NurbsSurfaceRecord,
+}
+
+impl SectionBlendRecord {
+    /// The structural check: the net a NURBS form, every number finite. What the blend
+    /// itself refuses (counts, crowns, coincident sections) its rebuild refuses.
+    ///
+    /// # Errors
+    ///
+    /// The first [`RecordError`] met.
+    pub fn validate(&self) -> Result<(), RecordError> {
+        self.net.validate("net")?;
+        let frames_finite = self
+            .sections
+            .iter()
+            .flatten()
+            .all(|f| points_finite(&[f.p, f.leave, f.bend, f.bend_change]));
+        if !frames_finite {
+            return Err(refuse("sections", "a section's numbers are finite"));
+        }
+        if !all_finite(&self.crown) {
+            return Err(refuse("crown", "a crown is finite"));
+        }
+        let motions_finite = self.motions.iter().all(|m| {
+            points_finite(&[m.origin, m.x_axis, m.y_axis]) && m.scale.is_none_or(|s| all_finite(&s))
+        });
+        if !motions_finite {
+            return Err(refuse("motions", "a motion's numbers are finite"));
         }
         Ok(())
     }

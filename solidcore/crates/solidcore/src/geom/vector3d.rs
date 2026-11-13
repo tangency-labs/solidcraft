@@ -58,7 +58,7 @@
 //!
 //! Deviations:
 //! - Out-params and `SmStatus` become return values. `SM_ERR_INVALID_INPUT` is
-//!   [`SolidError::InvalidInput`]; `SM_ERR` is [`SolidError::Upstream`] with code 1001.
+//!   [`SolidError::InvalidInput`]; `SM_ERR` is [`GeomFailure`](crate::error::geom::GeomFailure) with code 1001.
 //! - `Unitize` updates the vector in place and, for a zero vector, stores `(0, 0, 1)`
 //!   and returns an error. [`Vec3::unitize`] returns the unit vector or the error;
 //!   [`Vec3::unitize_or_z`] returns upstream's in-place result whatever the status
@@ -89,9 +89,6 @@ use crate::geom::tol;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI, UNDEF_DOUBLE};
 use crate::nurbs::math::{NOW, NOZ};
-
-// Upstream `SM_ERR` (generic error status).
-use crate::error::SM_ERR;
 
 // ---- SmMath.cpp ----------------------------------------------------------------------
 
@@ -149,14 +146,6 @@ pub(crate) fn is_valid_double(a: f64) -> bool {
     !a.is_nan()
         && (-f64::MAX..=f64::MAX).contains(&a)
         && ((-BIG_DOUBLE / 100.0)..=(BIG_DOUBLE / 100.0)).contains(&a)
-}
-
-fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR,
-        entity: None,
-    }
 }
 
 // ---- Vec3 ----------------------------------------------------------------------------
@@ -544,7 +533,7 @@ impl Vec3 {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when the system is (numerically) singular.
+    /// `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)) when the system is (numerically) singular.
     pub fn solve_two_linear_equations(self, o: Self) -> Result<Point2> {
         let (x, y, z) = (self.x, self.y, self.z);
         let denom = (o.y * x) - (o.x * y);
@@ -556,7 +545,10 @@ impl Vec3 {
                 return Ok(Point2::new((o.z - o.y * u) / o.x, u));
             }
         }
-        Err(sm_err("geom::vector3d::Vec3::solve_two_linear_equations"))
+        Err(SolidError::geom_failed(
+            "geom::vector3d::Vec3::solve_two_linear_equations",
+            "the system is singular",
+        ))
     }
 
     /// Component `0` (`x`), `1` (`y`) or `2` (`z`); `0.0` for any other index
@@ -575,13 +567,16 @@ impl Vec3 {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) for any other index.
+    /// `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)) for any other index.
     pub fn component_mut(&mut self, index: usize) -> Result<&mut f64> {
         match index {
             0 => Ok(&mut self.x),
             1 => Ok(&mut self.y),
             2 => Ok(&mut self.z),
-            _ => Err(sm_err("geom::vector3d::Vec3::component_mut")),
+            _ => Err(SolidError::geom_failed(
+                "geom::vector3d::Vec3::component_mut",
+                "the component index is out of range",
+            )),
         }
     }
 
@@ -641,7 +636,7 @@ impl Vec3 {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] when `self` has zero length; `SM_ERR`
-    /// ([`SolidError::Upstream`]) if no perpendicular can be found.
+    /// ([`GeomFailure`](crate::error::geom::GeomFailure)) if no perpendicular can be found.
     pub fn make_unit_ortho_vectors(self, y_reference: Option<Self>) -> Result<[Self; 3]> {
         let x_axis = self.unitize()?;
 
@@ -660,7 +655,10 @@ impl Vec3 {
         if len_sq < EFF_ZERO_SQ {
             z_axis = x_axis.cross(Self::new(0.0, 0.0, 1.0));
             if z_axis.length_squared() < EFF_ZERO_SQ {
-                return Err(sm_err("geom::vector3d::Vec3::make_unit_ortho_vectors"));
+                return Err(SolidError::geom_failed(
+                    "geom::vector3d::Vec3::make_unit_ortho_vectors",
+                    "no perpendicular vector found",
+                ));
             }
         }
         let z_axis = z_axis.unitize_or_z();

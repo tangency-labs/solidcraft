@@ -127,7 +127,7 @@
     "what": "as report-fillet-concave-arc-bar-top-into-cylinder-solver-residues, the concave arc and the bar's front top edge rounded r2 together (Constant, Tangent chain on): the corner patch where the two rounds meet stood up to 0.037 out of the bar's front face, a lip beside the line where the front face runs tangent into the cylinder; reported from the app (2026-10-30, test-peg part)"
   },
   "expressible": true,
-  "gallery_note": "The new view shows the completed round at the front junction of the convex bar edge and the concave cylinder arc. The inset shows the whole part.",
+  "gallery_note": "the peg as the app's sketch solver left it: its front face lies at y = 0.0579, not 0, and runs tangent into the cylinder at x = 41.65, where the two R2 rounds turn into each other; the front one touches the front at z = 8.",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

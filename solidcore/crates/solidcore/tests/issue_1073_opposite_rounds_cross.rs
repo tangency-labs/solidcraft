@@ -1,19 +1,42 @@
 //! tangency-labs/solidcore#1073 (WR-460): rounds on the four vertical edges of a
 //! 14 x 6 x 10 post, each 6 mm face carrying two of them. Past r = 3 the two rails on a
-//! face have crossed and SMLib builds an open body. The opt-in
-//! `Kernel::fixes.fillet_refuse_crossing_rails` refuses it before the post is edited.
-#![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test helpers
+//! face have crossed and SMLib builds an open body. With SolidCraft's fix list the band
+//! test (`fixes.fillet_refuse_overlapping_bands`, WR-542) refuses it before the post is
+//! edited, naming the largest radius that builds. (The crossing-rails refusal
+//! `fillet_refuse_crossing_rails`, which refused it with a bare 1001 after the fillet's
+//! B-rep was built, is retired: the band test is the one test of two bands on a face.)
+#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
 use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
+use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, vertex};
-use solidcore::{Brep, Kernel, Result};
+use solidcore::{Brep, Kernel, Result, SolidError};
+
+/// SolidCraft's fix list (`tests/kernel_cases/fixes.json`), or the pinned SMLib's
+/// (`Kernel::default`).
+fn kernel(fixed: bool) -> Kernel {
+    if !fixed {
+        return Kernel::default();
+    }
+    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
+    let mut f = UpstreamFixes::default();
+    for name in &names {
+        if let Some(flag) = f.flag_mut(name) {
+            *flag = true;
+        }
+    }
+    Kernel {
+        fixes: f,
+        ..Kernel::default()
+    }
+}
 
 /// Fillet the post's vertical edges with `r`; the post and whether it is a solid after.
 fn round(fixed: bool, r: f64) -> (Brep, Result<()>, bool) {
-    let mut k = Kernel::default();
-    k.fixes.fillet_refuse_crossing_rails = fixed;
+    let mut k = kernel(fixed);
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 14.0, 6.0, 10.0).unwrap();
     let vertical: Vec<_> = b
         .edges()
@@ -38,11 +61,6 @@ fn round(fixed: bool, r: f64) -> (Brep, Result<()>, bool) {
 }
 
 #[test]
-fn issue_1073_flag_is_off_by_default() {
-    assert!(!Kernel::default().fixes.fillet_refuse_crossing_rails);
-}
-
-#[test]
 fn issue_1073_upstream_builds_an_open_body() {
     let (_, result, solid) = round(false, 3.5);
     result.unwrap();
@@ -58,18 +76,36 @@ fn issue_1073_rounds_that_fit_are_kept() {
     }
 }
 
+/// Past r = 3 the two bands on each 6 mm face overlap: refused for that (the band test,
+/// right after the trace), naming 3, where the bands meet at the face's middle; the
+/// named radius builds a solid.
 #[test]
 fn issue_1073_rounds_past_the_face_are_refused() {
     for r in [3.03, 3.0625, 3.5, 4.0] {
         let (_, result, _) = round(true, r);
-        assert!(result.is_err(), "r = {r}");
+        let fit = match result {
+            Err(SolidError::FilletRefused {
+                reason: Some(NoRoomReason::BandsOverlap),
+                fit,
+                ..
+            }) => fit,
+            other => panic!("r = {r}: expected BandsOverlap, got {other:?}"),
+        };
+        assert_eq!(fit.kind, FitKind::Radius, "r = {r}");
+        assert!(
+            (fit.size - 3.0).abs() <= 1e-9 * 3.0,
+            "r = {r}: fit {}",
+            fit.size
+        );
+        let (_, built, solid) = round(true, fit.size);
+        built.unwrap();
+        assert!(solid, "r = {r}: the fit {} is not a solid", fit.size);
     }
 }
 
 #[test]
 fn issue_1073_all_edges_that_fit_are_kept() {
-    let mut k = Kernel::default();
-    k.fixes.fillet_refuse_crossing_rails = true;
+    let mut k = kernel(true);
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 14.0, 6.0, 10.0).unwrap();
     let all: Vec<_> = b.edges().ids().collect();
     fillet_edges(&mut k, &mut b, &all, 2.5, 1, 1, 1.0).unwrap();

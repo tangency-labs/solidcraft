@@ -4,7 +4,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::{Point2, Vec3};
 use solidcore::topology::brep::p1;
 use solidcore::topology::Brep;
-use solidcore::{Result, SolidError};
+use solidcore::Result;
 
 fn point(out: &mut Vec<f64>, value: Vec3) {
     out.extend([value.x, value.y, value.z]);
@@ -17,7 +17,9 @@ fn sample(out: &mut Vec<f64>, value: Result<Vec3>) -> Result<()> {
             point(out, p);
         }
         Err(e) if e.is_unported() => return Err(e),
-        Err(SolidError::Upstream { code, .. }) => out.push(f64::from(code)),
+        Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => out.push(f64::from(
+            solidcore::error::upstream_status(&up_err).unwrap_or(-1),
+        )),
         Err(_) => out.push(-1.0),
     }
     Ok(())
@@ -143,7 +145,9 @@ pub fn append_pyramid_rays(k: &mut Kernel, brep: &mut Brep, out: &mut Vec<f64>) 
         let status = match attempt.status {
             Ok(()) => 0.0,
             Err(e) if e.is_unported() => return Err(e),
-            Err(SolidError::Upstream { code, .. }) => f64::from(code),
+            Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => {
+                f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))
+            }
             Err(e) => return Err(e),
         };
         let mut trims = 0;

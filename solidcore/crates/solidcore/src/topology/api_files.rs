@@ -26,7 +26,7 @@
 //!   point ([`p5::turn_to_nurbs_plain`]: the kernel's identities and callbacks).
 //! - **Null B-rep.** A null B-rep is `None` (`SM_ERR_INVALID_INPUT`).
 //! - **Statuses.** The `SM_ERR_INVALID_INPUT` and `SM_ERR_OUT_OF_MEMORY` the wrappers
-//!   return themselves are [`SolidError::Upstream`] with that code.
+//!   return themselves are a [`TopologyFailure`](crate::error::topology::TopologyFailure) with that code.
 //! - **Appending a part.** Upstream appends the four arrays one after the other and
 //!   resets them all when an append fails. The port reserves the four first and returns
 //!   `SM_ERR_OUT_OF_MEMORY` with the arrays untouched (they are empty: anything else is
@@ -38,7 +38,8 @@
 //! - `SM_ASSERT_VALID` is not ported.
 //! - **Recursion.** None.
 
-use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT, SM_ERR_OUT_OF_MEMORY};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Result, SolidError};
 use crate::geom::tol::USE_DEFAULT;
 use crate::kernel::Kernel;
 use crate::topology::brep::p10::TopologyEnv;
@@ -57,13 +58,15 @@ const OP_SLOTS: &str = "topology::api_files::add_curve_output_slots";
 /// `SM_BIG_ULONG` (`SmMath.h`): the size no `SmTArray` reaches.
 pub const BIG_ULONG: u64 = 99_999_999;
 
-/// An `SmApiStatus` the wrapper returns itself.
-const fn status(operation: &'static str, code: i32) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code,
-        entity: None,
-    }
+/// The wrapper's own `SM_ERR_INVALID_INPUT`: an input it is given is not usable, as the
+/// phrase says.
+fn invalid(operation: &'static str, what: &'static str) -> SolidError {
+    SolidError::topology_invalid_value(operation, what)
+}
+
+/// The wrapper's own `SM_ERR_OUT_OF_MEMORY`, for the data the phrase names.
+fn out_of_memory(operation: &'static str, what: &'static str) -> SolidError {
+    SolidError::topology(operation, TopologyFailure::OutOfMemory(what))
 }
 
 /// `bAscii ? SM_ASCII : SM_BINARY`.
@@ -93,7 +96,7 @@ pub fn read_brep_from_file(
     env: &mut TopologyEnv<'_>,
 ) -> Result<Brep> {
     let Some(data) = data else {
-        return Err(status(OP_READ_BREP, SM_ERR_INVALID_INPUT));
+        return Err(invalid(OP_READ_BREP, "no data is given"));
     };
 
     let mut brep = p3::new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
@@ -127,19 +130,19 @@ pub fn read_part_from_file(
     env: &mut PartEnv<'_>,
 ) -> Result<()> {
     let Some(data) = data else {
-        return Err(status(OP_READ_PART, SM_ERR_INVALID_INPUT));
+        return Err(invalid(OP_READ_PART, "no data is given"));
     };
     if !out.curves.is_empty()
         || !out.surfaces.is_empty()
         || !out.boolean_tree_nodes.is_empty()
         || !out.breps.is_empty()
     {
-        return Err(status(OP_READ_PART, SM_ERR_INVALID_INPUT));
+        return Err(invalid(OP_READ_PART, "the part to read into is not empty"));
     }
 
     let part = part_file::read_part_from_file(k, data, file_type(ascii), env)?;
 
-    let oom = |_| status(OP_READ_PART, SM_ERR_OUT_OF_MEMORY);
+    let oom = |_| out_of_memory(OP_READ_PART, "the part's contents");
     out.curves
         .try_reserve_exact(part.curves.len())
         .map_err(oom)?;
@@ -172,7 +175,7 @@ pub fn write_brep_to_file(
     ascii: bool,
 ) -> Result<Vec<u8>> {
     let Some(brep) = brep else {
-        return Err(status(OP_WRITE_BREP, SM_ERR_INVALID_INPUT));
+        return Err(invalid(OP_WRITE_BREP, "no B-rep is given"));
     };
     brep_data_write::write_brep_to_file(k, brep, env, file_type(ascii))
 }
@@ -185,7 +188,7 @@ pub fn write_brep_to_file(
 /// `SM_ERR_INVALID_INPUT` for no B-rep; those of [`p5::turn_to_nurbs_plain`].
 pub fn turn_to_nurbs(k: &mut Kernel, brep: Option<&mut Brep>) -> Result<()> {
     let Some(brep) = brep else {
-        return Err(status(OP_TURN, SM_ERR_INVALID_INPUT));
+        return Err(invalid(OP_TURN, "no B-rep is given"));
     };
     p5::turn_to_nurbs_plain(k, brep)
 }
@@ -203,12 +206,13 @@ pub fn add_curve_output_slots<T>(curves: &mut Vec<Option<T>>, additional: u64) -
         return Ok(());
     }
     if additional >= BIG_ULONG.wrapping_sub(old_size) {
-        return Err(status(OP_SLOTS, SM_ERR_OUT_OF_MEMORY));
+        return Err(out_of_memory(OP_SLOTS, "the curve output slots"));
     }
-    let n = usize::try_from(additional).map_err(|_| status(OP_SLOTS, SM_ERR_OUT_OF_MEMORY))?;
+    let n = usize::try_from(additional)
+        .map_err(|_| out_of_memory(OP_SLOTS, "the curve output slots"))?;
     curves
         .try_reserve_exact(n)
-        .map_err(|_| status(OP_SLOTS, SM_ERR_OUT_OF_MEMORY))?;
+        .map_err(|_| out_of_memory(OP_SLOTS, "the curve output slots"))?;
     curves.resize_with(curves.len() + n, || None);
     Ok(())
 }
@@ -216,6 +220,7 @@ pub fn add_curve_output_slots<T>(curves: &mut Vec<Option<T>>, additional: u64) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::{SM_ERR_INVALID_INPUT, SM_ERR_OUT_OF_MEMORY};
     use crate::geom::attribute::{AttributeStore, ObjectKey};
     use crate::geom::object::ObjectRef;
     use crate::topology::topology::NotifyRecords;
@@ -223,8 +228,8 @@ mod tests {
 
     fn code(r: &Result<impl Sized>) -> Option<i32> {
         match r {
-            Err(SolidError::Upstream { code, .. }) => Some(*code),
-            _ => None,
+            Err(e) => e.upstream_status(),
+            Ok(_) => None,
         }
     }
 

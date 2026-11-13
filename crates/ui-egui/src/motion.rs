@@ -62,12 +62,14 @@ pub fn tint(ctx: &Context, id: Id, colour: Option<Color32>, from: Color32, s: f3
     ctx.data(|d| d.get_temp::<Color32>(id.with("colour"))).filter(|_| t > 0.01).map(|c| from.lerp_to_gamma(c, t))
 }
 
-/// The gap a press keeps for its drag: `at_press` measures it from the pointer when the drag
-/// starts (none when it cannot), and every dragged frame gets it back, so what is dragged follows
-/// the pointer from where it was grabbed instead of jumping onto it at the first move.
+/// The gap a press keeps for its drag: `at_press` measures it from where the button went down
+/// (none when it cannot), and every dragged frame gets it back, so what is dragged follows the
+/// pointer from where it was grabbed instead of jumping onto it at the first move. Measured from
+/// the press, not the pointer when the drag starts: a handle that also takes clicks only knows it
+/// is dragged once the pointer has moved a few points.
 pub fn grab<T: Clone + Send + Sync + 'static>(ui: &Ui, id: Id, r: &Response, at_press: impl FnOnce(Pos2) -> Option<T>) -> Option<T> {
     if r.drag_started()
-        && let Some(p) = r.interact_pointer_pos()
+        && let Some(p) = ui.input(|i| i.pointer.press_origin()).or_else(|| r.interact_pointer_pos())
     {
         match at_press(p) {
             Some(g) => {

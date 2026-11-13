@@ -24,6 +24,7 @@
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
+//! --plugin-limits FILE.json (local sessions only)              user fuel/memory ceilings; connected desktops use their own preferences
 //! --debug (with any command)                                  SolidCraft's debug log on stderr (or RUST_LOG=LEVEL)
 //! --max-file-size SIZE (with any command)                     read STEP and design files up to SIZE (2GB, 1500MB; at most 16GB)
 //! ```
@@ -76,7 +77,7 @@ const USAGE_BENCH_ASSISTANT: &str = "  solidcraft-cli bench-assistant --connect 
 /// `snapshot`'s lines in the usage.
 const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.sc|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27] [--quality coarse|normal|fine|ultra]\n  solidcraft-cli snapshot --in <design.sc|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON;\n       --quality: the display quality the bodies are meshed at, as the app's setting (default normal))\n";
 /// `render`'s lines in the usage.
-const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n      [--progressive] [--samples N] [--max-depth N] [--seed N] [--exposure EV] [--lighting FILE.json] [--environment FILE.json] [--tone-map reinhard|aces_fitted]\n";
+const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n      [--progressive] [--samples N] [--max-depth N] [--seed N] [--exposure EV] [--lighting FILE.json] [--environment FILE.json] [--tone-map reinhard|aces_fitted] [--legacy-memory-admission]\n      --legacy-memory-admission skips available-RAM checks; fixed shared/host budgets and allocation limits still apply.\n";
 /// `exec`'s lines in the usage.
 const USAGE_EXEC: &str = "  solidcraft-cli exec <command> [json-params]\n";
 /// `commands`'s lines in the usage.
@@ -108,6 +109,8 @@ const USAGE_BENCH_EDIT: &str = "  solidcraft-cli bench-edit <script.json|recipe.
 const USAGE_SAVE_STRESS: &str = "  solidcraft-cli save-stress <path> <rounds>\n";
 /// The flags every command takes, at the end of the top-level usage.
 const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its\n      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate\n  --max-file-size SIZE, with any command: read STEP and import files and design files up to SIZE for this run\n      (for example 2GB or 1500MB; at most 16GB; the defaults are 512 MB and 256 MB, and a smaller SIZE keeps them)\n";
+
+const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib}; defaults 100000000000 / 128, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
 
 /// The commands the CLI takes, in the order the top-level usage lists them.
 const COMMANDS: &[Command] = &[
@@ -155,6 +158,10 @@ fn main() -> ExitCode {
     };
     if let Err(e) = max_file_size(&mut args) {
         solidcraft_engine::note!("error: {e}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(e) = plugin_limits(&mut args) {
+        eprintln!("error: {e}");
         return ExitCode::FAILURE;
     }
     let r = match args.first().map(String::as_str) {
@@ -263,6 +270,43 @@ fn max_file_size(args: &mut Vec<String>) -> Result<(), String> {
     solidcraft_engine::io::limits::set_override(Some(bytes))
 }
 
+/// Explicit host policy for local sessions only. A script or package cannot change this.
+fn plugin_limits(args: &mut Vec<String>) -> Result<(), String> {
+    let mut path = None;
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        let value = if arg == "--plugin-limits" {
+            let value = args.get(i + 1).filter(|v| !v.starts_with("--")).cloned().ok_or("--plugin-limits needs a JSON settings file")?;
+            args.drain(i..i + 2);
+            Some(value)
+        } else if let Some(value) = arg.strip_prefix("--plugin-limits=") {
+            let value = value.to_string();
+            args.remove(i);
+            Some(value)
+        } else {
+            i += 1;
+            None
+        };
+        if let Some(value) = value
+            && (value.is_empty() || path.replace(value).is_some())
+        {
+            return Err("provide one --plugin-limits JSON settings file".into());
+        }
+    }
+    let Some(path) = path else { return Ok(()) };
+    if args.iter().any(|v| v == "--connect" || v.starts_with("--connect="))
+        || (args.first().map(String::as_str) == Some("mcp") && !args.iter().any(|v| v == "--headless"))
+    {
+        return Err("--plugin-limits controls local sessions; use mcp --headless or change the connected desktop's Preferences > Plugins".into());
+    }
+    let bytes =
+        solidcraft_engine::io::vfs::read(&path, solidcraft_engine::plugin::MAX_MANIFEST_BYTES).map_err(|e| format!("--plugin-limits: {e}"))?;
+    // Windows editors and PowerShell 5.1 may write a UTF-8 BOM in this user settings file.
+    let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes);
+    let limits: solidcraft_engine::plugin::HostLimits = serde_json::from_slice(bytes).map_err(|e| format!("--plugin-limits: {e}"))?;
+    solidcraft_engine::plugin::configure_process_host_limits(limits).map_err(|e| e.to_string())
+}
+
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
 }
@@ -275,6 +319,7 @@ fn usage() -> String {
         s.push_str(c.usage);
     }
     s.push_str(USAGE_DEBUG);
+    s.push_str(USAGE_PLUGIN_LIMITS);
     s
 }
 
@@ -653,9 +698,9 @@ fn cmd_script(args: &[String]) -> Result<(), String> {
 
 /// `gpu`: the headless adapter survey and the policy's pick.
 fn cmd_gpu(args: &[String]) -> Result<(), String> {
-    use solidcraft_gpu::select::{Policy, survey};
+    use solidcraft_viewport_gpu::select::{Policy, survey};
     let policy = match args {
-        [] => Policy::from_env()?,
+        [] => solidcraft_gpu::env::policy()?,
         [flag, v] if flag == "--policy" => Policy::parse(v).ok_or_else(|| format!("--policy must be auto, hardware, software or cpu, not `{v}`"))?,
         _ => return Err("usage: solidcraft-cli gpu [--policy auto|hardware|software|cpu]".into()),
     };
@@ -675,7 +720,7 @@ fn cmd_gpu(args: &[String]) -> Result<(), String> {
         }))
     );
     match s.lands_on {
-        Some(solidcraft_gpu::select::Landing::Cpu) => {
+        Some(solidcraft_viewport_gpu::select::Landing::Cpu) => {
             solidcraft_engine::note!("warning: {}", solidcraft_engine::capture::CPU_WARNING);
             Ok(())
         }
@@ -691,7 +736,7 @@ fn cmd_gpu(args: &[String]) -> Result<(), String> {
 /// error that names the policy.
 fn install_renderer() {
     solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-        let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+        let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
         Ok(solidcraft_engine::capture::Picture { rgba, renderer })
     }));
 }
@@ -778,7 +823,7 @@ fn cmd_icon(args: &[String]) -> Result<(), String> {
 }
 
 fn icon_png(size: usize) -> Result<Vec<u8>, String> {
-    solidcraft_engine::render::png(size, size, app_icon::rgba(size)?).ok_or_else(|| "icon: PNG encoding failed".to_string())
+    solidcraft_viewport::png(size, size, app_icon::rgba(size)?).ok_or_else(|| "icon: PNG encoding failed".to_string())
 }
 
 /// A Windows icon file holding PNG images (Vista and later read these).
@@ -908,9 +953,10 @@ fn serve_mcp(
     scope: Option<solidcraft_engine::io::vfs::PathScope>,
     options: solidcraft_mcp::Options,
 ) -> Result<(), String> {
-    let stdin = std::io::stdin();
+    // Not the locked handles: the server reads stdin on a thread of its own (#14007).
+    let stdin = std::io::BufReader::new(std::io::stdin());
     let stdout = std::io::stdout();
-    solidcraft_mcp::Server::new(backend).with_path_scope(scope).with_options(options).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
+    solidcraft_mcp::Server::new(backend).with_path_scope(scope).with_options(options).serve(stdin, stdout).map_err(|e| e.to_string())
 }
 
 /// The port of the running desktop app: the one its discovery file names, if something listens

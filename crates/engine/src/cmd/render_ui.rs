@@ -65,12 +65,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("settings")
         .noundo()
         .doc_only()
-        .params("width, height: 1..16384; custom?: bool. Validated Render output draft request; headless echo only, no design edits or job."),
+        .params("width, height: 1..16384; custom?: bool. Validated Render output draft request; headless echo only, no design edits or job. The UI separately limits new selections to 8192 per side, 33554432 output pixels and the selected rendering profile."),
     CommandSpec::new("render.result.view", "View Render Image", result_view)
         .icon("render_image")
         .noundo()
         .doc_only()
-        .params("view: model|image|fit|actual. Validated result canvas request; headless echo only, never starts a job."),
+        .params("view: model|image|fit|actual|denoise_mask. Guide-mask view requires a selected completed result captured with denoising diagnostics. Validated result canvas request; headless echo only, never starts a job."),
     CommandSpec::new("render.result.close", "Close Render Image", close_result)
         .icon("close")
         .key("Escape")
@@ -275,8 +275,18 @@ struct ResultView {
 }
 fn result_view(s: &mut Session, params: &Value) -> Result<Value> {
     let input: ResultView = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.view", e.to_string()))?;
-    if !matches!(input.view.as_str(), "model" | "image" | "fit" | "actual") {
-        return Err(bad("render.result.view", "view must be model, image, fit or actual"));
+    if !matches!(input.view.as_str(), "model" | "image" | "fit" | "actual" | "denoise_mask") {
+        return Err(bad("render.result.view", "view must be model, image, fit, actual or denoise_mask"));
+    }
+    if input.view == "denoise_mask" {
+        s.render_jobs.collect().map_err(crate::render_jobs::job_error)?;
+        let job = s.render_selected_result().ok_or_else(|| bad("render.result.view", "no completed result is selected"))?;
+        let frame = s.render_jobs.frame(job).map_err(crate::render_jobs::job_error)?;
+        if frame.denoise_mask_png().is_none() {
+            return Err(bad("render.result.view", "the selected result has no denoising guide mask"));
+        }
+        s.render_jobs.set_comparison(None);
+        return Ok(json!({"view":input.view,"job":job}));
     }
     if input.view == "model" {
         s.render_jobs.set_comparison(None);
@@ -297,7 +307,16 @@ fn output_viewer_requests_are_validated_headless_echoes() {
     let mut s = Session::default();
     let document = s.doc.clone();
     let before = (s.revision, s.undo.len(), s.evaluations);
-    for size in [json!({"width":1280,"height":720}), json!({"width":1920,"height":1080})] {
+    // Headless requests keep the established per-side range. They allocate no
+    // image; the UI and actual renderer independently enforce their envelopes.
+    for size in [
+        json!({"width":1280,"height":720}),
+        json!({"width":1920,"height":1080}),
+        json!({"width":7680,"height":4320}),
+        json!({"width":16384,"height":1}),
+        json!({"width":1,"height":16384}),
+        json!({"width":16384,"height":16384}),
+    ] {
         assert_eq!(s.execute("render.output.size", &size).unwrap(), size);
     }
     let custom = json!({"width":1920,"height":1080,"custom":true});
@@ -307,10 +326,18 @@ fn output_viewer_requests_are_validated_headless_echoes() {
         let request = json!({"view":view});
         assert_eq!(s.execute("render.result.view", &request).unwrap(), request);
     }
+    assert!(s.execute("render.result.view", &json!({"view":"denoise_mask"})).is_err());
     assert_eq!(s.execute("render.result.close", &json!({})).unwrap(), json!({"view":"model"}));
-    for request in
-        [json!(null), json!({}), json!({"width":0,"height":1}), json!({"width":u64::MAX,"height":1}), json!({"width":1,"height":1,"extra":true})]
-    {
+    for request in [
+        json!(null),
+        json!({}),
+        json!({"width":0,"height":1}),
+        json!({"width":1,"height":0}),
+        json!({"width":16385,"height":1}),
+        json!({"width":1,"height":16385}),
+        json!({"width":u64::MAX,"height":1}),
+        json!({"width":1,"height":1,"extra":true}),
+    ] {
         assert!(s.execute("render.output.size", &request).is_err());
     }
     for request in [json!(null), json!({"view":"unknown"}), json!({"view":"image","extra":true})] {
@@ -511,7 +538,7 @@ fn batch_fixture(count: usize) -> Session {
     let mut s = Session::default();
     s.set_render_job_host(Some(solidcraft_render::job::CpuHost::cooperative())).unwrap();
     for index in 0..count {
-        let camera = solidcraft_render::Camera { yaw: index as f64 * 0.2, roll: index as f64 * 0.01, ..Default::default() };
+        let camera = solidcraft_viewport::Camera { yaw: index as f64 * 0.2, roll: index as f64 * 0.01, ..Default::default() };
         s.execute("render.settings.set", &json!({"name":format!("Shot {index:02}"),"set":{"camera":camera,"width":8+index,"height":8}})).unwrap();
     }
     s
@@ -633,7 +660,7 @@ fn render_results_batch_cameras_and_common_setup_are_captured_before_later_shot_
     let original = s.doc.render.setups.get("Shot 01").unwrap().camera;
     s.execute("render.batch", &json!({"request":{"setup":"Shot 00"}})).unwrap();
     let first = s.render_queue_state().job.unwrap();
-    let changed = solidcraft_render::Camera { yaw: 2.0, ..Default::default() };
+    let changed = solidcraft_viewport::Camera { yaw: 2.0, ..Default::default() };
     s.execute("render.settings.set", &json!({"name":"Shot 01","set":{"camera":changed}})).unwrap();
     s.execute("render.settings.set", &json!({"name":"Shot 00","set":{"width":64}})).unwrap();
     let document = s.doc.clone();

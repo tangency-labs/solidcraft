@@ -13,7 +13,7 @@ The authority is `solidcore/docs/layers.md`; this is its short form. Every job l
 3. **Is it state, selection, commands, settings, history or UI?** Then it is SolidCraft (`crates/`, `apps/`), which computes no geometry.
 
 ## What SolidCraft may use
-- `solidcore-ops` (modelling), `solidcore-tess` (display meshes, polylines) and `solidcore-record` (geometry as data). CI enforces this seam through `cargo xtask layers` (#13498): solidcore's public API is listed in xtask/solidcore-public.txt, and the remaining direct uses in xtask/solidcore-seam.txt, a list that only shrinks.
+- `solidcore-ops` (modelling), `solidcore-tess` (display meshes, polylines) and `solidcore-record` (geometry as data). CI enforces this seam through `cargo xtask layers` (#13498): solidcore's public API is listed in xtask/solidcore-public.txt, and the remaining direct uses in xtask/solidcore-seam.txt, a list that only shrinks. Within those crates, xtask/solidcore-paths.txt holds each crate's count of paths into solidcore internals (#15031): a count may not go up, and a PR that removes paths lowers its line (`cargo xtask layers --paths <crate>` lists them). The same command keeps solidcore/ self-contained: no manifest under it may use a `path` that leaves solidcore/ or depend on a `solidcraft-*` crate, and CI's "SolidCore builds on its own" job runs `cargo check --workspace --all-targets --locked` on an export of solidcore/ alone.
 - Before writing STEP, meshing, surface intersection, tangent chains or frames, look for solidcore's: a second implementation is flagged.
 
 ## Lists that only shrink
@@ -23,5 +23,5 @@ The authority is `solidcore/docs/layers.md`; this is its short form. Every job l
 ## Working in solidcore/
 - Follow `solidcore/AGENTS.md` and the reference doc for the area (`solidcore/docs/`). A change there needs a code owner's review (`.github/CODEOWNERS`) and runs SolidCore checks (its tests, goldens, kernel rig, clippy, fmt, panic sites) in `.github/workflows/ci.yml`.
 - New kernel cases go in `solidcore/crates/solidcore/tests/kernel_cases/`, never in SolidCraft (`cargo xtask lists`).
-- Kernel work goes here: CONTRIBUTING.md, "Kernel work goes in solidcore/". Kernel-only PRs target the `kernel` branch.
+- Kernel work goes here: CONTRIBUTING.md, "Kernel work goes in solidcore/". Kernel PRs target `main`; big multi-step work goes as stacked PRs into `main`.
 - Issues and claims for solidcore are in this repository, like any other change (`skills/solidcraft-contributing/SKILL.md`): the vendored tree is mirrored to tangency-labs/solidcore by `.github/workflows/solidcore-mirror.yml`, so pull requests are not opened there.

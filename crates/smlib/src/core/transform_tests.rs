@@ -168,7 +168,7 @@ fn solidcore_case(name: &str) -> Got {
     let c = case(name);
     let got = transform(&c.shape.core(), &c.matrix).map(|b| {
         let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Measured { volume: volume(&b, 1e-8).unwrap(), bounds: bounds(&b).unwrap(), counts: counts(&b).unwrap(), kinds: kinds(&rec) }
     });
     judge(name, "solidcore", got)

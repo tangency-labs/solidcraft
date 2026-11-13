@@ -2,9 +2,10 @@
 //! (`Kernel::fixes.fillet_cleanup_keeps_target_faces`), `DoFilleting`'s
 //! `BooleanPostProcess` leaves every edge of the fillet's input, and every edge between two
 //! of its faces, alone. Where a round takes away the face on one side of a target edge,
-//! that edge is left with one face on both sides: a slit, kept as an input edge.
-//! `Kernel::fixes.fillet_cleanup_removes_input_slits` checks such an edge all the same
-//! (removing it merges no faces), and the kept-faces test needs two faces.
+//! that edge is left with one face on both sides: a slit, kept as an input edge. The
+//! clean-up checks such an edge all the same (removing it merges no faces), and the
+//! kept-faces test needs two faces; this was opt-in as
+//! `Kernel::fixes.fillet_cleanup_removes_input_slits` until that flag was retired.
 //!
 //! The slit here is the one of #1120 (WR-304): a disc extruded from two half arcs joined
 //! to a cylinder of the same radius leaves the line between the halves' walls inside the
@@ -85,12 +86,11 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// The joined body before and after a clean-up that keeps all of it, as `(one-face edges,
 /// edges)` each, and the volume after.
-fn cleaned(remove_input_slits: bool) -> ((usize, usize), (usize, usize), f64) {
+fn cleaned() -> ((usize, usize), (usize, usize), f64) {
     let mut k = Kernel::default();
     let mut b = joined(&mut k);
     let before = (one_face_edges(&b).len(), p1::edges(&b, None).unwrap().len());
     k.fixes.fillet_cleanup_keeps_target_faces = true;
-    k.fixes.fillet_cleanup_removes_input_slits = remove_input_slits;
     let relations = CleanupRelations {
         kept_edges: p1::edges(&b, None).unwrap().into_iter().collect(),
         kept_faces: p1::faces(&b, None).unwrap().into_iter().collect(),
@@ -106,16 +106,10 @@ fn cleaned(remove_input_slits: bool) -> ((usize, usize), (usize, usize), f64) {
 }
 
 #[test]
-fn wr602_default_keeps_the_input_slit() {
-    let (before, after, _) = cleaned(false);
+fn wr602_input_slit_removed_seam_kept() {
+    let (before, after, v) = cleaned();
     // The merged wall has its seam and the slit.
     assert!(before.0 >= 2, "{before:?}");
-    assert_eq!(after, before, "upstream keeps every input edge");
-}
-
-#[test]
-fn wr602_input_slit_removed_seam_kept() {
-    let (before, after, v) = cleaned(true);
     assert_eq!(after.0, before.0 - 1, "the slit goes, the seam stays");
     assert_eq!(after.1, before.1 - 1, "no other edge goes");
     let want = core::f64::consts::PI * R * R * 11.0;

@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use solidcraft_engine::Session;
-use solidcraft_engine::render::{Camera, StandardView};
+use solidcraft_viewport::{Camera, StandardView};
 
 use crate::SolveApp;
 use crate::start_page;
@@ -135,7 +135,7 @@ pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     if b.is_empty() {
         return None;
     }
-    cam.fit(&b);
+    cam.fit(&solidcraft_engine::render::view_bounds(&b));
     // Fill the card: the fit leaves room for a whole window's margins.
     cam.distance *= 0.7;
     let scene = solidcraft_engine::view::scene(s, &cam).ok()?;
@@ -153,11 +153,44 @@ fn cache_path(key: &str) -> Option<std::path::PathBuf> {
     key.hash(&mut h);
     meta.len().hash(&mut h);
     meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.hash(&mut h);
-    let root = std::env::var_os("LOCALAPPDATA")
-        .or_else(|| std::env::var_os("XDG_CACHE_HOME"))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    Some(root.join("SolidCraft").join("thumbnails").join(format!("{:016x}.png", h.finish())))
+    Some(pictures_dir()?.join(format!("{:016x}.png", h.finish())))
+}
+
+/// How long a picture no recent design has asked for is kept.
+#[cfg(not(target_arch = "wasm32"))]
+const KEEP_PICTURES: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
+
+#[cfg(test)]
+thread_local! {
+    /// A test that ages pictures on purpose keeps them in its own folder, so the once-a-run sweep
+    /// another test starts cannot delete them between the aging and the read.
+    static TEST_PICTURES: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Where Home keeps its pictures: the per-user cache folder, which is still there after a restart,
+/// so a design that has not changed is not rebuilt for its picture at every launch.
+#[cfg(not(target_arch = "wasm32"))]
+fn pictures_dir() -> Option<std::path::PathBuf> {
+    // Tests never touch the user's real folder.
+    #[cfg(test)]
+    let own = TEST_PICTURES.with(|d| d.borrow().clone()).unwrap_or_else(|| std::env::temp_dir().join("SolidCraft").join("thumbnails"));
+    #[cfg(test)]
+    let dir = Some(own);
+    #[cfg(not(test))]
+    let dir = Some(solidcraft_engine::recovery::cache_dir()?.join("thumbnails"));
+    dir
+}
+
+/// Delete the pictures not read for [`KEEP_PICTURES`], once a run, off the window thread: saving a
+/// design leaves its earlier picture behind (the file's identity changed), and nothing else removes it.
+#[cfg(not(target_arch = "wasm32"))]
+fn clean_old_pictures() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if let Some(dir) = pictures_dir() {
+            solidcraft_engine::slicer_files::sweep(&dir, std::time::SystemTime::now(), KEEP_PICTURES);
+        }
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -166,8 +199,11 @@ fn cached(key: &str) -> Option<egui::ColorImage> {
     if std::fs::metadata(&path).ok()?.len() > 512 * 1024 {
         return None;
     }
-    let bytes = std::fs::read(path).ok()?;
-    decode_thumbnail(bytes)
+    let bytes = std::fs::read(&path).ok()?;
+    let img = decode_thumbnail(bytes)?;
+    // A picture still in use is not old: [`clean_old_pictures`] goes by this time.
+    let _ = std::fs::File::options().write(true).open(&path).and_then(|f| f.set_modified(std::time::SystemTime::now()));
+    Some(img)
 }
 
 fn decode_thumbnail(bytes: Vec<u8>) -> Option<egui::ColorImage> {
@@ -205,7 +241,7 @@ fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] ident
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = identity.filter(|p| cache_path(key).as_ref() == Some(p)) {
         let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-        if let Some(bytes) = solidcraft_engine::render::png(THUMB[0], THUMB[1], rgba)
+        if let Some(bytes) = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba)
             && let Some(dir) = path.parent()
             && std::fs::create_dir_all(dir).is_ok()
         {
@@ -383,6 +419,7 @@ fn start_jobs(h: &mut HomeState) {
     let (tx, rx) = std::sync::mpsc::channel();
     let stop = h.stop.clone();
     let spawned = std::thread::Builder::new().name("thumbnails".into()).spawn(move || {
+        clean_old_pictures();
         // Prefer local PNGs; even the metadata checks belong off the window thread.
         keys.sort_by_key(|k| !cache_path(k).is_some_and(|p| p.exists()));
         let Some(cold) = read_pictures(keys, &tx) else { return };
@@ -633,7 +670,7 @@ enum FileAction {
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     poll(app, ui.ctx());
     let file_menu_open = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::unique("sc_file_menu"))).unwrap_or(false);
-    let interactive = !app.file_picker_busy() && !app.file_load.busy() && !file_menu_open;
+    let interactive = !app.file_picker_busy() && !app.file_load_holds() && !file_menu_open;
     // Help windows draw before Home; remember their prior visibility so one Escape closes only the window.
     let had_help_window = ui.ctx().memory(|memory| {
         ["sc_about", "sc_crash_reports"]
@@ -643,7 +680,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
     if interactive
         && !had_help_window
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !app.help.about
         && !app.crashes.open
         && !app.help.menu
@@ -656,7 +693,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if interactive
         && !had_help_window
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !app.help.about
         && !app.crashes.open
         && !egui::Popup::is_any_open(ui.ctx())
@@ -849,10 +886,17 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     } else {
         friendly_path(path).into()
     };
-    let mut menu =
-        vec![start_page::MenuEntry { label: app.tr_label("Remove from list").into(), icon: "delete", chosen: FileAction::ForgetRecent(index) }];
+    let mut menu = vec![start_page::MenuEntry {
+        label: app.tr_label("Remove from list").into(),
+        icon: "delete".into(),
+        chosen: FileAction::ForgetRecent(index),
+    }];
     if !cfg!(target_arch = "wasm32") {
-        menu.push(start_page::MenuEntry { label: app.tr_label("Show in folder").into(), icon: "folder", chosen: FileAction::ShowInFolder(index) });
+        menu.push(start_page::MenuEntry {
+            label: app.tr_label("Show in folder").into(),
+            icon: "folder".into(),
+            chosen: FileAction::ShowInFolder(index),
+        });
     }
     start_page::Recent {
         title,
@@ -968,6 +1012,7 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         ("mesh", "Mesh", Some("home.export_mesh_hint"), FileAction::Mesh),
         ("view_dxf", "DXF", None, FileAction::ViewDxf),
         ("obj", "OBJ", None, FileAction::Export("obj")),
+        ("glb", "GLB", None, FileAction::Export("glb")),
         ("urdf", "URDF", None, FileAction::Export("urdf")),
         ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
@@ -1178,7 +1223,7 @@ mod tests {
             session.run_script(&script).unwrap();
             let image = thumbnail(&session).unwrap();
             let rgba = image.pixels.iter().flat_map(|p| p.to_srgba_unmultiplied()).collect();
-            let png = solidcraft_engine::render::png(THUMB[0], THUMB[1], rgba).unwrap();
+            let png = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap();
             std::fs::write(dir.join(format!("{i}.png")), png).unwrap();
             hashes.push(format!("{:x}", Sha256::digest(serde_json::to_vec(&script).unwrap())));
             eprintln!("{}: {:.3} s", sample.name, began.elapsed().as_secs_f64());
@@ -1240,6 +1285,41 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         assert!(decode_thumbnail(vec![0; 600_000]).is_none());
         assert!(decode_thumbnail(vec![0; 24]).is_none());
+    }
+
+    /// A picture Home still reads is kept by the sweep of old pictures; one no design reads any
+    /// more (the design was saved again, so its identity changed) goes once it is old.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn reading_a_picture_keeps_it_from_the_sweep_of_old_ones() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let own = std::env::temp_dir().join(format!("solidcraft-kept-pictures-{}-{nonce}", std::process::id()));
+        TEST_PICTURES.with(|d| *d.borrow_mut() = Some(own.clone()));
+        let design = std::env::temp_dir().join(format!("solidcraft-kept-thumb-{}-{nonce}.sc", std::process::id()));
+        std::fs::write(&design, b"design").unwrap();
+        let key = design.to_string_lossy().into_owned();
+        let png = cache_path(&key).unwrap();
+        assert!(png.starts_with(pictures_dir().unwrap()));
+        std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+        let rgba = vec![128u8; THUMB[0] * THUMB[1] * 4];
+        std::fs::write(&png, solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap()).unwrap();
+        let age = |png: &std::path::Path| std::fs::metadata(png).unwrap().modified().unwrap().elapsed().unwrap_or_default();
+        let make_old = |png: &std::path::Path| {
+            let then = std::time::SystemTime::now() - 2 * KEEP_PICTURES;
+            std::fs::File::options().write(true).open(png).unwrap().set_modified(then).unwrap();
+        };
+        let sweep = || solidcraft_engine::slicer_files::sweep(png.parent().unwrap(), std::time::SystemTime::now(), KEEP_PICTURES);
+        make_old(&png);
+        assert!(cached(&key).is_some());
+        assert!(age(&png) < KEEP_PICTURES, "reading the picture marks it as in use");
+        sweep();
+        assert!(png.exists(), "a picture in use is kept");
+        make_old(&png);
+        sweep();
+        assert!(!png.exists(), "a picture nothing read for a month goes");
+        std::fs::remove_file(design).unwrap();
+        std::fs::remove_dir_all(own).unwrap();
+        TEST_PICTURES.with(|d| *d.borrow_mut() = None);
     }
 
     /// STEP opens deliberately have no save path, but their source still gets a cache entry.
@@ -1449,7 +1529,7 @@ mod tests {
         assert!(h.app.home.open);
         let gear = crate::scenario::handle_at("titlebar:preferences").unwrap();
         h.call("ui.click", serde_json::json!({"x": gear.x, "y": gear.y}));
-        assert!(h.app.prefs_window.open && h.app.home.open);
+        assert!(h.app.prefs_window.shell.open && h.app.home.open);
         let shown = |h: &crate::scenario::Harness| {
             h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::unique("sc_prefs"))))
         };
@@ -1460,7 +1540,7 @@ mod tests {
         // Home › Keyboard Shortcuts opens the same window at its page.
         h.app.keymap.open = true;
         h.frames(2);
-        assert!(shown(&h) && h.app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS && h.app.home.open);
+        assert!(shown(&h) && h.app.prefs_window.shell.section == crate::prefs::PAGE_SHORTCUTS && h.app.home.open);
     }
 
     fn click_file(h: &mut crate::scenario::Harness, id: &str) {
@@ -1525,6 +1605,14 @@ mod tests {
         assert!(!h.app.home.open);
         assert!(h.dir.join(format!("{}.json", h.app.session.doc.name)).is_file());
         assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
+        // The GLB tile (#1553) writes a binary glTF file of the bodies.
+        h.app.home.show(0);
+        click_file(&mut h, "home:export");
+        click_file(&mut h, "home:export:glb");
+        h.settle();
+        let glb = std::fs::read(h.dir.join(format!("{}.glb", h.app.session.doc.name))).unwrap_or_default();
+        assert!(glb.starts_with(b"glTF"), "{} bytes", glb.len());
+        assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
     }
 
     #[test]
@@ -1572,7 +1660,7 @@ mod tests {
         h.app.home.show(0);
         assert_eq!(solidcraft_ui_text::tr("home.settings"), solidcraft_ui_text::tr("ui.preferences"), "one name for the window");
         click_file(&mut h, "home:settings");
-        assert!(h.app.prefs_window.open, "the entry opens Preferences");
+        assert!(h.app.prefs_window.shell.open, "the entry opens Preferences");
     }
 
     #[test]

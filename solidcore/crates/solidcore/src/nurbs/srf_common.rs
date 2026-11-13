@@ -16,7 +16,7 @@
 //! - The output surface is returned as a new [`Surface`] (upstream fills the caller's
 //!   `NL_SURFACE`, allocating it when NULL, or reuses pre-allocated storage that is
 //!   large enough). The `NL_STACKS` arguments have no counterpart.
-//! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number
 //!   instead of a flag plus the global `NL_ERROR` record. The `dir` flag is a
 //!   [`Direction`]; [`Direction::UV`] takes upstream's `default:` branch
 //!   (`NL_CAL_ERR`). The conic type is a [`ConicType`], so an unknown flag cannot be
@@ -30,7 +30,7 @@
 //!   `plan/findings.md`); [`revolved_srf`] keeps all weights.
 //! - `NL_MTOL` is [`MODEL_TOL`].
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::{conic_data, ConicType, Curve};
 use crate::nurbs::crv_common::{circ_arc, circ_weights, Arc};
@@ -44,10 +44,6 @@ const OP_EXTRUDE: &str = "nurbs::srf_common::extrude_crv";
 const OP_CYLCONE: &str = "nurbs::srf_common::cyl_cone";
 const OP_RULED: &str = "nurbs::srf_common::ruled_srf";
 const OP_REVOLVED: &str = "nurbs::srf_common::revolved_srf";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
@@ -100,14 +96,14 @@ pub fn corner_pts(p00: Vec3, p10: Vec3, p01: Vec3, p11: Vec3) -> Result<Surface>
 ///
 /// # Errors
 ///
-/// [`NlibCode::Call`] for [`Direction::UV`] (before touching `cur`),
-/// [`NlibCode::Geometry`] when `w` cannot be normalised.
+/// [`NurbsFailure::CallFailed`] for [`Direction::UV`] (before touching `cur`),
+/// [`NurbsFailure::Geometry`] when `w` cannot be normalised.
 pub fn extrude_crv(cur: &mut Curve, w: Vec3, d: f64, dir: Direction) -> Result<Surface> {
     // Get highest indexes.
     let linear_in_u = match dir {
         Direction::U => true,
         Direction::V => false,
-        Direction::UV => return Err(nlib(OP_EXTRUDE, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP_EXTRUDE, NurbsFailure::CallFailed)),
     };
 
     // Prepare for extrusion.
@@ -175,8 +171,8 @@ pub struct CylCone {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Call`] when both radii are at most [`MODEL_TOL`] or for
-/// [`Direction::UV`], [`NlibCode::Geometry`] when `x × y` cannot be normalised, and
+/// [`NurbsFailure::CallFailed`] when both radii are at most [`MODEL_TOL`] or for
+/// [`Direction::UV`], [`NurbsFailure::Geometry`] when `x × y` cannot be normalised, and
 /// the errors of [`circ_arc`].
 pub fn cyl_cone(cc: &CylCone, ctp: ConicType, dir: Direction) -> Result<Surface> {
     let CylCone {
@@ -192,7 +188,7 @@ pub fn cyl_cone(cc: &CylCone, ctp: ConicType, dir: Direction) -> Result<Surface>
 
     // Get bottom and top circles.
     if rb <= MODEL_TOL && rt <= MODEL_TOL {
-        return Err(nlib(OP_CYLCONE, NlibCode::Call));
+        return Err(SolidError::nurbs(OP_CYLCONE, NurbsFailure::CallFailed));
     }
     let (z, _) = normalize(x.cross(y))?;
     let a = pt_along_vector(c, h, z);
@@ -218,7 +214,7 @@ pub fn cyl_cone(cc: &CylCone, ctp: ConicType, dir: Direction) -> Result<Surface>
 
     // Get local notations (the top circle's when there is one, as upstream).
     let Some(cur) = cur_t.as_ref().or(cur_b.as_ref()) else {
-        return Err(nlib(OP_CYLCONE, NlibCode::Call));
+        return Err(SolidError::nurbs(OP_CYLCONE, NurbsFailure::CallFailed));
     };
     let (n, p) = (cur.n(), cur.degree());
     let knots = cur.knots().to_vec();
@@ -227,7 +223,7 @@ pub fn cyl_cone(cc: &CylCone, ctp: ConicType, dir: Direction) -> Result<Surface>
     let circle_in_u = match dir {
         Direction::U => true,
         Direction::V => false,
-        Direction::UV => return Err(nlib(OP_CYLCONE, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP_CYLCONE, NurbsFailure::CallFailed)),
     };
 
     let bw = cur_b.as_ref().map(Curve::cpts);
@@ -238,12 +234,12 @@ pub fn cyl_cone(cc: &CylCone, ctp: ConicType, dir: Direction) -> Result<Surface>
         let qb = match (bw, tw) {
             (Some(bw), _) => get(bw, i, OP_CYLCONE)?,
             (None, Some(tw)) => CPoint::weighted(c, get(tw, i, OP_CYLCONE)?.w),
-            (None, None) => return Err(nlib(OP_CYLCONE, NlibCode::Call)),
+            (None, None) => return Err(SolidError::nurbs(OP_CYLCONE, NurbsFailure::CallFailed)),
         };
         let qt = match (tw, bw) {
             (Some(tw), _) => get(tw, i, OP_CYLCONE)?,
             (None, Some(bw)) => CPoint::weighted(a, get(bw, i, OP_CYLCONE)?.w),
-            (None, None) => return Err(nlib(OP_CYLCONE, NlibCode::Call)),
+            (None, None) => return Err(SolidError::nurbs(OP_CYLCONE, NurbsFailure::CallFailed)),
         };
         bottom.push(qb);
         top.push(qt);
@@ -267,7 +263,7 @@ pub fn cyl_cone(cc: &CylCone, ctp: ConicType, dir: Direction) -> Result<Surface>
 /// # Errors
 ///
 /// The errors of [`make_compatible`] (the curves keep the changes made before),
-/// then [`NlibCode::Call`] for [`Direction::UV`].
+/// then [`NurbsFailure::CallFailed`] for [`Direction::UV`].
 pub fn ruled_srf(cur_a: &mut Curve, cur_b: &mut Curve, dir: Direction) -> Result<Surface> {
     // Make boundary curves compatible.
     let mut cur = [cur_a.clone(), cur_b.clone()];
@@ -286,7 +282,7 @@ pub fn ruled_srf(cur_a: &mut Curve, cur_b: &mut Curve, dir: Direction) -> Result
     let linear_in_u = match dir {
         Direction::U => true,
         Direction::V => false,
-        Direction::UV => return Err(nlib(OP_RULED, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP_RULED, NurbsFailure::CallFailed)),
     };
 
     // Get dimensionality of curves (surface should be 3D).
@@ -328,9 +324,9 @@ pub fn ruled_srf(cur_a: &mut Curve, cur_b: &mut Curve, dir: Direction) -> Result
 ///
 /// # Errors
 ///
-/// `InvalidInput` for an angle [`conic_data`] rejects, [`NlibCode::Geometry`] when
-/// `t` cannot be normalised, [`NlibCode::Input`] when a point cannot be projected onto
-/// the axis, [`NlibCode::Call`] when every profile point lies on the axis, and the
+/// `InvalidInput` for an angle [`conic_data`] rejects, [`NurbsFailure::Geometry`] when
+/// `t` cannot be normalised, [`NurbsFailure::Input`] when a point cannot be projected onto
+/// the axis, [`NurbsFailure::CallFailed`] when every profile point lies on the axis, and the
 /// errors of [`circ_weights`] / [`circ_arc`].
 pub fn revolved_srf(cur: &mut Curve, s: Vec3, t: Vec3, al: f64, ctp: ConicType) -> Result<Surface> {
     // Get number of arcs.
@@ -361,7 +357,7 @@ pub fn revolved_srf(cur: &mut Curve, s: Vec3, t: Vec3, al: f64, ctp: ConicType) 
         let wp = pj.w;
 
         let LinePlaneIsect::Hit { p: c, .. } = project_pt_line(lst, a)? else {
-            return Err(nlib(OP_REVOLVED, NlibCode::Input));
+            return Err(SolidError::nurbs(OP_REVOLVED, NurbsFailure::Input));
         };
         let x = a - c;
         let rad = x.length();
@@ -394,11 +390,11 @@ pub fn revolved_srf(cur: &mut Curve, s: Vec3, t: Vec3, al: f64, ctp: ConicType) 
     }
 
     if allrzero {
-        return Err(nlib(OP_REVOLVED, NlibCode::Call));
+        return Err(SolidError::nurbs(OP_REVOLVED, NurbsFailure::CallFailed));
     }
 
     // Get the knots.
-    let u = circle_knots.ok_or_else(|| nlib(OP_REVOLVED, NlibCode::Call))?;
+    let u = circle_knots.ok_or_else(|| SolidError::nurbs(OP_REVOLVED, NurbsFailure::CallFailed))?;
     let v = cur.knots().to_vec();
     let q = cur.degree();
     Surface::new(net, p, q, u, v).map_err(|_| invalid(OP_REVOLVED, "empty profile"))
@@ -509,10 +505,7 @@ mod tests {
         );
         assert!(matches!(
             e,
-            Err(SolidError::Nlib {
-                code: NlibCode::Call,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::CallFailed))
         ));
     }
 }

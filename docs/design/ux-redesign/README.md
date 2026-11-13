@@ -65,7 +65,7 @@ options and collapsed sections, so commands with 10 to 20 options fit.
 - The earlier sketch variant with tab locks and a Finish menu was set aside as too complex for a
   first version, and is not part of this proposal.
 - The icons in the mockups are the reviewed SVGs from the icon system in PR #853
-  (`assets/icons/ui/design/svg/`), coloured with its accents from `palette.toml`: Sketch tools in
+  (`crates/look/icons/design/svg/`), coloured with its accents from `palette.toml`: Sketch tools in
   the Sketch green, constraints in red, everything else in the Solid blue. The greyed Simulation and
   Manufacture entries in the switcher mockup use placeholder icons and are not part of this work. This proposal does not
   implement or change any app icons.

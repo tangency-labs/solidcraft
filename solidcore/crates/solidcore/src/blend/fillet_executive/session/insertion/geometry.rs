@@ -69,7 +69,7 @@ impl SurfaceBinding {
             .face_mut(face)?
             .surface
             .as_mut()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
         let type_code = surface.type_code();
         let key = context.geometry_key(surface.notify_identity_slot())?;
         Ok(Self {
@@ -90,7 +90,7 @@ impl SurfaceBinding {
             .face(self.face)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
         if surface.notify_key() != Some(self.geometry.key)
             || surface.type_code() != self.geometry.type_code
         {
@@ -279,7 +279,7 @@ impl<'a> InsertionGeometry<'a> {
             .notifications
             .as_mut()
             .ok_or_else(|| invalid("missing insertion notification context"))?;
-        crate::topology::brep::p3::seed_records(notifications.records, body, &key_of);
+        crate::topology::brep::p3::seed_records_since(notifications.records, body, &key_of);
         let mut env = crate::topology::edge::NotifyEnv {
             records: notifications.records,
             attributes: notifications.attributes,

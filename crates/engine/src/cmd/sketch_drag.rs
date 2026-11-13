@@ -171,6 +171,15 @@ pub(super) fn drag_entity(
     let Some((path, hold, n, short)) = prepare(sk, e, with, from, to) else {
         return (Dragged::default(), Left::Unsolved);
     };
+    // Splines whose tangent handles nobody turned stay the natural curve through their moved fit
+    // points: their handles follow each step. Dragging a handle itself turns it.
+    let natural: Vec<usize> = {
+        let moved: Vec<usize> = path.points().collect();
+        sk.natural_handle_splines()
+            .into_iter()
+            .filter(|&c| !matches!(sk.curves.get(c).map(|x| &x.kind), Some(CurveKind::Spline { handles, .. }) if handles.iter().any(|h| moved.contains(h))))
+            .collect()
+    };
     // A point dragged alone that ends tangent lines: each step first tries with their other ends
     // held too, and only when that can't be solved lets them move. Unheld, the solver spread its
     // correction over every free point, so the line's far end moved (towards the dragged one)
@@ -196,6 +205,7 @@ pub(super) fn drag_entity(
     // Whether the sketch follows step `t` (with the tangent lines' far ends held, else free).
     let held = |sk: &mut Sketch, last: &Geometry, t: f64, budget: &mut Budget| {
         path.apply(sk, t);
+        sk.renew_natural_handles(&natural);
         let kept = keep.as_ref().is_some_and(|keep| {
             let ok = counted_solve(sk, keep, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok()
                 && !last.sweep_wrapped(sk)
@@ -203,6 +213,7 @@ pub(super) fn drag_entity(
             if !ok {
                 last.restore(sk);
                 path.apply(sk, t);
+                sk.renew_natural_handles(&natural);
             }
             ok
         });

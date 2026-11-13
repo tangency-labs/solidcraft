@@ -305,14 +305,47 @@ fn four_sections_join_at_c3() {
         let p = |k: usize| sections[k][s].p;
         let d1 = (p(i + 1) - p(i - 1)) * (1.0 / (2.0 * h));
         let d2 = (p(i + 1) - p(i) * 2.0 + p(i - 1)) * (1.0 / (h * h));
-        let d3 = if i == 1 {
-            (p(0) * -1.0 + p(1) * 3.0 - p(2) * 3.0 + p(3)) * (1.0 / (h * h * h))
-        } else {
-            (p(0) - p(1) * 3.0 + p(2) * 3.0 - p(3)) * (1.0 / (h * h * h))
-        };
+        // Both joints read the same four sections, ahead of the first and behind the second, so
+        // they hold the same third difference (#13447).
+        let d3 = (p(0) * -1.0 + p(1) * 3.0 - p(2) * 3.0 + p(3)) * (1.0 / (h * h * h));
         assert!((left1 - d1).len() < 1e-7 * (1.0 + d1.len()), "the tangent is the secant: {left1:?} vs {d1:?}");
         assert!((left2 - d2).len() < 1e-4 * (1.0 + d2.len()), "the curvature is the second difference: {left2:?} vs {d2:?}");
         assert!((left3 - d3).len() < 2e-2 * (1.0 + d3.len()), "the change of curvature is the third difference: {left3:?} vs {d3:?}");
+    }
+}
+
+/// Five sections of the cubic cylinder `(2 v, t, t³)` at `t = 0, ¼, …, 1`, held at G0. A third
+/// difference is exact on a cubic, so at every interior section (the forward stencil at the second,
+/// the central one at the middle, the backward one at the last-but-one) the face's change of
+/// curvature along the run is `d³/du³ = (0, 0, 6)` at every station (#13447: the backward one held
+/// `(0, 0, −6)`).
+#[test]
+fn interior_sections_hold_a_cubics_third_derivative() {
+    let n = 3;
+    let sections: Vec<Vec<Frame>> = (0..5)
+        .map(|i| {
+            let t = i as f64 / 4.0;
+            let leave = if i == 4 { Vec3::new(0.0, -1.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+            (0..n)
+                .map(|s| {
+                    let v = s as f64 / (n - 1) as f64;
+                    Frame { p: Vec3::new(2.0 * v, t, t * t * t), leave, bend: Vec3::ZERO, bend_change: Vec3::ZERO }
+                })
+                .collect()
+        })
+        .collect();
+    let body = loft_blend(&sections, [Continuity::G0, Continuity::G0], [0.0, 0.0], n).unwrap();
+    assert_runs_through(&body, &sections, n);
+    let want = Vec3::new(0.0, 0.0, 6.0);
+    for (u, stencil) in [(0.25, "forward"), (0.5, "central"), (0.75, "backward")] {
+        for s in 0..n {
+            let v = s as f64 / (n - 1) as f64;
+            // Read from both sides: the joint is C³, so they agree as far as the step tells.
+            for backwards in [true, false] {
+                let (_, _, _, d3) = run_derivs(&body, u, v, backwards, 1e-4);
+                assert!((d3 - want).len() < 2e-2 * (1.0 + want.len()), "the {stencil} difference at ({u}, {v}): {d3:?}");
+            }
+        }
     }
 }
 

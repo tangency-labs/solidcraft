@@ -149,7 +149,19 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>>
             return Err(SolidError::invalid_input("smlib_boolean", "no operand"));
         };
         let solid_in = p2::is_manifold_solid(&ca)? && p2::is_manifold_solid(&cb)?;
-        let r = sm::boolean(k, ca, cb, operation(op))?;
+        let mut r = sm::boolean(k, ca, cb, operation(op))?;
+        // Grow the result's tolerances to cover marginal edge/vertex, vertex/face and
+        // edge/face gaps, so an otherwise-sound union is not refused as "Bad Gap" for a
+        // sub-micron gap (SolidCraft issue #10, fuzzer seed 73). Tolerances only grow:
+        // a body that already passes is unchanged; a marginal failure becomes sound.
+        // Offset and shell already grow their results' tolerances this way.
+        solidcore::topology::brep::validation::validate_and_update_tolerances(
+            k,
+            &mut r.result,
+            false,
+            None,
+            solidcore::topology::brep::validation::CheckLevel::Level2 as u8,
+        )?;
         finish(r.result, solid_in, true)
     })?;
     result(d, Ok(None))

@@ -30,7 +30,7 @@
 //!   no longer changes the parameter) or for more than [`MAX_PERIOD_SHIFTS`] shifts,
 //!   the Rust function returns [`SolidError::NotConverged`].
 //! - `N_SrfOffsetGetMaxDeriv` clears and skips any error of `N_SrfEvalPtNormalDeriv`;
-//!   the port skips [`SolidError::Nlib`] errors and passes on the others (which mark
+//!   the port skips [`SolidError::Failed`] errors and passes on the others (which mark
 //!   inputs upstream would read outside its arrays with).
 //! - `N_CreateSkinSpine`: the flags become types (`eDerivFlag` a [`SkinDerivs`], the
 //!   `bAlignProfiles` / `sZ0` / `iSubDivLevel` triple an `Option<SpineAlignment>`, a
@@ -52,7 +52,7 @@
 //!   overflows is `InvalidInput`; alignment parameters that cannot be allocated are
 //!   `NL_MEM_ERR` (upstream's failed `N_AllocReal1dArray`).
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::crv_adv::p1::{CurveEnd, BARE_FLAG_REASON};
 use crate::nurbs::crv_basic::{curves_are_coincident, Boundary, Curve};
@@ -157,7 +157,7 @@ pub fn offset_get_max_deriv(sur: &Surface, d: f64) -> Result<MaxSecondDerivs> {
 
                     let nd = match eval_pt_normal_deriv(patch, ua, vb, Side::Left, Side::Left) {
                         Ok(nd) => nd,
-                        Err(SolidError::Nlib { .. }) => continue,
+                        Err(e) if e.is_nurbs_failure() => continue,
                         Err(e) => return Err(e),
                     };
 
@@ -477,9 +477,9 @@ enum SpineData {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for a degree the mode does not allow (`None`: above `k`;
+/// [`NurbsFailure::Input`] for a degree the mode does not allow (`None`: above `k`;
 /// `Ends`: outside `2..=k + 2`; `All`: outside `2..=3`);
-/// [`NlibCode::Call`] for [`Direction::UV`]; [`NlibCode::Weight`] when a weight of
+/// [`NurbsFailure::CallFailed`] for [`Direction::UV`]; [`NurbsFailure::Weight`] when a weight of
 /// the surface is outside `[WEIGHT_MIN, WEIGHT_MAX]`; the errors of compatibility,
 /// alignment, evaluation and interpolation; `InvalidInput` for no profiles, fewer
 /// spine parameters than profiles, or profiles of different sizes.
@@ -500,17 +500,17 @@ pub fn create_skin_spine(
     match opts.derivs {
         SkinDerivs::None => {
             if deg > k {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
         }
         SkinDerivs::Ends => {
             if deg < 2 || deg > k + 2 {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
         }
         SkinDerivs::All => {
             if !(2..=3).contains(&deg) {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
         }
     }
@@ -585,7 +585,7 @@ pub fn create_skin_spine(
     let udir = match opts.dir {
         Direction::U => true,
         Direction::V => false,
-        Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
     };
     let nc = first.n();
     let deg_c = first.degree();
@@ -816,7 +816,7 @@ fn transpose(a: &[Vec<CPoint>]) -> Vec<Vec<CPoint>> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when the knot vectors differ in length or in any value;
+/// [`NurbsFailure::Input`] when the knot vectors differ in length or in any value;
 /// `InvalidInput` when `vfield` has fewer control points than `cur`.
 pub fn cross_boundary_derivs_vector_field(
     cur: &Curve,
@@ -829,10 +829,10 @@ pub fn cross_boundary_derivs_vector_field(
     let uk = cur.knots();
     let vk = vfield.knots();
     if uk.len() != vk.len() {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     if uk.iter().zip(vk).any(|(a, b)| a != b) {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     let pw = cur.cpts();
@@ -917,13 +917,7 @@ mod tests {
         )
         .unwrap();
         let e = cross_boundary_derivs_vector_field(&cur, &vf, Boundary::Left).unwrap_err();
-        assert!(matches!(
-            e,
-            SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            }
-        ));
+        assert!(matches!(e.nurbs_failure(), Some(NurbsFailure::Input)));
     }
 
     #[test]
@@ -983,13 +977,7 @@ mod tests {
             ..opts
         };
         let e = create_skin_spine(&mut profiles, &spine, &[0.0, 0.5, 1.0], &opts).unwrap_err();
-        assert!(matches!(
-            e,
-            SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            }
-        ));
+        assert!(matches!(e.nurbs_failure(), Some(NurbsFailure::Input)));
     }
 
     #[test]
