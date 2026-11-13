@@ -135,13 +135,21 @@ pub(super) fn chord(s: &BSplineSurface, a: Point2, b: Point2) -> Result<(f64, f6
 
 fn endpoint_chord(s: &BSplineSurface, a: Point2, b: Point2) -> Result<(f64, f64)> {
     let origin = s.evaluate_point(a)?;
-    let (x, ex) = point(s, a, origin)?;
-    let (y, ey) = point(s, b, origin)?;
+    let x = point(s, a, origin)?;
+    let y = point(s, b, origin)?;
+    Ok(chord_between(x, y))
+}
+
+/// The chord between two certified points, in the frame both were measured in.
+///
+/// The endpoints may come from different surfaces: an analytic extension is measured across
+/// the source's side and the widened form's end, each at its own parameter. `gamma_8`
+/// covers the coordinate differences, three squares, two sums and sqrt; adding the two
+/// evaluation errors uses the triangle inequality, not independence (Higham §3).
+pub(super) fn chord_between((x, ex): (Vec3, f64), (y, ey): (Vec3, f64)) -> (f64, f64) {
     let chord = (y - x).length();
-    // `gamma_8`: coordinate differences, three squares, two sums and sqrt; adding the
-    // two evaluation errors uses the triangle inequality, not independence (Higham §3).
     let err = (ex + ey + gamma(8) * (x.length() + y.length() + chord)) * (1.0 + gamma(8));
-    Ok((chord, err))
+    (chord, err)
 }
 
 /// A circle's short arc, or its complement for `long`, from a chord enclosure. Propagate

@@ -42,7 +42,7 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use super::sides::{ExtendedSides, SideExtension};
-use super::{below_resolution, keeps, ExtendRefusal, Local};
+use super::{below_resolution, keeps, Continuity, ExtendRefusal, Local};
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
@@ -54,7 +54,7 @@ use crate::nurbs::srf_basic::Direction;
 use crate::nurbs::srf_tool::p1::extract_iso_crv;
 use crate::surface::ball_patch::BallPatch;
 use crate::surface::implicit::{lies_on, Implicit};
-use crate::surface::side::{Across, BoxSide};
+use crate::surface::side::{Across, BoxSide, Bracket};
 use crate::surface::surface::Surface;
 use std::f64::consts::PI;
 
@@ -258,7 +258,200 @@ struct Measure {
 /// result, its across length, whether the cap stopped it, and its construction bound;
 /// `None` where the length asked (the distance, or the length cap below it) is below the
 /// side's resolution ([`below_resolution`]).
+///
+/// The world-frame continuation is tried first and kept where it certifies, so a result
+/// that worked before does not move. Only where its position-sized bound or rounding
+/// cannot certify the ask is the local-frame continuation used.
 fn extend_side(
+    cur: &BSplineSurface,
+    side: BoxSide,
+    c: Vec3,
+    r: f64,
+    z: Vec3,
+    cap: Cap,
+    distance: f64,
+) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
+    match extend_side_world(cur, side, c, r, z, cap, distance) {
+        Err(SolidError::ExtendRefused {
+            refusal: ExtendRefusal::NotExact,
+            ..
+        }) => extend_side_local(cur, side, c, r, z, cap, distance),
+        other => other,
+    }
+}
+
+/// The world-frame continuation: the source's own net in world coordinates. Its rounding is
+/// sized on the part's position, so a far ask that cannot be certified falls to
+/// [`extend_side_local`].
+fn extend_side_world(
+    cur: &BSplineSurface,
+    side: BoxSide,
+    c: Vec3,
+    r: f64,
+    z: Vec3,
+    cap: Cap,
+    distance: f64,
+) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
+    let net = cur
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let source = Local::of(net, side)?;
+    let dom = knot_box(cur)?;
+    let middle = side.point(&dom, 0.5);
+    let made = |e: f64| -> Result<Option<(BSplineSurface, f64)>> {
+        let Some(g) = source.extended(Continuity::Natural, e)? else {
+            return Ok(None);
+        };
+        if !g.is_finite() {
+            return Ok(None);
+        }
+        let bound = g.bound();
+        let out = g.surface(side)?;
+        if !keeps(net, &out, side)? {
+            return Err(SolidError::port_invariant(
+                OP,
+                "the extension moved the source's net",
+            ));
+        }
+        Ok(Some((BSplineSurface::from_gw_nurb(&out), bound)))
+    };
+    // the iso across the side at its middle, from the side (0) to the extension's end (1)
+    let from_end = side.at(&dom);
+    let at = |s: &BSplineSurface, f: f64| -> Point2 {
+        let end = knot_box(s).map_or(from_end, |d| side.at(&d));
+        let from = side.at(&dom);
+        let x = from + f * (end - from);
+        if side.is_u() {
+            Point2::new(x, middle.y)
+        } else {
+            Point2::new(middle.x, x)
+        }
+    };
+    // the iso's circle, its plane through the source's own points (`source_iso`), its
+    // normal turning from the source's far end through the side, outward
+    let (x_far, x_half) = source_iso(cur, &dom, side, middle)?;
+    let x_side = cur.evaluate_point(middle)?;
+    let n = {
+        let n = (x_half - x_far).cross(x_side - x_half);
+        let len = n.length();
+        if len.is_nan() || len <= 0.0 {
+            return Err(SolidError::surface_failed(
+                OP,
+                "the side's normal has no direction",
+            ));
+        }
+        n * (1.0 / len)
+    };
+    let measure = |s: &BSplineSurface| -> Result<Measure> {
+        let x0 = s.evaluate_point(at(s, 0.0))? - c;
+        let x1 = s.evaluate_point(at(s, 1.0))? - c;
+        let cc = n * n.dot(x0);
+        let (u0, u1) = (x0 - cc, x1 - cc);
+        let mut phi = u0.cross(u1).dot(n).atan2(u0.dot(u1));
+        if phi < 0.0 {
+            phi += 2.0 * PI;
+        }
+        let (t0, t1) = (x0 - z * x0.dot(z), x1 - z * x1.dot(z));
+        Ok(Measure {
+            length: u0.length() * phi,
+            rounding: 0.0,
+            turn: angle(t0, t1),
+        })
+    };
+    let value = |e: f64, turn: bool| -> Result<Option<f64>> {
+        Ok(match made(e)? {
+            Some((s, _)) => {
+                let m = measure(&s)?;
+                Some(if turn { m.turn } else { m.length })
+            }
+            None => None,
+        })
+    };
+    // the length across an extension whose construction bound is `bound`, with the closed
+    // form's rounding (the evaluations at the points' size, the cross products, the atan2)
+    // and the points' construction bound through the angle
+    let size = c.length() + r;
+    let across_of = |s: &BSplineSurface, bound: f64| -> Result<Across> {
+        let length = measure(s)?.length;
+        let rounding = gamma(64) * (length + size) + 4.0 * bound;
+        Ok(Across {
+            enclosure: Bracket {
+                lower: (length - rounding).max(0.0),
+                upper: length + rounding,
+            },
+            truncation: 0.0,
+            rounding,
+            converged: true,
+            // a closed form at the points' size: its rounding part is sized on the part
+            resolution: 0.0,
+        })
+    };
+    let range = source.range()?;
+    let least = source.least_step()?;
+    let asked = match cap {
+        Cap::Arc(arc) => distance.min(r * arc),
+        Cap::Round { length, .. } => distance.min(length),
+    };
+    if let Some((g, bound)) = made(least)? {
+        if below_resolution(Some(&across_of(&g, bound)?), bound, asked) {
+            return Ok(None);
+        }
+    }
+    // the extension parameter, the length it was solved to (the distance or its cap; none
+    // where the turn's cap sets it) and whether the cap holds it short of the distance
+    let (e, goal, capped) = match cap {
+        Cap::Arc(arc) => {
+            let target = distance.min(r * arc);
+            (
+                reach(&|e| value(e, false), target, range, least)?,
+                Some(target),
+                target < distance,
+            )
+        }
+        Cap::Round { length, turn } => {
+            // within the length cap and the turn's (none where the turn never gets there)
+            let at_turn = match solve(&|e| value(e, true), turn, range, least)? {
+                Reach::At(e_turn) => Some((
+                    e_turn,
+                    value(e_turn, false)?.ok_or_else(|| {
+                        SolidError::surface_failed(
+                            OP,
+                            "the extension at the turn could not be made",
+                        )
+                    })?,
+                )),
+                Reach::Short(_) => None,
+            };
+            let target = distance.min(length);
+            match at_turn {
+                Some((e_turn, l_turn)) if l_turn <= target => (e_turn, None, true),
+                _ => (
+                    reach(&|e| value(e, false), target, range, least)?,
+                    Some(target),
+                    target < distance,
+                ),
+            }
+        }
+    };
+    let (grown, bound) = made(e)?.ok_or_else(|| {
+        SolidError::surface_failed(
+            OP,
+            "the extension at the reached distance could not be made",
+        )
+    })?;
+    let across = across_of(&grown, bound)?;
+    // a length solved for is met, or the extension is refused naming a length that works
+    if goal.is_some_and(|goal| !solved_length_met(&across, bound, goal, e <= least)) {
+        return Err(refused(
+            ExtendRefusal::NotExact,
+            super::workable(Some(&across), bound),
+        ));
+    }
+    certify_circle(&grown, side, middle, c, size)?;
+    Ok(Some((grown, across, capped, bound)))
+}
+
+fn extend_side_local(
     cur: &BSplineSurface,
     side: BoxSide,
     c: Vec3,
@@ -451,7 +644,7 @@ fn extend_side(
         ));
     }
     // The certificate is sized on the sphere's own radius, not the centre's position.
-    certify_circle(&grown, side, middle, c)?;
+    certify_circle_local(&grown, side, middle, c)?;
     Ok(Some((grown, across, capped, bound)))
 }
 
@@ -594,7 +787,73 @@ fn bisect(
 /// every determinant of three spread homogeneous control points (from the centre `c`) and
 /// a fourth is zero within its rounding (`size` the points' absolute size), and the three
 /// span a plane. Refused as not exact otherwise.
-fn certify_circle(s: &BSplineSurface, side: BoxSide, middle: Point2, c: Vec3) -> Result<()> {
+fn certify_circle(
+    s: &BSplineSurface,
+    side: BoxSide,
+    middle: Point2,
+    c: Vec3,
+    size: f64,
+) -> Result<()> {
+    let net = s
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    // the iso along the side's across direction: a u-curve across a u side
+    let (t, dir) = if side.is_u() {
+        (middle.y, Direction::U)
+    } else {
+        (middle.x, Direction::V)
+    };
+    let iso = extract_iso_crv(net, t, dir)?;
+    let mut rows: Vec<[f64; 4]> = Vec::new();
+    let mut mags: Vec<f64> = Vec::new();
+    for p in iso.cpts() {
+        let w = if p.w == NOW { 1.0 } else { p.w };
+        rows.push([p.x - c.x * w, p.y - c.y * w, p.z - c.z * w, w]);
+        mags.push(p.x.abs().max(p.y.abs()).max(p.z.abs()) + (size + 1.0) * w.abs());
+    }
+    let n = rows.len();
+    let (Some(&r0), Some(&rm), Some(&rl)) = (rows.first(), rows.get(n / 2), rows.last()) else {
+        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
+    };
+    let (Some(&m0), Some(&mm), Some(&ml)) = (mags.first(), mags.get(n / 2), mags.last()) else {
+        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
+    };
+    let g = |row: [f64; 4], x: usize| row.get(x).copied().unwrap_or(0.0);
+    // the 3 x 3 minor of the three spread rows on columns i, j, l
+    let minor = |i: usize, j: usize, l: usize| -> f64 {
+        g(r0, i) * (g(rm, j) * g(rl, l) - g(rm, l) * g(rl, j))
+            - g(r0, j) * (g(rm, i) * g(rl, l) - g(rm, l) * g(rl, i))
+            + g(r0, l) * (g(rm, i) * g(rl, j) - g(rm, j) * g(rl, i))
+    };
+    let three = m0 * mm * ml;
+    // the three span a plane: a minor well past its rounding
+    let spans = [(0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)]
+        .iter()
+        .any(|&(i, j, l)| minor(i, j, l).abs() > 1e3 * 6.0 * gamma(16) * three);
+    if !spans {
+        return Err(refused(ExtendRefusal::NotExact, None));
+    }
+    let (m123, m023, m013, m012) = (
+        minor(1, 2, 3),
+        minor(0, 2, 3),
+        minor(0, 1, 3),
+        minor(0, 1, 2),
+    );
+    for (&row, &mag) in rows.iter().zip(&mags) {
+        // expansion along the fourth row; |fl(det) - det| <= gamma_K per(|A|) <= gamma_K 4!
+        // times the product of the rows' sizes
+        let det = -g(row, 0) * m123 + g(row, 1) * m023 - g(row, 2) * m013 + g(row, 3) * m012;
+        if det.abs() > gamma(32) * 24.0 * three * mag {
+            return Err(refused(ExtendRefusal::NotExact, None));
+        }
+    }
+    Ok(())
+}
+
+/// The local-frame certificate: the extraction's world-sized input budget is kept
+/// separate from the local determinant's arithmetic, so a far-away, perfectly spread
+/// plane is not read as rank-deficient.
+fn certify_circle_local(s: &BSplineSurface, side: BoxSide, middle: Point2, c: Vec3) -> Result<()> {
     let net = s
         .gw_nurb()
         .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;

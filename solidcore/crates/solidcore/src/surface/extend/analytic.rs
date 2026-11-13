@@ -407,9 +407,11 @@ fn length(f: &Frame, iso: Iso, (x_far, x_half): (Vec3, Vec3), x0: Vec3, x1: Vec3
     Ok(radius * phi)
 }
 
-/// The widened analytic path uses the same local chord and arc as the analytic's own
-/// measure: the STEP parameters select the definition's points, so no world-coordinate
-/// net subtraction or inverse mapping in the rebuilt form selects them.
+/// The widened analytic path measures the distance in the side's own frame, from the
+/// STEP parameters the construction widened: the closed-form radius and arc keep the
+/// result the same at any position. The parameters come through the polar converters, so
+/// their own rounding is in the angle and radius bounds, and a conversion that could only
+/// be solved numerically is refused as not exact.
 pub(super) fn widened_across(
     k: &Kernel,
     (source, source_dom, source_side): (&Surface, &crate::geom::extent2d::Extent2d, BoxSide),
@@ -426,29 +428,55 @@ pub(super) fn widened_across(
         Point2::new(middle.x, end)
     };
     let from = source_side.point(source_dom, 0.5);
-    let a = source.convert_uv_from_nurbs_to_step(k, from)?;
-    let b = s.convert_uv_from_nurbs_to_step(k, to)?;
     let parallel = round_the_axis(s, side) == Some(true);
-    let (radius, radius_err, delta) = match support.implicit() {
+    // a straight iso (a cone's ruling, a plane) is its chord, on the form
+    let circular = match support.implicit() {
+        Implicit::Cone { .. } => parallel,
+        Implicit::Sphere { .. } | Implicit::Torus { .. } => true,
+        Implicit::Plane { .. } => false,
+    };
+    if !circular {
+        return Ok(super::measure::across(super::measure::chord(
+            &form, middle, to,
+        )?));
+    }
+    let (a, a_exact) = source.convert_uv_from_nurbs_to_step_exact(k, from)?;
+    let (b, b_exact) = s.convert_uv_from_nurbs_to_step_exact(k, to)?;
+    // A numerical inverse is no closed form: its angle is not bounded by the conversion's
+    // rounding, so the distance across cannot be certified here.
+    if !(a_exact && b_exact) {
+        return Err(super::not_exact(None));
+    }
+    // The polar converters' own rounding, in degrees: it scales with the angles converted
+    // (up to a turn), so it is taken from both ends rather than from the difference alone.
+    let conv_x = gamma(8) * (a.x.abs() + b.x.abs());
+    let conv_y = gamma(8) * (a.y.abs() + b.y.abs());
+    let (radius, radius_err, delta, conv) = match support.implicit() {
         Implicit::Cone {
             radius, tan_angle, ..
         } => {
-            if !parallel {
-                return Ok(super::measure::across(super::measure::chord(
-                    &form, middle, to,
-                )?));
-            }
             let term = tan_angle * a.y;
             let r = radius + term;
-            (r, gamma(4) * (radius.abs() + term.abs()), b.x - a.x)
+            (
+                r,
+                gamma(4) * (radius.abs() + term.abs()) + tan_angle.abs() * conv_y.to_radians(),
+                b.x - a.x,
+                conv_x,
+            )
         }
         Implicit::Sphere { radius, .. } => {
             if parallel {
                 let latitude = a.y.to_radians();
                 let r = radius * latitude.cos();
-                (r, gamma(8) * radius * (1.0 + latitude.abs()), b.x - a.x)
+                (
+                    r,
+                    gamma(8) * radius * (1.0 + latitude.abs())
+                        + radius * latitude.sin().abs() * conv_y.to_radians(),
+                    b.x - a.x,
+                    conv_x,
+                )
             } else {
-                (radius, 0.0, b.y - a.y)
+                (radius, 0.0, b.y - a.y, conv_y)
             }
         }
         Implicit::Torus { major, minor, .. } => {
@@ -457,11 +485,13 @@ pub(super) fn widened_across(
                 let term = minor * latitude.cos();
                 (
                     major + term,
-                    gamma(12) * (major.abs() + minor * (1.0 + latitude.abs())),
+                    gamma(12) * (major.abs() + minor * (1.0 + latitude.abs()))
+                        + minor * latitude.sin().abs() * conv_y.to_radians(),
                     b.x - a.x,
+                    conv_x,
                 )
             } else {
-                (minor, 0.0, b.y - a.y)
+                (minor, 0.0, b.y - a.y, conv_y)
             }
         }
         Implicit::Plane { .. } => {
@@ -471,7 +501,7 @@ pub(super) fn widened_across(
         }
     };
     let angle = delta.to_radians().abs();
-    let angle_err = gamma(4) * angle;
+    let angle_err = gamma(4) * angle + conv.to_radians();
     Ok(super::measure::across(super::measure::circle_from_angle(
         (radius, radius_err),
         (angle, angle_err),

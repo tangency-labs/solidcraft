@@ -2720,6 +2720,69 @@ fn a_far_cone_extends_round_its_axis_by_a_tolerance_as_at_the_origin() {
     }
 }
 
+/// A sphere patch far from the origin, over longitudes far from zero, extended round its
+/// axis by a tolerance-sized distance as at the origin. The angle comes through the polar
+/// converter, so its own rounding is in the bound and an inexact conversion is refused.
+#[test]
+fn a_far_sphere_patch_extends_round_its_axis_by_a_tolerance_as_at_the_origin() {
+    use crate::surface::sphere::{Sphere, SphereOptions};
+    let kk = k();
+    for o in [0.0, 1e3, 1e5] {
+        let pl = Axis2Placement::new(Vec3::new(o, o, 0.0), Vec3::Z, Vec3::X);
+        let s = Surface::from(
+            Sphere::new(
+                &kk,
+                pl.origin(),
+                pl.x_axis(),
+                pl.y_axis(),
+                Extent2d::from_bounds(300.0, 40.0, 340.0, 60.0),
+                2.0,
+                SphereOptions::default(),
+            )
+            .unwrap(),
+        );
+        for d in [1e-4, 1e-3] {
+            let e = s
+                .extended_by_distance(&kk, &dom(&s), BoxSide::UMin, Continuity::Natural, d)
+                .unwrap_or_else(|err| panic!("at {o:e} by {d:e}: {err:?}"))
+                .unwrap_or_else(|| panic!("at {o:e} by {d:e}: not extended"));
+            meets(&e, d);
+        }
+    }
+}
+
+/// A torus patch far from the origin, over major angles far from zero, extended round its
+/// axis by a tolerance-sized distance as at the origin. Its sweep and tube conversions are
+/// both closed forms here; an inexact one is refused.
+#[test]
+fn a_far_torus_patch_extends_round_its_axis_by_a_tolerance_as_at_the_origin() {
+    use crate::surface::torus::{Torus, TorusOptions};
+    let kk = k();
+    for o in [0.0, 1e3, 1e5] {
+        let pl = Axis2Placement::new(Vec3::new(o, o, 0.0), Vec3::Z, Vec3::X);
+        let s = Surface::from(
+            Torus::new(
+                &kk,
+                pl.origin(),
+                pl.x_axis(),
+                pl.y_axis(),
+                Extent2d::from_bounds(300.0, 20.0, 340.0, 40.0),
+                6.0,
+                2.0,
+                TorusOptions::default(),
+            )
+            .unwrap(),
+        );
+        for d in [1e-3, 1e-2] {
+            let e = s
+                .extended_by_distance(&kk, &dom(&s), BoxSide::UMin, Continuity::Natural, d)
+                .unwrap_or_else(|err| panic!("at {o:e} by {d:e}: {err:?}"))
+                .unwrap_or_else(|| panic!("at {o:e} by {d:e}: not extended"));
+            meets(&e, d);
+        }
+    }
+}
+
 /// At a side's least step the solve accepts an extension that cannot be made shorter only
 /// when its length is proved to reach the distance: an enclosure that merely holds `d`
 /// (below it by more than the stop allowance) may be short and is not accepted; one whose
