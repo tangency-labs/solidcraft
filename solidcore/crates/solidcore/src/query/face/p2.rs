@@ -46,7 +46,8 @@
 //! - **Object model.** The face is a record of a [`Brep`]; the functions take the
 //!   B-rep and the face's id. Classification objects are [`EntityRef`]s (the face, edge
 //!   or vertex). `SmFace::PointClassify`'s status is the result: `Ok(())` for
-//!   `SM_SUCCESS`, [`SolidError::Upstream`] `SM_ERR` when no loop classifies the point
+//!   `SM_SUCCESS`, a [`QueryFailure`](crate::error::query::QueryFailure) at the face with
+//!   status `SM_ERR` when no loop classifies the point
 //!   (the classification is still updated, as upstream).
 //! - **Unused parameters.** `PointClassify`'s `sSrcZoneTol3d`,
 //!   `bDoBoundaryIntersections` and `bUVSpaceOkay` are `NotUsed` upstream; they are
@@ -78,6 +79,12 @@
 //!   [`point_classify_prepared`] shares the same walk over read-only topology;
 //!   missing UV trims or a required cache-tree build report [`SolidError::Unported`]
 //!   only when reached. Evaluation copies retain exact NURBS data and tolerances.
+//! - **Inner loops left out (not upstream).** Classifying against every loop, with
+//!   `Kernel::memoize_curve_caches`, an inner loop whose walk provably answers neither
+//!   inside nor on the loop, cannot fail and cannot edit the B-rep
+//!   (`query::loop::WalkExclusion`) is not walked: such an answer never stops
+//!   the classification, so its result is the same. A face holding many holes no longer
+//!   walks every hole for every point (a plate's holes placed into it one by one).
 //! - **Ignored statuses.** `Evaluate1stDerivatives` of the surface and `EvaluatePoint`
 //!   of the on-boundary edge curve: on failure the point stays `SmPoint3d()`
 //!   ([`Vec3::UNDEF`]); [`SolidError::Unported`] still propagates. The `PointClassify`
@@ -144,7 +151,7 @@
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, EntityRef, Result, SolidError, SM_ERR};
+use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::point_set::PointContainment;
@@ -162,7 +169,7 @@ use crate::intersect::point_class::{
 use crate::kernel::Kernel;
 use crate::math::{max2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
-use crate::query::r#loop::{contains_uv_point_with_topology, UvContainment};
+use crate::query::r#loop::{contains_uv_point_with_topology, UvContainment, WalkExclusion};
 use crate::surface::surface::p1::{
     get_surface_cache_with_face, get_trim_surface_cache, make_surface_cache, make_trim_srf_cache,
     make_trim_srf_cache_with_face,
@@ -794,9 +801,9 @@ impl Default for PointClassifyOptions<'_> {
 ///
 /// # Errors
 ///
-/// [`SolidError::Upstream`] `SM_ERR` when the point is neither outside nor inside nor
-/// on the checked loops (a loop that cannot classify it, or only inner loops checked
-/// without the point being outside all of them); `SM_ERR_NULL_POINTER` for a face
+/// A query failure at the face with status `SM_ERR` when the point is neither outside
+/// nor inside nor on the checked loops (a loop that cannot classify it, or only inner
+/// loops checked without the point being outside all of them); `SM_ERR_NULL_POINTER` for a face
 /// without surface; those of the trimmed surface cache search, of [`face_vertices`]
 /// and `query::loop::contains_uv_point`; [`SolidError::InvalidInput`] for an
 /// on-boundary edge without curve.
@@ -1208,9 +1215,23 @@ fn point_classify_with_topology(
     // Get tolerance
     let tol_3d = max2(face_tolerance, pc.tolerance());
 
+    // (not upstream) with every loop classified, an inner loop's walk only decides when
+    // it answers inside or on the loop, so with the curve memos' shortcuts an inner loop
+    // whose walk provably answers neither, without failing or editing the B-rep, is not
+    // walked (`WalkExclusion`): the same answer, where every inner loop was walked for
+    // every point (each hole of a plate placed into it walking every hole placed before)
+    let exclusion = if !tgt_loops_only && k.memoize_curve_caches {
+        WalkExclusion::at(k, b, f, surface, uv)
+    } else {
+        None
+    };
+
     // For every loop: check containment
     for l in loops {
         let is_outer = Some(l) == outer_loop;
+        if !is_outer && exclusion.is_some_and(|x| x.excludes(k, b, l)) {
+            continue; // neither in nor on this InnerLoop
+        }
 
         // check TargetPoint containment
         let UvContainment {
@@ -1266,11 +1287,20 @@ fn point_classify_with_topology(
 
     // PointClassify() fails for BadDatabase loops that cross seam boundaries
     let _ = use_uv_classification;
-    Err(SolidError::Upstream {
-        operation: OP_CLASSIFY,
-        code: SM_ERR,
-        entity: Some(this),
-    })
+    Err(no_loop_classifies(this))
+}
+
+/// The failure of [`point_classify`] when no loop of the face `this` classifies the point
+/// (upstream `SM_ERR`, about the face).
+fn no_loop_classifies(this: EntityRef) -> SolidError {
+    crate::error::Failure::new(
+        OP_CLASSIFY,
+        crate::error::query::QueryFailure::Failed(
+            "the point is in no loop of the face (a loop crosses its seam)",
+        ),
+    )
+    .at(this)
+    .into_error()
 }
 
 /// The on-boundary exit of [`point_classify`]: the edge, its parameter, the gap from
@@ -1497,7 +1527,8 @@ pub trait CurveOnClassifyBrep<O: ClassObject>:
     }
 }
 
-/// The lazy B-rep query state shared by classifications of the same face. Only gap
+/// The lazy B-rep query state shared by classifications of the same face, or of faces of
+/// one B-rep that does not change between them (keep features' walls). Only gap
 /// caches are copied back: replacing the B-rep would also replace geometry ownership
 /// and unrelated topology. Keep this state alive on error, since `CalcVertexFaceGap`
 /// invalidates same-face siblings before attempting the projection.
@@ -2102,6 +2133,9 @@ pub(crate) fn curve_on_classify_cached<O: ClassObject>(
     uv_space_okay: bool,
     cache: &mut CurveOnClassifyCache,
 ) -> Result<bool> {
+    if cache.snapshot.is_none() {
+        k.work_counters.add_classification_snapshot();
+    }
     curve_on_classify_mut(
         k,
         f,
@@ -2639,6 +2673,23 @@ pub(crate) mod tests {
         let mut pc = PointClassification::new(1e-6);
         let r = point_classify(&k, b, f, uv, &mut pc, PointClassifyOptions::default());
         (r, pc)
+    }
+
+    /// The seam failure stays the `SM_ERR` it replaced, about the face, with a typed
+    /// reason.
+    #[test]
+    fn no_loop_classifying_the_point_is_a_query_failure_at_the_face() {
+        let face = EntityRef::Face(FaceId::from_index(3));
+        let e = no_loop_classifies(face);
+        assert_eq!(e.operation(), OP_CLASSIFY);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.entity(), Some(face));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert!(matches!(
+            e.query_failure(),
+            Some(crate::error::query::QueryFailure::Failed(_))
+        ));
     }
 
     #[test]

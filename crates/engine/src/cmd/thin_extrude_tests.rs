@@ -144,17 +144,22 @@ fn bad_thin_walls_are_refused_and_change_nothing() {
         assert!(e.contains(says), "{p}: {e}");
         assert_eq!(s.doc.to_json(), before);
     }
-    // A wall thicker than an arc it follows bends.
-    let mut s = Session::default();
-    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Small"}));
-    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 1}));
-    run(&mut s, "sketch.finish", json!({}));
-    let e = s.execute("solid.extrude", &json!({"sketch": "Small", "thin": true, "thickness": 3, "side": "inside", "distance": 5}));
-    assert!(e.is_err_and(|e| e.to_string().contains("thicker")));
-    run(&mut s, "solid.extrude", json!({"sketch": "Small", "thin": true, "thickness": 3, "side": "outside", "distance": 5}));
-    // Measured from the tessellation, within its 1e-4.
-    let (v, exact) = (volume(&mut s), std::f64::consts::PI * (16.0 - 1.0) * 5.0);
-    assert!((v - exact).abs() < 1e-4 * exact, "{v} vs {exact}");
+    // A wall inside a circle thicker than its radius covers the whole disk (#7333); outside, the
+    // wall is a ring. Each in its own session, so one solid does not count in the other's volume.
+    let small = || {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Small"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 1}));
+        run(&mut s, "sketch.finish", json!({}));
+        s
+    };
+    for (side, exact) in [("inside", std::f64::consts::PI * 5.0), ("outside", std::f64::consts::PI * (16.0 - 1.0) * 5.0)] {
+        let mut s = small();
+        run(&mut s, "solid.extrude", json!({"sketch": "Small", "thin": true, "thickness": 3, "side": side, "distance": 5}));
+        // Measured from the tessellation, within its 1e-4.
+        let v = volume(&mut s);
+        assert!((v - exact).abs() < 1e-4 * exact, "{side}: {v} vs {exact}");
+    }
 }
 
 #[test]

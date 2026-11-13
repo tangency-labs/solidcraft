@@ -723,6 +723,16 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     } else {
         None
     };
+    // Where each box would sit, then moved apart in screen space: a tilted view pulls boxes that
+    // are apart in the sketch together on the screen (#10543).
+    let anchored: Vec<Option<Pos2>> = (0..t.dims.len())
+        .map(|i| {
+            let (_, at) = lv.get(i).copied()?;
+            let sp = proj.to_screen(plane.to_world(at))?;
+            Some(in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()))
+        })
+        .collect();
+    let apart = apart(&anchored, view);
     // Line inputs need screen-space clearance: a fixed sketch-space offset can leave a
     // wide field over a vertical line, especially when the whole preview is short.
     let line_positions = if matches!(t.cmd, "sketch.line" | "sketch.line.midpoint") {
@@ -761,6 +771,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             .as_ref()
             .or(polygon_positions.as_ref())
             .and_then(|positions| positions.get(i).copied())
+            .or(apart.get(i).copied().flatten())
             .unwrap_or_else(|| in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()));
         // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
         Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::unique(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Background).show(
@@ -968,6 +979,28 @@ pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2
     let Some(t) = app.tool.as_ref() else { return false };
     (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
         || ctx.memory(|m| m.area_rect(egui::Id::unique("sc_construction_switch"))).is_some_and(|r| r.contains(p))
+}
+
+/// The boxes at `positions` (top left, `None` for one not shown) with none covering another: a
+/// box that overlaps an earlier one moves below it, or above it when that leaves `view`. The
+/// first box of an overlap keeps its place, so the one that follows the cursor does not jump.
+fn apart(positions: &[Option<Pos2>], view: Option<egui::Rect>) -> Vec<Option<Pos2>> {
+    const GAP: f32 = 2.0;
+    let mut out = positions.to_vec();
+    let rect = |p: Pos2| egui::Rect::from_min_size(p, BOX);
+    for j in 1..out.len() {
+        for i in 0..j {
+            let (Some(a), Some(b)) = (out[i], out[j]) else { continue };
+            if !rect(a).intersects(rect(b)) {
+                continue;
+            }
+            let below = Pos2::new(b.x, a.y + BOX.y + GAP);
+            let above = Pos2::new(b.x, a.y - BOX.y - GAP);
+            let fits = |p: Pos2| view.is_none_or(|v| v.contains_rect(rect(p)));
+            out[j] = Some(if fits(below) || !fits(above) { below } else { above });
+        }
+    }
+    out
 }
 
 /// Where a value box whose top left would be `pos` goes so it stays in the drawing area `view`:

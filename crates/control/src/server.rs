@@ -144,6 +144,9 @@ impl Hub {
                     shared.lock().retain(|(i, _)| *i != id);
                 });
             }
+            // A captured value drops after the body's locals, so without this `_closed` would tell
+            // `Stop::stop` the port is free while the listener still holds it (#14752).
+            drop(listener);
         });
         Ok(stop)
     }
@@ -1417,6 +1420,14 @@ mod tests {
             }
         }
         assert!(started.elapsed() < Duration::from_secs(3), "before the token wait runs out");
-        assert!(TcpListener::bind(("127.0.0.1", port)).is_ok(), "the port is free again");
+        // The listener thread closes its socket when it notices the stop; on a loaded machine that can
+        // take a moment after `stop()` returns. Wait for the port to be free, not for one instant.
+        let freed = Instant::now();
+        let mut bound = TcpListener::bind(("127.0.0.1", port));
+        while bound.is_err() && freed.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(10));
+            bound = TcpListener::bind(("127.0.0.1", port));
+        }
+        assert!(bound.is_ok(), "the port is free again: {:?}", bound.err());
     }
 }

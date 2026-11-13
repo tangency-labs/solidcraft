@@ -53,10 +53,8 @@
 //!   [`LuDecomposition::near_singular`] / [`LinearSolution::near_singular`]; the
 //!   row-swap index array and the solution vector are returned. Other statuses are
 //!   [`SolidError::InvalidInput`] (`SM_ERR_INVALID_INPUT`) or
-//!   [`GeomFailure`](crate::error::geom::GeomFailure) with status `1001` (`SM_ERR`), except
-//!   the singular system of [`Matrix::solve_linear_system`] (and of
-//!   [`Matrix::solve_with_lu`], which it calls), which stays an upstream status while
-//!   `local_solve_nd` matches it.
+//!   [`GeomFailure`](crate::error::geom::GeomFailure) with status `1001` (`SM_ERR`), which
+//!   `local_solve_nd` reads by that status.
 //! - `LUDecompose` uses a fixed `MAX_MATRIX_SIZE` (1000) scale buffer on the stack
 //!   (larger matrices overflow it); here it is a `Vec`. `SolveLinearSystem` keeps
 //!   its explicit size check.
@@ -488,7 +486,7 @@ impl Matrix {
             }
             let denom = self.get(row, row, OP)?;
             if denom.abs() < zero_tol {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::geom_failed(OP, "the system is singular"));
             }
             *x.get_mut(row).ok_or_else(|| out_of_range(OP))? = sum / denom;
         }
@@ -523,7 +521,9 @@ impl Matrix {
             });
         }
         let mut tmp = self.clone();
-        let lu = tmp.lu_decompose().map_err(|_| SolidError::sm_err(OP))?;
+        let lu = tmp
+            .lu_decompose()
+            .map_err(|_| SolidError::geom_failed(OP, "the matrix has no LU decomposition"))?;
         let x = tmp.solve_with_lu(&lu.index, rhs)?;
         Ok(LinearSolution {
             x,
@@ -1179,9 +1179,11 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
         let z = m(2, 2, &[1.0, 2.0, 0.0, 0.0]);
+        let singular = z.solve_linear_system(&[1.0, 2.0]).unwrap_err();
+        assert_eq!(singular.upstream_status(), Some(1001));
         assert!(matches!(
-            z.solve_linear_system(&[1.0, 2.0]),
-            Err(e) if e.upstream_status() == Some(1001)
+            singular.geom_failure(),
+            Some(crate::error::geom::GeomFailure::Failed(_))
         ));
         let big = Matrix::new(MAX_MATRIX_SIZE + 1, MAX_MATRIX_SIZE + 1);
         assert!(matches!(

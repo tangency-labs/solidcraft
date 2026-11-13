@@ -157,17 +157,22 @@ In the browser, `solidcraft-web` ships self-hosted script fonts (SIL OFL 1.1) in
 artifacts only, loaded asynchronously from the same origin without contacting any external CDNs or
 third-party servers:
 
-- Japanese (and Hangul-less Korean UI for now): `./fonts/BIZUDPGothic-Regular.ttf`
+- Japanese: `./fonts/BIZUDPGothic-Regular.ttf`
 - Simplified Chinese (`zh`): `./fonts/CraftUI-SC.otf` (a locale-glyph subset of Noto Sans SC, renamed
   under the OFL so it does not use the reserved name Noto)
 - Traditional Chinese (`zh-TW`): `./fonts/CraftUI-TC.otf` (same for Noto Sans TC)
+- Korean (`ko`): `./fonts/CraftUI-KR.otf` (a Hangul, kana and Latin subset of Noto Sans KR, renamed
+  the same way)
 
 A CJK interface language fetches the matching face on demand. With any other interface language, the
 first time Japanese text (kana, kanji or full-width forms in a design name, file name, body name or
 typed text) is drawn, the Japanese face is fetched (#720). A session that never shows such text
 downloads no script font. If the needed face fails to load, the web interface shows English for that
 session only to prevent missing glyphs (tofu); the saved language preference is kept, so the next
-visit tries again. Korean Hangul coverage on the web remains follow-up work.
+visit tries again. The Korean subset covers the whole Hangul syllable block and the Hangul jamo, so
+Korean text typed into a design renders as well. It carries no Hanja (CJK ideographs): a Korean
+interface fetches the Korean face alone, so Hanja in a design name is not drawn unless the Japanese
+face is fetched too, and the desktop falls back to the system Hangul font, which covers Hanja.
 
 ## Right-to-left text
 

@@ -76,9 +76,9 @@ use crate::blend::blend_corner::ball::{solver_of_edgeuse_or_mate, BallSolvers};
 use crate::blend::blend_corner::on_face::{self, Clearance};
 use crate::blend::blend_corner::swept::fmt_g;
 use crate::blend::blend_corner::{BlendCorner, BlendCornerEvent};
-use crate::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy};
+use crate::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy, SetbackTooShortWhy};
 use crate::blend::blend_setback::{
-    bisect_thousandths, certified_scale, containment, distances, fill_hole_counted,
+    bisect_thousandths, certified_scale, containment_kept, distances, fill_hole_counted,
     fill_hole_probe, spring_curve, Edge, Face, FaceKind, Fill, FillStats, Probe, Round,
     SpringCurve,
 };
@@ -109,6 +109,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p2::IsoCurveOptions;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::knots::Side;
 use crate::surface::procedural_blend::corner::{CornerDefinition, SetbackFill};
 use crate::surface::side::Bracket;
 use crate::surface::surface::Surface;
@@ -350,7 +351,7 @@ pub fn overlapping_setbacks(
         // the largest setback certified to fit: from the length's lower side (#3184)
         for e in vertex::edges(b, vtx, None)? {
             let curve = edge::evaluation_curve(b, e)?
-                .ok_or_else(|| SolidError::null_pointer(OP_TOPOLOGY))?;
+                .ok_or_else(|| SolidError::blend_missing(OP_TOPOLOGY, "an edge's curve"))?;
             // a bracket as wide as the corner's tolerance, as the Setback's room asks it
             // (`set_backs`)
             let length = curve.length_bound(k, &edge::interval(b, e)?, corner.approx_tol_3d)?;
@@ -455,7 +456,7 @@ fn smax(a: f64, b: f64) -> f64 {
 /// `sm_SbAwayFrom`: the unit direction of `e` away from `vertex`, from its curve's end
 /// tangent there.
 fn away_from(k: &Kernel, b: &Brep, e: EdgeId, vertex: VertexId) -> Result<Vec3> {
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul = || SolidError::blend_missing(OP_CLASSIFY, "the edge or its curve");
     let curve = edge::curve(b, e)?.ok_or_else(nul)?;
     let ivl = edge::interval(b, e)?;
     let at_start = edge::start_vertex(b, e)? == Some(vertex);
@@ -481,9 +482,50 @@ struct CornerPlanes {
     edges: Vec<Edge>,
 }
 
-/// `sm_SbCornerPlanes`: of a corner whose edges all have one convexity, the planes of its
-/// faces with their normals out of the material, and its edges for [`distances`]; `None`
-/// (`rbPlanes` FALSE) where a face is not a plane (or its side is undecided).
+/// Not the fork's: the sense of the planar `face`'s surface normal out of the material, from
+/// the body's topology: the face use of `face` that edge `e`'s loop edge use on the
+/// material's side (its shell's region not void, as [`is_concave_edge`] takes it) lies in,
+/// whose normal (the surface's, reversed where the face use is `Opposite`) points out of
+/// the material (`IsConvexRadialSector`'s reading). `None` where no such edge use lies in
+/// `face`.
+fn material_sense(b: &Brep, face: FaceId, e: EdgeId) -> Result<Option<f64>> {
+    for use_ in edge::edgeuses(b, e, None, None)? {
+        if !eu1::is_loop_edgeuse(b, use_)? {
+            continue;
+        }
+        let Some(fu) = eu1::faceuse(b, use_)? else {
+            continue;
+        };
+        if eu1::faceuse_face(b, fu)? != Some(face) {
+            continue;
+        }
+        let Some(shell) = eu1::shell(b, use_)? else {
+            continue;
+        };
+        let Some(region) = eu1::shell_region(b, shell)? else {
+            continue;
+        };
+        if b.region(region)?.is_void() != 0 {
+            continue;
+        }
+        return Ok(Some(
+            if eu1::faceuse_orientation(b, fu)? == OrientType::Opposite {
+                -1.0
+            } else {
+                1.0
+            },
+        ));
+    }
+    Ok(None)
+}
+
+/// `sm_SbCornerPlanes`: the planes of a corner's faces with their normals out of the
+/// material, and its edges for [`distances`]; `None` (`rbPlanes` FALSE) where a face is not
+/// a plane (or its side is undecided). Not the fork's: each normal's sense is the face's own
+/// out of the material ([`material_sense`]), so that a corner of mixed convexity (a step's
+/// corner, whose face between its two convex edges has a reflex angle at the vertex) has its
+/// planes as its faces are; the fork took it from the other edges' side of the face, which
+/// holds only where every edge has one convexity.
 fn corner_planes(
     k: &Kernel,
     b: &Brep,
@@ -491,9 +533,9 @@ fn corner_planes(
     all_eus: &[EdgeuseId],
     solvers: &dyn BallSolvers,
     tol: f64,
-    convex: bool,
 ) -> Result<Option<CornerPlanes>> {
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul =
+        || SolidError::blend_missing(OP_CLASSIFY, "topology the corner's planes are found from");
     let n = all_eus.len();
     let mut away = Vec::with_capacity(n);
     for &eu in all_eus {
@@ -516,26 +558,26 @@ fn corner_planes(
         if !planar.is_planar {
             return Ok(None);
         }
+        // the surface's own normal (is_planar's is unsigned), turned out of the material
+        let mid = face2::uv_domain(b, face)?.mid();
+        let Ok(along) = surface
+            .evaluate_normal(k, mid, Side::Right, Side::Right)?
+            .unitize()
+        else {
+            return Ok(None);
+        };
         let Ok(mut normal) = planar.normal.unitize() else {
             return Ok(None);
         };
-        // the other edges lie on the material's side of a convex corner's face, off it at
-        // a concave one's
-        let mut others = Vec3::new(0.0, 0.0, 0.0);
-        for (j, &aj) in away.iter().enumerate() {
-            if j != i && j != (i + n - 1) % n {
-                others += aj;
-            }
-        }
-        let side = normal.dot(others);
-        if side.abs() <= EFF_ZERO {
-            return Ok(None);
-        }
-        if (side > 0.0) == convex {
+        if normal.dot(along) < 0.0 {
             normal = -normal;
         }
+        let e = eu1::edge(b, this.ok_or_else(nul)?)?.ok_or_else(nul)?;
+        let Some(sense) = material_sense(b, face, e)? else {
+            return Ok(None);
+        };
         faces.push(face);
-        planes.push(Face::plane(vpoint, normal));
+        planes.push(Face::plane(vpoint, normal * sense));
     }
     let mut edges = Vec::with_capacity(n);
     for (i, &eu) in all_eus.iter().enumerate() {
@@ -566,7 +608,7 @@ fn quadric_face(
     vpoint: Point3,
     tol: f64,
 ) -> Result<Option<Face>> {
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul = || SolidError::blend_missing(OP_CLASSIFY, "the face's surface");
     let surface = face2::surface(b, face)?.ok_or_else(nul)?;
     let q = BlendQuadric::from_surface(k, surface, face2::uv_domain(b, face)?.mid(), tol)?;
     let zero = Vec3::new(0.0, 0.0, 0.0);
@@ -616,7 +658,8 @@ fn corner_quadrics(
     tol: f64,
     convex: bool,
 ) -> Result<Option<CornerPlanes>> {
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul =
+        || SolidError::blend_missing(OP_CLASSIFY, "topology the corner's quadrics are found from");
     let n = all_eus.len();
     let mut away = Vec::with_capacity(n);
     for &eu in all_eus {
@@ -720,7 +763,7 @@ fn corner_faces(
     tol: f64,
     convex: bool,
 ) -> Result<Option<(CornerPlanes, bool)>> {
-    if let Some(planes) = corner_planes(k, b, vtx, all_eus, solvers, tol, convex)? {
+    if let Some(planes) = corner_planes(k, b, vtx, all_eus, solvers, tol)? {
         return Ok(Some((planes, false)));
     }
     // beside a curved face only with its own flag: without it such a corner is the corner it
@@ -742,7 +785,7 @@ fn along_edge(
     c: Point3,
     tol: f64,
 ) -> Result<Option<f64>> {
-    let nul = || SolidError::null_pointer(OP_TOPOLOGY);
+    let nul = || SolidError::blend_missing(OP_TOPOLOGY, "the edge or its curve");
     // the curve as its edge's (its length's cache at the edge's tolerance, as the fork's
     // pEdge->GetCurve() reads it through its owner)
     let curve = edge::evaluation_curve(b, e)?.ok_or_else(nul)?;
@@ -804,7 +847,12 @@ fn curved_least(
     convex: bool,
     tol: f64,
 ) -> Result<Option<Vec<f64>>> {
-    let nul = || SolidError::null_pointer(OP_TOPOLOGY);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_TOPOLOGY,
+            "topology or geometry the least curved setbacks are found from",
+        )
+    };
     let n = all_eus.len();
     let mut least = vec![0.0; n];
     let s = if convex { 1.0 } else { -1.0 };
@@ -961,7 +1009,12 @@ fn set_backs(
     curved: bool,
     convex: bool,
 ) -> Result<core::result::Result<SetBacks, Option<&'static str>>> {
-    let nul = || SolidError::null_pointer(OP_TOPOLOGY);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_TOPOLOGY,
+            "topology or geometry the setbacks are found from",
+        )
+    };
     let n = all_eus.len();
     let (mut setbacks, least) = if curved {
         let radii: Vec<f64> = edges.iter().map(|e| e.radius).collect();
@@ -1093,7 +1146,12 @@ pub fn classify_setback(
     fills: &[SetBackFill],
     marked: bool,
 ) -> Result<SetbackClass> {
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_CLASSIFY,
+            "topology or a solver the setback corner's classification reads",
+        )
+    };
     let none = Ok(SetbackClass {
         event: BlendCornerEvent::None,
         order: 1,
@@ -1148,9 +1206,10 @@ pub fn classify_setback(
         max_r = smax(max_r, r0);
     }
 
-    // the edges: of one convexity, no two tangent at the vertex; straight between planes
-    // (beside a curved face, any edge)
+    // the edges: no two tangent at the vertex; straight between planes (beside a curved
+    // face, any edge); of one convexity, or mixed (convex and concave edges at one vertex)
     let mut concave0 = false;
+    let mut mixed = false;
     let mut straight = true;
     for (i, &eu) in all_eus.iter().enumerate() {
         let e = eu1::edge(b, eu)?.ok_or_else(nul)?;
@@ -1164,7 +1223,7 @@ pub fn classify_setback(
         if i == 0 {
             concave0 = concave;
         } else if concave != concave0 {
-            return none;
+            mixed = true;
         }
         for &other in all_eus.iter().skip(i + 1) {
             let oe = eu1::edge(b, other)?;
@@ -1220,6 +1279,13 @@ pub fn classify_setback(
             event: BlendCornerEvent::None,
             order,
         });
+    }
+    // a corner of mixed convexity is the order-2 fill's between planes: its saddle is
+    // certified by its normal (fill_hole) and kept off the faces by their kept regions
+    // (containment_kept). The G1 fill is certified convex (or no more concave than its
+    // faces) and so takes no saddle; beside a curved face the kept regions have no test yet.
+    if mixed && (order != 2 || curved) {
+        return none;
     }
     Ok(SetbackClass {
         event: BlendCornerEvent::Setback,
@@ -1284,8 +1350,18 @@ pub fn make_setback_topology(
         solvers,
         fills,
     } = env;
-    let nul = || SolidError::null_pointer(OP_TOPOLOGY);
-    let err = || SolidError::sm_err(OP_TOPOLOGY);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_TOPOLOGY,
+            "topology or a solver the setback corner's topology is made from",
+        )
+    };
+    let err = || {
+        SolidError::blend_failed(
+            OP_TOPOLOGY,
+            "the setback corner's topology could not be made",
+        )
+    };
     let all = corner.all_eus.clone().ok_or_else(nul)?;
     let solver_eus = corner.solver_eus.clone().ok_or_else(nul)?;
     let n = all.len();
@@ -1360,6 +1436,7 @@ pub fn make_setback_topology(
             .typed(BlendRefusal::SetbackTooShort {
                 vertex: vtx,
                 least: most,
+                why: SetbackTooShortWhy::RailsCross,
             })));
         }
         corner.ease_dist = a.ease;
@@ -1435,7 +1512,18 @@ pub fn make_setback_topology(
                     fmt_g(scale.scale * a.setback)
                 )
             };
-            return Ok(Err(SetbackRefusal::no_room(why, Some(builds))));
+            let refusal = SetbackRefusal::no_room(why, Some(builds));
+            // as data where a setback builds: the least one (none fits otherwise, so none
+            // is named)
+            return Ok(Err(if fits_room {
+                refusal.typed(BlendRefusal::SetbackTooShort {
+                    vertex: vtx,
+                    least: builds,
+                    why: SetbackTooShortWhy::ConvexFill,
+                })
+            } else {
+                refusal
+            }));
         }
         for (s, &m) in sbs.iter_mut().zip(&most) {
             *s = smin(scale.scale * *s, m);
@@ -1593,8 +1681,13 @@ fn gather_ends(
     faces: &[FaceId],
     tol: f64,
 ) -> Result<Gathered> {
-    let nul = || SolidError::null_pointer(OP_FILL);
-    let err = || SolidError::sm_err(OP_FILL);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_FILL,
+            "topology or a solver the fill's ends are gathered from",
+        )
+    };
+    let err = || SolidError::blend_failed(OP_FILL, "the fill's ends could not be gathered");
     let vtx = corner.vertex.ok_or_else(nul)?;
     let n = faces.len();
     let mut surfaces: Vec<Surface> = Vec::with_capacity(n);
@@ -1811,7 +1904,12 @@ impl Growth<'_> {
         solvers: &mut S,
         scale: f64,
     ) -> Result<Option<Ends>> {
-        let nul = || SolidError::null_pointer(OP_FILL);
+        let nul = || {
+            SolidError::blend_missing(
+                OP_FILL,
+                "topology or a solver the fill's ends are placed from",
+            )
+        };
         let sb = corner.setback.as_mut().ok_or_else(nul)?;
         let mut dist: f64 = 0.0;
         for ((s, &base), &most) in sb.setbacks.iter_mut().zip(&self.base).zip(&self.most) {
@@ -1896,7 +1994,7 @@ fn grow_curved<S: SetbackSolvers>(
     solvers: &mut S,
     asked: Option<SetBackFill>,
 ) -> Result<core::result::Result<Ends, SetbackRefusal>> {
-    let err = || SolidError::sm_err(OP_FILL);
+    let err = || SolidError::blend_failed(OP_FILL, "the curved fill could not grow");
     if growth.trial(pseudo, corner, solvers, 2.0)?.is_none() {
         let why = if let Some(a) = asked {
             format!(
@@ -1957,7 +2055,17 @@ fn grow_curved<S: SetbackSolvers>(
                 fmt_g(hi * a.setback)
             )
         };
-        return Ok(Err(SetbackRefusal::no_room(why, Some(builds))));
+        let refusal = SetbackRefusal::no_room(why, Some(builds));
+        // as data where a setback builds: the least one (none fits otherwise, so none is
+        // named)
+        return Ok(Err(match corner.vertex.filter(|_| fits_room) {
+            Some(vertex) => refusal.typed(BlendRefusal::SetbackTooShort {
+                vertex,
+                least: builds,
+                why: SetbackTooShortWhy::ConcaveFill,
+            }),
+            None => refusal,
+        }));
     }
     Ok(Ok(ends))
 }
@@ -2043,7 +2151,7 @@ fn rail_toward_vertex(
     r: f64,
     sign: f64,
 ) -> Result<Option<Vec3>> {
-    let nul = || SolidError::null_pointer(OP_FILL);
+    let nul = || SolidError::blend_missing(OP_FILL, "the edge or its curve");
     let vtx = corner.vertex.ok_or_else(nul)?;
     let Some(t) = rail_direction(face, p, other, q, r, sign) else {
         return Ok(None);
@@ -2072,7 +2180,12 @@ fn corner_springs(
     corner: &FilletCorner,
     planes: &CornerPlanes,
 ) -> Result<core::result::Result<Vec<SpringCurve>, Springs>> {
-    let nul = || SolidError::null_pointer(OP_FILL);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_FILL,
+            "topology or a solver the corner's spring curves are built from",
+        )
+    };
     let all = corner.all_eus.as_ref().ok_or_else(nul)?;
     let sign = if corner.setback.as_ref().ok_or_else(nul)?.convex {
         1.0
@@ -2137,7 +2250,12 @@ fn springs_on_faces(
     planes: &CornerPlanes,
     tol: f64,
 ) -> Result<Springs> {
-    let nul = || SolidError::null_pointer(OP_FILL);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_FILL,
+            "topology or a solver the spring curves on the faces are built from",
+        )
+    };
     let vtx = corner.vertex.ok_or_else(nul)?;
     let springs = match corner_springs(k, target, pseudo, corner, planes)? {
         Ok(springs) => springs,
@@ -2209,7 +2327,7 @@ fn springs_refusal<S: SetbackSolvers>(
     fills: &[SetBackFill],
     tol: f64,
 ) -> Result<Option<SetbackRefusal>> {
-    let err = || SolidError::sm_err(OP_FILL);
+    let err = || SolidError::blend_failed(OP_FILL, "the spring curves could not be checked");
     let at_base = springs_on_faces(k, target, pseudo, corner, planes, tol)?;
     if at_base != Springs::Leave {
         return Ok(None);
@@ -2353,8 +2471,13 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     solvers: &mut S,
     fills: &[SetBackFill],
 ) -> Result<core::result::Result<(), SetbackRefusal>> {
-    let nul = || SolidError::null_pointer(OP_FILL);
-    let err = || SolidError::sm_err(OP_FILL);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_FILL,
+            "topology or a solver the setback fill is built from",
+        )
+    };
+    let err = || SolidError::blend_failed(OP_FILL, "the setback fill could not be built");
     let all = corner.all_eus.clone().ok_or_else(nul)?;
     let sb = corner.setback.as_ref().ok_or_else(err)?;
     if sb.overflows {
@@ -2475,10 +2598,10 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     let worst = if open {
         None
     } else {
-        let worst = containment(k, &fill, &planes.planes, convex, tol)?;
+        let worst = containment_kept(k, &fill, &planes.planes, tol)?;
         if worst == f64::INFINITY {
             return Ok(Err(SetbackRefusal::not_built(
-                "Fillet Error: the setback corner's fill is not certified to stay on the material's side of its curved faces",
+                "Fillet Error: the setback corner's fill is not certified to stay on the material's side of its curved faces, or off the kept part of a face where a convex and a concave round meet",
             )));
         }
         if worst > tol {
@@ -2606,8 +2729,13 @@ fn open_setback_springs(
     planes: &[Face],
     edges: &[Edge],
 ) -> Result<core::result::Result<(), SetbackRefusal>> {
-    let nul = || SolidError::null_pointer(OP_FILL);
-    let err = || SolidError::sm_err(OP_FILL);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_FILL,
+            "topology or a solver the open setback's springs are built from",
+        )
+    };
+    let err = || SolidError::blend_failed(OP_FILL, "the open setback's springs could not be built");
     let n = corner.all_eus.as_ref().ok_or_else(nul)?.len();
     if corner.vertices.len() != 3 * n
         || corner.edges.len() != 3 * n
@@ -2711,7 +2839,10 @@ fn one_weight_polynomial(curve: &mut BSplineCurve) -> Result<()> {
     }
     let points = curve.control_points()?;
     let Some(w0) = points.first().map(|c| c.w) else {
-        return Err(SolidError::null_pointer(OP_FILL));
+        return Err(SolidError::blend_missing(
+            OP_FILL,
+            "the curve's first control point",
+        ));
     };
     if points.iter().skip(1).any(|c| c.w != w0) {
         return Ok(());
@@ -2743,7 +2874,10 @@ fn keep_definition(
 ) -> Result<Arc<SetbackFill>> {
     let definition = SetbackFill::create(k, faces, rounds, order, tol, convex, worst)?;
     if !definition.is_fill(&definition.refill(k)?, &fill.patches) {
-        return Err(SolidError::sm_err(OP_FILL));
+        return Err(SolidError::blend_failed(
+            OP_FILL,
+            "the fill's definition does not rebuild its patches",
+        ));
     }
     Ok(Arc::new(definition))
 }
@@ -2763,7 +2897,8 @@ pub fn create_setback_patches(
     corner: &mut FilletCorner,
     env: &mut CornerPatchEnv<'_, '_>,
 ) -> Result<()> {
-    let nul = || SolidError::null_pointer(OP_PATCHES);
+    let nul =
+        || SolidError::blend_missing(OP_PATCHES, "the setback corner's event, fill or topology");
     if corner.setback.as_ref().is_some_and(|sb| sb.open) {
         return Ok(()); // an open G1 corner: its hole is left (OpenSetBackSprings)
     }
@@ -2774,7 +2909,10 @@ pub fn create_setback_patches(
         .and_then(|sb| sb.fill.take())
         .ok_or_else(nul)?;
     if fill.patches.len() != 2 * n {
-        return Err(SolidError::sm_err(OP_PATCHES));
+        return Err(SolidError::blend_failed(
+            OP_PATCHES,
+            "the fill does not hold two patches per round",
+        ));
     }
     let definition = corner.setback.as_ref().and_then(|sb| sb.definition.clone());
     let fillet = env.fillet.as_mut().ok_or_else(nul)?;
@@ -2868,6 +3006,36 @@ pub fn create_setback_patches(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A box with its first edge's curve taken away, the edge and its start vertex.
+    fn box_with_curveless_edge() -> (Brep, EdgeId, VertexId) {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0)
+            .unwrap();
+        let e = b.edges().ids().next().unwrap();
+        let v = edge::start_vertex(&b, e).unwrap().unwrap();
+        b.edge_mut(e).unwrap().curve = None;
+        (b, e, v)
+    }
+
+    /// An edge without a curve has no direction away from its vertex: a typed `Missing`
+    /// failure, with the null-pointer status the bare status had.
+    #[test]
+    fn an_edge_without_a_curve_is_a_typed_missing_failure() {
+        let (b, e, v) = box_with_curveless_edge();
+        let err = away_from(&Kernel::default(), &b, e, v).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the edge or its curve"
+            ))
+        );
+        assert_eq!(err.operation(), OP_CLASSIFY);
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
+    }
     use crate::blend::blend_setback::FaceKind;
 
     /// The rail of a ball of radius `r` rolling between `face` and the plane through `q` with

@@ -52,7 +52,7 @@
 //!   upstream dereferences a null pointer (a loop without loop use, a face without
 //!   surface or loops, an edge use whose UV trim curve or vertex use is missing where it
 //!   is used, ...) the port returns [`SolidError::InvalidInput`]. `SER` / `NER` returns
-//!   are [`SolidError::Upstream`] with the upstream code (`SM_ERR`, `SM_ERR_NULL_POINTER`,
+//!   are a [`TopologyFailure`](crate::error::topology::TopologyFailure) with the upstream code (`SM_ERR`, `SM_ERR_NULL_POINTER`,
 //!   `SM_ERR_INVALID_INPUT` for a failed `Unitize`).
 //! - **Projected seam endpoints (WR-440, #530), opt-in.** With
 //!   `Kernel::fixes.check_loop_projected_seam_ends` (off by default: upstream's raw UV
@@ -148,9 +148,6 @@ const FACE_TYPE: i64 = 16002;
 /// `SmLoop_TYPE` (`TOPO_BASE_TYPE + 3`), the owner type of a loop report.
 const LOOP_TYPE: i64 = 16003;
 
-// Upstream `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
-
 /// `SM_LIST_2`: the `CheckFace` label table.
 const LIST_CHECK_FACE: u64 = 2;
 /// `SM_LIST_3`: the `CheckLoop` label table.
@@ -176,13 +173,10 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// An upstream status other than `SM_ERR` / `SM_ERR_NULL_POINTER`.
-pub(crate) const fn status(code: i32) -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code,
-        entity: None,
-    }
+/// A value the trimming tools compute with that has no defined result, as the phrase
+/// says (upstream `SM_ERR_INVALID_INPUT`).
+pub(crate) fn invalid_value(what: &'static str) -> SolidError {
+    SolidError::topology_invalid_value(OP, what)
 }
 
 /// The identity a face or loop has in an assert report (upstream compares pointers):
@@ -506,11 +500,13 @@ enum TrimSurfaceBackend<'a> {
 impl TrimSurfaceBackend<'_> {
     fn surface(&self) -> Result<&Surface> {
         match self {
-            Self::Legacy(surface) => surface.as_ref().ok_or_else(|| SolidError::null_pointer(OP)),
+            Self::Legacy(surface) => surface
+                .as_ref()
+                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim")),
             Self::Retained(transfer) => transfer
                 .transfer
                 .as_ref()
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?
                 .owned_surface(),
         }
     }
@@ -620,15 +616,19 @@ fn trim_surface_impl(
 ) -> Result<Vec<FaceId>> {
     // Native SmObjDelete/SmObjsDelete remain active through these early checks.
     let early = (|| {
-        let region = region.ok_or(SolidError::null_pointer(OP))?;
+        let region = region
+            .ok_or_else(|| SolidError::topology_missing(OP, "the region for the new faces"))?;
         if !b.region(region)?.in_brep {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::topology_missing(OP, "the region in the B-rep"));
         }
         let _ = first_is_outer; // SM_ASSERT only
         brep_set_tolerance(k, b, tol_3d)?;
         let g1_surface = surface_continuity_check(k, surface.surface()?)?;
         if !g1_surface && !oriented_correctly {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the surface is not G1 and the loops are not oriented",
+            ));
         }
         Ok((region, g1_surface))
     })();
@@ -643,7 +643,9 @@ fn trim_surface_impl(
     // Native clears the temporary cleanup immediately before MakeFace(s).
     let mut new_faces = match surface {
         TrimSurfaceBackend::Legacy(surface) => {
-            let surface = surface.take().ok_or_else(|| SolidError::null_pointer(OP))?;
+            let surface = surface
+                .take()
+                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?;
             let input = TrimInput {
                 loop_counts: input.loop_counts,
                 curves: input.curves,
@@ -683,7 +685,7 @@ fn trim_surface_impl(
                 transfer
                     .transfer
                     .as_mut()
-                    .ok_or_else(|| SolidError::null_pointer(OP))?,
+                    .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?,
                 &input.uv_domain,
                 input.surface_orientation,
                 None,
@@ -830,7 +832,7 @@ fn bspline_of(c: &Curve) -> Result<Cow<'_, BSplineCurve>> {
         CurveKind::Ellipse(e) => conic_base(e.base()),
         CurveKind::Hyperbola(h) => conic_base(h.base()),
         CurveKind::Parabola(p) => conic_base(p.base()),
-        _ => Err(null("UV trim curve is not an SmBSplineCurve")),
+        _ => Err(null("UV trim curve is not a B-spline curve")),
     }
 }
 
@@ -865,7 +867,7 @@ fn edit_end_point(
         CurveKind::Ellipse(e) => conic_edit_end_point(e.base_mut(), point, edit_start, weight),
         CurveKind::Hyperbola(h) => conic_edit_end_point(h.base_mut(), point, edit_start, weight),
         CurveKind::Parabola(p) => conic_edit_end_point(p.base_mut(), point, edit_start, weight),
-        _ => Err(null("EditEndPoint: UV trim curve is not an SmBSplineCurve")),
+        _ => Err(null("EditEndPoint: UV trim curve is not a B-spline curve")),
     }
 }
 
@@ -1306,10 +1308,9 @@ fn move_loopuse_first(
     lu: crate::topology::LoopuseId,
 ) -> Result<()> {
     let list = &mut b.faceuse_mut(fu)?.loopuses;
-    let pos = list
-        .iter()
-        .position(|&x| x == lu)
-        .ok_or(SolidError::sm_err(OP))?;
+    let pos = list.iter().position(|&x| x == lu).ok_or_else(|| {
+        SolidError::topology_failed(OP, "the loop use is not in the face use's loop uses")
+    })?;
     list.remove(pos);
     list.insert(0, lu);
     Ok(())
@@ -1334,7 +1335,7 @@ pub fn fix_trim_loop_order(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> 
     // Get the loops
     let loops = fp2::loops(b, f, false, None)?;
     if loops.is_empty() {
-        return Err(SolidError::sm_err(OP)); // no loops at all
+        return Err(SolidError::topology_failed(OP, "the face has no loops")); // no loops at all
     }
 
     // Find the outer loop
@@ -1416,14 +1417,12 @@ pub fn fix_trim_loop_order(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> 
     // Move outer to the first position
     let (lu_a, lu_b) = lu1::loop_loopuses(b, outer_loop)?;
     let lu_b = lu_b.ok_or_else(|| null("loop without second loop use"))?;
-    let fu_a = b
-        .loopuse(lu_a)?
-        .faceuse
-        .ok_or(SolidError::null_pointer(OP))?;
-    let fu_b = b
-        .loopuse(lu_b)?
-        .faceuse
-        .ok_or(SolidError::null_pointer(OP))?;
+    let fu_a = b.loopuse(lu_a)?.faceuse.ok_or_else(|| {
+        SolidError::topology_missing(OP, "the face use of the loop's first loop use")
+    })?;
+    let fu_b = b.loopuse(lu_b)?.faceuse.ok_or_else(|| {
+        SolidError::topology_missing(OP, "the face use of the loop's second loop use")
+    })?;
     move_loopuse_first(b, fu_a, lu_a)?;
     move_loopuse_first(b, fu_b, lu_b)?;
 
@@ -1473,11 +1472,14 @@ impl OrderedLoops {
     /// # Errors
     ///
     /// `SM_ERR` as described.
-    pub const fn status(&self) -> Result<()> {
+    pub fn status(&self) -> Result<()> {
         if self.closed && self.on_plane {
             Ok(())
         } else {
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::topology_failed(
+                OP,
+                "the loops do not close, or a curve is off their plane",
+            ))
         }
     }
 }
@@ -1547,7 +1549,10 @@ fn next_round_the_vertex(
     };
     let (mut back, _) = leaving(arrive)?;
     if back.length() <= 0.0 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the arriving edge's tangent has zero length",
+        ));
     }
     back /= back.length();
 
@@ -1556,7 +1561,10 @@ fn next_round_the_vertex(
     for &end in &candidates {
         let (ray, acc) = leaving(end)?;
         if ray.length() <= 0.0 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "a leaving edge's tangent has zero length",
+            ));
         }
         rays.push(ray);
         accs.push(acc);
@@ -1879,7 +1887,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
         }
         let loop_normal = loop_normal
             .unitize()
-            .map_err(|_| status(SM_ERR_INVALID_INPUT))?;
+            .map_err(|_| invalid_value("the loop's normal has zero length"))?;
 
         // Update the plane data for all loops
         if out.loop_counts.len() == 1 {
@@ -1907,7 +1915,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
     out.plane_normal = out
         .plane_normal
         .unitize()
-        .map_err(|_| status(SM_ERR_INVALID_INPUT))?;
+        .map_err(|_| invalid_value("the loops' average normal has zero length"))?;
 
     // test every curve to see if it's on the plane
     for c in curves {
@@ -2155,16 +2163,19 @@ pub fn find_outer_loops(
 
 // ---- checks -------------------------------------------------------------------------------
 
-/// `CheckFace`: `SM_ERR` (with a report) for a face without loops; nothing to check
-/// when some UV trim curve is missing; otherwise [`check_loop`] (unless
-/// `skip_check_loop`) and the loop orientation test (outer loop first, the others
-/// inner, none of zero area) for every loop.
+/// `CheckFace`: `SM_ERR` (with a report) for a face without loops; otherwise
+/// [`check_loop`] (unless `skip_check_loop`) and the loop orientation test (outer loop
+/// first, the others inner, none of zero area) for every loop. Where some UV trim curve is
+/// missing, the face's trims are made first and stay on `b` (not upstream, which checks
+/// nothing then; #15040); where they cannot be made, the face fails the `UVTrimCurve` test
+/// (report 1).
 ///
 /// # Errors
 ///
 /// `SM_ERR` as described; [`SolidError::InvalidInput`] for a face without surface (with
-/// a loop to check); those of `SmFace::ComputeLoopOrientation` (`topology.face_p3`) and
-/// [`check_loop`].
+/// a loop to check); those of making the UV trim curves
+/// ([`crate::topology::face::p3::create_uv_trim_curves`]), of
+/// `SmFace::ComputeLoopOrientation` (`topology.face_p3`) and of [`check_loop`].
 pub fn check_face(
     k: &Kernel,
     b: &mut Brep,
@@ -2189,12 +2200,41 @@ pub fn check_face(
             UNDEF_DOUBLE,
             UNDEF_DOUBLE,
         )?;
-        return Err(SolidError::sm_err(OP)); // Loops are missing
+        return Err(SolidError::topology_failed(OP, "the face has no loops")); // Loops are missing
     }
 
-    // it's not a problem when an edge does not have a stored UVTrimCurve
+    // (not upstream, which passes such a face unchecked: "it's not a problem when an edge
+    // does not have a stored UVTrimCurve") A face whose edge uses have no UV trim curves is
+    // checked like any other: its trims are made first, as the volume and mass properties
+    // make them, so the check's answer does not depend on whether an earlier operation
+    // filled them (definitions-and-certificates.md §7.2; #15040). A face whose trims cannot
+    // be made fails the UVTrimCurve test: it is not passed unchecked.
     if !face_uv_curves_present(b, f)? {
-        return Ok(());
+        let made = face_create_uv_trim_curves(k, b, f);
+        if let Err(e) = &made {
+            if e.is_unported_or_cancelled() {
+                return made;
+            }
+        }
+        let present = made.is_ok() && face_uv_curves_present(b, f)?;
+        report(
+            &mut alist,
+            face,
+            FACE_TYPE,
+            "SmFace",
+            LIST_CHECK_FACE,
+            1,
+            present,
+            UNDEF_DOUBLE,
+            UNDEF_DOUBLE,
+        )?;
+        if !present {
+            made?;
+            return Err(SolidError::topology_failed(
+                OP,
+                "the face's UV trim curves cannot be made, so its loops cannot be checked",
+            ));
+        }
     }
 
     for (ii, &l) in loops.iter().enumerate() {
@@ -2240,7 +2280,10 @@ pub fn check_face(
 
         // signal bad loop errors: we want 1st Loop Outer, rest Inner
         if (ii == 0 && lo == OrientType::Opposite) || (ii != 0 && lo == OrientType::Same) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the first loop is not outer, or a later loop is not inner",
+            ));
         }
 
         report(
@@ -2257,7 +2300,7 @@ pub fn check_face(
 
         // Also check for zero-area loop.
         if lo == OrientType::Unknown {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(OP, "a loop has zero area"));
         }
     }
     Ok(())
@@ -2649,7 +2692,10 @@ pub fn check_loop(
                     closure = 1;
                 }
                 if closure >= 2 {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::topology_failed(
+                        OP,
+                        "the loop crosses the surface's closure more than once",
+                    ));
                 }
             }
         }
@@ -2669,7 +2715,10 @@ pub fn surface_continuity_check(k: &Kernel, surface: &Surface) -> Result<bool> {
     let (cu, _) = surface.calculate_continuities(k, SurfParamType::U)?;
     let (cv, _) = surface.calculate_continuities(k, SurfParamType::V)?;
     if cu == ContinuityType::Discontinuous || cv == ContinuityType::Discontinuous {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the surface is discontinuous",
+        ));
     }
     Ok(!(cu == ContinuityType::C0 || cv == ContinuityType::C0))
 }
@@ -2742,7 +2791,7 @@ pub fn mirror_curve(
         CurveKind::Ellipse(e) => e.base_mut().set_canonical(&data)?,
         CurveKind::Hyperbola(h) => h.base_mut().set_canonical(&data)?,
         CurveKind::Parabola(p) => p.base_mut().set_canonical(&data)?,
-        _ => return Err(null("MirrorCurve: not an SmBSplineCurve")),
+        _ => return Err(null("MirrorCurve: not a B-spline curve")),
     }
     curve.convert_to_2d(k)
 }
@@ -2817,11 +2866,6 @@ pub fn is_iso_curve_on_seam(k: &Kernel, surface: &Surface, curve: &Curve) -> Res
     let tolerance = range.length() / 1000.0;
     Ok(closed
         && ((param - range.min()).abs() < tolerance || (param - range.max()).abs() < tolerance))
-}
-
-/// `SM_ERR_INVALID_INPUT` as an error.
-pub(crate) const fn invalid_input_status() -> SolidError {
-    status(SM_ERR_INVALID_INPUT)
 }
 
 #[cfg(test)]
@@ -3017,13 +3061,9 @@ mod tests {
             match transfer.into_location().unwrap() {
                 TrimSurfaceLocation::Installed(face) => {
                     if mode == 4 {
-                        assert!(matches!(
-                            result,
-                            Err(SolidError::Upstream {
-                                code: crate::error::SM_ERR,
-                                ..
-                            })
-                        ));
+                        assert!(result
+                            .as_ref()
+                            .is_err_and(|e| e.upstream_status() == Some(crate::error::SM_ERR)));
                         assert_eq!(p1::faces(&b, None).unwrap(), vec![face]);
                         assert!(b.face(face).unwrap().loops.is_empty());
                     } else {
@@ -3047,9 +3087,9 @@ mod tests {
                     } else {
                         crate::error::SM_ERR
                     };
-                    assert!(
-                        matches!(result, Err(SolidError::Upstream {code: got, ..}) if got==code)
-                    );
+                    assert!(result
+                        .as_ref()
+                        .is_err_and(|e| e.upstream_status() == Some(code)));
                     assert!(p1::faces(&b, None).unwrap().is_empty());
                 }
                 TrimSurfaceLocation::Owned(surface) => {

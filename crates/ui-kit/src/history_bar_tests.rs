@@ -3,21 +3,18 @@ use super::*;
 use egui::{Event, Modifiers, PointerButton, RawInput};
 use std::cell::Cell;
 
-const HANDLES: Handles<'static> = Handles { grip: "test:grip", marker: "test:marker", step: "test:", controls: "test:ctl:" };
+const HANDLES: Handles<'static> = Handles { marker: "test:marker", step: "test:" };
 
-fn bar(steps: usize, marker: usize, play: bool) -> Bar<'static> {
+fn bar(steps: usize, marker: usize) -> Bar<'static> {
     let t = Tokens::get();
     Bar {
-        title: "Steps",
         marker_tip: "Drag me",
-        play,
-        playing: false,
-        play_labels: crate::PlayLabels { play: "Play", stop: "Stop" },
         accent: solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main),
         drag_accent: solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Sketch),
         marker,
         steps,
         floating: false,
+        reorder: true,
         handles: HANDLES,
     }
 }
@@ -77,7 +74,7 @@ impl Rig {
     fn new(labels: &[&'static str], marker: usize) -> Rig {
         let rig = Rig {
             ctx: crate::test_support::context(),
-            bar: bar(labels.len(), marker, true),
+            bar: bar(labels.len(), marker),
             rect: Rect::from_min_size(pos2(0.0, 100.0), vec2(700.0, 40.0)),
             labels: labels.to_vec(),
             folded: None,
@@ -107,11 +104,8 @@ impl Rig {
             ..Default::default()
         };
         let output = crate::test_support::raw_frame(&self.ctx, input, |ui| {
-            let head = header(ui, &self.bar, self.rect);
-            actions.extend(head.actions);
-            let strip_rect = Rect::from_min_max(pos2(head.x, self.rect.top()), self.rect.right_bottom());
             let mut steps = Steps { labels: self.labels.clone(), folded: self.folded, marks: self.marks.clone() };
-            let out = strip(ui, &self.bar, self.rect, strip_rect, "test_strip", &mut steps);
+            let out = strip(ui, &self.bar, self.rect, self.rect, "test_strip", &mut steps);
             self.hovered.set(out.hovered);
             actions.extend(out.actions);
         });
@@ -200,12 +194,25 @@ fn a_dragged_step_returns_reorder_with_the_slot_and_side_of_the_marker() {
 }
 
 #[test]
+fn without_reorder_a_dragged_step_returns_nothing_and_a_click_still_selects() {
+    let mut rig = Rig::new(&["A", "B", "C"], 2);
+    rig.bar.reorder = false;
+    let (a, c) = (rig.at("test:A"), rig.at("test:C"));
+    let end = c + vec2(32.0 - 14.0 + 2.0, 0.0);
+    assert_eq!(rig.drag(a, end), Vec::new(), "no reorder");
+    assert_eq!(rig.drag(c, a - vec2(12.0, 0.0)), Vec::new());
+    assert_eq!(rig.click(c), vec![Action::Select { step: 3, modifiers: Modifiers::NONE }]);
+    // the marker still drags
+    assert_eq!(rig.drag(rig.marker(), a - vec2(12.0, 0.0)), vec![Action::Seek { slot: 0, before: true }]);
+}
+
+#[test]
 fn the_dragged_marker_returns_seek_and_a_drag_that_leaves_the_window_returns_nothing() {
     let rig = Rig::new(&["A", "B", "C"], 2);
     let (a, marker) = (rig.at("test:A"), rig.marker());
-    assert_eq!(rig.drag(marker, a - vec2(12.0, 0.0)), vec![Action::Seek(Seek::Slot { slot: 0, before: true })]);
+    assert_eq!(rig.drag(marker, a - vec2(12.0, 0.0)), vec![Action::Seek { slot: 0, before: true }]);
     let marker = rig.marker();
-    assert_eq!(rig.drag(marker, marker), vec![Action::Seek(Seek::Slot { slot: 2, before: false })], "dropped where it is");
+    assert_eq!(rig.drag(marker, marker), vec![Action::Seek { slot: 2, before: false }], "dropped where it is");
     // Released as the pointer leaves the window: the drag ends with no drop.
     let marker = rig.marker();
     rig.frame(vec![Event::PointerMoved(marker)]);
@@ -233,42 +240,12 @@ fn a_folded_chip_of_the_apps_own_takes_its_slots_and_the_marker_inside_it_goes_a
 }
 
 #[test]
-fn the_controls_return_seek_and_play_and_their_menu() {
-    let rig = Rig::new(&["A", "B"], 1);
-    for (control, action) in [
-        ("test:ctl:first", Action::Seek(Seek::First)),
-        ("test:ctl:back", Action::Seek(Seek::Back)),
-        ("test:ctl:play", Action::Play),
-        ("test:ctl:forward", Action::Seek(Seek::Forward)),
-        ("test:ctl:last", Action::Seek(Seek::Last)),
-    ] {
-        assert_eq!(rig.click(rig.at(control)), vec![action], "{control}");
-    }
-    let back = rig.at("test:ctl:back");
-    assert_eq!(rig.click_with(back, PointerButton::Secondary, Modifiers::NONE), vec![Action::ControlsMenu { at: back }]);
-}
-
-#[test]
-fn without_play_the_controls_close_up_and_a_narrow_bar_leaves_the_title_out() {
-    let mut rig = Rig::new(&["A"], 1);
-    rig.bar.play = false;
-    rig.frame(Vec::new());
-    assert!(solidcraft_ui_registry::handle_at("test:ctl:play").is_none());
-    assert_eq!(rig.click(rig.at("test:ctl:forward")), vec![Action::Seek(Seek::Forward)]);
-    let grip = rig.at("test:grip");
-    rig.rect = Rect::from_min_size(rig.rect.min, vec2(100.0, 40.0));
-    rig.frame(Vec::new());
-    assert!(rig.at("test:grip").x < grip.x, "the grip alone, without the title");
-}
-
-#[test]
 fn an_empty_bar_has_the_marker_at_its_start_and_returns_only_its_drop() {
     let rig = Rig::new(&[], 0);
     assert_eq!(rig.frame(Vec::new()), Vec::new());
     let marker = rig.marker();
-    let first = rig.at("test:ctl:last");
-    assert!(marker.x > first.x, "the marker after the controls");
-    assert_eq!(rig.drag(marker, marker + vec2(80.0, 0.0)), vec![Action::Seek(Seek::Slot { slot: 0, before: false })]);
+    assert!((marker.x - rig.rect.left() - Tokens::get().space_12 / 2.0).abs() <= 1.0, "the empty strip starts at its marker");
+    assert_eq!(rig.drag(marker, marker + vec2(80.0, 0.0)), vec![Action::Seek { slot: 0, before: false }]);
 }
 
 #[test]

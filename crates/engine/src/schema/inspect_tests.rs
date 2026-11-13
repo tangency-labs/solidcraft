@@ -99,7 +99,7 @@ fn describe_returns_both_schemas() {
 
 #[test]
 fn inspect_schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<DocumentInspectParams>(), &["measure", "sketch_counts"]);
+    assert_keys(input_schema_for::<DocumentInspectParams>(), &["bodies", "measure", "sketch_counts", "timeline"]);
     assert_keys(input_schema_for::<MeasureParams>(), &["bodies", "items", "names_only"]);
     assert_keys(input_schema_for::<CommandsParams>(), &[]);
     assert_keys(input_schema_for::<MaterialListParams>(), &[]);
@@ -182,6 +182,15 @@ fn the_types_read_each_key_as_the_handler_does() {
     // document.inspect's flags are plain booleans, `null` is left out.
     assert_eq!(issues("document.inspect", json!({"measure": true, "sketch_counts": null})), none);
     assert_eq!(issues("document.inspect", json!({"measure": "yes"})), ["`measure` must be true or false"]);
+    for ok in
+        [json!({"timeline": "summary", "bodies": "names"}), json!({"timeline": false, "bodies": false}), json!({"timeline": true, "bodies": null})]
+    {
+        assert_eq!(issues("document.inspect", ok.clone()), none, "{ok}");
+    }
+    for bad in [json!("full"), json!(1), json!(["Box"])] {
+        assert_eq!(issues("document.inspect", json!({ "timeline": bad.clone() })), ["`timeline` must be true, false or \"summary\""], "{bad}");
+        assert_eq!(issues("document.inspect", json!({ "bodies": bad.clone() })), ["`bodies` must be true, false or \"names\""], "{bad}");
+    }
     // Neither list command takes a key.
     assert_eq!(issues("engine.commands", json!({"x": 1})), ["unknown key `x`"]);
     assert_eq!(issues("material.list", json!({"x": 1})), ["unknown key `x`"]);
@@ -234,7 +243,17 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"sketch": true}), false),
         ],
     );
-    takes(input_schema_for::<DocumentInspectParams>(), &[(json!({"measure": true, "sketch_counts": false}), true), (json!({"measure": 1}), false)]);
+    takes(
+        input_schema_for::<DocumentInspectParams>(),
+        &[
+            (json!({"measure": true, "sketch_counts": false}), true),
+            (json!({"measure": 1}), false),
+            (json!({"timeline": "summary", "bodies": "names"}), true),
+            (json!({"timeline": false, "bodies": true}), true),
+            (json!({"timeline": "names"}), false),
+            (json!({"bodies": ["Block"]}), false),
+        ],
+    );
     takes(input_schema_for::<CommandsParams>(), &[(json!({}), true), (json!({"x": 1}), false)]);
 }
 
@@ -323,6 +342,81 @@ fn document_inspect_replies_match_its_schema() {
     let r = run(&mut s, "document.inspect", json!({}));
     matches::<DocumentInspectResult>("document.inspect", &r, false);
     assert!(r["bodies"].as_array().is_some_and(|b| b.iter().any(|b| b["removed_later"] == true)), "{r}");
+}
+
+/// `timeline` and `bodies` make a large design's reply small (#14162): a summary row has only
+/// what the feature is and the states it has, `"names"` lists only body names and measures
+/// nothing, `false` leaves either out. The default reply is as it was; a bad value is refused
+/// by the handler too, with the check off.
+#[test]
+fn document_inspect_gives_a_short_timeline_and_body_names_when_asked() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    design(&mut s);
+    // A feature that fails: a box whose length goes to zero.
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "5 mm"}));
+    run(&mut s, "solid.box", json!({"length": "t", "width": 5, "height": 5, "corner": [80, 0, 0], "body_name": "Broken"}));
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "0 mm"}));
+    let keys = |row: &Value| -> Vec<String> {
+        let mut k: Vec<String> = row.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
+        k.sort();
+        k
+    };
+    let full = run(&mut s, "document.inspect", json!({"measure": true}));
+    for row in full["timeline"].as_array().unwrap() {
+        assert_eq!(keys(row), ["error", "id", "ms", "name", "rolled_back", "suppressed", "type", "warning"], "the default row: {row}");
+    }
+    assert_eq!(run(&mut s, "document.inspect", json!({"measure": true, "timeline": true, "bodies": true})), full);
+    let failing = full["timeline"].as_array().unwrap().iter().filter(|f| !f["error"].is_null()).count();
+    assert_eq!(failing, 1, "the zero-length box fails: {full}");
+
+    let short = run(&mut s, "document.inspect", json!({"measure": true, "timeline": "summary", "bodies": "names"}));
+    matches::<DocumentInspectResult>("document.inspect", &short, false);
+    let rows = short["timeline"].as_array().unwrap();
+    assert_eq!(rows.len(), full["timeline"].as_array().unwrap().len(), "{short}");
+    for (row, was) in rows.iter().zip(full["timeline"].as_array().unwrap()) {
+        let mut want = vec!["id", "name", "type"];
+        if !was["error"].is_null() {
+            want.push("error");
+        }
+        if !was["warning"].is_null() {
+            want.push("warning");
+        }
+        want.sort();
+        assert_eq!(keys(row), want, "{row} from {was}");
+        assert_eq!(
+            (&row["id"], &row["name"], &row["type"], &row.get("error")),
+            (&was["id"], &was["name"], &was["type"], &was.get("error").filter(|e| !e.is_null()))
+        );
+    }
+    let names: Vec<&Value> = full["bodies"].as_array().unwrap().iter().map(|b| &b["name"]).collect();
+    assert_eq!(short["bodies"].as_array().unwrap().iter().collect::<Vec<_>>(), names, "names only, nothing measured: {short}");
+    let size = |r: &Value| r["timeline"].to_string().len() + r["bodies"].to_string().len();
+    assert!(size(&short) * 3 < size(&full), "timeline and bodies: {} vs {} bytes", size(&short), size(&full));
+    // Everything else is as it was.
+    for key in ["params", "sketches", "undo", "marker", "selection"] {
+        assert_eq!(short[key], full[key], "{key}");
+    }
+
+    let none = run(&mut s, "document.inspect", json!({"timeline": false, "bodies": false}));
+    matches::<DocumentInspectResult>("document.inspect", &none, false);
+    assert!(none.get("timeline").is_none() && none.get("bodies").is_none(), "{none}");
+    assert_eq!(none["params"], full["params"]);
+
+    // A rolled-back or suppressed feature says so in its summary row.
+    run(&mut s, "timeline.roll_to", json!({"feature": "Shapes"}));
+    let rolled = run(&mut s, "document.inspect", json!({"timeline": "summary"}));
+    assert!(rolled["timeline"].as_array().unwrap().iter().any(|f| f["rolled_back"] == true), "{rolled}");
+    assert!(rolled["timeline"].as_array().unwrap().iter().all(|f| f.get("rolled_back").is_none_or(|r| r == true)), "{rolled}");
+
+    // The handler refuses a bad value itself (with the check off as well).
+    let mut off = Session { param_check: ParamCheck::Off, ..Session::default() };
+    for (p, want) in [
+        (json!({"timeline": "full"}), "`timeline` must be true, false or \"summary\""),
+        (json!({"bodies": ["Block"]}), "`bodies` must be true, false or \"names\""),
+    ] {
+        let e = off.execute("document.inspect", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(want), "{p}: {e}");
+    }
 }
 
 /// `inspect.measure` in each form: bodies (with sheet metal and a material), names only, one

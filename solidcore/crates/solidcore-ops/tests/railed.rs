@@ -8,8 +8,12 @@
     clippy::float_arithmetic
 )]
 
+mod common;
+
+use common::edge_at;
+use solidcore_ops::make_cylinder;
 use solidcore_ops::sweep::railed::{
-    loft_blend, loft_rails, BlendFrame, Continuity, RailFit, RailLoft, RailSection,
+    loft_blend, loft_rails, section_frames, BlendFrame, Continuity, RailFit, RailLoft, RailSection,
 };
 use solidcore_ops::sweep::Curve;
 use solidcore_ops::Error;
@@ -134,4 +138,48 @@ fn malformed_lofts_are_refused() {
     );
     let one = vec![vec![BlendFrame::default(); 2]];
     assert!(loft_blend(&one, [Continuity::G0; 2], [0.0; 2]).is_err());
+}
+
+/// The rims of two coaxial cylinders of radius 5 (one up to z = 10, the other from z = 20) read
+/// as frames leaving along their walls (SolidCraft's 0.2 rule), up from the lower and down,
+/// back into the blend, from the upper: blended at G1 the sheet leaves each rim along the axis,
+/// and is the cylinder's wall between them to its stations' interpolation.
+#[test]
+fn two_rims_read_as_frames_blend_into_the_wall_between() {
+    let lower = make_cylinder([0.0, 0.0, 0.0], 5.0, 10.0).unwrap();
+    let upper = make_cylinder([0.0, 0.0, 20.0], 5.0, 10.0).unwrap();
+    let a = section_frames(
+        &lower,
+        &[edge_at(&lower, [0.0, 5.0, 10.0])],
+        [0.0, 0.0, 1.0],
+        17,
+        0.2,
+    )
+    .unwrap();
+    let b = section_frames(
+        &upper,
+        &[edge_at(&upper, [0.0, 5.0, 20.0])],
+        [0.0, 0.0, -1.0],
+        17,
+        0.2,
+    )
+    .unwrap();
+    for f in a.iter().chain(&b) {
+        assert!(f.bend.iter().all(|x| x.abs() <= 1e-9), "{f:?}");
+    }
+    let sheet = loft_blend(&[a, b], [Continuity::G1, Continuity::G1], [0.0, 0.0]).unwrap();
+    assert_eq!(sheet.counts().unwrap()[0], 1);
+    let area = sheet.area(1e-8).unwrap();
+    let wall = 2.0 * std::f64::consts::PI * 5.0 * 10.0;
+    assert!((area - wall).abs() <= 1e-3 * wall, "{area} vs {wall}");
+}
+
+/// A frame query on an edge the body does not have is refused.
+#[test]
+fn a_frame_query_off_the_body_is_refused() {
+    let body = make_cylinder([0.0, 0.0, 0.0], 5.0, 10.0).unwrap();
+    assert_eq!(
+        section_frames(&body, &[99_999], [0.0, 0.0, 1.0], 5, 0.2).err(),
+        Some(Error::Argument)
+    );
 }

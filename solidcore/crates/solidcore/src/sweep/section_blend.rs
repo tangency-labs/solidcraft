@@ -13,6 +13,7 @@
 //! | `end_rows` (crate) | (none; the rows of SolidCraft's `bridge::section`) |
 //! | `third_derivative` (crate) | (none; SolidCraft's `bridge::third_derivative`) |
 //! | [`SectionBlendDefinition`], [`section_blend_surface`] | (none; the face's definition kept, #3140) |
+//! | [`section_frames`], [`FrameOptions`] | (none; SolidCraft's `section_frames`, `bridge::frames`) |
 //!
 //! **The surface.** The sections run along u, each sampled at the same stations along v. Section
 //! `i` sits at `u = i / (n - 1)` and the surface passes through every station of it: each
@@ -717,4 +718,370 @@ impl SectionBlendDefinition {
             scale,
         });
     }
+}
+
+const OP_FRAMES: &str = "sweep::section_blend::section_frames";
+
+fn frames_invalid(reason: &'static str) -> SolidError {
+    SolidError::invalid_input(OP_FRAMES, reason)
+}
+
+/// How an edge chain's frames are read ([`section_frames`]): SolidCraft's conventions, the
+/// caller's to pass.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameOptions {
+    /// The stations along the chain, [`MIN_STATIONS`] ..= [`MAX_STATIONS`], at even arc length
+    /// (SolidCraft's placement).
+    pub stations: usize,
+    /// The least length the support face's tangent plane keeps of the unit `leave`, `0 ..= 1`
+    /// (SolidCraft's is 0.2): a face whose plane keeps less is not left through.
+    pub min_in_plane: f64,
+}
+
+/// The frames of a cross-section that is an edge chain of a body: at each station, the chain's
+/// point, and the support face's shape read along `leave` there (SolidCraft's `section_frames`,
+/// with its rules for the face and the stations passed in as [`FrameOptions`]).
+///
+/// - The chain is `chain` in order: each edge shares a vertex with the next (the first is
+///   turned to run into the second).
+/// - The support face is the face bounding every chain edge whose tangent plane, at the first
+///   edge's middle, keeps most of the unit `leave`; refused where the most is below
+///   `min_in_plane`.
+/// - The stations lie at even arc length along the chain (each edge's [`Curve::length`], and its
+///   parameter at a length from [`Curve::find_parameter_at_arc_length`]): where the definition is
+///   read, not a certified quantity.
+/// - At a station `p`, its foot on the face's surface `(u, v)` (by projection), the unit normal
+///   `n`, the leave direction `w`, `leave`'s part in the tangent plane made unit, and the
+///   parameter direction `(du, dv)` with `S_u du + S_v dv = w`. The surface's own derivatives to
+///   third order give the parameter line's exactly: `c' = S_u du + S_v dv`,
+///   `c'' = S_uu du^2 + 2 S_uv du dv + S_vv dv^2`,
+///   `c''' = S_uuu du^3 + 3 S_uuv du^2 dv + 3 S_uvv du dv^2 + S_vvv dv^3`; `bend` is the curvature
+///   vector `(c'' - t (t . c'')) / |c'|^2`, `t` the unit tangent, and `bend_change` its arc-length
+///   derivative from `c'''`, each on the spans the line runs into where the station sits on a
+///   knot. SolidCraft reads `c'`, `c''`, `c'''` by five-point differences of
+///   step a thousandth of the chain: these are those derivatives without the stencils'
+///   truncation.
+///
+/// # Errors
+/// `InvalidInput` for stations or `min_in_plane` out of range, a `leave` not finite or of no
+/// length, a chain that is empty or does not join end to start, an edge without a curve, no face
+/// bounding the whole chain or none keeping `min_in_plane` of `leave`, a `leave` normal to the
+/// face at a station, or a surface singular there; those of the lengths, projections and
+/// evaluations.
+pub fn section_frames(
+    k: &crate::kernel::Kernel,
+    b: &crate::topology::Brep,
+    chain: &[crate::topology::EdgeId],
+    leave: Vec3,
+    opts: &FrameOptions,
+) -> Result<Vec<SectionFrame>> {
+    use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+    use crate::topology::{edge, edgeuse::p1 as eu};
+    if !(MIN_STATIONS..=MAX_STATIONS).contains(&opts.stations) {
+        return Err(frames_invalid("a section's frames take 2 to 257 stations"));
+    }
+    if !(opts.min_in_plane.is_finite() && (0.0..=1.0).contains(&opts.min_in_plane)) {
+        return Err(frames_invalid(
+            "the least in-plane share is between 0 and 1",
+        ));
+    }
+    if !finite(leave) {
+        return Err(frames_invalid("a leave direction that is not finite"));
+    }
+    let leave = leave
+        .unitize()
+        .map_err(|_| frames_invalid("a leave direction of no length"))?;
+    if chain.is_empty() {
+        return Err(frames_invalid("an empty chain"));
+    }
+    // each edge's run: its curve, interval and whether it runs backwards in the chain
+    let ends = |e| -> Result<(
+        Option<crate::topology::VertexId>,
+        Option<crate::topology::VertexId>,
+    )> { Ok((edge::start_vertex(b, e)?, edge::end_vertex(b, e)?)) };
+    let mut runs = Vec::new();
+    let mut at: Option<crate::topology::VertexId> = None;
+    for (i, &e) in chain.iter().enumerate() {
+        let (s, t) = ends(e)?;
+        let backwards = match (i, at) {
+            // the first runs into the second
+            (0, _) => match chain.get(1) {
+                Some(&next) => {
+                    let (ns, nt) = ends(next)?;
+                    !(t.is_some() && (t == ns || t == nt))
+                }
+                None => false,
+            },
+            (_, Some(v)) if s == Some(v) => false,
+            (_, Some(v)) if t == Some(v) => true,
+            _ => {
+                return Err(frames_invalid(
+                    "a chain whose edges do not join end to start",
+                ))
+            }
+        };
+        at = if backwards { s } else { t };
+        let curve = edge::evaluation_curve(b, e)?
+            .ok_or_else(|| frames_invalid("a chain edge without a curve"))?;
+        let ivl = edge::interval(b, e)?;
+        runs.push((e, curve, ivl, backwards));
+    }
+    // the support face: every chain edge bounds it, and its plane keeps most of `leave`
+    let faces_of = |e| -> Result<Vec<crate::topology::FaceId>> {
+        let mut out = Vec::new();
+        for u in edge::edgeuses(b, e, None, None)? {
+            if let Some(f) = eu::face(b, u)? {
+                if !out.contains(&f) {
+                    out.push(f);
+                }
+            }
+        }
+        Ok(out)
+    };
+    let (first_edge, first_curve, first_ivl, _) = runs
+        .first()
+        .ok_or_else(|| frames_invalid("an empty chain"))?;
+    let mid = first_curve.evaluate_point(k, first_ivl.evaluate(0.5))?;
+    let mut candidates = faces_of(*first_edge)?;
+    for &(e, _, _, _) in runs.iter().skip(1) {
+        let theirs = faces_of(e)?;
+        candidates.retain(|f| theirs.contains(f));
+    }
+    let mut best: Option<(f64, crate::topology::FaceId)> = None;
+    for f in candidates {
+        let Some(surf) = crate::topology::face::p2::surface(b, f)? else {
+            continue;
+        };
+        let Ok(foot) = crate::query::api_queries::surface_closest_point(k, surf, mid) else {
+            continue;
+        };
+        let Some(&uv) = foot.uvs.first() else {
+            continue;
+        };
+        let d = surf.evaluate(
+            k,
+            uv,
+            1,
+            1,
+            EvaluateFlags {
+                non_zero_tangents: false,
+                ..EvaluateFlags::default()
+            },
+        )?;
+        let (Some(su), Some(sv)) = (
+            d.get(1).and_then(|r| r.first()),
+            d.first().and_then(|r| r.get(1)),
+        ) else {
+            continue;
+        };
+        let Ok(n) = su.cross(*sv).unitize() else {
+            continue;
+        };
+        let keeps = (leave - n * leave.dot(n)).length();
+        if best.is_none_or(|(s, _)| keeps > s) {
+            best = Some((keeps, f));
+        }
+    }
+    let (keeps, face) = best.ok_or_else(|| frames_invalid("no face bounds the whole chain"))?;
+    if keeps < opts.min_in_plane {
+        return Err(frames_invalid(
+            "the leave direction lies in no face at the chain: its tangent plane keeps less than the least asked",
+        ));
+    }
+    let surf = crate::topology::face::p2::surface(b, face)?
+        .ok_or_else(|| frames_invalid("the support face has no surface"))?;
+    // the stations at even arc length
+    let mut lengths = Vec::new();
+    for (_, curve, ivl, _) in &runs {
+        let chord = curve
+            .evaluate_point(k, ivl.min())?
+            .distance(curve.evaluate_point(k, ivl.max())?);
+        let len = curve.length(k, ivl, 1e-9 * (1.0 + chord))?;
+        if !(len.is_finite() && len >= 0.0) {
+            return Err(frames_invalid("a chain edge whose length is not finite"));
+        }
+        lengths.push(len);
+    }
+    let total: f64 = lengths.iter().sum();
+    if !(total.is_finite() && total > 0.0) {
+        return Err(frames_invalid("a chain of no length"));
+    }
+    let mut out = Vec::new();
+    #[allow(clippy::cast_precision_loss)] // at most MAX_STATIONS
+    let last = (opts.stations - 1) as f64;
+    for i in 0..opts.stations {
+        #[allow(clippy::cast_precision_loss)] // at most MAX_STATIONS
+        let s = total * (i as f64) / last;
+        // the run the station is on, and how far along it
+        let mut left = s;
+        let mut pick = 0;
+        for (j, &l) in lengths.iter().enumerate() {
+            pick = j;
+            if left <= l || j + 1 == lengths.len() {
+                break;
+            }
+            left -= l;
+        }
+        let ((_, curve, ivl, backwards), &len) = (
+            runs.get(pick)
+                .ok_or_else(|| frames_invalid("a chain's run"))?,
+            lengths
+                .get(pick)
+                .ok_or_else(|| frames_invalid("a chain's run"))?,
+        );
+        // `clamp(0.0, len)` without its panic
+        let left = if left < 0.0 {
+            0.0
+        } else if left > len {
+            len
+        } else {
+            left
+        };
+        let t = if *backwards {
+            if left >= len {
+                ivl.min()
+            } else {
+                curve
+                    .find_parameter_at_arc_length(k, ivl.max(), -left)?
+                    .end_param
+            }
+        } else if left >= len {
+            ivl.max()
+        } else {
+            curve
+                .find_parameter_at_arc_length(k, ivl.min(), left)?
+                .end_param
+        };
+        // `clamp(ivl.min(), ivl.max())` without its panic on a reversed or NaN interval
+        let t = if t < ivl.min() {
+            ivl.min()
+        } else if t > ivl.max() {
+            ivl.max()
+        } else {
+            t
+        };
+        let p = curve.evaluate_point(k, t)?;
+        out.push(frame_at(k, surf, p, leave)?);
+    }
+    Ok(out)
+}
+
+/// The frame at `p` on `surf` leaving along `leave`'s part in the tangent plane
+/// ([`section_frames`]).
+fn frame_at(
+    k: &crate::kernel::Kernel,
+    surf: &Surface,
+    p: Point3,
+    leave: Vec3,
+) -> Result<SectionFrame> {
+    use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+    let foot = crate::query::api_queries::surface_closest_point(k, surf, p)?;
+    let uv = *foot
+        .uvs
+        .first()
+        .ok_or_else(|| frames_invalid("a station with no foot on the support face"))?;
+    let d = surf.evaluate(
+        k,
+        uv,
+        3,
+        3,
+        EvaluateFlags {
+            non_zero_tangents: false,
+            ..EvaluateFlags::default()
+        },
+    )?;
+    let at = |i: usize, j: usize| -> Result<Vec3> {
+        d.get(i)
+            .and_then(|r| r.get(j))
+            .copied()
+            .ok_or_else(|| frames_invalid("a surface's derivatives"))
+    };
+    let (su, sv) = (at(1, 0)?, at(0, 1)?);
+    let n = su
+        .cross(sv)
+        .unitize()
+        .map_err(|_| frames_invalid("a support surface singular at a station"))?;
+    let w = (leave - n * leave.dot(n))
+        .unitize()
+        .map_err(|_| frames_invalid("a leave direction normal to the support face at a station"))?;
+    // S_u du + S_v dv = w, by its normal equations
+    let (a, bb, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
+    let det = a * c - bb * bb;
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(det > 0.0) {
+        return Err(frames_invalid("a support surface singular at a station"));
+    }
+    let du = (c * w.dot(su) - bb * w.dot(sv)) / det;
+    let dv = (a * w.dot(sv) - bb * w.dot(su)) / det;
+    // the higher derivatives on the spans the line runs into: at a knot (a rational circle's
+    // quarter) a surface's second and third derivatives differ from one span to the next, and
+    // the line leaves along `w`, as SolidCraft's samples read it
+    let side = |d: f64| {
+        if d < 0.0 {
+            crate::nurbs::knots::Side::Right
+        } else {
+            crate::nurbs::knots::Side::Left
+        }
+    };
+    let sided = surf.evaluate(
+        k,
+        uv,
+        3,
+        3,
+        EvaluateFlags {
+            u_side: side(du),
+            v_side: side(dv),
+            non_zero_tangents: false,
+            ..EvaluateFlags::default()
+        },
+    )?;
+    let at = |i: usize, j: usize| -> Result<Vec3> {
+        sided
+            .get(i)
+            .and_then(|r| r.get(j))
+            .copied()
+            .ok_or_else(|| frames_invalid("a surface's derivatives"))
+    };
+    let c1 = at(1, 0)? * du + at(0, 1)? * dv;
+    let c2 = at(2, 0)? * (du * du) + at(1, 1)? * (2.0 * du * dv) + at(0, 2)? * (dv * dv);
+    let c3 = at(3, 0)? * (du * du * du)
+        + at(2, 1)? * (3.0 * du * du * dv)
+        + at(1, 2)? * (3.0 * du * dv * dv)
+        + at(0, 3)? * (dv * dv * dv);
+    let (bend, bend_change) = shape(c1, c2, c3)?;
+    if !(finite(bend) && finite(bend_change)) {
+        return Err(frames_invalid("a station's shape is not finite"));
+    }
+    Ok(SectionFrame {
+        p,
+        leave: w,
+        bend,
+        bend_change,
+    })
+}
+
+/// The curvature vector of a curve with derivatives `c1`, `c2`, `c3`, and its arc-length
+/// derivative: with `sigma = |c1|` and `t = c1 / sigma`, `kappa = (c2 - t (t . c2)) / sigma^2`,
+/// and `d kappa / ds = (d kappa / d tau) / sigma`, differentiating each factor (`sigma' = t . c2`,
+/// `t' = (c2 - t (t . c2)) / sigma`).
+fn shape(c1: Vec3, c2: Vec3, c3: Vec3) -> Result<(Vec3, Vec3)> {
+    let sigma = c1.length();
+    // the floor on the tangent's length, divided by below: refused, never adjusted
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(sigma.is_finite() && sigma > 0.0) {
+        return Err(frames_invalid(
+            "a parameter line that does not move at a station",
+        ));
+    }
+    let t = c1 * (1.0 / sigma);
+    let a2 = t.dot(c2);
+    let across = c2 - t * a2;
+    let kappa = across * (1.0 / (sigma * sigma));
+    let dt = across * (1.0 / sigma);
+    let da2 = dt.dot(c2) + t.dot(c3);
+    let dsigma = a2;
+    let dacross = c3 - dt * a2 - t * da2;
+    let dkappa =
+        dacross * (1.0 / (sigma * sigma)) - across * (2.0 * dsigma / (sigma * sigma * sigma));
+    Ok((kappa, dkappa * (1.0 / sigma)))
 }

@@ -20,6 +20,12 @@
 //!   and under its own panic guard; calling ops from it is refused ([`Error::Reentered`]), as is
 //!   calling ops from inside a kernel call. Ops itself writes nothing and logs nothing.
 //! - **The call running now:** [`current_call`] reads it without a lock, for crash reports.
+#![cfg_attr(
+    feature = "profile",
+    doc = "- **Profiles** (feature `profile`): [`profiled`] returns the kernel's profile of each \
+           ops call made inside it, one per call, each scoped under the kernel's lock so that \
+           calls on other threads never mix into it. Without the feature none of this exists."
+)]
 
 use std::cell::Cell;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
@@ -186,6 +192,57 @@ thread_local! {
     static STOPPED: Cell<Option<bool>> = const { Cell::new(None) };
 }
 
+#[cfg(feature = "profile")]
+thread_local! {
+    /// The profiles of this thread's calls, while it runs inside [`profiled`]. Per thread:
+    /// several threads share the one process kernel, and each collects only its own calls.
+    static PROFILES: std::cell::RefCell<Option<Vec<CallProfile>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// One ops call's kernel profile (feature `profile`): what the kernel's profiler recorded
+/// inside it ([`solidcore::profile`]).
+#[cfg(feature = "profile")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallProfile {
+    /// The call's name, as [`current_call`] gives it.
+    pub call: &'static str,
+    /// What the profiler recorded inside it. Its first scope is the call itself, named
+    /// `call`, whose counters are the call's totals; the kernel's own scopes nest under it.
+    pub profile: solidcore::profile::Profile,
+}
+
+/// Runs `f` and returns, beside its value, the kernel profile of each ops call this thread
+/// makes inside it, in order (feature `profile`). Each call's profile is taken under the
+/// kernel's lock as the call ends, so calls other threads make meanwhile are in none of them;
+/// a call that panics or is cancelled reports what ran before. Nested, the inner `profiled`
+/// returns its calls and the outer one gets them too.
+#[cfg(feature = "profile")]
+pub fn profiled<T>(f: impl FnOnce() -> T) -> (T, Vec<CallProfile>) {
+    /// Puts the enclosing `profiled`'s collection back (this one's calls added to it), on a
+    /// return or a panic out of `f`.
+    struct Restore(Option<Vec<CallProfile>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let outer = self.0.take();
+            PROFILES.with(|p| {
+                let mut p = p.borrow_mut();
+                let inner = p.take();
+                *p = outer.map(|mut o| {
+                    o.extend(inner.into_iter().flatten());
+                    o
+                });
+            });
+        }
+    }
+    let outer = PROFILES.with(|p| p.borrow_mut().replace(Vec::new()));
+    let restore = Restore(outer);
+    let value = f();
+    let mine = PROFILES.with(|p| p.borrow().clone().unwrap_or_default());
+    drop(restore);
+    (value, mine)
+}
+
 /// Is this thread inside a kernel call, whose panic the session catches? (Crash reports mark
 /// such a panic recovered.)
 #[must_use]
@@ -328,7 +385,29 @@ fn run_with<T: Answer>(
     // the operands as they come in, for a call that consumes them, when someone will read them
     let snapshot = (before && hook.is_some()).then(|| written(k, inputs));
     STOPPED.with(|d| d.set(None));
-    let caught = catch_unwind(AssertUnwindSafe(|| f(k)));
+    // this thread collects profiles: the call's alone, under the lock (other threads' calls
+    // left records in the shared kernel, dropped here)
+    #[cfg(feature = "profile")]
+    let profiling = PROFILES.with(|p| p.borrow().is_some());
+    #[cfg(feature = "profile")]
+    if profiling {
+        let _ = k.take_profile();
+    }
+    let caught = catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(feature = "profile")]
+        let _scope = profiling.then(|| k.profiler.scope(call));
+        f(k)
+    }));
+    // (its scope closed with the closure, a panic's unwinding included)
+    #[cfg(feature = "profile")]
+    if profiling {
+        let profile = k.take_profile();
+        PROFILES.with(|p| {
+            if let Some(v) = p.borrow_mut().as_mut() {
+                v.push(CallProfile { call, profile });
+            }
+        });
+    }
     let stopped = STOPPED
         .with(Cell::take)
         .unwrap_or_else(|| token.as_ref().is_some_and(CancelToken::is_cancelled));

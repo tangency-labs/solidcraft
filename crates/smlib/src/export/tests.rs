@@ -489,7 +489,7 @@ mod mapped_tests {
             knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0, 5.0 + e, 5.0 + e, 5.0 + e, 5.0 + e],
             points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5]],
         };
-        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0]).unwrap();
+        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0], &|_, _| false).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
         assert_eq!(out.interval(), Some([3.0, 5.0]));
         same_curve_on(&out, &base(), [3.0, 5.0]);
@@ -509,7 +509,7 @@ mod mapped_tests {
             knots: vec![1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 3.0, 3.0, 3.0],
             points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
         };
-        let out = mapped(&trim, true, [1.0, 0.0], [1.0, 3.0]).unwrap();
+        let out = mapped(&trim, true, [1.0, 0.0], [1.0, 3.0], &|_, _| false).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
         assert_eq!(out.interval(), Some([1.0, 3.0]));
         same_curve_on(&out, &want, [1.0, 3.0]);
@@ -526,7 +526,7 @@ mod mapped_tests {
             knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0, 5.0 + e, 5.0 + e, 5.0 + e, 5.0 + e],
             points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [6.0, 1.0], [7.0, 2.0], [8.0, 3.0], [9.0, 4.0]],
         };
-        let out = mapped(&trim, false, [1.0, 0.0], [3.0, 5.0]).unwrap();
+        let out = mapped(&trim, false, [1.0, 0.0], [3.0, 5.0], &|_, _| false).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
         assert_eq!(out.interval(), Some([3.0, 5.0]));
         let want = b::Curve2::Spline {
@@ -541,7 +541,75 @@ mod mapped_tests {
     /// A trim already on its edge is left as it is.
     #[test]
     fn a_trim_on_its_edge_is_unchanged() {
-        let out = mapped(&base(), true, [1.0, 0.0], [3.0, 5.0]).unwrap();
+        let out = mapped(&base(), true, [1.0, 0.0], [3.0, 5.0], &|_, _| false).unwrap();
         assert_eq!(out, base());
+    }
+
+    /// A circle's edge on its NURBS form (a whole turn of four quarters, knots 0 to 4) whose end
+    /// lies a rounding past the quarter line SMLib's trim stops on: the edge ends at 1.00000012,
+    /// the trim at 1, 1.2e-7 of the form's parameter apart, as a file's quarter arc measures once
+    /// its end angle is converted. On a 50 mm circle the two parameters are 0.01 µm apart, one
+    /// point of the edge within its tolerance, so the trim's end is the edge's and the face is
+    /// kept; the engine block and cylinder head of an assembly were lost whole on it.
+    #[test]
+    fn a_trim_ending_on_the_quarter_line_its_circle_edge_ends_a_rounding_past_is_the_edges() {
+        let r = 50.0;
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        // The NURBS form of a circle of radius r about z: four rational quadratic quarters.
+        let corners = [[r, 0.0], [r, r], [0.0, r], [-r, r], [-r, 0.0], [-r, -r], [0.0, -r], [r, -r], [r, 0.0]];
+        let circle = b::Curve::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0],
+            homogeneous: corners
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let k = if i % 2 == 1 { w } else { 1.0 };
+                    [p[0] * k, p[1] * k, 0.0, k]
+                })
+                .collect(),
+        };
+        let end = 1.0 + 1.2e-7;
+        let (p, q) = (point3(&circle, 1.0).unwrap(), point3(&circle, end).unwrap());
+        assert!(((p[0] - 0.0).abs() + (p[1] - r).abs()) < 1e-9, "{p:?}");
+        let gap = (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt();
+        assert!(gap > 1e-9 && gap < 1e-4, "{gap}");
+        let tolerance = 1e-3;
+        let on_edge = |s: f64, t: f64| match (point3(&circle, s), point3(&circle, t)) {
+            (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= tolerance,
+            _ => false,
+        };
+        // SMLib's trim of the quarter arc in the face's (u, v), on [0, 1].
+        let trim = b::Curve2::Spline { knots: vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0], points: vec![[0.0, 0.0], [0.3, 0.1], [0.7, 0.2], [1.0, 0.4]] };
+        let out = mapped(&trim, true, [1.0, 0.0], [0.0, end], &on_edge).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([0.0, end]));
+        assert_eq!(eval(&out, end), eval(&trim, 1.0));
+        // The same gap where the edge's points there are farther apart than its tolerance is
+        // not the edge's end: the trim is refused, as one a quarter short would be.
+        assert!(mapped(&trim, true, [1.0, 0.0], [0.0, end], &|_, _| false).is_err());
+        assert!(mapped(&trim, true, [1.0, 0.0], [0.0, 1.5], &on_edge).is_err());
+    }
+
+    /// A trim that runs past its edge's end by more than a rounding but within the edge's
+    /// tolerance has its overhang dropped, and an interior knot inside the edge's interval
+    /// nearer its end than the overhang stays where it is: the curve on the edge is unchanged.
+    #[test]
+    fn a_trim_past_its_edge_within_tolerance_keeps_its_interior_knots() {
+        let g = 1e-7;
+        // Interior knot 5 − g/2 (inside the edge, nearer its end than the overhang), end at 5 + g.
+        let trim = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 5.0 - 0.5 * g, 5.0 + g, 5.0 + g, 5.0 + g, 5.0 + g],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
+        };
+        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0], &|_, _| true).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([3.0, 5.0]));
+        let b::Curve2::Spline { knots, .. } = &out else { panic!("{out:?}") };
+        assert!(knots.contains(&(5.0 - 0.5 * g)), "{knots:?}");
+        for i in 0..=8 {
+            let t = 3.0 + 2.0 * f64::from(i) / 8.0 * (1.0 - 1e-6);
+            let (p, q) = (eval(&out, t).unwrap(), eval(&trim, t).unwrap());
+            assert!((p[0] - q[0]).abs() < 1e-5 && (p[1] - q[1]).abs() < 1e-5, "at {t}: {p:?} vs {q:?}");
+        }
     }
 }

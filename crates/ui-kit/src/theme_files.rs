@@ -500,8 +500,8 @@ theme_keys! {
         app_bar, toolbar, panel, panel_header, border, text, text_dim, accent, accent_soft, sketch_accent, error, warning,
         icon, timeline, hover, sel_face, sel_edge, sel_edge_rim, hover_edge, hover_edge_halo, sel_profile,
         sel_profile_edge, hover_profile, hover_profile_edge, sel_vertex, origin_plane, origin_plane_edge, origin_plane_hover,
-        origin_point, axis_x, axis_y, axis_z, construction_plane, construction_geom, body, body_edge, manipulator, joint_manipulator, joint_axis,
-        preview_add, preview_new, preview_sketch, preview_cut, cube_face, cube_border, cube_text, cube_hover, viewport_top,
+        origin_point, axis_x, axis_y, axis_z, construction_plane, construction_geom, body, body_edge, isoparm, manipulator, joint_manipulator,
+        joint_axis, preview_add, preview_new, preview_sketch, preview_cut, cube_face, cube_border, cube_text, cube_hover, viewport_top,
         viewport_bottom, grid, grid_major, body_selected, sketch, sketch_fixed, sketch_halo, sketch_locked, sketch_conflict, dimension, dimension_driven,
         sketch_point, sketch_point_free, dialog_bg, dialog_border, chip, section_cap,
         profile_fill, glyph_bg, glyph_edge, glyph_text, overlay, rubber_band, app_bar_text, app_bar_hover, timeline_item,
@@ -1217,6 +1217,11 @@ pub fn resolve_base(theme: &ThemeFile) -> Tokens {
     // its own (#7244).
     if !theme.colors.contains_key("sketch_conflict") {
         t.sketch_conflict = t.error;
+    }
+    // A surface's isoparms follow the theme's own body and edges unless it sets their colour:
+    // halfway from the edge colour to the body's, about half the edges' contrast.
+    if !theme.colors.contains_key("isoparm") && (theme.colors.contains_key("body") || theme.colors.contains_key("body_edge")) {
+        t.isoparm = t.body_edge.lerp_to_gamma(t.body, 0.5);
     }
     // A file that sets no colours is its base palette, exactly.
     if !theme.colors.is_empty() {
@@ -2286,6 +2291,23 @@ mod tests {
         }
         for c in ["#12345", "#1234567", "#gggggg", "282828", "#2828281"] {
             assert!(parse_color(c).is_none(), "{c}");
+        }
+    }
+
+    /// A theme that sets its own body or edge colours without an isoparm colour gets isoparms
+    /// halfway between them; one that sets none keeps its base's; one that sets it, its own.
+    #[test]
+    fn isoparms_follow_a_themes_body_and_edges_unless_it_sets_them() {
+        for base in [Base::Dark, Base::Light] {
+            let defaults = if base.is_dark() { Tokens::dark() } else { Tokens::light() };
+            let bare = from_value(&json!({"format": FORMAT, "name": "Bare", "base": base})).unwrap();
+            assert_eq!(resolve(&bare).isoparm, defaults.isoparm);
+            let edged =
+                from_value(&json!({"format": FORMAT, "name": "Edged", "base": base, "colors": {"body": "#c0c0c0", "body_edge": "#000000"}})).unwrap();
+            assert_eq!(resolve(&edged).isoparm, Color32::from_rgb(96, 96, 96));
+            let own = from_value(&json!({"format": FORMAT, "name": "Own", "base": base, "colors": {"body_edge": "#000000", "isoparm": "#123456"}}))
+                .unwrap();
+            assert_eq!(resolve(&own).isoparm, Color32::from_rgb(0x12, 0x34, 0x56));
         }
     }
 

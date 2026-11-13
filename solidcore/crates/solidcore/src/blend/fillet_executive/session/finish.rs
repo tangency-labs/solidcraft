@@ -45,6 +45,7 @@ use crate::blend::fillet_executive::p3::{
     ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
 };
 use crate::blend::fillet_geom::p1::FilletErrorType;
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::object::NotifyOperation;
 use crate::geom::tol::approx_tol3d;
@@ -52,6 +53,7 @@ use crate::kernel::Kernel;
 use crate::surface::procedural_blend::NetScope;
 use crate::topology::brep::{p1, p3};
 use crate::topology::{BrepId, EdgeId};
+use std::collections::BTreeSet;
 
 const OP: &str = "blend::fillet_executive::session::finish";
 
@@ -60,18 +62,18 @@ const OP: &str = "blend::fillet_executive::session::finish";
 /// this file that names an edge. The public wrappers recognise it to put the caller's
 /// body back.
 pub(crate) fn is_non_manifold_refusal(error: &SolidError) -> bool {
-    matches!(
-        error,
-        SolidError::Upstream {
-            operation: OP,
-            code: 1001,
-            entity: Some(EntityRef::Edge(_)),
-        }
-    )
+    // the status, not the variant: a typed failure that replaced the `Upstream` is the same
+    // refusal (#13790)
+    error.upstream_status() == Some(1001)
+        && error.operation() == OP
+        && matches!(error.entity(), Some(EntityRef::Edge(_)))
 }
 
 /// `error` without the entity it names (the refused result's edge, gone once the
-/// caller's body is put back).
+/// caller's body is put back): an [`SolidError::Upstream`], or a typed failure that
+/// replaced one (its [`SolidError::upstream_status`] is set; the reasons of those name no
+/// entity of their own, so clearing the failure's entity clears the error's). Other errors
+/// are returned as they are.
 pub(crate) fn without_entity(error: SolidError) -> SolidError {
     match error {
         SolidError::Upstream {
@@ -81,17 +83,31 @@ pub(crate) fn without_entity(error: SolidError) -> SolidError {
             code,
             entity: None,
         },
+        replaced if replaced.upstream_status().is_some() => match replaced {
+            SolidError::Failed(mut f) => {
+                f.entity = None;
+                SolidError::Failed(f)
+            }
+            other => other,
+        },
         other => other,
     }
 }
 
-/// `FILEXEC_ERR`: the executive's generic failure status.
-fn failure() -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code: 1001,
-        entity: None,
-    }
+/// The operation, status and entity of a failure the executive turns into a
+/// [`SolidError::FilletRefused`] when a size builds (WR-696): one that answers with an
+/// upstream status, by its status rather than its variant, so a typed failure that replaced
+/// an [`SolidError::Upstream`] is refused alike (#13790). Failures that stand for no
+/// upstream status are passed on as they are.
+fn refusable(error: &SolidError) -> Option<(&'static str, i32, Option<EntityRef>)> {
+    error
+        .upstream_status()
+        .map(|code| (error.operation(), code, error.entity()))
+}
+
+/// `FILEXEC_ERR` (`SM_ERR`): the executive's generic failure status, as the phrase says.
+fn failure(what: &'static str) -> SolidError {
+    SolidError::blend_failed(OP, what)
 }
 
 /// Ordinary statuses become `None`; deferrals propagate.
@@ -150,6 +166,7 @@ impl FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
+        k.work_counters.add_target_record_seeding();
         p3::seed_records(notification_records, target, &key_of);
         crate::geom::context::Context::with_notification_context(k, |k, context| {
             let mut env = crate::topology::edge::NotifyEnv {
@@ -250,6 +267,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             ));
         }
         let result = crate::geom::context::Context::with_notification_context(k, |k, context| {
+            k.work_counters.add_target_record_seeding();
             p3::seed_records(notification_records, target, &key_of);
             let mut env = crate::topology::edge::NotifyEnv {
                 records: notification_records,
@@ -390,7 +408,18 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             }
         }
         if let Some((edges, faces)) = &self.0.cleanup_kept {
-            relations.kept_edges.clone_from(edges);
+            // An input edge is kept by its id while it is still the whole input edge, with
+            // the ends it had. A split one is not: which of its pieces keeps the id follows
+            // the edge's direction, so a part and its mirror image would keep different
+            // pieces (#15768). Its pieces stay where they lie between two input faces.
+            let live: BTreeSet<EdgeId> = p1::edges(self.0.target, None)?.into_iter().collect();
+            for (&edge, ends) in edges {
+                if live.contains(&edge)
+                    && crate::topology::edge::vertices(self.0.target, edge, None)? == *ends
+                {
+                    relations.kept_edges.insert(edge);
+                }
+            }
             relations.kept_faces.clone_from(faces);
         }
         let before = p1::edges(self.0.target, None)?;
@@ -446,6 +475,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
+        k.work_counters.add_target_record_seeding();
         p3::seed_records(notification_records, target, &key_of);
         crate::geom::context::Context::with_notification_context(k, |_, context| {
             let mut env = crate::topology::edge::NotifyEnv {
@@ -456,6 +486,49 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             };
             crate::topology::face::p3::notify(target, id, &mut env, None, operation, data)
         })?
+    }
+    /// (not upstream) The records are seeded once for all the faces, not once a face as
+    /// [`Self::finish_notify_face`] does: a `PreEdit` notification makes and removes no
+    /// entity, so the records are the same, but each seeding walks the whole target, and
+    /// a walk a face made a large part's fillet spend most of its time here. Each face
+    /// still gets its own notification context, as before.
+    fn finish_pre_edit_faces(&mut self, k: &mut Kernel, brep: FilletObject) -> Result<()> {
+        Self::require_target(brep)?;
+        let serial = self.0.target_serial;
+        let key_of = |entity| p3::topology_ref(serial, entity);
+        let SessionObjects {
+            target,
+            notification_records,
+            attributes,
+            ..
+        } = &mut *self.0;
+        let faces = p1::faces(target, None)?;
+        k.work_counters.add_target_record_seeding();
+        p3::seed_records(notification_records, target, &key_of);
+        for id in faces {
+            let this = key_of(EntityRef::Face(id));
+            // SmTypes.h:659: SM_NO_GET_BREP(face) expands to a null object.
+            ignore(
+                crate::geom::context::Context::with_notification_context(k, |_, context| {
+                    let mut env = crate::topology::edge::NotifyEnv {
+                        records: &mut *notification_records,
+                        attributes: &mut *attributes,
+                        context: Some(context),
+                        key_of: &key_of,
+                    };
+                    crate::topology::face::p3::notify(
+                        target,
+                        id,
+                        &mut env,
+                        None,
+                        NotifyOperation::PreEdit,
+                        [Some(this), None, None],
+                    )
+                })
+                .and_then(|notified| notified),
+            )?;
+        }
+        Ok(())
     }
     fn finish_orient_trimmed_surfaces(
         &mut self,
@@ -474,6 +547,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
+        k.work_counters.add_target_record_seeding();
         p3::seed_records(notification_records, target, &key_of);
         let oriented =
             crate::geom::context::Context::with_notification_context(k, |k, context| {
@@ -538,12 +612,7 @@ impl FilletSession<'_> {
         }
         // Not upstream (WR-696): a refusal with a size that builds carries it on the error,
         // its status unchanged.
-        if let Err(SolidError::Upstream {
-            operation,
-            code,
-            entity,
-        }) = result
-        {
+        if let Some((operation, code, entity)) = result.as_ref().err().and_then(refusable) {
             if let Some(fit) = self.fit_size() {
                 return Err(SolidError::FilletRefused {
                     operation,
@@ -578,11 +647,11 @@ impl FilletSession<'_> {
             ));
             self.executive.error.comment =
                 "Fillet Merge Failure: Result Is Not A Closed Manifold Solid".into();
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: 1001,
-                entity: Some(EntityRef::Edge(edge)),
-            });
+            return Err(SolidError::blend_at(
+                OP,
+                BlendFailure::Failed("the result is not a closed manifold solid"),
+                EntityRef::Edge(edge),
+            ));
         }
         Ok(())
     }
@@ -724,7 +793,7 @@ impl FilletSession<'_> {
                 reason: None,
                 comment: crate::blend::blend_corner::setback::SETBACK_NOT_BUILT,
             });
-            return Err(failure());
+            return Err(failure("an asked setback is not built"));
         }
         // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
         // the setback set on it is first read: the Setback where it is one
@@ -750,8 +819,13 @@ impl FilletSession<'_> {
         }
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
         self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
+            let mut edges = std::collections::BTreeMap::new();
+            for edge in p1::edges(self.objects.target, None)? {
+                let ends = crate::topology::edge::vertices(self.objects.target, edge, None)?;
+                edges.insert(edge, ends);
+            }
             Some((
-                p1::edges(self.objects.target, None)?.into_iter().collect(),
+                edges,
                 p1::faces(self.objects.target, None)?.into_iter().collect(),
             ))
         } else {
@@ -769,7 +843,7 @@ impl FilletSession<'_> {
                 if let Some(output) = error_out.as_deref_mut() {
                     output.assign(&session.executive.error);
                 }
-                return Err(failure());
+                return Err(failure("the fillet body is not built"));
             }
             let faces = session
                 .objects
@@ -784,7 +858,7 @@ impl FilletSession<'_> {
                 if let Some(output) = error_out {
                     output.assign(&session.executive.error);
                 }
-                return Err(failure());
+                return Err(failure("the fillet body has no faces"));
             }
             session.shrink_fillet_faces(k)?;
             // The fork's NoteRadiusCornerSurfaces (6eecf04): the fillet surfaces that turn at
@@ -1003,6 +1077,47 @@ mod stitch_identity_tests {
     }
 }
 
+#[cfg(test)]
+mod pre_edit_tests {
+    use super::*;
+    use crate::math::Point3;
+
+    /// The tail of a fillet notifies every face of the target `PreEdit`, which resets its
+    /// rectangular-trim flag to unsure. It seeded the session's records before each face, a
+    /// walk over every entity of the target each time, so the tail cost faces × entities: on
+    /// a part of a few thousand faces most of a fillet's time. The records are seeded once,
+    /// and every face is still notified.
+    #[test]
+    fn the_pre_edit_tail_seeds_the_records_once_and_notifies_every_face() {
+        let mut k = Kernel::default();
+        let mut target =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0)
+                .unwrap();
+        let faces = p1::faces(&target, None).unwrap();
+        assert_eq!(faces.len(), 6);
+        for &f in &faces {
+            target.face_mut(f).unwrap().rectangular_trim = 1;
+        }
+        let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+        k.work_counters.reset();
+        FinishAccess(&mut session.objects)
+            .finish_pre_edit_faces(&mut k, FilletObject::Body(FilletBody::Target))
+            .unwrap();
+        assert_eq!(k.work_counters.target_record_seedings(), 1);
+        for &f in &faces {
+            assert_eq!(
+                session.objects.target.face(f).unwrap().rectangular_trim,
+                crate::topology::brep_data::UNSURE,
+                "{f:?}"
+            );
+        }
+        // Not the target: refused, as each face's notification refused it.
+        assert!(FinishAccess(&mut session.objects)
+            .finish_pre_edit_faces(&mut k, FilletObject::IntermediateBrep)
+            .is_err());
+    }
+}
+
 /// A ball that does not fit a face it rolls on (WR-462, tangency-labs/solidcore#1172; since the
 /// retirement of `fillet_refuse_ball_not_fitting`, judged by `BallIsRegular`, WR-696): a
 /// 60 x 40 x 20 box, its top edge at x = 60 rounded r3, then the round's end arc on the face
@@ -1099,5 +1214,82 @@ mod ball_fit_tests {
         let (code, result) = end_round(2.0);
         result.unwrap();
         assert_ne!(code, NO_ROOM);
+    }
+
+    /// The executive's generic failure (`FILEXEC_ERR`) is a typed failure with the status,
+    /// operation and (no) entity of the bare status it replaced (#13790).
+    #[test]
+    fn the_generic_failure_is_typed_with_its_status() {
+        let e = failure("the fillet body is not built");
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::Failed("the fillet body is not built"))
+        );
+        assert_eq!(e.upstream_status(), Some(1001));
+        assert_eq!(e.operation(), OP);
+        assert_eq!(e.entity(), None);
+        assert!(!is_non_manifold_refusal(&e));
+        assert_eq!(refusable(&e), Some((OP, 1001, None)));
+    }
+
+    /// #13790: the executive's decisions on a bare `Upstream` (the WR-696 refusal with a fit
+    /// size, the WR-212 non-manifold refusal and the entity it drops once the body is put
+    /// back) treat a typed failure that replaced the `Upstream` alike, and leave typed
+    /// failures that never stood for a status as they are.
+    #[test]
+    fn typed_failures_that_replaced_an_upstream_status_are_refused_alike() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        use crate::topology::EdgeId;
+        let edge = Some(EntityRef::Edge(EdgeId::from_index(3)));
+        // the refusal with a fit size
+        let upstream = SolidError::Upstream {
+            operation: "intersect::x",
+            code: 1001,
+            entity: edge,
+        };
+        assert_eq!(refusable(&upstream), Some(("intersect::x", 1001, edge)));
+        for typed in replaced_upstream("intersect::x", 1001, edge) {
+            assert_eq!(refusable(&typed), refusable(&upstream), "{typed:?}");
+        }
+        for native in native_failures("intersect::x", 1001) {
+            assert_eq!(refusable(&native), None, "{native:?}");
+        }
+        // the non-manifold refusal
+        let upstream = SolidError::Upstream {
+            operation: OP,
+            code: 1001,
+            entity: edge,
+        };
+        assert!(is_non_manifold_refusal(&upstream));
+        for typed in replaced_upstream(OP, 1001, edge) {
+            assert!(is_non_manifold_refusal(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream(OP, 1001, None)
+            .into_iter()
+            .chain(replaced_upstream(OP, 1006, edge))
+            .chain(native_failures(OP, 1001))
+        {
+            assert!(!is_non_manifold_refusal(&other), "{other:?}");
+        }
+        // the entity it drops: the same operation and status, with no entity
+        let stripped = without_entity(upstream);
+        assert_eq!(stripped.entity(), None);
+        for typed in replaced_upstream(OP, 1001, edge) {
+            let kept = typed.clone();
+            let stripped_typed = without_entity(typed);
+            assert_eq!(stripped_typed.entity(), stripped.entity());
+            assert_eq!(stripped_typed.operation(), stripped.operation());
+            assert_eq!(stripped_typed.upstream_status(), stripped.upstream_status());
+            // only the entity changes: the typed reason is kept
+            assert_eq!(
+                stripped_typed.failure().map(|f| &f.reason),
+                kept.failure().map(|f| &f.reason)
+            );
+        }
+        // a failure that never stood for a status keeps its entity
+        let native = crate::error::Failure::new(OP, crate::error::Reason::Failed("native"))
+            .at(EntityRef::Edge(EdgeId::from_index(3)))
+            .into_error();
+        assert_eq!(without_entity(native).entity(), edge);
     }
 }

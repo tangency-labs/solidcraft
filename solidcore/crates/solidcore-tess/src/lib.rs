@@ -9,8 +9,12 @@
 //! in a compute shader.
 //!
 //! - [`plan`]: the face planner and its display entry point, at a [`MeshTolerance`];
+//! - [`mesh()`]: the mesh path, not for display: every face by constrained Delaunay with lattice
+//!   seeds and Ruppert shaping to a [`MeshSpec`], for mesh bodies, mesh export and analysis
+//!   meshers, slow by design; [`TessPlan::welded`] joins its faces at their shared vertices;
 //! - [`TessPlan`], [`FacePlan`]: the plan, and [`TessPlan::transformed`] for a placed copy;
 //! - [`Mesh`]: an indexed triangle mesh with its edge polylines and their display flags;
+//! - [`curve_points`]: a free curve's points at a [`MeshTolerance`], by the edge rules;
 //! - [`simplify`]: display levels of detail of a large mesh;
 //! - [`preview`]: a bounded coarse mesh of a decoded body.
 //!
@@ -19,8 +23,11 @@
 //! Library code never panics, unwraps or indexes on input-derived data: a face the planner
 //! cannot mesh is named in its [`PlanStats`], and the rest of the body is meshed.
 
+mod curve;
 #[cfg(test)]
 mod fixtures;
+mod hash;
+mod iso;
 mod mesh;
 // SolidCraft's mesher, moved here (RFC 0003, item 1.1) and kept in SolidCraft's formatting so it
 // reads the same as its history.
@@ -32,16 +39,23 @@ mod pole;
 pub mod preview;
 mod ring;
 pub mod simplify;
+mod spec;
 mod stats;
 mod tolerance;
 mod vec;
 
+pub use curve::curve_points;
+pub use iso::{MAX_ISOPARMS, isoparms};
 pub use mesh::Mesh;
 pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
 pub use par::guarded;
 pub use plan::{FacePlan, TessPlan};
 pub use pole::{AveragedPole, PoleNode, PoleRule};
-pub use stats::{Cap, CappedEdge, EdgeCap, OverTolerance, PlanStats, RefusedEdge, RefusedFace};
+pub use spec::{MAX_MESH_MIN_ANGLE, MESH_MIN_ANGLE, MeshSpec, WeldedMesh, mesh};
+pub use stats::{
+    Cap, CappedEdge, EdgeCap, OverTolerance, PlanStats, RefusedEdge, RefusedFace, ShapeLimit,
+    Unshaped,
+};
 pub use tolerance::{DISPLAY_ANGLE, MeshTolerance};
 
 /// The plan evaluator's curve and surface forms a [`TessPlan`] holds (its `surfaces`), so a
@@ -74,7 +88,8 @@ pub(crate) fn eval_message(e: solidcore::eval::EvalError) -> String {
         solidcore::eval::EvalError::Invalid(what)
         | solidcore::eval::EvalError::TooLarge(what)
         | solidcore::eval::EvalError::Unevaluable(what)
-        | solidcore::eval::EvalError::Degenerate(what) => what,
+        | solidcore::eval::EvalError::Degenerate(what)
+        | solidcore::eval::EvalError::OffRange(what) => what,
     }
 }
 

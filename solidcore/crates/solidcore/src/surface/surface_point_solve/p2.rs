@@ -227,7 +227,10 @@ impl SurfPtGlobalSolver<'_> {
 
             // when either guess is uninitialized - quit
             if poly_dist >= BIG_DOUBLE && grid_dist >= BIG_DOUBLE {
-                return Err(SolidError::sm_err(OP_ROUGH));
+                return Err(SolidError::surface_failed(
+                    OP_ROUGH,
+                    "neither rough guess is initialized",
+                ));
             }
 
             // when the GridGuess is better than the PolyGuess, use it
@@ -238,7 +241,10 @@ impl SurfPtGlobalSolver<'_> {
             uv = grid_uv_guess;
         } else {
             // both failed
-            return Err(SolidError::sm_err(OP_ROUGH));
+            return Err(SolidError::surface_failed(
+                OP_ROUGH,
+                "both rough guesses failed",
+            ));
         }
 
         Ok(RoughGuess {
@@ -264,7 +270,10 @@ impl SurfPtGlobalSolver<'_> {
         let b = &self.base;
         // We need a SmBSplineSurface to work with control points.
         let Some(bspl) = b.b_spline() else {
-            return Err(SolidError::sm_err(OP_POLY));
+            return Err(SolidError::surface_failed(
+                OP_POLY,
+                "the surface is not a B-spline surface",
+            ));
         };
         let op = b.solver_op();
         let test_pt = b.test_point();
@@ -322,9 +331,9 @@ impl SurfPtGlobalSolver<'_> {
 
         // Next try: Iter every ControlPoint and find the one closest to the target
         let rational = bspl.is_rational();
-        let (num_u, num_v, cpts) = bspl
-            .control_points()
-            .map_err(|_| SolidError::sm_err(OP_POLY))?;
+        let (num_u, num_v, cpts) = bspl.control_points().map_err(|_| {
+            SolidError::surface_failed(OP_POLY, "the B-spline surface has no control points")
+        })?;
 
         let mut tied: Option<(usize, usize)> = None;
         let mut num_ties: usize = 0;
@@ -1027,7 +1036,12 @@ impl SurfPtGlobalSolver<'_> {
         let rough = match NetScope::with_net(k, || self.find_rough_guess(k)) {
             Ok(r) => r,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_SOLVE)),
+            Err(_) => {
+                return Err(SolidError::surface_failed(
+                    OP_SOLVE,
+                    "no rough guess was found",
+                ))
+            }
         };
         let (best_idx_u, best_idx_v) = (rough.best_idx_u, rough.best_idx_v);
 
@@ -1396,7 +1410,10 @@ impl SurfPtSolveStepper<'_> {
                 return Ok((adjusted, scale));
             }
             self.set_uv(domain.clamp_point(self.uv()));
-            return Err(SolidError::sm_err(OP_ADJUST));
+            return Err(SolidError::surface_failed(
+                OP_ADJUST,
+                "the guess is outside the domain and the step is zero",
+            ));
         }
 
         // Never take too big a step.
@@ -1884,14 +1901,20 @@ impl SurfPtSolveStepper<'_> {
                 | ErrorNormType::MaxAbs
                 | ErrorNormType::Gap
         ) {
-            return Err(SolidError::sm_err(OP_LINE_B));
+            return Err(SolidError::surface_failed(
+                OP_LINE_B,
+                "the error norm is an absolute norm",
+            ));
         }
 
         let mut y0 = prev.error_norm(norm_type)?;
         let mut y1 = self.error_norm(norm_type)?;
 
         if y0 * y1 > 0.0 {
-            return Err(SolidError::sm_err(OP_LINE_B));
+            return Err(SolidError::surface_failed(
+                OP_LINE_B,
+                "the error norm does not change sign over the step",
+            ));
         }
 
         let best_input_y = min2(y0.abs(), y1.abs());

@@ -164,7 +164,10 @@ impl EvalNFunctions for CsIntersectEnfo<'_> {
         let k = self.kernel;
         check_len(x, f, 3, OP_CS_INTERSECT)?;
         let (Some(&t), Some(&u), Some(&v)) = (x.first(), x.get(1), x.get(2)) else {
-            return Err(SolidError::sm_err(OP_CS_INTERSECT));
+            return Err(SolidError::surface_failed(
+                OP_CS_INTERSECT,
+                "the solver variables are too few",
+            ));
         };
 
         // count calls
@@ -185,7 +188,10 @@ impl EvalNFunctions for CsIntersectEnfo<'_> {
             || dv.length_squared() < EFF_ZERO_SQ
             || ct.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_CS_INTERSECT));
+            return Err(SolidError::surface_failed(
+                OP_CS_INTERSECT,
+                "a tangent of the curve or surface has zero length",
+            ));
         }
 
         // get Gap Vector = S - C
@@ -285,7 +291,10 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
         let count = if directed { 4 } else { 3 };
         check_len(x, f, count, OP_CS_NORMALIZE)?;
         let (Some(&t), Some(&u), Some(&v)) = (x.first(), x.get(1), x.get(2)) else {
-            return Err(SolidError::sm_err(OP_CS_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_CS_NORMALIZE,
+                "the solver variables are too few",
+            ));
         };
 
         // evaluate Curve Point and derivs
@@ -304,7 +313,10 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
             || su.length_squared() < EFF_ZERO_SQ
             || sv.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_CS_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_CS_NORMALIZE,
+                "a tangent of the curve or surface has zero length",
+            ));
         }
 
         // get gap vector
@@ -333,7 +345,10 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
 
         if directed {
             if self.opt_vectors.unwrap_or(&[]).is_empty() {
-                return Err(SolidError::null_pointer(OP_CS_NORMALIZE));
+                return Err(SolidError::surface_missing(
+                    OP_CS_NORMALIZE,
+                    "the direction vector",
+                ));
             }
             let dir = nth(self.opt_vectors.unwrap_or(&[]), 0, OP_CS_NORMALIZE)?;
 
@@ -416,7 +431,10 @@ impl EvalNFunctions for SspIntersectEnfo<'_> {
         let (Some(&u1), Some(&v1), Some(&u2), Some(&v2)) =
             (x.first(), x.get(1), x.get(2), x.get(3))
         else {
-            return Err(SolidError::sm_err(OP_SSP_INTERSECT));
+            return Err(SolidError::surface_failed(
+                OP_SSP_INTERSECT,
+                "the solver variables are too few",
+            ));
         };
 
         // get surface 3d points - with 1st derivatives
@@ -446,13 +464,16 @@ impl EvalNFunctions for SspIntersectEnfo<'_> {
             }
             let plane_norm = norm1.cross(norm2);
             if plane_norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_SSP_INTERSECT));
+                return Err(SolidError::surface_failed(
+                    OP_SSP_INTERSECT,
+                    "the surface normals are parallel",
+                ));
             }
             temp_plane = Plane::from_normal(through, plane_norm.unitize_or_z());
             &temp_plane
         } else {
             self.plane
-                .ok_or_else(|| SolidError::null_pointer(OP_SSP_INTERSECT))?
+                .ok_or_else(|| SolidError::surface_missing(OP_SSP_INTERSECT, "the plane"))?
         };
 
         // evaluate Plane derivatives
@@ -483,7 +504,10 @@ impl EvalNFunctions for SspIntersectEnfo<'_> {
             || dug.length_squared() < EFF_ZERO_SQ
             || dvg.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_SSP_INTERSECT));
+            return Err(SolidError::surface_failed(
+                OP_SSP_INTERSECT,
+                "a surface tangent has zero length",
+            ));
         }
 
         // get gap vector
@@ -545,7 +569,10 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
         let (Some(&u1), Some(&v1), Some(&u2), Some(&v2)) =
             (x.first(), x.get(1), x.get(2), x.get(3))
         else {
-            return Err(SolidError::sm_err(OP_SSI_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_SSI_NORMALIZE,
+                "the solver variables are too few",
+            ));
         };
 
         let uv = Point2::new(u1, v1);
@@ -566,7 +593,10 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
             || du2.length_squared() < EFF_ZERO_SQ
             || dv2.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_SSI_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_SSI_NORMALIZE,
+                "a surface tangent has zero length",
+            ));
         }
 
         // when the gap is small
@@ -607,7 +637,10 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
                 .surface
                 .evaluate_normal(k, uv, Side::Left, Side::Left)?;
             if nu.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_SSI_NORMALIZE));
+                return Err(SolidError::surface_failed(
+                    OP_SSI_NORMALIZE,
+                    "the first surface has no normal",
+                ));
             }
         }
         let nu = nu.unitize_or_z();
@@ -619,7 +652,10 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
                 .surface
                 .evaluate_normal(k, uv2, Side::Left, Side::Left)?;
             if n2u.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_SSI_NORMALIZE));
+                return Err(SolidError::surface_failed(
+                    OP_SSI_NORMALIZE,
+                    "the second surface has no normal",
+                ));
             }
         }
         let n2u = n2u.unitize_or_z();
@@ -676,7 +712,10 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
         let (Some(&u1), Some(&v1), Some(&u2), Some(&v2)) =
             (x.first(), x.get(1), x.get(2), x.get(3))
         else {
-            return Err(SolidError::sm_err(OP_SS_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_SS_NORMALIZE,
+                "the solver variables are too few",
+            ));
         };
 
         // Surf1Point and Surf2Point current solution values
@@ -693,7 +732,10 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
             || s2u.length_squared() < EFF_ZERO_SQ
             || s2v.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_SS_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_SS_NORMALIZE,
+                "a surface tangent has zero length",
+            ));
         }
 
         // when the gap is small
@@ -724,7 +766,10 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
 
         if directed {
             if self.opt_vectors.unwrap_or(&[]).is_empty() {
-                return Err(SolidError::null_pointer(OP_SS_NORMALIZE));
+                return Err(SolidError::surface_missing(
+                    OP_SS_NORMALIZE,
+                    "the direction vector",
+                ));
             }
             let dir = nth(self.opt_vectors.unwrap_or(&[]), 0, OP_SS_NORMALIZE)?;
 
@@ -868,7 +913,8 @@ impl SurfaceEval<'_> {
 
         // On the high side of the 'good' domain, this must be flipped (because it's
         // decreasing).
-        let surface = surface.ok_or(SolidError::null_pointer(OP_EVAL_NORMAL))?;
+        let surface =
+            surface.ok_or_else(|| SolidError::surface_missing(OP_EVAL_NORMAL, "the surface"))?;
         let domain = surface.natural_uv_domain_with_nurb(k)?;
         if sing_u {
             let mut n = duv.cross(dv);
@@ -1231,7 +1277,10 @@ impl Surface {
         if !(uv_domain.contains_point(start_uv, EFF_ZERO)
             && uv_domain.contains_point(end_uv, EFF_ZERO))
         {
-            return Err(SolidError::sm_err(OP_LINE_ON_SURF));
+            return Err(SolidError::surface_failed(
+                OP_LINE_ON_SURF,
+                "an end point is outside the UV domain",
+            ));
         }
 
         // Build the UV line
@@ -1696,9 +1745,12 @@ impl Surface {
                             && cache.point_test_enabled
                             && !cache.face_was_modified
                         {
-                            let face = cache.face()?.ok_or(SolidError::null_pointer(
-                                "surface::surface::p4::global_point_solve",
-                            ))?;
+                            let face = cache.face()?.ok_or_else(|| {
+                                SolidError::surface_missing(
+                                    "surface::surface::p4::global_point_solve",
+                                    "the cache's face",
+                                )
+                            })?;
                             let queries = context.face_queries().ok_or_else(|| {
                                 SolidError::unported(
                                     "prepared face classifier for fast drop",

@@ -347,6 +347,7 @@ fn iso_record(surface: &brep::Surface, along_u: bool, fixed: f64, (a, b): (f64, 
         }
         // A label: the face's (u, v) are its NURBS form's, whose rows are its iso curves.
         Surface::BallPatch { .. } => return Err(KernelError::Invalid("an iso curve of a ball patch's label (take its NURBS form's)".into())),
+        Surface::Blend { .. } => return Err(KernelError::Invalid("an iso curve of a blend's label (take its NURBS form's)".into())),
     })
 }
 

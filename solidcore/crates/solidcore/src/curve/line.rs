@@ -138,7 +138,7 @@ use crate::nurbs::b_spline_curve::{
 };
 use crate::nurbs::b_spline_curve_n_lib::{InValueType, TrimMode};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
-use crate::nurbs::math::NOW;
+use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 use crate::surface::surface::Surface;
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
@@ -807,6 +807,26 @@ impl Line {
         self.point + step_param * self.scale * self.vector
     }
 
+    /// Not upstream: the points of the line at the ends of `interval` (NURB domain), each
+    /// with the error bound of its coordinates, whose segment holds the line over
+    /// `interval`. A point is `P + s scale V` with `s` the STEP parameter; a rounded `s`
+    /// moves it along the line, the product and the sum round each coordinate by at most
+    /// `γ_3 (|P| + |s scale V|)`. `None` for numbers not finite.
+    #[must_use]
+    pub(crate) fn segment_over(&self, interval: &Extent1d) -> Option<[(Point3, f64); 2]> {
+        let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+        let end = |t: f64| {
+            let s = self.convert_t_from_nurbs_to_step(t);
+            let q = self.evaluate_point(t);
+            let e = gamma(3)
+                * (size(self.point) + (s * self.scale).abs() * size(self.vector))
+                * (1.0 + gamma(1));
+            (q.x.is_finite() && q.y.is_finite() && q.z.is_finite() && e.is_finite())
+                .then_some((q, e))
+        };
+        Some([end(interval.min())?, end(interval.max())?])
+    }
+
     /// The point at the analytic domain start and the line vector over the domain
     /// (`scale * V`, times the domain length for a bounded line) (`IsLine`; always a
     /// line).
@@ -1101,7 +1121,10 @@ impl Line {
     ) -> Result<Vec<Solution<O>>> {
         // only good for MINIMIZE and INTERSECT operations
         if operation != SolverOperation::Minimize && operation != SolverOperation::Intersect {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::curve_failed(
+                OP_DROP,
+                "the operation is neither minimize nor intersect",
+            ));
         }
 
         // init output
@@ -1755,19 +1778,28 @@ impl Line {
 
         // Check join-point distance.
         if this_common.distance(other_common) > tol {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve_failed(
+                OP_JOIN,
+                "the join points are farther apart than the tolerance",
+            ));
         }
 
         // Other curve must be linear.
         if !other_is_line(other, 5, tol)? {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve_failed(
+                OP_JOIN,
+                "the other curve is not linear",
+            ));
         }
 
         // And it must be collinear with us.
         let whole_line_vec = other_end - this_end;
         let (dist, _) = line_point_distance(this_end, whole_line_vec, this_common);
         if dist > tol {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve_failed(
+                OP_JOIN,
+                "the other curve is not collinear",
+            ));
         }
 
         // Length of other curve's param range will be ours, scaled by the 3d lengths.
@@ -1895,6 +1927,25 @@ impl Line {
             self.base.transform(rotate_n_move, scale)?;
         }
         Ok(())
+    }
+
+    /// A copy mirrored about the XY plane of `mirror_plane`, still a line: its point and unit
+    /// vector mirrored, its domain, scale and `inside_out` as they were, an existing NURB
+    /// mirrored with it, so each parameter is the mirror of the same point. Not upstream
+    /// (#15862): `SmBSplineCurve::CreateMirrorCurve`, which a line inherits, gives the plain
+    /// B-spline of the line's NURB, over the whole domain of an infinite line.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineCurve::create_mirror_curve`].
+    pub fn create_mirror_curve(&self, mirror_plane: &Axis2Placement) -> Result<Self> {
+        let mut line = self.copy();
+        line.point = mirror_plane.mirror_point(self.point);
+        line.vector = mirror_plane.mirror_vector(self.vector);
+        if self.base.nurb.is_some() {
+            line.base = self.base.create_mirror_curve(mirror_plane)?;
+        }
+        Ok(line)
     }
 
     /// Moves the line ends to `tgt_start` / `tgt_end` (`DeformToEndPointTargets`). With
@@ -2057,8 +2108,7 @@ impl Line {
     }
 
     /// [`Line::assert_valid`] of a UV trim on `trim_surface`, its face's surface: the
-    /// `SmBSplineCurve` checks measure the trim on it with
-    /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560, see
+    /// `SmBSplineCurve` checks measure the trim on it (WR-560, see
     /// [`BSplineCurve::assert_valid_on`]).
     ///
     /// # Errors

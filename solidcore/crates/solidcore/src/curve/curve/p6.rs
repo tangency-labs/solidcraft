@@ -1523,17 +1523,13 @@ impl Curve {
             let this_b = self.evaluate_point(k, last.0)?;
             let other_a = other.evaluate_point(k, first.1)?;
             let other_b = other.evaluate_point(k, last.1)?;
-            let mut separation_a = other_a - this_a;
-            let mut separation_b = other_b - this_b;
-            // `fixes.simple_coincidence_side_across_the_curve`: the side is taken across
-            // this curve, its tangent's component removed. An end of one curve that runs
-            // past the other's end drops onto that end, and the pair's difference then
-            // points along the curves, forward at one end and back at the other, for two
-            // curves that lie on each other.
-            if k.fixes.simple_coincidence_side_across_the_curve {
-                separation_a = self.across_tangent(k, first.0, separation_a)?;
-                separation_b = self.across_tangent(k, last.0, separation_b)?;
-            }
+            // The side is taken across this curve, its tangent's component removed. An end
+            // of one curve that runs past the other's end drops onto that end, and the
+            // pair's difference then points along the curves, forward at one end and back at
+            // the other, for two curves that lie on each other; upstream took that for a
+            // crossing.
+            let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
+            let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
             let scaled_zero =
                 EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
             if separation_a.length() > scaled_zero
@@ -1555,8 +1551,9 @@ impl Curve {
                 )?;
                 let Some(cross) = found else {
                     // curves change sides but no crossing found
-                    return Err(SolidError::sm_err(
+                    return Err(SolidError::curve_failed(
                         "curve::simple_coincidence_checker (crossing)",
+                        "the curves change sides but no crossing was found",
                     ));
                 };
                 return Ok(vec![pair_solution(
@@ -1585,8 +1582,9 @@ impl Curve {
                 )?;
                 if !found {
                     // curves within tolerance but no nearest point found
-                    return Err(SolidError::sm_err(
+                    return Err(SolidError::curve_failed(
                         "curve::simple_coincidence_checker (nearest)",
+                        "the curves are within tolerance but no nearest point was found",
                     ));
                 }
                 nearest.num_variables = 2;
@@ -2347,7 +2345,10 @@ impl Curve {
                         pass_on,
                     )?;
                     if pass_on && !dropped.as_ref().is_some_and(|d| d.success) {
-                        return Err(SolidError::sm_err(OP_DEFORM));
+                        return Err(SolidError::curve_failed(
+                            OP_DEFORM,
+                            "the point did not drop onto the surface",
+                        ));
                     }
                     let uv = dropped.map_or(crate::math::Vec2::UNDEF, |result| result.result_uv);
                     Ok(Some(Point3::new(uv.x, uv.y, 0.0)))

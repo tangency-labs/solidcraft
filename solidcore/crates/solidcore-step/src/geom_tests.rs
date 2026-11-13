@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::geom::{Associated, Curve, CurveForm, KnotSpec, Logical, P3, PreferredRep, Surface, SurfaceCurveKind, Trim};
 use crate::p21::{self, Exchange};
 use crate::read::{Reader, Units};
-use crate::write::{GeomWriter, Writer, real};
+use crate::write::{GeomWriter, Writer, real, string};
 
 const MM: Units = Units { len: 1.0, ang: 1.0 };
 
@@ -88,6 +88,23 @@ fn round_trip_surface(s: &Surface, params: &[(f64, f64)]) {
     let mut w2 = Writer::new();
     GeomWriter::new(&mut w2).surface(&back);
     assert_eq!(w2.data(), w.data(), "a second write differs");
+}
+
+/// ISO 10303-21 `\X2\` is UCS-2: a character outside the BMP is one `\X4\` code point, never a
+/// surrogate pair (#9089).
+#[test]
+fn string_writes_characters_outside_the_bmp_as_x4() {
+    assert_eq!(string("it's"), "'it''s'");
+    assert_eq!(string("é"), "'\\X2\\00E9\\X0\\'");
+    assert_eq!(string("\u{FFFF}"), "'\\X2\\FFFF\\X0\\'");
+    assert_eq!(string("\u{10000}"), "'\\X4\\00010000\\X0\\'");
+    assert_eq!(string("🚀"), "'\\X4\\0001F680\\X0\\'");
+    assert_eq!(string("\u{10FFFF}"), "'\\X4\\0010FFFF\\X0\\'");
+    assert_eq!(string("é🚀中"), "'\\X2\\00E9\\X0\\\\X4\\0001F680\\X0\\\\X2\\4E2D\\X0\\'");
+    for name in ["🚀", "Ünïcødé 🚀 中文", "a'b\\🚀", "\u{10000}\u{10FFFF}"] {
+        let ex = file(&format!("#1=A({});", string(name)));
+        assert_eq!(ex.get(1).and_then(|e| e.params().first()).and_then(|p| p.as_str()), Some(name));
+    }
 }
 
 const TS: [f64; 5] = [0.0, 0.3, 1.0, FRAC_PI_2, 2.5];

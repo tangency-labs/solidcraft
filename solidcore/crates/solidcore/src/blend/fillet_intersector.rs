@@ -622,12 +622,12 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         let approx_tol_3d = self.solver.this_approx_tol_3d();
         let sur0 = Surface::from(self.surface(0)?.surface.clone());
         let sur1 = Surface::from(self.surface(1)?.surface.clone());
-        let generator =
-            self.solver
-                .fillet_surface_generator_mut()
-                .ok_or(SolidError::null_pointer(
-                    "blend::fillet_intersector::create_fillet_surface",
-                ))?;
+        let generator = self.solver.fillet_surface_generator_mut().ok_or_else(|| {
+            SolidError::blend_missing(
+                "blend::fillet_intersector::create_fillet_surface",
+                "the solver's surface generator",
+            )
+        })?;
         generator
             .create_surface_replacing_uv(
                 k,
@@ -1009,7 +1009,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         ) {
             Ok(()) => Ok(()),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) => Err(SolidError::sm_err(OP_VALUES)),
+            Err(_) => Err(SolidError::blend_failed(
+                OP_VALUES,
+                "the section's values could not be computed",
+            )),
         }
     }
 
@@ -1044,7 +1047,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
         // skip zero length chords
         if diff.length() < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_DELTA));
+            return Err(SolidError::blend_failed(
+                OP_DELTA,
+                "the chord has zero length",
+            ));
         }
 
         // unitize and save the chord
@@ -1090,7 +1096,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         let step_size = next_tsp.curve_parameter - tsect.curve_parameter;
 
         if next_tsp.crv_deriv().length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP_SPAN));
+            return Err(SolidError::blend_failed(
+                OP_SPAN,
+                "the next section's curve derivative is zero",
+            ));
         }
 
         let angle_found_rad = tsect.crv_deriv().angle_between(next_tsp.crv_deriv())?;
@@ -1730,7 +1739,9 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
         // 2. Remember if the end of current fillet touched a boundary on
         //    either surface UVDomain
-        let last_tsect_pnt = pnts.last().ok_or(SolidError::null_pointer(OP_FLUSH))?;
+        let last_tsect_pnt = pnts
+            .last()
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the last section point"))?;
         self.curr_fillet_touch_boundary = false;
 
         // for both surfaces
@@ -1879,7 +1890,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                     &mut mid_pnt,
                 )?;
                 if !found_solution {
-                    return Err(SolidError::sm_err(OP_FLUSH));
+                    return Err(SolidError::blend_failed(
+                        OP_FLUSH,
+                        "no mid-point section was found",
+                    ));
                 }
 
                 // save the rail UVCurve points for the new mid-span point
@@ -2066,7 +2080,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                 );
                 if keep_unported(smoothed)?.is_none() {
                     solver.set_status(FilStatus::SelfIntHandlingFailure)?;
-                    return Err(SolidError::sm_err(OP_FLUSH));
+                    return Err(SolidError::blend_failed(
+                        OP_FLUSH,
+                        "the self-intersecting fillet could not be smoothed",
+                    ));
                 }
             }
         }
@@ -2074,13 +2091,19 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         // get (the potentially modified) rail curves, their UVTrimCurves, and the Centerline
         let mut uv1 = surface1_uv_curves
             .pop()
-            .ok_or(SolidError::null_pointer(OP_FLUSH))?;
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the first rail's UV curve"))?;
         let mut uv2 = surface2_uv_curves
             .pop()
-            .ok_or(SolidError::null_pointer(OP_FLUSH))?;
-        let mut curve2 = curves_3d.pop().ok_or(SolidError::null_pointer(OP_FLUSH))?;
-        let mut curve1 = curves_3d.pop().ok_or(SolidError::null_pointer(OP_FLUSH))?;
-        let mut center_line = curves_3d.pop().ok_or(SolidError::null_pointer(OP_FLUSH))?;
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the second rail's UV curve"))?;
+        let mut curve2 = curves_3d
+            .pop()
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the second rail curve"))?;
+        let mut curve1 = curves_3d
+            .pop()
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the first rail curve"))?;
+        let mut center_line = curves_3d
+            .pop()
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the center line"))?;
 
         // 10. Generate the fillet surface from the rail curves and centerline
         let mut fillet_surface = None;
@@ -2096,7 +2119,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             );
             let Some(s) = keep_unported(created)? else {
                 solver.set_status(FilStatus::SurfSkinningFailure)?;
-                return Err(SolidError::sm_err(OP_FLUSH));
+                return Err(SolidError::blend_failed(
+                    OP_FLUSH,
+                    "the fillet surface could not be skinned",
+                ));
             };
             fillet_surface = s;
         }
@@ -2543,14 +2569,21 @@ mod tests {
             fi.base.base.point(n).unwrap().point_type,
             IntersectionPointType::Crossing
         );
-        // a zero next tangent is SM_ERR
+        // a zero next tangent is SM_ERR: a typed blend failure with the status of the bare
+        // `Upstream` it replaced (#13790)
         let z = fi
             .base
             .base
             .alloc_point(pnt([0.2, 0.0], [0.2, 0.0], [0.0, 0.0, 0.0], 0.1));
-        assert!(fi
+        let e = fi
             .test_span_accuracy(&mut s, &Kernel::default(), p, z, None)
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            e,
+            SolidError::blend_failed(OP_SPAN, "the next section's curve derivative is zero")
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(s.surface(0).unwrap().offset_distance(), 1.0);
     }
 

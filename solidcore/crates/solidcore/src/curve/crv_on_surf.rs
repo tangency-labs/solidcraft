@@ -1819,7 +1819,10 @@ impl CrvOnSurf {
     ) -> Result<Extent1d> {
         // Don't own curve can not reverse parameterization
         if self.owner_flag == 0 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "a curve that does not own its base curve cannot be reparametrised",
+            ));
         }
         *self.curve_cache_mut() = None;
         self.uv_curve.reverse_parameterization(k, old_interval)
@@ -1850,7 +1853,10 @@ impl CrvOnSurf {
     ) -> Result<()> {
         // Don't own curve can not trim the curve
         if self.owner_flag == 0 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "a curve that does not own its base curve cannot be trimmed",
+            ));
         }
 
         // pass the call along to the UVCurve
@@ -2886,7 +2892,7 @@ mod tests {
                 // full volume chain and must not become a depth refusal.
                 assert!(matches!(
                     curve.transform(&k, &motion, Some(Vec3::new(2.0, 3.0, 4.0))),
-                    Err(SolidError::Upstream { code: 1001, .. })
+                    Err(e) if crate::error::upstream_status(&e) == Some(1001)
                 ));
                 assert_eq!(curve.evaluate(&k, sample, 1, true, false).unwrap(), before);
             }

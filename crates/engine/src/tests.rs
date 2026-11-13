@@ -1013,6 +1013,13 @@ fn a_copy_with_history_undoes_like_the_session_it_copies() {
 /// no command panics internally.
 #[test]
 fn hostile_params_never_panic() {
+    // `file.slicers` gets every hostile value like every command, but lists made-up slicers (none)
+    // instead of searching this machine's programs on each of its ~5,600 calls: a third of a second
+    // a call on Windows, half an hour in all. The tests that make slicers up take turns, and
+    // `MadeUp` puts the real search back.
+    let _turn = mesh_convert::CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _reset = mesh_convert::MadeUp;
+    *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
     let keys = [
         "plane",
         "offset",
@@ -1141,6 +1148,13 @@ fn hostile_params_never_panic() {
         "references",
         "head",
         "head_gap",
+        "shape",
+        "size",
+        "web",
+        "clip",
+        "through_all",
+        "depth",
+        "dot_grid",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
@@ -2414,6 +2428,35 @@ fn a_used_up_or_dropped_checkpoint_says_why() {
     let dropped = s.execute("edit.restore_checkpoint", &json!({"checkpoint": first})).unwrap_err().to_string();
     assert!(dropped.contains("16"), "{dropped}");
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first + 1}));
+}
+
+/// Regression (#15865): forgetting a checkpoint dropped every later one too, so a batch that
+/// forgot its own rollback checkpoint took the checkpoint one of its steps had returned with it.
+#[test]
+fn forgetting_a_checkpoint_keeps_the_later_ones() {
+    let mut s = Session::default();
+    let empty = s.doc.clone();
+    let earlier = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let outer = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"name": "Kept", "length": 10, "width": 10, "height": 10}));
+    let inner = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let doc = s.doc.clone();
+    let undo = s.undo.len();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": outer, "forget": true}));
+    assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": outer})).is_err());
+    run(&mut s, "solid.box", json!({"name": "Later", "length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+    let back = run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": inner}));
+    assert_eq!(back["restored"], true, "{back}");
+    assert!(Arc::ptr_eq(&s.doc, &doc) && s.doc.find_feature("Kept").is_some() && s.doc.find_feature("Later").is_none());
+    assert_eq!(s.undo.len(), undo);
+    // Restoring still uses up every later checkpoint: they hold states after the one restored.
+    let first = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let second = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first}));
+    assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": second})).is_err());
+    // Neither forgetting a later checkpoint nor restoring one used up the earlier one.
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": earlier}));
+    assert!(Arc::ptr_eq(&s.doc, &empty) && s.undo.is_empty());
 }
 
 /// Regression (#3242): `file.new` replaced the session and its checkpoints with it, so a
@@ -5278,6 +5321,158 @@ fn pattern_copies_added_after_a_rename_keep_their_numbers() {
     assert_eq!(names(&s), ["X", "Second"]);
 }
 
+/// What a body of the #12114 tests is and where: the box is 10 mm across, the post 6 mm; and its
+/// centre in x.
+fn pattern_box_or_post(s: &mut Session, body: &str) -> (&'static str, f64) {
+    let m = run(s, "inspect.measure", json!({"bodies": [body]}));
+    let bbox = &m["bodies"][0]["bbox"];
+    let (min, max) = (bbox["min"][0].as_f64().unwrap_or(f64::NAN), bbox["max"][0].as_f64().unwrap_or(f64::NAN));
+    (if max - min > 8.0 { "box" } else { "post" }, ((min + max) / 2.0).round())
+}
+
+/// A pattern of two bodies keeps each copy's name with its own source and place when the count
+/// goes up or down, through undo, reopening and a change to the bodies it copies (#12114).
+#[test]
+fn pattern_copies_of_several_bodies_keep_their_names_when_the_count_changes() {
+    let mut s = Session::default();
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    let shape = pattern_box_or_post;
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "2", "unit": ""}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 30, "name": "Pat"}));
+    run(&mut s, "body.rename", json!({"body": "Post (2)", "name": "Lens"}));
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Lens"]);
+
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
+    // The new post copies are numbered as a single body's are (#372); what matters here is that
+    // every name stays with its own source and place.
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Base (4)", "Lens", "Post (2)", "Post (3)"]);
+    let expect = [("Base (2)", ("box", 30.0)), ("Base (4)", ("box", 90.0)), ("Lens", ("post", 30.0)), ("Post (3)", ("post", 90.0))];
+    for (body, want) in expect {
+        assert_eq!(shape(&mut s, body), want, "{body}");
+    }
+
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "3"}));
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Lens", "Post (2)"]);
+    assert_eq!(shape(&mut s, "Lens"), ("post", 30.0));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Base (4)", "Lens", "Post (2)", "Post (3)"]);
+    run(&mut s, "edit.redo", json!({}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(names(&reopened), ["Base", "Post", "Base (2)", "Base (3)", "Lens", "Post (2)"]);
+
+    // Copying only the post now: the post's copies keep their names.
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"]}}));
+    assert_eq!(names(&s), ["Base", "Post", "Lens", "Post (2)"]);
+    assert_eq!(shape(&mut s, "Lens"), ("post", 30.0));
+    assert_eq!(shape(&mut s, "Post (2)"), ("post", 60.0));
+}
+
+/// A design saved before #12114 whose two-body Pattern went from count 4 to 3 kept all six names
+/// and read them in the order its copies were made, so the post at x = 30 was `Base (4)`. It
+/// opens with the names it was saved with, and from then on a count change keeps each name with
+/// its copy.
+#[test]
+fn an_older_pattern_of_several_bodies_opens_with_the_names_it_was_saved_with() {
+    let mut s = Session::default();
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    let shape = pattern_box_or_post;
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "3", "unit": ""}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 30, "name": "Pat"}));
+    // The file as an older build saved it: without this change, and with the names it stored.
+    let mut file: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    if let Some(pending) = file["format_pending"].as_array_mut() {
+        pending.retain(|change| change != "pattern-names-by-source");
+    }
+    let pattern = file["features"].as_array_mut().unwrap().iter_mut().find(|f| f["name"] == "Pat").unwrap();
+    pattern["body_names"] = json!(["Base (2)", "Base (3)", "Base (4)", "Post (2)", "Post (3)", "Post (4)"]);
+    let doc = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();
+    assert!(doc.features.iter().any(|f| f.name == "Pat" && f.pattern_names_in_order));
+
+    let mut s = Session::opened_at(doc, None, None);
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Base (4)", "Post (2)"]);
+    assert_eq!(shape(&mut s, "Base (4)"), ("post", 30.0));
+    assert_eq!(shape(&mut s, "Post (2)"), ("post", 60.0));
+    // Opening stored the names as the copies have them, to be read source by source.
+    let pattern = s.doc.features.iter().find(|f| f.name == "Pat").unwrap();
+    assert!(!pattern.pattern_names_in_order);
+    assert_eq!(pattern.body_names, ["Base (2)", "Base (3)", "Base (4)", "Post (2)"]);
+
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
+    assert_eq!(shape(&mut s, "Base (3)"), ("box", 60.0));
+    assert_eq!(shape(&mut s, "Base (4)"), ("post", 30.0));
+    assert_eq!(shape(&mut s, "Post (2)"), ("post", 60.0));
+    assert_eq!(names(&s).len(), 8);
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "2"}));
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (4)"]);
+    assert_eq!(shape(&mut s, "Base (4)"), ("post", 30.0));
+}
+
+/// A design made in memory whose two-body Pattern stored only some of its copies' names: the
+/// first command changes the bodies it copies, before any command stored the names. The copies
+/// it still makes keep their own names, not the names of the source it no longer copies (#12114).
+#[test]
+fn a_pattern_edited_before_its_names_were_stored_keeps_each_name_with_its_source() {
+    let mut s = Session::default();
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    let shape = pattern_box_or_post;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 30, "name": "Pat"}));
+    let mut doc = (*s.doc).clone();
+    if let Some(f) = doc.features.iter_mut().find(|f| f.name == "Pat") {
+        f.body_names = ["Base (2)", "Base (3)", "Lens"].map(String::from).to_vec();
+    }
+    let mut s = Session::new(doc);
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Lens", "Post (2)"]);
+
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"]}}));
+    assert_eq!(names(&s), ["Base", "Post", "Lens", "Post (2)"]);
+    assert_eq!(shape(&mut s, "Lens"), ("post", 30.0));
+    assert_eq!(shape(&mut s, "Post (2)"), ("post", 60.0));
+}
+
+/// Names an edit gives a Pattern of two bodies name its copies in the order they are made, as
+/// before #12114: a shorter list names the first copies, and the names stay through the store
+/// that follows the edit and through reopening.
+#[test]
+fn names_an_edit_gives_a_pattern_of_two_bodies_name_its_copies_in_order() {
+    let mut s = Session::default();
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    let shape = pattern_box_or_post;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 30, "name": "Pat"}));
+
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"body_names": ["Custom"]}}));
+    assert_eq!(shape(&mut s, "Custom"), ("box", 30.0), "{:?}", names(&s));
+
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"body_names": ["Left", "Right"]}}));
+    assert_eq!(shape(&mut s, "Left"), ("box", 30.0), "{:?}", names(&s));
+    assert_eq!(shape(&mut s, "Right"), ("box", 60.0), "{:?}", names(&s));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(names(&reopened), names(&s));
+
+    // Names given with a change to the bodies are the new copies' names, in order, even when one
+    // source is left: they are not moved by source as the stored names are.
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"], "body_names": ["Left", "Right"]}}));
+    assert_eq!(shape(&mut s, "Left"), ("post", 30.0), "{:?}", names(&s));
+    assert_eq!(shape(&mut s, "Right"), ("post", 60.0), "{:?}", names(&s));
+
+    // Names given that are the very names stored are still given: read in order, not moved.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30, "name": "Pat"}));
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"body_names": ["Left", "Right"]}}));
+    assert_eq!(s.doc.find_feature("Pat").map(|f| f.body_names.clone()), Some(vec!["Left".to_string(), "Right".to_string()]));
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"], "body_names": ["Left", "Right"]}}));
+    assert_eq!(shape(&mut s, "Left"), ("post", 30.0), "{:?}", names(&s));
+}
+
 /// A sketch side drawn as two collinear lines extrudes into one flat face, not two with an edge
 /// between them (#1788); the face is named from the first line and answers to the second.
 #[test]
@@ -5743,4 +5938,60 @@ fn a_command_check_that_panics_refuses_the_command() {
     let r = s.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1}));
     assert!(matches!(r, Err(EngineError::Internal(..))), "{r:?}");
     assert!(s.doc.features.is_empty());
+}
+
+/// #4153, #11901: the other ISO 261 metric sizes (M33, M39, M45, M3.5…) are known by name with
+/// their ISO 262 coarse pitch, as the first-choice ones are, and a thread named so is cut with
+/// it. The size chosen automatically for a face is still one of the first-choice sizes, as
+/// before they were added: a 33 mm shaft is sized M30 on main and here.
+#[test]
+fn second_choice_metric_threads_are_known_by_name() {
+    use solidcraft_doc::thread_forms::ThreadForm;
+    for (name, dia, pitch) in [("M3.5", 3.5, 0.6), ("M7", 7.0, 1.0), ("M33", 33.0, 3.5), ("M39", 39.0, 4.0), ("M45", 45.0, 4.5), ("M64", 64.0, 6.0)] {
+        assert_eq!(solidcraft_doc::parse_metric_thread(name), Some((dia, pitch)), "{name}");
+        assert_eq!(ThreadForm::Metric.format(dia, pitch, pitch), name);
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"diameter": dia, "height": 4.0 * dia, "body_name": "Shaft"}));
+        let named = run(&mut s, "solid.thread", json!({"face": [dia / 2.0, 0.0, 2.0 * dia], "designation": name}));
+        assert!((named["thread"]["pitch"].as_f64().unwrap() - pitch).abs() < 1e-9, "{named}");
+    }
+    // The smallest second-choice size, by name only (no shaft that thin is cut here).
+    assert_eq!(solidcraft_doc::parse_metric_thread("M1.1"), Some((1.1, 0.25)));
+    assert_eq!(ThreadForm::Metric.format(1.1, 0.25, 0.25), "M1.1");
+    assert_eq!(ThreadForm::Metric.fit(33.0, false), Some((30.0, 3.5)));
+    assert_eq!(ThreadForm::Metric.fit(7.0, false), Some((6.0, 1.0)));
+    assert_ne!(ThreadForm::Metric.fit(39.0, true).map(|(d, _)| d), Some(39.0), "a 39 mm hole is not sized M39 automatically");
+}
+
+/// The ISO 273 table a dialog lists: every size `clearance` takes, M1.6 to M64, each with its
+/// three fits, and a size with its pitch finds the same row.
+#[test]
+fn clearance_sizes_are_the_iso_273_table() {
+    let sizes = cmd::clearance_sizes();
+    assert_eq!(sizes.len(), 21);
+    assert_eq!((sizes.first().map(String::as_str), sizes.last().map(String::as_str)), (Some("M1.6"), Some("M64")));
+    assert!(sizes.iter().any(|s| s == "M4") && sizes.iter().any(|s| s == "M2"), "{sizes:?}");
+    for size in &sizes {
+        for fit in ["close", "normal", "loose"] {
+            assert!(cmd::clearance_diameter(size, fit).is_some(), "{size} {fit}");
+        }
+    }
+    assert_eq!(cmd::clearance_diameter("M4", "normal"), Some(4.5));
+    assert_eq!(cmd::clearance_diameter("M4x0.7", "close"), Some(4.3));
+    assert_eq!(cmd::clearance_diameter("m4", "loose"), Some(4.8));
+    assert_eq!(cmd::clearance_diameter("M7", "normal"), None, "no M7 in ISO 273");
+    assert_eq!(cmd::clearance_diameter("M4", "snug"), None, "no such fit");
+}
+
+/// The counterbore `head` makes, as the Hole dialog shows it before running the command: the
+/// head's diameter and height from the standard's table plus the default 0.5 mm gap each side
+/// and below. A size with its pitch finds the same head; a size or standard the tables do not
+/// have gives none.
+#[test]
+fn head_counterbore_is_the_head_plus_the_default_gap() {
+    assert_eq!(cmd::head_counterbore("ISO 4762", "M4"), Some((8.0, 4.5)), "socket head dk 7, k 4");
+    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M4x0.7"), Some((8.6, 2.7)), "button head dk 7.6, k 2.2");
+    assert_eq!(cmd::head_counterbore("socket_head_cap_screw", "M4"), Some((8.0, 4.5)), "the family name parts.insert takes");
+    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M2"), None, "ISO 7380-1 has no M2");
+    assert_eq!(cmd::head_counterbore("DIN 912", "M4"), None);
 }

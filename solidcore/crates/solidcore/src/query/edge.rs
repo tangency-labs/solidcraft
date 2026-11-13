@@ -42,6 +42,19 @@
 //! - `pInsideFaceuses` of `RadialSectorClassify` is unused upstream and dropped; the
 //!   optional attribute filters of the co-ported `GetVertices` / `GetFaces` are not
 //!   ported (no caller here passes one).
+//! - **Tangent faces** (not upstream). `RadialSectorClassify` reads faces that leave the
+//!   edge in parallel as a zero sector (the sector's own two) or as coincident (the
+//!   classified face and one of the sector's) from fixed steps and angle thresholds, which
+//!   a tangent contact of a large enough part passes: a cylinder of radius `r` on a plane
+//!   makes the angle `d / r` at a step `d`. The zero sector's class is kept while the steps
+//!   grow (three times each round) until its faces are apart, and a coincidence of faces the
+//!   definitions show to lie on different surfaces
+//!   ([`crate::query::face::p1::faces_on_other_surfaces`]) is held back likewise. Where the
+//!   faces part by more than the tolerance the sector decides; where a step leaves a face
+//!   or the rounds run out first, the class is returned. Three planes are read once, at
+//!   the edge: two of them closer than 0.001° there are coincident only where their faces
+//!   stay within the tolerance band of each other's plane; walls 3.3e-7 rad apart through
+//!   the edge, 2.8e-5 apart 85 mm from it, are classified by their exact binormals.
 //! - **Loops.** The step-off loops of both classifications keep upstream's bound (20
 //!   rounds of growing step-offs). No recursion.
 
@@ -520,6 +533,33 @@ fn on_plane(brep: &Brep, eu: EdgeuseId) -> Result<bool> {
         .is_kind_of(PLANE_TYPE)
 }
 
+/// Whether the definitions show the faces of two loop edge uses to lie on different surfaces
+/// ([`crate::query::face::p1::faces_on_other_surfaces`]), asked once and kept in `known`.
+fn on_other_surfaces(
+    k: &Kernel,
+    brep: &Brep,
+    eu: EdgeuseId,
+    other: &Brep,
+    other_eu: EdgeuseId,
+    known: &mut Option<bool>,
+) -> Result<bool> {
+    if let Some(apart) = *known {
+        return Ok(apart);
+    }
+    let face = |b: &Brep, eu: EdgeuseId| {
+        eu1::face(b, eu)?.ok_or_else(|| null(OP_RADIAL, "edge use without face"))
+    };
+    let apart = crate::query::face::p1::faces_on_other_surfaces(
+        k,
+        brep,
+        face(brep, eu)?,
+        other,
+        face(other, other_eu)?,
+    )?;
+    *known = Some(apart);
+    Ok(apart)
+}
+
 /// `SmEdge::RadialSectorClassify`: where the face of `classify_eu` lies relative to
 /// the sector between the face of `sector_eu` and the face of its radial partner, at
 /// the edge's normalised parameter `normalized_param`. The binormals of the three
@@ -652,6 +692,16 @@ pub fn radial_sector_classify_between(
         && on_plane(other_brep.as_deref().unwrap_or(&*brep), classify_eu)?;
 
     let mut num_consecutive_coincidences: u32 = 0;
+    // The class of a zero sector, read where the sector's faces are first seen parallel and
+    // kept while the steps grow to see whether they part by more than the tolerance (tangent
+    // faces do).
+    let mut zero_sector: Option<RadialSectorClass> = None;
+    // A coincidence of the classified face with a face on another surface is held back
+    // while the steps grow to see whether the two part; whether the sector face's and the
+    // radial partner's surfaces are other surfaces than the classified face's.
+    let mut held = false;
+    let mut other_than_sector: Option<bool> = None;
+    let mut other_than_radial: Option<bool> = None;
 
     // the step-off vectors (Bin = binormal)
     let mut s1 = StepOffVectors::default();
@@ -720,31 +770,25 @@ pub fn radial_sector_classify_between(
                 ));
             }
 
+            // the sector's faces stayed together as far as the faces reach
+            if let Some(class) = zero_sector {
+                return Ok(class);
+            }
+
             // (the angle values are from the previous iteration)
-            // `fixes.radial_sector_step_off_coincidence_by_own_face`: the classify face
-            // lies on the face it coincides with (the sector edge use's face for ang2, the
-            // radial partner's for ang3), so its side is read against that face's normal,
-            // as the coincidence test below reads it; upstream reads both against the
-            // radial partner's normal, which for ang2 is another face at the sector angle.
-            let by_own_face = k.fixes.radial_sector_step_off_coincidence_by_own_face;
+            // The classify face lies on the face it coincides with (the sector edge use's
+            // face for ang2, the radial partner's for ang3), so its side is read against that
+            // face's normal, as the coincidence test below reads it. Upstream reads both
+            // against the radial partner's normal, which for ang2 is another face at the
+            // sector angle: past 90 degrees the coincident pair is taken for opposite sides.
             if ang2 <= ang3 + EFF_ZERO && ang2 < 0.5 * PI / 180.0 {
-                let same = if by_own_face {
-                    norm1.dot(norm3) >= 0.0
-                } else {
-                    norm2.dot(norm3) > 0.0
-                };
-                return Ok(if same {
+                return Ok(if norm1.dot(norm3) >= 0.0 {
                     RadialSectorClass::CoincidentSector
                 } else {
                     RadialSectorClass::CoincidentSectorMate
                 });
             } else if ang3 <= ang2 + EFF_ZERO && ang3 < 0.5 * PI / 180.0 {
-                let same = if by_own_face {
-                    norm2.dot(s3.tangent.cross(bin3)) >= 0.0
-                } else {
-                    norm2.dot(norm3) > 0.0
-                };
-                return Ok(if same {
+                return Ok(if norm2.dot(s3.tangent.cross(bin3)) >= 0.0 {
                     RadialSectorClass::CoincidentRadial
                 } else {
                     RadialSectorClass::CoincidentRadialMate
@@ -796,22 +840,37 @@ pub fn radial_sector_classify_between(
 
             // If sector angle is zero (faces of EU and its radial partner are
             // parallel) and there are no other faces, that's the same as a lamina edge.
-            if ang1 < EFF_ZERO_SQRT && edge_faces(brep, edge)?.len() < 3 {
-                return Ok(if ang2 > EFF_ZERO_SQRT {
-                    if bin3.dot(norm1) > 0.0 {
-                        RadialSectorClass::ZeroSector
+            // Tangent faces (a cylinder resting on a plane) also leave the edge at a zero
+            // angle, but part as the step grows: the angle at a step d is about d times the
+            // difference of their curvatures, so a fixed step reads a large part's faces as
+            // parallel. They are one only while they stay within the tolerance: the class is
+            // read here, at the first step that shows them parallel, and the steps go on
+            // until the faces are more than the tolerance apart, a step leaves a face or the
+            // steps run out. Their angle no longer counts then: at a larger step it tells
+            // two faces within the tolerance of each other apart.
+            let parted = s1.point.distance(s2.point) > tolerance;
+            if (zero_sector.is_some() || ang1 < EFF_ZERO_SQRT)
+                && !parted
+                && edge_faces(brep, edge)?.len() < 3
+            {
+                if zero_sector.is_none() {
+                    zero_sector = Some(if ang2 > EFF_ZERO_SQRT {
+                        if bin3.dot(norm1) > 0.0 {
+                            RadialSectorClass::ZeroSector
+                        } else {
+                            RadialSectorClass::ZeroSectorMate
+                        }
+                    } else if bin3.dot(norm1) > 0.0 {
+                        RadialSectorClass::CoincidentSector
                     } else {
-                        RadialSectorClass::ZeroSectorMate
-                    }
-                } else if bin3.dot(norm1) > 0.0 {
-                    RadialSectorClass::CoincidentSector
-                } else {
-                    RadialSectorClass::CoincidentSectorMate
-                });
+                        RadialSectorClass::CoincidentSectorMate
+                    });
+                }
+            } else {
+                // the sector's faces are apart: get out of big loop - main exit point
+                zero_sector = None;
+                break;
             }
-
-            // get out of big loop - main exit point
-            break;
         }
 
         // calculate the angles between the 3 different binormal vectors
@@ -836,7 +895,14 @@ pub fn radial_sector_classify_between(
             if count == 2 {
                 step_off_distance = tolerance * 2.0;
             }
-            if count > 2 {
+            if count > 2 && (zero_sector.is_some() || held) {
+                // Two faces are followed until they part. The step below tracks the
+                // classified face's parting: it would not grow for a zero sector (that face
+                // has parted), and for a parting that grows as the square of the step it
+                // settles where the faces are half the tolerance apart.
+                last_step_off_distance = step_off_distance;
+                step_off_distance = 3.0 * last_step_off_distance;
+            } else if count > 2 {
                 let denom = min_dist - last_min;
                 if denom.abs() < EFF_ZERO {
                     last_step_off_distance = step_off_distance;
@@ -857,11 +923,14 @@ pub fn radial_sector_classify_between(
             }
         }
 
-        // Check for coincidence
+        // Check for coincidence (the classified face has parted from both faces of a zero
+        // sector that is being stepped further: it coincides with neither)
         let mut coincidence = false;
+        let together = zero_sector.is_none();
 
         // when minDist is not changing over several iterations
         if count > 2
+            && together
             && (min_dist - last_min).abs() < min_dist / 100.0 + EFF_ZERO
             && (min_dist - last2_min).abs() < min_dist / 100.0 + EFF_ZERO
         {
@@ -869,7 +938,7 @@ pub fn radial_sector_classify_between(
         }
 
         // when angle between binormals has been very small over several iterations
-        if count > 2 && (ang2 < deg2rad(0.01) || ang3 < deg2rad(0.01)) {
+        if count > 2 && together && (ang2 < deg2rad(0.01) || ang3 < deg2rad(0.01)) {
             coincidence = true;
         }
 
@@ -889,17 +958,45 @@ pub fn radial_sector_classify_between(
         }
 
         if coincidence {
+            // Directions that stay parallel near the edge are the sign of one surface. Faces
+            // on different surfaces are tangent there instead (a cylinder resting on a plane:
+            // the angle at a step d is d over the radius, under any threshold for a large
+            // enough part), and are one only where they stay within the tolerance. Their
+            // coincidence is held back while steps are left (`done` is the last): the steps
+            // go on to where the faces part (the exit above) or a step leaves a face.
+            let classify_brep = other_brep.as_deref().unwrap_or(&*brep);
             // when ang2 (TargetFaceuse/ClassifyFaceuse angle) is small and less than ang3
-            if ang2 <= ang3 + EFF_ZERO && ang2 < 0.5 * PI / 180.0 {
+            let on_sector = ang2 <= ang3 + EFF_ZERO && ang2 < 0.5 * PI / 180.0;
+            // else when ang3 (RadialMateFaceuse/ClassifyFaceuse angle) is small and less
+            // than ang2
+            let on_radial = ang3 <= ang2 + EFF_ZERO && ang3 < 0.5 * PI / 180.0;
+            if on_sector
+                && (done
+                    || !on_other_surfaces(
+                        k,
+                        brep,
+                        sector_eu,
+                        classify_brep,
+                        classify_eu,
+                        &mut other_than_sector,
+                    )?)
+            {
                 return Ok(if norm1.dot(norm3) < 0.0 {
                     RadialSectorClass::CoincidentSectorMate
                 } else {
                     RadialSectorClass::CoincidentSector
                 });
-            }
-            // else when ang3 (RadialMateFaceuse/ClassifyFaceuse angle) is small and less
-            // than ang2
-            else if ang3 <= ang2 + EFF_ZERO && ang3 < 0.5 * PI / 180.0 {
+            } else if on_radial
+                && (done
+                    || !on_other_surfaces(
+                        k,
+                        brep,
+                        eu_radial,
+                        classify_brep,
+                        classify_eu,
+                        &mut other_than_radial,
+                    )?)
+            {
                 let norm4 = s2.tangent.cross(s2.binormal);
                 let norm5 = s3.tangent.cross(bin3);
                 return Ok(if norm4.dot(norm5) < 0.0 {
@@ -907,6 +1004,9 @@ pub fn radial_sector_classify_between(
                 } else {
                     RadialSectorClass::CoincidentRadial
                 });
+            }
+            if on_sector || on_radial {
+                held = true;
             }
         }
 
@@ -918,6 +1018,10 @@ pub fn radial_sector_classify_between(
         last_min = min_dist;
     }
 
+    // the sector's faces stayed together through every step
+    if let Some(class) = zero_sector {
+        return Ok(class);
+    }
     if lamina_edge {
         return Ok(RadialSectorClass::Inside);
     }
@@ -1310,7 +1414,7 @@ mod tests {
         // the step-off reaches `EvaluateBinormal`, which returns `SM_ERR_INVALID_INPUT`
         // for an edge use outside a loop (without dereferencing it)
         assert!(
-            matches!(r, Err(SolidError::Upstream { code: 1007, .. })),
+            r.as_ref().is_err_and(|e| e.upstream_status() == Some(1007)),
             "{r:?}"
         );
         assert_eq!(RadialSectorClass::ZeroSectorMate.code(), 7);

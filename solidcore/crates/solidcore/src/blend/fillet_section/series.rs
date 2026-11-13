@@ -80,6 +80,10 @@ pub struct Trunc {
     degree: usize,
     /// The highest power of eps computed.
     eps: usize,
+    /// The coefficients left as they are (bit [`Trunc::bit`] of `c[i][k]`), whatever the
+    /// rest computes: an incremental evaluation's coefficients already computed
+    /// ([`Trunc::skipping`]).
+    skip: u64,
 }
 
 impl Trunc {
@@ -98,6 +102,7 @@ impl Trunc {
             e,
             degree: s + e,
             eps: e,
+            skip: 0,
         })
     }
 
@@ -111,13 +116,56 @@ impl Trunc {
             e: self.e,
             degree,
             eps,
+            skip: self.skip,
         }
+    }
+
+    /// This truncation, also leaving out the coefficients `c[i][k]` whose bit
+    /// ([`Trunc::bit`]) `mask` sets: an operation leaves them as they are (an operation
+    /// that returns a new series leaves them 0). Each coefficient computed is bit for bit
+    /// the same as without the mask, as it depends only on the operands' coefficients
+    /// (see [`Trunc`]); an incremental evaluation (`station::GnIncremental`) so computes
+    /// only the coefficients it has not kept from an earlier one.
+    #[must_use]
+    pub const fn skipping(self, mask: u64) -> Self {
+        Self {
+            s: self.s,
+            e: self.e,
+            degree: self.degree,
+            eps: self.eps,
+            skip: self.skip | mask,
+        }
+    }
+
+    /// The bit of `c[i][k]` in a [`Trunc::skipping`] mask (`i <= MAX_S`, `k <= STORE_E`).
+    #[must_use]
+    pub const fn bit(i: usize, k: usize) -> u64 {
+        1_u64 << (i * (STORE_E + 1) + k)
     }
 
     /// Whether `c[i][k]` is computed.
     #[inline]
-    const fn computes(self, i: usize, k: usize) -> bool {
-        i <= self.s && k <= self.e && k <= self.eps && i + k <= self.degree
+    #[must_use]
+    pub const fn computes(self, i: usize, k: usize) -> bool {
+        i <= self.s
+            && k <= self.e
+            && k <= self.eps
+            && i + k <= self.degree
+            && self.skip & Self::bit(i, k) == 0
+    }
+
+    /// The [`Trunc::bit`]s of every coefficient computed.
+    #[must_use]
+    pub fn computed_mask(self) -> u64 {
+        let mut m = 0_u64;
+        for i in 0..=self.s {
+            for k in 0..=self.e {
+                if self.computes(i, k) {
+                    m |= Self::bit(i, k);
+                }
+            }
+        }
+        m
     }
 
     /// The highest total degree `i + k` computed.
@@ -229,6 +277,25 @@ impl<T: GnScalar> Ser<T> {
         }
     }
 
+    /// Copies `src`'s coefficients that `tr` computes into `self`, leaving the rest: an
+    /// incremental evaluation's update of a kept series with the coefficients just
+    /// computed (or its accumulator's reset to its initial value there).
+    pub fn merge_computed(&mut self, src: &Self, tr: Trunc) {
+        for (i, (row, rs)) in self.c.iter_mut().zip(&src.c).enumerate().take(tr.s + 1) {
+            for (k, (x, &y)) in row.iter_mut().zip(rs).enumerate().take(tr.e + 1) {
+                if tr.computes(i, k) {
+                    *x = y;
+                }
+            }
+        }
+    }
+
+    /// The coefficients `tr` computes, the rest 0.
+    #[must_use]
+    pub fn masked(&self, tr: Trunc) -> Self {
+        Self::from_fn(tr, |i, k| self.at(i, k))
+    }
+
     /// `sm_SerScale`: each coefficient times `f`.
     #[must_use]
     pub fn scale(&self, f: T, tr: Trunc) -> Self {
@@ -287,7 +354,10 @@ impl<T: GnScalar> Ser<T> {
         let x0 = self.at(0, 0);
         if !x0.is_positive() {
             // SER_MSG(SM_ERR, "SmGnSectionFSG: a face's normal vanishes at a foot")
-            return Err(SolidError::sm_err("blend::fillet_section::Ser::inv_sqrt"));
+            return Err(SolidError::blend_failed(
+                "blend::fillet_section::Ser::inv_sqrt",
+                "a face's normal vanishes at a foot",
+            ));
         }
         let mut z = self.scale(T::of(1.0) / x0, tr);
         z.set(0, 0, T::of(0.0));
@@ -302,6 +372,79 @@ impl<T: GnScalar> Ser<T> {
             sum.add_scaled_from(&pow, T::of(binom), m, tr);
         }
         Ok(sum.scale(T::of(1.0) / x0.sqrt(), tr))
+    }
+}
+
+/// [`Ser::inv_sqrt`] evaluated incrementally: the series it takes (z, its powers, the
+/// binomial sum and the result) are kept between calls, and a call computes only the
+/// coefficients its truncation computes ([`Trunc::skipping`]: the caller leaves out those
+/// whose operands' coefficients are unchanged). Its operations, their order and so every
+/// coefficient are [`Ser::inv_sqrt`]'s, bit for bit; the two must change together.
+#[derive(Clone, Debug)]
+pub struct InvSqrtSeries<T> {
+    z: Ser<T>,
+    /// `z^m`, `m = 0..`: `pow[0]` is 1.
+    pow: Vec<Ser<T>>,
+    sum: Ser<T>,
+    out: Ser<T>,
+}
+
+impl<T: GnScalar> Default for InvSqrtSeries<T> {
+    fn default() -> Self {
+        let zero = Ser::constant(T::of(0.0));
+        Self {
+            z: zero,
+            pow: vec![Ser::constant(T::of(1.0))],
+            sum: zero,
+            out: zero,
+        }
+    }
+}
+
+impl<T: GnScalar> InvSqrtSeries<T> {
+    /// `x^(-1/2)` as [`Ser::inv_sqrt`], its coefficients that `tr` computes updated (the
+    /// rest kept from earlier calls). `x` must hold every coefficient below each one
+    /// computed.
+    ///
+    /// # Errors
+    ///
+    /// As [`Ser::inv_sqrt`].
+    pub fn update(&mut self, x: &Ser<T>, tr: Trunc) -> Result<&Ser<T>> {
+        let x0 = x.at(0, 0);
+        if !x0.is_positive() {
+            return Err(SolidError::blend_failed(
+                "blend::fillet_section::Ser::inv_sqrt",
+                "a face's normal vanishes at a foot",
+            ));
+        }
+        self.z.merge_computed(&x.scale(T::of(1.0) / x0, tr), tr);
+        self.z.set(0, 0, T::of(0.0));
+        self.sum.merge_computed(&Ser::constant(T::of(1.0)), tr);
+        let mut binom = 1.0_f64;
+        for m in 1..=(tr.s + tr.e) {
+            binom *= (-0.5 - (m - 1) as f64) / m as f64;
+            let Some(prev) = self.pow.get(m - 1) else {
+                return Err(SolidError::blend_failed(
+                    "blend::fillet_section::Ser::inv_sqrt",
+                    "the series has no power of the previous order",
+                ));
+            };
+            let next = prev.mul_valued(&self.z, m - 1, 1, tr);
+            if self.pow.len() <= m {
+                self.pow.push(Ser::constant(T::of(0.0)));
+            }
+            let Some(pm) = self.pow.get_mut(m) else {
+                return Err(SolidError::blend_failed(
+                    "blend::fillet_section::Ser::inv_sqrt",
+                    "the series has no power of this order",
+                ));
+            };
+            pm.merge_computed(&next, tr);
+            self.sum.add_scaled_from(pm, T::of(binom), m, tr);
+        }
+        self.out
+            .merge_computed(&self.sum.scale(T::of(1.0) / x0.sqrt(), tr), tr);
+        Ok(&self.out)
     }
 }
 
@@ -636,5 +779,18 @@ mod tests {
         let p = e1.add(&e2, tr).times(&s, tr).sub(&e2, tr);
         assert_eq!(p.a[0].c[1][0], 2.0);
         assert_eq!(p.a[1].c[0][0], 0.0);
+    }
+
+    #[test]
+    fn a_vanishing_normal_is_a_typed_failure() {
+        let tr = Trunc::new(1, 0).unwrap();
+        let op = "blend::fillet_section::Ser::inv_sqrt";
+        let why = "a face's normal vanishes at a foot";
+        let error = Ser::constant(0.0).inv_sqrt(tr).unwrap_err();
+        assert_eq!(error, SolidError::blend_failed(op, why));
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        let mut pows = InvSqrtSeries::<f64>::default();
+        let error = pows.update(&Ser::constant(-1.0), tr).unwrap_err();
+        assert_eq!(error, SolidError::blend_failed(op, why));
     }
 }

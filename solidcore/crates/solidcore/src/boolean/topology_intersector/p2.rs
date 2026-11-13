@@ -1303,19 +1303,19 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .other
             .ok_or(invalid(OP_INSERT_RELATE, "no other B-rep"))?;
 
-        // `fixes.boolean_capture_keeps_operand_vertices_apart`: a proto vertex's ball never
-        // reaches two distinct vertices of one operand. Two vertices a distance d apart are
-        // never both closer than d / 2 to one point, so the capture distance stays below
-        // half the smallest distance between two vertices of either operand; it never
-        // drops below the intersection tolerance, within which points are one.
-        if k.fixes.boolean_capture_keeps_operand_vertices_apart {
-            let mut nearest = f64::INFINITY;
-            for b in [brep.brep_arena(this)?, brep.brep_arena(other)?] {
-                nearest = nearest.min(nearest_vertex_pair_distance(b)?);
-            }
-            if nearest.is_finite() {
-                capture_distance = capture_distance.min(max2(0.5 * nearest, topo_int_tol));
-            }
+        // A proto vertex's ball never reaches two distinct vertices of one operand. Two
+        // vertices a distance d apart are never both closer than d / 2 to one point, so the
+        // capture distance stays below half the smallest distance between two vertices of
+        // either operand; it never drops below the intersection tolerance, within which
+        // points are one. Upstream's capture distance is unbounded: with a STEP file's
+        // tolerances (0.01 everywhere) it is 10 mm, every vertex of a 30 mm rim was captured
+        // into one proto vertex, and the rim minus its own copy failed in the merge.
+        let mut nearest = f64::INFINITY;
+        for b in [brep.brep_arena(this)?, brep.brep_arena(other)?] {
+            nearest = nearest.min(nearest_vertex_pair_distance(b)?);
+        }
+        if nearest.is_finite() {
+            capture_distance = capture_distance.min(max2(0.5 * nearest, topo_int_tol));
         }
 
         let mut mgr = ProtoTopologyManager::new(
@@ -1336,12 +1336,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // Intersect Topology; if that didn't work, quit before we mess up the Breps.
         let mut deleted = self.intersect_topology(k, brep)?;
 
-        // Not upstream unless opted in (`Kernel::fixes.boolean_coincident_strip_drops_crossing`,
-        // WR-614, tangency-labs/solidcore#1794): the crossing line of two planes within
-        // tolerance of each other across a strip bounded by their edges is not an edge.
-        if k.fixes.boolean_coincident_strip_drops_crossing {
-            deleted.extend(self.drop_crossings_in_coincident_strips(k, brep)?);
-        }
+        // Not upstream (WR-614, tangency-labs/solidcore#1794): the crossing line of two
+        // planes within tolerance of each other across a strip bounded by their edges is
+        // not an edge.
+        deleted.extend(self.drop_crossings_in_coincident_strips(k, brep)?);
 
         // Resolve Intersections; if that didn't work, quit before we mess up the Breps.
         deleted.extend(self.resolve_intersections(k, brep)?);

@@ -43,7 +43,7 @@ One card per agent, with an "Add agent..." and a "Refresh" button at the end.
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
 | Add SolidCraft to AI apps | Checkbox | `Prefs.connect_ai_apps` | `true` | "Off takes the entries out again." | none | |
-| Run slow commands in the background | Checkbox | `Prefs.agent_off_thread` | `false` | none | none | |
+| Run slow commands in the background | Checkbox | `Prefs.agent_off_thread` | `true` | none | none | |
 | Connect the last agent at start | Checkbox | `Prefs.agent_connect_at_start` | `false` | none | none | |
 | Open the chat at start | Checkbox | `Prefs.agent_chat_open_at_start` | `false` | none | none | |
 

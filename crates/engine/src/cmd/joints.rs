@@ -1654,9 +1654,26 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     let before = super::motion::positions(s);
     let st = s.model.state();
     let r = joints::reach(&s.doc, &st, &joints::Reach { occurrence: occ, point: at, to, axis, joints: only });
+    let mut stopped_by_contact = None;
     let reached = match &r {
+        // Only a reach that moves something touches the design (and so adds an undo step).
+        Ok(x) if !x.values.is_empty() && s.doc.assembly.contact_enabled => {
+            // With contact sets on, the joints go toward the values found as joint.drive moves
+            // them, stopping where two parts of a set would pass into each other (#14682). No
+            // value is held on the way: the loops close from each step, so a loop the values
+            // close at both ends doesn't stop the drag in between.
+            let want: Vec<(u64, Vec<f64>)> = x.values.iter().map(|(id, q)| (*id, q.clone())).collect();
+            let (out, _) = super::motion::drive_with_contact(s, &want, &BTreeSet::new())?;
+            stopped_by_contact = out
+                .get("stopped_by_contact")
+                .filter(|v| v.is_object())
+                .cloned()
+                .map(serde_json::from_value::<ContactStop>)
+                .transpose()
+                .map_err(|e| bad(cmd, e.to_string()))?;
+            x.clone()
+        }
         Ok(x) => {
-            // Only a reach that moves something touches the design (and so adds an undo step).
             if !x.values.is_empty() {
                 let doc = s.doc_mut();
                 for (id, q) in &x.values {
@@ -1691,7 +1708,10 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         .filter_map(|id| name(*id))
         .map(|j| ReachedJoint { joint: j.id, name: j.name.clone(), values: named_value_list(j, effective.get(&j.id).unwrap_or(&j.values)) })
         .collect();
-    let stopped_by_limit = (!reached.limits.is_empty()).then(|| {
+    // A contact that stopped it came first: the limits and loop the reach found further on are
+    // not where it rests.
+    let contact_stopped = stopped_by_contact.is_some();
+    let stopped_by_limit = (!contact_stopped && !reached.limits.is_empty()).then(|| {
         reached
             .limits
             .iter()
@@ -1715,7 +1735,8 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         values,
         moved: super::motion::moved(&before, &super::motion::positions(s)).next().is_some(),
         stopped_by_limit,
-        stopped_by_loop: reached.stopped_by_loop.and_then(name).map(|j| ReachLoopStop { joint: j.name.clone() }),
+        stopped_by_loop: reached.stopped_by_loop.filter(|_| !contact_stopped).and_then(name).map(|j| ReachLoopStop { joint: j.name.clone() }),
+        stopped_by_contact,
         reason: r.err(),
         continuous: (bool_(p, "continuous") == Some(true)).then_some(true),
         param_warnings: Vec::new(),
@@ -1728,7 +1749,11 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
 fn body_centre(s: &Session, occ: u64) -> Vec3 {
     let comp = s.doc.occurrences.iter().find(|o| o.id == occ).map(|o| o.component).unwrap_or(0);
     let st = s.model.state();
-    st.bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).fold(Aabb3::EMPTY, |bb, b| bb.union(&b.mesh().bounds())).center()
+    st.bodies
+        .iter()
+        .filter(|b| s.doc.model_body_component(b) == comp)
+        .fold(Aabb3::EMPTY, |bb, b| bb.union(&b.body.exact_bounds().unwrap_or(Aabb3::EMPTY)))
+        .center()
 }
 
 fn motion_link(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2050,6 +2075,12 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
+    edit_joint(s, p, true)
+}
+
+/// joint.edit's change, also run by `assembly.constraint.edit`. `plain`: a change of kind makes a
+/// constraint a plain joint (joint.edit); the constraint command keeps the rule it has just set.
+pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Value> {
     let cmd = "joint.edit";
     let id = joint_id(s, p.get("joint"), cmd)?;
     let kind = match str_(p, "type") {
@@ -2089,7 +2120,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         j.kind = k;
         // A constraint changed to another kind of joint is a plain joint now: its tag would keep
         // restarting it, and a tangent's gap expression would leave the radius out of its offset.
-        if k != was {
+        if k != was && plain {
             if j.constraint == Some(joints::Constraint::Tangent) {
                 j.exprs.offset = None;
             }

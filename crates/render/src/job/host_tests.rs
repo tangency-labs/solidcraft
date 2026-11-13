@@ -2627,6 +2627,42 @@ fn actual_cpu_texture_worker_releases_sources_after_completion_or_cancel_while_s
     }
 }
 
+// The native worker checks `stop` and starts waiting while it holds the queue lock. A stop sent
+// in between must still wake it, else joining the worker waits for good (#14500).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_stop_sent_while_the_worker_is_about_to_wait_still_wakes_it() {
+    use std::sync::mpsc::sync_channel;
+    use std::time::Duration;
+    let shared = ImageHost::shared(MEMORY_LIMIT);
+    let (checked, on_checked) = sync_channel(1);
+    let (stopped, on_stopped) = sync_channel(1);
+    let worker = {
+        let shared = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            // Hold the lock between the check and the wait, as native_worker does.
+            let queue = shared.queue.lock().unwrap();
+            assert!(!shared.stop.load(Ordering::Acquire));
+            checked.send(()).unwrap();
+            // A stop that takes the lock cannot finish here; one that doesn't finishes now.
+            let _ = on_stopped.recv_timeout(Duration::from_millis(500));
+            // One wait, without checking `stop` again, as native_worker's wait.
+            let (_queue, waited) = shared.wake.wait_timeout(queue, Duration::from_secs(10)).unwrap();
+            !waited.timed_out()
+        })
+    };
+    on_checked.recv().unwrap();
+    let stopper = {
+        let shared = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            shared.stop_worker();
+            let _ = stopped.send(());
+        })
+    };
+    assert!(worker.join().unwrap(), "the worker missed the stop and waited until its timeout");
+    stopper.join().unwrap();
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn registered_preview_and_final_profiles_keep_capture_identity_and_completed_mode() {

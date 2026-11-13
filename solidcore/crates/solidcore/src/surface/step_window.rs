@@ -658,10 +658,7 @@ impl<'a> Map<'a> {
                     v: uv.y,
                 })
             }
-            Err(SolidError::Upstream {
-                code: SM_ERR_NOT_WITHIN_TOLERANCE,
-                ..
-            }) => Err(SolidError::invalid_input(
+            Err(e) if is_off_surface(&e) => Err(SolidError::invalid_input(
                 OP,
                 "a boundary point off its surface",
             )),
@@ -1664,6 +1661,13 @@ fn turn(
         + turn(k, map, e, (tm, xm), (tb, xb), d, depth + 1)?)
 }
 
+/// Whether the inversion answered that the point is off its surface
+/// (`SM_ERR_NOT_WITHIN_TOLERANCE`): by its status, so also a typed failure that replaced the
+/// `Upstream` (#13790).
+fn is_off_surface(error: &SolidError) -> bool {
+    error.upstream_status() == Some(SM_ERR_NOT_WITHIN_TOLERANCE)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -2498,5 +2502,27 @@ mod tests {
             vec![edge(&top, 0.0, 360.0, true)],
         ];
         assert!(refused(&twice, none, TOL));
+    }
+
+    /// #13790: a typed `SM_ERR_NOT_WITHIN_TOLERANCE` that replaced the inversion's
+    /// `Upstream` is the same off-surface answer.
+    #[test]
+    fn off_surface_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        let upstream = SolidError::Upstream {
+            operation: "surface::x",
+            code: SM_ERR_NOT_WITHIN_TOLERANCE,
+            entity: None,
+        };
+        assert!(is_off_surface(&upstream));
+        for typed in replaced_upstream("surface::x", SM_ERR_NOT_WITHIN_TOLERANCE, None) {
+            assert!(is_off_surface(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream("surface::x", crate::error::SM_ERR, None)
+            .into_iter()
+            .chain(native_failures("surface::x", SM_ERR_NOT_WITHIN_TOLERANCE))
+        {
+            assert!(!is_off_surface(&other), "{other:?}");
+        }
     }
 }

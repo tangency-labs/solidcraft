@@ -425,3 +425,62 @@ fn quarter_turn_reaches_keep_the_four_bar_closed_and_diagnostics_current() {
         }
     }
 }
+
+/// A grounded block A and a block B on a slider toward it, 10 mm clear, in one contact set:
+/// `contact` turns contact sets on or off. The slider stops 10 mm past the touch.
+fn blocks_on_a_rail(contact: bool) -> Session {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    let a = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"}));
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 10}));
+    run(&mut s, "joint.limits", json!({"joint": "Rail", "index": 0, "min": -10, "max": 100}));
+    run(&mut s, "contact.create", json!({"occurrences": ["A", "B"]}));
+    run(&mut s, "contact.enable_sets", json!({"enabled": contact}));
+    s
+}
+
+/// A drag (joint.reach) stops where a contact set says two parts touch, as joint.drive does, and
+/// says so, not the limit further on; with contact sets off it goes on to that limit (#14682).
+#[test]
+fn a_reach_stops_where_a_contact_set_touches() {
+    // B's near face, in its own coordinates; the drag pulls its centre 25 mm toward A, 15 mm past
+    // where B touches A.
+    let near_face = Vec3::new(20.0, 5.0, 5.0);
+    let pull = |s: &mut Session| {
+        let from = place(s, "B", Vec3::new(25.0, 5.0, 5.0));
+        let to = from - Vec3::new(25.0, 0.0, 0.0);
+        reach(s, "B", Vec3::new(25.0, 5.0, 5.0), json!({"point": pt(to)}))
+    };
+    let mut s = blocks_on_a_rail(true);
+    let start = place(&s, "B", near_face).x;
+    assert!((start - 20.0).abs() < 1e-6, "B starts 10 mm clear of A: {start}");
+    let r = pull(&mut s);
+    assert!(r["stopped_by_contact"].is_object(), "{r}");
+    assert!(r["stopped_by_limit"].is_null(), "the contact stopped it, not the limit: {r}");
+    assert_eq!(r["reached"], false, "{r}");
+    let x = place(&s, "B", near_face).x;
+    assert!((10.0 - 1e-6..10.0 + 1e-3).contains(&x), "B stops touching A, not through it: its face at x = {x}");
+    let collisions = run(&mut s, "contact.check", json!({}));
+    assert!(collisions["collisions"].as_array().is_some_and(Vec::is_empty), "{collisions}");
+    // Contact sets off: the same drag goes through A, to the slider's limit.
+    let mut s = blocks_on_a_rail(false);
+    let r = pull(&mut s);
+    assert!(r["stopped_by_contact"].is_null(), "{r}");
+    assert!(r["stopped_by_limit"].is_array(), "{r}");
+    let x = place(&s, "B", near_face).x;
+    assert!(x.abs() < 1e-6, "B's face at x = {x}, not at the limit, 0");
+}
+
+#[test]
+fn body_centre_uses_exact_body_bounds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    let c = super::body_centre(&s, 0);
+    assert!((c.x - 5.0).abs() < 1e-6 && (c.y - 10.0).abs() < 1e-6 && (c.z - 15.0).abs() < 1e-6, "got {c:?}");
+}

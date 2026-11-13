@@ -295,6 +295,16 @@ extend_cases!(
     extend_picks_near_no_edge,
 );
 
+#[test]
+fn a_sub_resolution_extension_is_not_reported_as_a_changed_sheet() {
+    let sheet = Sheet::Square.core();
+    let was = native(&to_arrays(&sheet).unwrap()).unwrap().0;
+    for how in [Continuation::Natural, Continuation::Tangent, Continuation::Curvature] {
+        assert_eq!(extend_sheet(&sheet, [10.0, 5.0, 0.0], TOL, 1e-14, how).err(), Some(Error::NotExact));
+        assert_eq!(native(&to_arrays(&sheet).unwrap()).unwrap().0, was);
+    }
+}
+
 /// The capi's argument checks for an extend, before any kernel call, and a body of more than
 /// one face.
 #[test]

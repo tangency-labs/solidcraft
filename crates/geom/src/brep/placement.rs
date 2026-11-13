@@ -68,8 +68,9 @@ impl Rigid {
         Frame { origin: self.point(f.origin), x_axis: self.direction(f.x_axis), y_axis: self.direction(f.y_axis) }
     }
 
-    fn curve(&self, c: &Curve) -> Curve {
-        match c {
+    /// The curve moved; `None` for one on a blend by its definition ([`moved`]).
+    fn curve(&self, c: &Curve) -> Option<Curve> {
+        Some(match c {
             Curve::Line { start, end } => Curve::Line { start: self.point(*start), end: self.point(*end) },
             Curve::Circle { frame, radius } => Curve::Circle { frame: self.frame(frame), radius: *radius },
             Curve::Ellipse { frame, radii } => Curve::Ellipse { frame: self.frame(frame), radii: *radii },
@@ -79,15 +80,17 @@ impl Rigid {
                 Curve::RationalSpline { knots: knots.clone(), homogeneous: homogeneous.iter().map(|h| self.homogeneous(*h)).collect() }
             }
             Curve::SurfaceIntersection { surfaces, leader, tolerance } => Curve::SurfaceIntersection {
-                surfaces: [Box::new(self.surface(&surfaces[0])), Box::new(self.surface(&surfaces[1]))],
-                leader: Box::new(self.curve(leader)),
+                surfaces: [Box::new(self.surface(&surfaces[0])?), Box::new(self.surface(&surfaces[1])?)],
+                leader: Box::new(self.curve(leader)?),
                 tolerance: *tolerance,
             },
-        }
+        })
     }
 
-    fn surface(&self, s: &Surface) -> Surface {
-        match s {
+    /// The surface moved; `None` for a blend by its definition, which the kernel moves with its
+    /// net ([`moved`]).
+    fn surface(&self, s: &Surface) -> Option<Surface> {
+        Some(match s {
             Surface::Plane { origin, u_axis, v_axis } => {
                 Surface::Plane { origin: self.point(*origin), u_axis: self.direction(*u_axis), v_axis: self.direction(*v_axis) }
             }
@@ -122,7 +125,9 @@ impl Rigid {
                 matrix: compose(&self.matrix(), matrix),
                 forward: *forward,
             },
-        }
+            // Moving a definition is the kernel's: its supports, leader and seeds move with it.
+            Surface::Blend { .. } => return None,
+        })
     }
 }
 
@@ -138,20 +143,28 @@ fn compose(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
 }
 
 /// This record moved by `motion` (module docs): topology, parameters and pcurves unchanged.
-pub fn moved(brep: &Brep, motion: &Rigid) -> Brep {
+/// `None` for a record with a blend by its definition: moving its supports, leader and seeds is
+/// the kernel's, which moves the definition with its net (its transform).
+pub fn moved(brep: &Brep, motion: &Rigid) -> Option<Brep> {
     let mut out = brep.clone();
     for f in &mut out.faces {
-        f.surface = motion.surface(&f.surface);
-        f.nurbs = f.nurbs.as_ref().map(|n| motion.surface(n));
+        f.surface = motion.surface(&f.surface)?;
+        f.nurbs = match &f.nurbs {
+            Some(n) => Some(motion.surface(n)?),
+            None => None,
+        };
     }
     for e in &mut out.edges {
-        e.curve = motion.curve(&e.curve);
-        e.nurbs = e.nurbs.as_ref().map(|n| motion.curve(n));
+        e.curve = motion.curve(&e.curve)?;
+        e.nurbs = match &e.nurbs {
+            Some(n) => Some(motion.curve(n)?),
+            None => None,
+        };
     }
     for v in &mut out.vertices {
         v.point = motion.point(v.point);
     }
-    out
+    Some(out)
 }
 
 /// A linear map that keeps handedness (rows of a matrix with positive determinant) and a
@@ -245,7 +258,8 @@ impl Affine {
             | Surface::Sphere { .. }
             | Surface::BallPatch { .. }
             | Surface::Torus { .. }
-            | Surface::PlacedRevolution { .. } => return None,
+            | Surface::PlacedRevolution { .. }
+            | Surface::Blend { .. } => return None,
         })
     }
 
