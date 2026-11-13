@@ -330,7 +330,7 @@ fn a_round_of_radius_5_between_sheets_at_a_right_angle_touches_each_5_from_the_c
 #[test]
 fn a_chordal_fillet_of_chord_5_root_2_is_the_radius_5_round() {
     let (a, b) = corner();
-    let chord = 5.0 * 2.0_f64.sqrt();
+    let chord = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
     let f = fillet_sheets(&a, &b, &fillet_how(Section::Chord(chord), false)).unwrap();
     assert!(has_edge_through(&f.fillet, [5.0, 5.0, 0.0]));
     assert!(has_edge_through(&f.fillet, [0.0, 5.0, 5.0]));

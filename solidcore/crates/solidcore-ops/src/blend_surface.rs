@@ -360,10 +360,11 @@ pub struct Fillet {
 /// The fillet between sheets `a` and `b` where they meet along an edge of each: the two sheets'
 /// copies sewn into one body at `how.tolerance`, the edges they then share rounded by the
 /// kernel's blend ([`crate::blend`]) with `how.section` (on the side the sheets' normals give,
-/// as the kernel's blend of a sheet's edge takes it), and the faces the blend made taken out as
-/// the fillet ([`crate::trim::remove_faces`]). With `how.trim`, the sheets' faces left in the
-/// rounded body are each taken out as that sheet, cut back along the contact curves; a face is a
-/// sheet's when a point inside it (the kernel's) lies within `how.tolerance` of that sheet. The
+/// as the kernel's blend of a sheet's edge takes it). Each face of the rounded body is a sheet's
+/// when a point inside it (the kernel's) lies within `how.tolerance` of that sheet, and the
+/// fillet's otherwise (the blend makes the faces it trims anew, so their ids do not tell); the
+/// fillet's faces are taken out as the fillet ([`crate::trim::remove_faces`]), and with
+/// `how.trim` each sheet's as that sheet, cut back along the contact curves. The
 /// seams between the fillet and the cut sheets are measured on the rounded body
 /// ([`Body::continuity_report`]). Neither sheet changes.
 ///
@@ -422,38 +423,40 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
             "the sheets do not meet along an edge of each: a fillet between sheets that cross or stand apart is not built",
         ));
     }
-    let before = order.faces.clone();
     let sizes = vec![size; shared.len()];
     crate::blend::blend(&sewn, kind, &shared, &sizes, &[], crate::Corners::Filled)?;
     let rounded = native_order(&sewn);
-    let (made, kept): (Vec<usize>, Vec<usize>) = (0..rounded.faces.len())
-        .partition(|&i| rounded.faces.get(i).is_some_and(|f| !before.contains(f)));
+    // Each face of the rounded body is a sheet's (cut back) or the fillet's, by where a point
+    // inside it lies: the kernel's blend makes the faces it trims anew, so a face's id does not
+    // say which it is.
+    let inside = inside_points(&sewn)?;
+    let on = |sheet: &Body, order: &Order, p: [f64; 3]| -> Result<bool> {
+        Ok(sheet
+            .face_distances_within(order, &[p], how.tolerance)?
+            .iter()
+            .flatten()
+            .any(|d| d.is_some_and(|d| d <= how.tolerance)))
+    };
+    let (mut of_a, mut of_b, mut made) = (Vec::new(), Vec::new(), Vec::new());
+    for (i, p) in inside.iter().enumerate() {
+        if on(a, &a_order, *p)? {
+            of_a.push(i);
+        } else if on(b, &b_order, *p)? {
+            of_b.push(i);
+        } else {
+            made.push(i);
+        }
+    }
     if made.is_empty() {
         return Err(Error::NoEffect);
     }
-    let fillet = crate::trim::remove_faces(&sewn, &rounded, &kept)?;
+    let without = |keep: &[usize]| -> Vec<usize> {
+        (0..rounded.faces.len())
+            .filter(|i| !keep.contains(i))
+            .collect()
+    };
+    let fillet = crate::trim::remove_faces(&sewn, &rounded, &without(&made))?;
     let trimmed = if how.trim {
-        let inside = inside_points(&sewn)?;
-        let mut of_a = Vec::new();
-        for &i in &kept {
-            let Some(p) = inside.get(i) else {
-                return Err(Error::Exception);
-            };
-            let near = a.face_distances_within(&a_order, &[*p], how.tolerance)?;
-            if near
-                .iter()
-                .flatten()
-                .any(|d| d.is_some_and(|d| d <= how.tolerance))
-            {
-                of_a.push(i);
-            }
-        }
-        let of_b: Vec<usize> = kept.iter().copied().filter(|i| !of_a.contains(i)).collect();
-        let without = |sheet: &[usize]| -> Vec<usize> {
-            (0..rounded.faces.len())
-                .filter(|i| !sheet.contains(i))
-                .collect()
-        };
         Some((
             crate::trim::remove_faces(&sewn, &rounded, &without(&of_a))?,
             crate::trim::remove_faces(&sewn, &rounded, &without(&of_b))?,
