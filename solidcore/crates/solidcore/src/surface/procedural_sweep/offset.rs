@@ -324,15 +324,18 @@ impl ProceduralSweep {
         self.offset_support(domain, distance, tolerance)
     }
 
-    /// An offset executive's continued support, sized from exact source derivatives.
-    /// The extension is a support rectangle; final face loops determine its used part.
+    /// An offset executive's continued support, sized from exact source derivatives:
+    /// `distance` along both directions, and its turns continued `turns` radians further
+    /// at each end. The extension is a support rectangle; final face loops determine its
+    /// used part.
     pub(crate) fn extended_for_offset(
         &self,
         net: &BSplineSurface,
         distance: f64,
+        turns: f64,
         tolerance: f64,
     ) -> Result<Surface> {
-        if !distance.is_finite() {
+        if !(distance.is_finite() && turns.is_finite() && turns >= 0.0) {
             return Err(bad("a screw support extension must be finite"));
         }
         let domain = self.definition_box(&net.natural_uv_domain())?;
@@ -360,7 +363,7 @@ impl ProceduralSweep {
         if !screw_speed.is_finite() || screw_speed <= 0.0 {
             return Err(bad("a screw support has a singular extension direction"));
         }
-        let dt = (Ivl::from(distance.abs()) / Ivl::from(screw_speed)).hi;
+        let dt = (Ivl::from(distance.abs()) / Ivl::from(screw_speed) + Ivl::from(turns)).hi;
         let (Some(&first), Some(&last)) = (self.stations.first(), self.stations.last()) else {
             return Err(bad("missing screw stations"));
         };
@@ -503,7 +506,7 @@ mod tests {
         let requested = 1.0;
         let continued = source
             .definition()
-            .extended_for_offset(source.net(), requested, 1e-3)
+            .extended_for_offset(source.net(), requested, 0.0, 1e-3)
             .unwrap();
         let definition = continued.procedural_sweep().unwrap().definition();
         let end = definition.profile().natural_interval().max();
@@ -544,7 +547,7 @@ mod tests {
         let requested = 1.0;
         let continued = source
             .definition()
-            .extended_for_offset(source.net(), requested, 1e-3)
+            .extended_for_offset(source.net(), requested, 0.0, 1e-3)
             .unwrap();
         let definition = continued.procedural_sweep().unwrap().definition();
         let (section, [lo, hi]) = definition.screw_offset_section().unwrap().unwrap();
