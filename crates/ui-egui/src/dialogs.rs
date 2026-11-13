@@ -5516,6 +5516,15 @@ pub(crate) fn report_title(d: &Dialog) -> String {
 
 /// The commands OK runs (an edit rebuilds its feature in place); the live preview runs the same.
 pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
+    // Remove Tube on every tube of an edited Frame Member: OK deletes it, as `frame.remove_member`
+    // does with its last tube. (All Lines with nothing loaded is a sketch that lost its lines,
+    // not tubes taken out.)
+    if let (Kind::Frame(m), Some((id, _))) = (&d.kind, d.editing)
+        && !m.all
+        && sels(d, 0).is_empty()
+    {
+        return Ok(vec![("timeline.delete".into(), json!({ "feature": id }))]);
+    }
     let mut normalized = d.clone();
     normalized.sync_material(&app.session);
     for value in crate::length_input::fields(&app.session.doc, &mut normalized.kind) {

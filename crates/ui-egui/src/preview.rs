@@ -602,7 +602,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
-            b.centrelines = features().flat_map(|id| crate::dialogs_frame::centrelines(&p, id)).collect();
+            b.centrelines = crate::dialogs_frame::centrelines(&p);
             Ok(b)
         }
     }

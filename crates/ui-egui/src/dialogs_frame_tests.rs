@@ -946,6 +946,98 @@ fn cancel_after_remove_tube_leaves_the_feature_unchanged() {
     assert_eq!((stored(&app), members(&app)), (before, bodies));
 }
 
+/// Remove Tube on every tube of an edited Frame Member: Cancel leaves it, OK deletes it (as
+/// `frame.remove_member` does), in one undo step.
+#[test]
+fn ok_after_removing_every_tube_deletes_the_frame_member() {
+    let mut app = box_app();
+    let pairs = json!([{"a": vertex(0., 0., 0.), "b": vertex(0., 0., 400.)}, {"a": vertex(0., 0., 400.), "b": vertex(600., 0., 400.)}]);
+    app.run("frame.member", json!({"pairs": pairs, "profile": tube()})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let (doc, bodies, undo) = (serde_json::to_value(&*app.session.doc).unwrap(), members(&app), app.session.undo.len());
+    let empty = |app: &mut SolveApp| {
+        app.edit_feature(f);
+        settle_preview(app);
+        super::remove_tubes(app, &["pair1".to_string(), "pair2".to_string()]);
+        settle_preview(app);
+        assert!(path(app.dialog.as_ref().unwrap()).is_empty());
+        assert_eq!(app.preview.error, None);
+    };
+    empty(&mut app);
+    crate::dialogs::cancel(&mut app);
+    assert_eq!((serde_json::to_value(&*app.session.doc).unwrap(), members(&app)), (doc, bodies.clone()), "Cancel changes nothing");
+    empty(&mut app);
+    let d = app.dialog.clone().unwrap();
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    assert!(app.session.doc.feature(f).is_none(), "the Frame Member is deleted");
+    assert!(members(&app).is_empty(), "{:?}", members(&app));
+    assert_eq!(app.session.undo.len(), undo + 1, "one undo step");
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(members(&app), bodies);
+}
+
+/// A line refused in place of the waiting point gives the point back as it was picked, with its
+/// reference.
+#[test]
+fn a_refused_line_gives_the_waiting_point_back_with_its_reference() {
+    let mut app = box_app();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Hoop"})),
+        ("sketch.circle.center", json!({"center": [0, 0], "radius": 50})),
+        ("sketch.finish", json!({})),
+    ] {
+        app.run(id, p).unwrap();
+    }
+    let hoop = sketch_id(&app, "Hoop");
+    let circle = Sel::ExternalSketchCurve { sketch: hoop, id: app.session.doc.sketch(hoop).unwrap().curves[0].id.clone() };
+    let mut d = dialog_on(&mut app, &[]);
+    pick_all(&app, &mut d, &[corner(0., 0., 0.), corner(0., 0., 400.)]);
+    // A reference other than the one the corner would be found as again.
+    let given = json!({"vertex": [600.0, 0.0, 0.001]});
+    super::pick_as(&app, &mut d, corner(600., 0., 0.), Some(given.clone()));
+    pick(&app, &mut d, circle);
+    assert!(d.error.as_deref().is_some_and(super::refused_pick), "{:?}", d.error);
+    assert_eq!(path(&d), [corner(0., 0., 0.), corner(0., 0., 400.), corner(600., 0., 0.)]);
+    pick(&app, &mut d, corner(600., 0., 400.));
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["pairs"][1]["a"], given, "{}", c[0].1);
+}
+
+/// In a design with a component placed away from its frame the preview is of the placed model,
+/// and it still gives the dialog the centrelines to pick for Remove Tube.
+#[test]
+fn a_design_with_a_placed_component_still_previews_centrelines() {
+    let mut app = box_app();
+    let c = app.run("component.create", json!({"name": "Away", "grounded": false})).unwrap()["component"].as_u64().unwrap();
+    let o = app.session.doc.occurrence_of(c).unwrap().id;
+    app.run("occurrence.move", json!({"occurrence": o, "translate": [0, 0, 1000]})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    assert!(solidcraft_engine::frames::placed(&app.session));
+    dialog_with(&mut app, &[corner(0., 0., 0.), corner(0., 0., 400.)]);
+    assert_eq!(app.preview.centrelines.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["pair1"]);
+}
+
+/// While OK computes, the path holds: Ctrl+click and Remove Tube take nothing out.
+#[test]
+fn the_path_holds_while_ok_computes() {
+    let mut app = box_app();
+    let picks = [corner(0., 0., 0.), corner(0., 0., 400.)];
+    dialog_with(&mut app, &picks);
+    let (_finish, done) = std::sync::mpsc::channel();
+    app.applying = Some(crate::dialogs::Applying {
+        done,
+        ready: None,
+        seen: true,
+        started: 0.0,
+        cmds: Vec::new(),
+        progress: Default::default(),
+        quality: Default::default(),
+    });
+    assert!(!super::take_out(&mut app, &picks[1]));
+    super::remove_tubes(&mut app, &["pair1".to_string()]);
+    assert_eq!(path(app.dialog.as_ref().unwrap()), picks);
+}
+
 /// Remove Tube while the preview is computing (of the same path: picks go when the path changes)
 /// still takes the picked tubes out, from the last finished preview's centrelines.
 #[test]
