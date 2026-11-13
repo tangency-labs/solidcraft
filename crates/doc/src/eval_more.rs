@@ -2014,9 +2014,10 @@ pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
 }
 
 /// Whether `tools` may cover `body`: the body's exact box lies inside the box around the tools'
-/// ([`exact_box`]), as it does for a body inside its tools. A cut that leaves nothing of a body
-/// they cannot cover is a failed boolean, not an empty result (#15700). Unknown is covered, and
-/// so is a mesh body or a body cut by a mesh, as such a cut always was.
+/// ([`exact_box`]), grown by twice the body's own tolerance, as it does for a body inside its
+/// tools. A cut that leaves nothing of a body they cannot cover is a failed boolean, not an empty
+/// result (#15700). Unknown is covered, and so is a mesh body or a body cut by a mesh, as such a
+/// cut always was.
 pub(super) fn tools_may_cover(body: &Body, tools: &[Traced]) -> bool {
     if body.is_mesh() || tools.iter().any(|t| t.body.is_mesh()) {
         return true;
@@ -2026,6 +2027,7 @@ pub(super) fn tools_may_cover(body: &Body, tools: &[Traced]) -> bool {
         let Some(b) = exact_box(&t.body) else { return true };
         hull = hull.union(&b);
     }
+    let hull = hull.inflated(2.0 * body.record().tolerance);
     match body.exact_bounds() {
         Ok(b) if !b.is_empty() && b.min.is_finite() && b.max.is_finite() => hull.contains(b.min) && hull.contains(b.max),
         _ => true,

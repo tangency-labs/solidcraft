@@ -1794,12 +1794,13 @@ fn cut_never_deletes_a_target_its_tools_cannot_cover() {
     assert!((after - before).abs() < 1e-6 * before, "the box does not touch the loft, yet its volume went from {before} to {after} mm³: {cut:?}");
     assert_eq!(faces(&s), before_faces, "{cut:?}");
     if let Err(e) = &cut {
-        assert!(e.to_string().contains("`LoftBody`"), "the refusal must name the body: {e}");
+        assert!(e.to_string().contains("the cut failed: it would remove all of `LoftBody`, which the tools do not cover"), "{e}");
     }
 }
 
 /// A cut still takes away a target that lies wholly inside its tools (#15700): a cube inside a
-/// larger one, and a cube cut by its exact copy, whose faces all coincide with the target's.
+/// larger one, a cube cut by its exact copy, whose faces all coincide with the target's, and a
+/// cube that only two tools together cover, each reaching past its middle.
 #[test]
 fn cut_removes_a_target_inside_its_tools() {
     let mut s = Session::default();
@@ -1808,13 +1809,21 @@ fn cut_removes_a_target_inside_its_tools() {
         ("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [-5, -5, -5], "operation": "new", "body_name": "Outer"})),
         ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new", "body_name": "Twin"})),
         ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new", "body_name": "Copy"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [80, 0, 0], "operation": "new", "body_name": "Shared"})),
+        ("solid.box", json!({"length": 11, "width": 20, "height": 20, "corner": [75, -5, -5], "operation": "new", "body_name": "Left"})),
+        ("solid.box", json!({"length": 11, "width": 20, "height": 20, "corner": [84, -5, -5], "operation": "new", "body_name": "Right"})),
     ] {
         s.execute(command, &params).unwrap();
     }
-    for (target, tool) in [("Inner", "Outer"), ("Twin", "Copy")] {
-        let cut = s.execute("solid.combine", &json!({"target": target, "tools": [tool], "operation": "cut", "keep_tools": true})).unwrap();
+    let cuts: [(&str, &[(&str, f64)]); 3] =
+        [("Inner", &[("Outer", 8000.0)]), ("Twin", &[("Copy", 1000.0)]), ("Shared", &[("Left", 4400.0), ("Right", 4400.0)])];
+    for (target, tools) in cuts {
+        let names: Vec<&str> = tools.iter().map(|(n, _)| *n).collect();
+        let cut = s.execute("solid.combine", &json!({"target": target, "tools": names, "operation": "cut", "keep_tools": true})).unwrap();
         assert_eq!(cut["removed_bodies"], json!([target]), "{cut}");
         assert!(s.model.state().body(target).is_none(), "{target} must be gone: {cut}");
-        assert!((volume(&s, tool) - if tool == "Outer" { 8000.0 } else { 1000.0 }).abs() < 1e-6, "{tool} is kept as it was: {cut}");
+        for (tool, kept) in tools {
+            assert!((volume(&s, tool) - kept).abs() < 1e-6, "{tool} is kept as it was: {cut}");
+        }
     }
 }
