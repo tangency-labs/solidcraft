@@ -4,7 +4,6 @@
 # not listed here, and on a listed one that no longer does: a fix removes its line in the same
 # pull request. Never add a line: decide with exact geometry (`Body::exact_bounds`,
 # `kernel::apart`, the B-rep's faces and edges). These are truck-era uses SMLib answers exactly.
-crates/doc/src/appearance.rs:nearest_face picks the face nearest a point by the display mesh's triangles
 crates/doc/src/construct.rs:GeoRef::name_picks names picked faces and edges through the display mesh
 crates/doc/src/construct.rs:named_vertex finds where named edges meet through the display mesh
 crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
