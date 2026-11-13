@@ -113,6 +113,7 @@ delete_face
 bounding_solid
 pipe
 frame_member
+  moves: pairs[0].b.at[0], pairs[0].b.at[1], pairs[0].b.at[2]
 frame_member_sketch
   profiles: 2 all
 emboss

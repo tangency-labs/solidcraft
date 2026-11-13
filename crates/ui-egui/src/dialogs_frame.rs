@@ -173,13 +173,17 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
 
 /// The dialog editing a frame member feature, filled from it.
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, body_name, .. } = kind else { return None };
+    let FeatureKind::FrameMember { path_sketch, lines, pairs, profile, anchor, locate, angle, mirror, body_name, .. } = kind else { return None };
     let (_, mut inputs) = start(app, "frame.member")?;
     let st = app.session.model.state();
     let mut m = Member::new();
     m.all = lines.is_empty();
-    let ids = if m.all { frame::member_line_ids(&st, kind).unwrap_or_default() } else { lines.clone() };
-    if let Some(i) = inputs.get_mut(0) {
+    // The sketch's lines (the pairs' ids come after them).
+    let mut ids = if m.all { frame::member_line_ids(&st, kind).unwrap_or_default() } else { lines.clone() };
+    if m.all {
+        ids.truncate(ids.len().saturating_sub(pairs.len()));
+    }
+    if let (Some(i), Some(path_sketch)) = (inputs.get_mut(0), path_sketch) {
         i.items = ids.into_iter().map(|id| Sel::ExternalSketchCurve { sketch: path_sketch.0, id }).collect();
     }
     match profile {

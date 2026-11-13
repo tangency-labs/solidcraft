@@ -1682,6 +1682,32 @@ fn fillet_setbacks_default_to_none_and_round_trip() {
     assert_eq!(back, set);
 }
 
+/// A frame member saved before pairs reads with its sketch, no pairs and `next_pair` 0, and
+/// saves exactly as it was read (no `pairs`, no `next_pair`); one of pairs only, without a
+/// sketch, keeps them through a save.
+#[test]
+fn frame_member_pairs_default_to_none_and_round_trip() {
+    let profile = serde_json::json!({"source": "library", "profile": {"kind": "rect_tube", "width": "40", "height": "40", "wall": "3"}});
+    let old = serde_json::json!({"type": "frame_member", "path_sketch": 3, "lines": ["l1"], "profile": profile});
+    let kind: FeatureKind = serde_json::from_value(old.clone()).unwrap();
+    let FeatureKind::FrameMember { path_sketch, pairs, next_pair, .. } = &kind else { panic!("{kind:?}") };
+    assert_eq!(*path_sketch, Some(SketchId(3)));
+    assert!(pairs.is_empty());
+    assert_eq!(*next_pair, 0);
+    assert_eq!(serde_json::to_value(&kind).unwrap(), old);
+    let with_pairs = serde_json::json!({"type": "frame_member", "profile": profile, "pairs": [
+        {"id": "pair1", "a": {"type": "vertex", "at": [0.0, 0.0, 0.0]}, "b": {"type": "construct_point", "name": "Top"}},
+        {"id": "pair3", "a": {"type": "sketch_point", "sketch": 3, "point": "p1"}, "b": {"type": "origin"}}
+    ], "next_pair": 4});
+    let kind: FeatureKind = serde_json::from_value(with_pairs.clone()).unwrap();
+    let FeatureKind::FrameMember { path_sketch, pairs, next_pair, .. } = &kind else { panic!("{kind:?}") };
+    assert_eq!(*path_sketch, None);
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair1", "pair3"]);
+    assert_eq!(pairs[1].b, construct::GeoRef::Origin);
+    assert_eq!(*next_pair, 4);
+    assert_eq!(serde_json::to_value(&kind).unwrap(), with_pairs);
+}
+
 /// A fillet saved before turns reads as mitred and writes no `turn`; a swept one saves
 /// `turn: "swept"` and keeps it through a save and an open; a turn of another name is refused.
 #[test]

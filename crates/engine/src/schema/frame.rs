@@ -4,8 +4,9 @@
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a sketch exists, a dimension evaluates
 //! or a profile can be built stays the handler's to check. A key the handler refuses when it is
-//! left out (`profile`, `sketch`) is optional in the type and required in the schema, so that the
-//! handler's message, not the check's "is required", is what a caller sees. A call with several
+//! left out (`profile`, and `sketch` when there are no `pairs`) is optional in the type and
+//! required in the schema, so that the handler's message, not the check's "is required", is what
+//! a caller sees. A call with several
 //! problems may get a different one first in strict than with the check off (the check goes key
 //! by key, the handlers in their own order).
 //!
@@ -29,7 +30,7 @@ use solidcraft_doc::frame::{self, Anchor, MAX_MEMBERS, Profile, ProfileSpec};
 use super::check::{keyed, located, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::{AngleExpr, Point2, ProfilesParam, SketchRef, StringList, not_blank_pattern, present};
+use super::types::{AngleExpr, GeoRefParam, Point2, ProfilesParam, SketchRef, StringList, not_blank_pattern, present};
 use crate::params;
 
 /// The words `Anchor` is spelled with, as the handlers' message lists them.
@@ -610,23 +611,100 @@ impl JsonSchema for Participants {
     }
 }
 
-/// `sketch` is required and one of `profile` and `profile_sketch`, not both, as the schema says;
-/// the type leaves them to the handler's messages.
-fn member_required(schema: &mut Schema) {
-    require(schema, "sketch");
-    let only = |key: &str, other: &str| json!({"required": [key], "not": {"required": [other]}});
-    schema.insert("anyOf".into(), json!([only("profile", "profile_sketch"), only("profile_sketch", "profile")]));
+/// One member between two points: from `a` to `b`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MemberPairParam {
+    /// The pair's id (`pair<N>`, below `next_pair`) as the feature has it, which Edit Feature
+    /// gives back for each pair it keeps. Default: the next free one.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Where the member starts: a vertex, a sketch point (a 3D sketch node as `wire:index`), a
+    /// construction point, a snap point or the origin. Not a fixed point.
+    pub a: GeoRefParam,
+    /// Where it ends, somewhere else; a point as `a` is.
+    pub b: GeoRefParam,
 }
 
-/// Lay structural members along the lines of a frame sketch: one body per line, from its start
-/// to its end, its cross-section square to the line. The section is a built-in `profile` or the
-/// profiles of a `profile_sketch`, one of them. Each member keeps its name when other lines are
-/// added or deleted. Returns the feature and the bodies it made.
+/// `pairs`: one to 1000 pairs of points, as `frame.member` reads them.
+#[derive(Debug)]
+pub struct MemberPairs(pub Vec<MemberPairParam>);
+
+impl<'de> Deserialize<'de> for MemberPairs {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let fail = || D::Error::custom(whole(format!("`pairs` must list one pair of points or more, at most {MAX_MEMBERS}: [{{a, b}}]")));
+        match Value::deserialize(d)? {
+            Value::Array(a) if !a.is_empty() && a.len() <= MAX_MEMBERS => {
+                serde_json::from_value(Value::Array(a)).map(MemberPairs).map_err(|e| D::Error::custom(whole(format!("`pairs`: {e}"))))
+            }
+            _ => Err(fail()),
+        }
+    }
+}
+
+impl JsonSchema for MemberPairs {
+    fn schema_name() -> Cow<'static, str> {
+        "MemberPairs".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let pair = generator.subschema_for::<MemberPairParam>();
+        json_schema!({
+            "description": "Pairs of points, one member each, from `a` to `b`.",
+            "type": "array", "items": pair, "minItems": 1, "maxItems": MAX_MEMBERS
+        })
+    }
+}
+
+/// `next_pair`: the number the next new pair's id takes, a whole number, as `frame.member` reads
+/// it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NextPair(pub u32);
+
+impl<'de> Deserialize<'de> for NextPair {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .map(NextPair)
+            .ok_or_else(|| D::Error::custom(whole("`next_pair` must be a whole number (the number the next new pair's id takes)")))
+    }
+}
+
+impl JsonSchema for NextPair {
+    fn schema_name() -> Cow<'static, str> {
+        "NextPair".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The number the next new pair's id takes (`pair<N>`).",
+            "type": "integer", "minimum": 0, "maximum": u32::MAX
+        })
+    }
+}
+
+/// `sketch` or `pairs` (or both), and one of `profile` and `profile_sketch`, not both, as the
+/// schema says; the type leaves them to the handler's messages.
+fn member_required(schema: &mut Schema) {
+    let only = |key: &str, other: &str| json!({"required": [key], "not": {"required": [other]}});
+    schema.insert(
+        "allOf".into(),
+        json!([
+            {"anyOf": [{"required": ["sketch"]}, {"required": ["pairs"]}]},
+            {"anyOf": [only("profile", "profile_sketch"), only("profile_sketch", "profile")]}
+        ]),
+    );
+}
+
+/// Lay structural members along the lines of a frame sketch and between pairs of points: one
+/// body per line or pair, from its start to its end, its cross-section square to it. The section
+/// is a built-in `profile` or the profiles of a `profile_sketch`, one of them. Each member keeps
+/// its name when other lines or pairs are added or deleted. Returns the feature and the bodies it
+/// made.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = member_required)]
 pub struct FrameMemberKeys {
-    // Optional in the type and required in the schema (`member_required`).
-    /// The frame sketch, 2D or 3D, by id or name.
+    // `sketch` or `pairs` is required in the schema (`member_required`).
+    /// The frame sketch, 2D or 3D, by id or name. Give it, `pairs` or both.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub sketch: Option<SketchRef>,
@@ -635,6 +713,14 @@ pub struct FrameMemberKeys {
     /// length.
     #[serde(default)]
     pub lines: Option<LineIds>,
+    /// Members between two points, one each, after the lines' members; each point is found
+    /// again whenever the design changes, so the member follows it. Give it, `sketch` or both.
+    #[serde(default)]
+    pub pairs: Option<MemberPairs>,
+    /// The number the next new pair's id takes, which Edit Feature gives back so that a removed
+    /// pair's id is never given again. Default: one past the highest id given.
+    #[serde(default)]
+    pub next_pair: Option<NextPair>,
     /// The section as a built-in profile. Give it or `profile_sketch`, not both.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ProfileParam")]

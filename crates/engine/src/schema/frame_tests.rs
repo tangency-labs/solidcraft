@@ -51,6 +51,8 @@ fn schemas_and_the_key_check_agree() {
             "mirror",
             "name",
             "names",
+            "next_pair",
+            "pairs",
             "participants",
             "profile",
             "profile_sketch",
@@ -316,7 +318,7 @@ fn a_section_sketchs_keys_count_only_with_a_section_sketch() {
     assert_eq!(messages(json!({"sketch": 1, "profile_sketch": 2, "exact_regions": "yes"})), ["`exact_regions` must be true or false"]);
 }
 
-/// The schemas say what the handlers need: `sketch` and a profile are required, `profile` and
+/// The schemas say what the handlers need: `sketch` or `pairs` and a profile are required, `profile` and
 /// `profile_sketch` are alternatives, and values have the shape the handlers read.
 #[test]
 fn the_schemas_take_what_the_handlers_read() {
@@ -341,6 +343,14 @@ fn the_schemas_take_what_the_handlers_read() {
                 }),
                 true,
             ),
+            (json!({"profile": tube(), "pairs": [{"a": {"vertex": [0, 0, 0]}, "b": {"sketch": 3, "point": "p2"}}]}), true),
+            (
+                json!({"sketch": 3, "profile": tube(), "pairs": [{"id": "pair2", "a": {"type": "origin"}, "b": {"construct_point": "P"}}], "next_pair": 3}),
+                true,
+            ),
+            (json!({"profile": tube(), "pairs": []}), false),
+            (json!({"profile": tube(), "pairs": [{"a": {"vertex": [0, 0, 0]}, "b": {"vertex": [1, 0, 0]}, "c": 1}]}), false),
+            (json!({"profile": tube(), "pairs": [{"a": {"vertex": [0, 0, 0]}, "b": {"vertex": [1, 0, 0]}}], "next_pair": -1}), false),
             (json!({"profile": tube()}), false),
             (json!({"sketch": "Frame"}), false),
             (json!({"sketch": "Frame", "profile": tube(), "profile_sketch": "Section"}), false),

@@ -125,7 +125,8 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         (
             "frame_member",
             json!({"type": "frame_member", "path_sketch": 1, "lines": ["l1"],
-                "profile": {"source": "library", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}, "angle": "frame_member.angle"}),
+                "profile": {"source": "library", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}, "angle": "frame_member.angle",
+                "pairs": [{"id": "pair1", "a": {"type": "construct_point", "name": "CP"}, "b": {"type": "vertex", "at": o}}], "next_pair": 2}),
         ),
         (
             "frame_member_sketch",
