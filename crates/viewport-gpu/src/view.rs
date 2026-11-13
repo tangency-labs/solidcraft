@@ -95,14 +95,7 @@ impl Material {
     /// The surface `s` as the shader takes it.
     pub fn of(s: &solidcraft_viewport::surface::OpaqueSurface) -> Material {
         let base = s.base_color().to_f32();
-        Material {
-            base,
-            metallic: s.metallic() as f32,
-            roughness: s.roughness() as f32,
-            ior: s.dielectric_ior() as f32,
-            pbr: true,
-            two_sided: false,
-        }
+        Material { base, metallic: s.metallic() as f32, roughness: s.roughness() as f32, ior: s.dielectric_ior() as f32, pbr: true, two_sided: false }
     }
 
     /// Its two texels in the material texture: base and flag, then the optical parameters.

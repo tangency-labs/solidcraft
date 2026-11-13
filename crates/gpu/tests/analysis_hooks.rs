@@ -55,12 +55,8 @@ fn sphere() -> Mesh {
 /// 200 px.
 fn picture(c: &Capturer, mesh: Mesh, values: Option<Vec<f32>>, mode: AnalysisMode) -> Vec<u8> {
     let body = SceneMesh { values: values.map(Arc::new), ..SceneMesh::solid(Arc::new(mesh), Rgb(160, 165, 175)) };
-    let scene = Scene {
-        meshes: vec![body],
-        radius: 40.0,
-        analysis: Some(SceneAnalysis { mode, colors: AnalysisColors::DEFAULT }),
-        ..Default::default()
-    };
+    let scene =
+        Scene { meshes: vec![body], radius: 40.0, analysis: Some(SceneAnalysis { mode, colors: AnalysisColors::DEFAULT }), ..Default::default() };
     let mut cam = Camera { distance: 62.5, fov: 0.0, ..Default::default() };
     cam.set_view(StandardView::Front);
     c.rgba(&scene, &cam, SIDE, SIDE).unwrap()
@@ -134,12 +130,7 @@ fn the_white_share_widens_the_white_stripes() {
 fn values_ramp_through_the_curvature_colours() {
     let Some(c) = capturer() else { return };
     let quad = Mesh {
-        positions: vec![
-            Vec3::new(-15.0, 0.0, -15.0),
-            Vec3::new(15.0, 0.0, -15.0),
-            Vec3::new(15.0, 0.0, 15.0),
-            Vec3::new(-15.0, 0.0, 15.0),
-        ],
+        positions: vec![Vec3::new(-15.0, 0.0, -15.0), Vec3::new(15.0, 0.0, -15.0), Vec3::new(15.0, 0.0, 15.0), Vec3::new(-15.0, 0.0, 15.0)],
         normals: vec![Vec3::new(0.0, -1.0, 0.0); 4],
         triangles: vec![[0, 1, 2], [0, 2, 3]],
         tri_face: vec![0, 0],
