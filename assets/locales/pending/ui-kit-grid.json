@@ -1,0 +1,8 @@
+{
+  "en": {
+    "grid.paste_cut_off": "Pasted {rows} of {total} rows: the table has no more rows"
+  },
+  "de": {
+    "grid.paste_cut_off": "{rows} von {total} Zeilen eingefügt: Die Tabelle hat keine weiteren Zeilen"
+  }
+}

@@ -21,6 +21,30 @@ const SAMPLE_EMPHASIS: EmphasisLabels<'static> = EmphasisLabels { bold: "Bold", 
 /// The paging arrows' names a host passes to [`theme_browser`].
 const SAMPLE_ARROWS: PageLabels<'static> = PageLabels { previous: "Previous themes", next: "Next themes" };
 
+/// The grid specimen's rows: names, units, expressions and a read-only value.
+struct GallerySheet;
+
+impl GridSource for GallerySheet {
+    fn columns(&self) -> Vec<GridColumn> {
+        vec![
+            GridColumn::new("name", "Name", 1.0, CellKind::Text).flex(),
+            GridColumn::new("unit", "Unit", 0.6, CellKind::Choice(vec!["mm".into(), "in".into()])),
+            GridColumn::new("expression", "Expression", 1.4, CellKind::Expression).flex(),
+            GridColumn::new("value", "Value", 1.0, CellKind::ReadOnly).flex(),
+        ]
+    }
+    fn row_count(&self) -> usize {
+        2
+    }
+    fn row_key(&self, row: usize) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(if row == 0 { "width" } else { "height" })
+    }
+    fn text(&self, row: usize, col: usize) -> std::borrow::Cow<'_, str> {
+        let cells = [["width", "mm", "40 mm", "40 mm"], ["height", "mm", "width / 2", "20 mm"]];
+        std::borrow::Cow::Borrowed(cells.get(row).and_then(|r| r.get(col)).copied().unwrap_or(""))
+    }
+}
+
 /// One gallery specimen: its name, the published rect it fills, the handle inside it, and how
 /// to draw it.
 pub struct Element {
@@ -1443,6 +1467,9 @@ pub const ELEMENTS: &[Element] = &[
             plus_header(ui, |_| {});
         });
     }),
+    element!("grid", |ui, _| {
+        Grid::new("gallery_grid").empty("Empty").show(ui, &mut GallerySheet);
+    }),
     element!("table_custom", |ui, _| {
         table_custom(ui, "custom", &[Column::new("Name", 1.0)], "Empty", |ui, table| {
             table.headers(ui, |_, _| false);
@@ -2512,6 +2539,7 @@ fn gallery_covers_every_inline_element() {
         "disclosure.rs",
         "fields.rs",
         "framing.rs",
+        "grid.rs",
         "layout.rs",
         "look_chain.rs",
         "menu.rs",
