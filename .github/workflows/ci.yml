@@ -992,28 +992,25 @@ jobs:
       - name: Build without the compiler cache if it could not be set up
         if: steps.sccache.outcome == 'failure'
         run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
-      # nextest does not run doc tests.
+      # nextest does not run doc tests. `cargo xtask doc-tests` builds and tests only the libraries
+      # whose docs hold a code block rustdoc would compile.
       - name: Doc tests
         env:
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
         run: |
-          # Pull requests test the affected packages that have a library (only libraries have doc
-          # tests); everything else, the whole workspace.
-          scope=(--workspace)
+          # Pull requests test the affected packages; everything else, the whole workspace.
+          scope=()
           if [ "$FULL" != true ]; then
-            scope=()
-            libs=$(cargo metadata --no-deps --format-version 1 --locked \
-              | python3 -I -c 'import json, sys; print(" ".join(p["name"] for p in json.load(sys.stdin)["packages"] if any("lib" in t["kind"] for t in p["targets"])))')
             for p in $PACKAGES; do
-              case " $libs " in *" $p "*) scope+=(-p "$p") ;; esac
+              scope+=(-p "$p")
             done
+            if [ ${#scope[@]} -eq 0 ]; then
+              echo "No affected package: no doc tests to run."
+              exit 0
+            fi
           fi
-          if [ ${#scope[@]} -eq 0 ]; then
-            echo "No affected package has a library: no doc tests to run."
-            exit 0
-          fi
-          cargo test "${scope[@]}" --profile ci --locked --doc
+          cargo xtask doc-tests "${scope[@]}" --locked
 
   oracle:
     name: Reference tests
