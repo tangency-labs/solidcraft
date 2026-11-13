@@ -66,8 +66,9 @@ fn runs(group: &Group) -> Vec<&TextRun> {
         .collect()
 }
 
-/// A line of `text`'s width in the built-in font, measured by the rule sketch text is drawn with.
-fn measured(text: &str) -> f64 {
+/// A line of `text`'s width in the built-in font, measured by the rule sketch text is drawn with: also
+/// what the command's tests take a dimension's text box to be as wide as.
+pub(crate) fn measured(text: &str) -> f64 {
     TextMetrics::new(&font_data(None).unwrap(), &TextStyle::default()).unwrap().line_width(text, TEXT_MM).unwrap()
 }
 
@@ -499,9 +500,186 @@ fn a_chains_short_members_keep_their_numbers_between_their_lines() {
     assert!(middles.len() == 3 && middles.iter().zip([5.0, 15.0, 25.0]).all(|(x, mid)| close(*x, mid)), "{middles:?}");
 }
 
+/// `layout`'s lines of `role`, in its order.
+fn lines_as(layout: &Layout, role: LineRole) -> Vec<&Vec<Vec2>> {
+    layout.lines.iter().filter(|(r, _)| *r == role).map(|(_, line)| line).collect()
+}
+
+/// Whether `a` and `b` are the same points, each within 1e-9 mm.
+fn same_points(a: &[Vec2], b: &[Vec2]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.dist(*q) < 1e-9)
+}
+
+/// An 80 mm horizontal length at 1:1, 10 above its edge, names its parts: two extension lines, each
+/// from the gap above an end (y 1) to the overshoot past the dimension line (10 + 2 = 12); one
+/// dimension line at 10 from tip to tip; an arrow on each end pointing out; and the text's box, as
+/// wide as "80.00" measures, over the middle (x 40), from the gap above the line (11) to the
+/// capitals' 3.5 above that (14.5). Its corners go as the text reads: start and end on the line's
+/// side, then end and start on the far side.
+#[test]
+fn a_layout_names_its_extension_lines_dimension_lines_arrows_and_text_box() {
+    let d = dimension(length(LinearDirection::Horizontal), 10.0, TextPlace::Centred);
+    let layout = laid(&d, &read(&[[0.0, 0.0], [80.0, 0.0]], "80.00"), &view_at("1:1")).unwrap().layout;
+    let at = Vec2::new;
+    let extensions = lines_as(&layout, LineRole::Extension);
+    assert_eq!(extensions.len(), 2, "{layout:?}");
+    assert!(same_points(extensions[0], &[at(0.0, 1.0), at(0.0, 12.0)]) && same_points(extensions[1], &[at(80.0, 1.0), at(80.0, 12.0)]), "{layout:?}");
+    let along = lines_as(&layout, LineRole::Dimension);
+    assert!(along.len() == 1 && same_points(along[0], &[at(0.0, 10.0), at(80.0, 10.0)]), "{layout:?}");
+    let arrows: Vec<Vec2> = layout.arrows.iter().flat_map(|(tip, dir)| [*tip, *dir]).collect();
+    assert!(same_points(&arrows, &[at(0.0, 10.0), -Vec2::X, at(80.0, 10.0), Vec2::X]), "{layout:?}");
+    let half = measured("80.00") * 0.5;
+    assert_eq!(layout.text_boxes.len(), 1, "{layout:?}");
+    let corners = [at(40.0 - half, 11.0), at(40.0 + half, 11.0), at(40.0 + half, 14.5), at(40.0 - half, 14.5)];
+    assert!(same_points(&layout.text_boxes[0], &corners), "{layout:?}");
+}
+
+/// The text box of each line of `text_runs_along_its_line_and_reads_from_the_bottom_or_the_right`, at
+/// 0, 45, 90 and 135 degrees: its first corner is the run's origin, a gap clear of the line 10 out
+/// from the middle of what it measures; it runs along the run's angle for the width "80.00"
+/// measures, and stands the capitals' 3.5 high on the side away from the line. Upright from the top
+/// down, its line runs up 10 to the left (x -10), so the box reads from the right: up the sheet from
+/// y 40 - w/2 to 40 + w/2, its line's side at x -11 and its far side at -14.5.
+#[test]
+fn a_text_box_is_its_measured_width_at_0_45_90_and_135_degrees() {
+    let width = measured("80.00");
+    let s = FRAC_1_SQRT_2;
+    let lines = [
+        ([[0.0, 0.0], [80.0, 0.0]], Vec2::X),
+        ([[0.0, 0.0], [80.0, 80.0]], Vec2::new(s, s)),
+        ([[0.0, 0.0], [0.0, 80.0]], Vec2::new(0.0, 1.0)),
+        ([[80.0, 0.0], [0.0, 80.0]], Vec2::new(s, -s)),
+    ];
+    let on = |points: [[f64; 2]; 2]| {
+        laid(&dimension(length(LinearDirection::Aligned), 10.0, TextPlace::Centred), &read(&points, "80.00"), &view_at("1:1")).unwrap()
+    };
+    for (points, dir) in lines {
+        let on = on(points);
+        assert_eq!(on.layout.text_boxes.len(), 1, "{dir:?}: {:?}", on.layout);
+        let [start, end, far_end, far_start] = on.layout.text_boxes[0];
+        assert!(start.dist(runs(&on.group)[0].origin) < 1e-9, "{dir:?}: {start:?} {:?}", runs(&on.group));
+        assert!((end - start).dist(dir * width) < 1e-9, "{dir:?}: {:?}", on.layout.text_boxes);
+        let up = dir.perp() * TEXT_MM;
+        assert!((far_start - start).dist(up) < 1e-9 && (far_end - end).dist(up) < 1e-9, "{dir:?}: {:?}", on.layout.text_boxes);
+        let middle = Vec2::new(points[0][0] + points[1][0], points[0][1] + points[1][1]) * 0.5;
+        assert!(start.dist(middle + dir.perp() * (10.0 + SIZES.gap) - dir * (width * 0.5)) < 1e-9, "{dir:?}: {start:?}");
+    }
+    let upright = on([[0.0, 80.0], [0.0, 0.0]]);
+    let (low, high) = (40.0 - width * 0.5, 40.0 + width * 0.5);
+    let corners = [Vec2::new(-11.0, low), Vec2::new(-11.0, high), Vec2::new(-14.5, high), Vec2::new(-14.5, low)];
+    assert!(upright.layout.text_boxes.len() == 1 && same_points(&upright.layout.text_boxes[0], &corners), "{:?}", upright.layout);
+}
+
+/// "10.00" is longer than its 10 mm span holds with the arrows, so with no place of its own its box
+/// sits beyond the right arrow, a gap past the arrow's tail: from x 10 + 1.8 x 3 + 1 = 16.4, as wide as
+/// it measures, from the gap above the line (11) to 14.5.
+#[test]
+fn a_short_spans_text_box_sits_beyond_its_arrow() {
+    let d = dimension(length(LinearDirection::Horizontal), 10.0, TextPlace::Centred);
+    let layout = laid(&d, &read(&[[0.0, 0.0], [10.0, 0.0]], "10.00"), &view_at("1:1")).unwrap().layout;
+    let (from, to) = (10.0 + 1.8 * SIZES.arrow + SIZES.gap, 10.0 + 1.8 * SIZES.arrow + SIZES.gap + measured("10.00"));
+    let corners = [Vec2::new(from, 11.0), Vec2::new(to, 11.0), Vec2::new(to, 14.5), Vec2::new(from, 14.5)];
+    assert!(layout.text_boxes.len() == 1 && same_points(&layout.text_boxes[0], &corners), "{layout:?}");
+}
+
+/// A layout's lines are the group's before its arrowheads stop them: each extension line is one of the
+/// group's strokes as it is, the arrows' tips are its arrowheads' tips, and the dimension line runs
+/// from tip to tip while its stroke stops at the arrowheads' bases, 3 in from each (3 to 37 on a 40
+/// span). Outside arrows (a 5 span) leave the line whole: the stroke is the layout's, its tails 1.8
+/// arrows (5.4) past each tip. Each text is placed over its span's middle, so neither has a leader.
+#[test]
+fn a_layouts_lines_are_the_groups_before_the_arrowheads_stop_them() {
+    for (span, text, line, stroke) in [(40.0, "40.00", [0.0, 40.0], [3.0, 37.0]), (5.0, "5.00", [-5.4, 10.4], [-5.4, 10.4])] {
+        let d = dimension(length(LinearDirection::Horizontal), 10.0, TextPlace::At([span * 0.5, 30.0]));
+        let on = laid(&d, &read(&[[0.0, 0.0], [span, 0.0]], text), &view_at("1:1")).unwrap();
+        let (strokes, tips) = parts(&on.group);
+        let extensions = lines_as(&on.layout, LineRole::Extension);
+        assert_eq!(extensions.len(), 2, "{span}: {:?}", on.layout);
+        for extension in extensions {
+            assert!(strokes.iter().any(|s| same_points(s, extension)), "{span}: {extension:?} isn't drawn: {strokes:?}");
+        }
+        let arrow_tips: Vec<Vec2> = on.layout.arrows.iter().map(|(tip, _)| *tip).collect();
+        assert!(same_points(&arrow_tips, &tips), "{span}: {arrow_tips:?} {tips:?}");
+        let along = lines_as(&on.layout, LineRole::Dimension);
+        let at = |[from, to]: [f64; 2]| [Vec2::new(from, 10.0), Vec2::new(to, 10.0)];
+        assert!(along.len() == 1 && same_points(along[0], &at(line)), "{span}: {:?}", on.layout);
+        assert!(strokes.iter().any(|s| same_points(s, &at(stroke))), "{span}: {strokes:?}");
+    }
+}
+
+/// The chain of `a_chain_is_one_line_with_each_extension_line_once` (points at x 0, 10, 30 and 60, its
+/// line at y 4 + 10 = 14): four extension lines, the shared ones once, at x 0, 10, 30 and 60; three
+/// dimension lines; six arrows; and a box for each member in member order, over the member's middle
+/// (x 5, 20 and 45), from the gap above the line (15), as wide as the member's own text measures.
+#[test]
+fn a_chains_layout_has_each_shared_extension_line_once_and_a_box_per_member() {
+    let kind = DimensionKind::Chain { points: Vec::new(), direction: LinearDirection::Horizontal };
+    let member = |text: &str| Member { measured: Measured { value: 1.0, foreshortened: false }, text: text.into() };
+    let mut r = read(&[[0.0, 0.0], [10.0, 5.0], [30.0, 0.0], [60.0, 8.0]], "60");
+    r.text = None;
+    r.members = vec![member("10.00"), member("20.00"), member("30.00")];
+    let layout = laid(&dimension(kind, 10.0, TextPlace::Centred), &r, &view_at("1:1")).unwrap().layout;
+    let xs: Vec<f64> = lines_as(&layout, LineRole::Extension).iter().map(|line| line[0].x).collect();
+    assert!(xs.len() == 4 && xs.iter().zip([0.0, 10.0, 30.0, 60.0]).all(|(x, want)| close(*x, want)), "{layout:?}");
+    assert_eq!((lines_as(&layout, LineRole::Dimension).len(), layout.arrows.len()), (3, 6), "{layout:?}");
+    assert_eq!(layout.text_boxes.len(), 3, "{layout:?}");
+    for ([start, end, ..], (middle, text)) in layout.text_boxes.iter().zip([(5.0, "10.00"), (20.0, "20.00"), (45.0, "30.00")]) {
+        let half = measured(text) * 0.5;
+        assert!(same_points(&[*start, *end], &[Vec2::new(middle - half, 15.0), Vec2::new(middle + half, 15.0)]), "{text}: {layout:?}");
+    }
+}
+
+/// A text the font can't set ("\u{378}": no font has a glyph for it) leaves its lines and arrows laid
+/// out, but no box; the group's `why` says why.
+#[test]
+fn a_text_the_font_cant_set_has_no_box() {
+    let circle = DimensionKind::Radial { edge: edge(), diameter: true };
+    let points = [[0.0, 0.0], [6.0, 0.0], [-6.0, 0.0], [6.0, 0.0]];
+    let on = laid(&dimension(circle, 10.0, TextPlace::Centred), &read(&points, "\u{378}"), &view_at("1:1")).unwrap();
+    assert!(on.why.as_deref().is_some_and(|why| why.contains("no glyph")), "{:?}", on.why);
+    assert!(on.layout.text_boxes.is_empty(), "{:?}", on.layout);
+    assert_eq!(on.layout.arrows.len(), 2, "{:?}", on.layout);
+    assert!(!lines_as(&on.layout, LineRole::Dimension).is_empty(), "{:?}", on.layout);
+}
+
+/// A radius and an angle name their own parts. The quarter arc of radius 5 from east to north, its text
+/// placed up and to the left (135°), 10 past the rim: its one extension line is the arc continued from
+/// its north end (0, 5), every point 5 from the centre; its one dimension line, the leader, starts at
+/// the centre; its arrow on the rim at 135°, pointing out. The angle between rays along +x and +y, 20
+/// out: its two rays are extension lines, each from 0.15 of 20 (3, at most three gaps) to the overshoot
+/// past the arc (22); its arc of radius 20 is its dimension line; its arrows at (20, 0) and (0, 20)
+/// point away from each other along the arc.
+#[test]
+fn a_radial_and_an_angle_name_their_own_parts() {
+    let fillet = DimensionKind::Radial { edge: edge(), diameter: false };
+    let (r, m, s) = (5.0, 5.0 * FRAC_1_SQRT_2, FRAC_1_SQRT_2);
+    let arc = [[0.0, 0.0], [r, 0.0], [m, m], [0.0, r]];
+    let layout = laid(&dimension(fillet, 10.0, TextPlace::At([-10.0, 10.0])), &read(&arc, "R5.00"), &view_at("1:1")).unwrap().layout;
+    let extensions = lines_as(&layout, LineRole::Extension);
+    assert_eq!(extensions.len(), 1, "{layout:?}");
+    assert!(extensions[0][0].dist(Vec2::new(0.0, r)) < 1e-9 && extensions[0].iter().all(|p| close(p.len(), r)), "{layout:?}");
+    let along = lines_as(&layout, LineRole::Dimension);
+    assert!(along.len() == 1 && along[0][0].dist(Vec2::ZERO) < 1e-9, "{layout:?}");
+    let arrows: Vec<Vec2> = layout.arrows.iter().flat_map(|(tip, dir)| [*tip, *dir]).collect();
+    assert!(same_points(&arrows, &[Vec2::new(-m, m), Vec2::new(-s, s)]), "{layout:?}");
+
+    let angle = DimensionKind::Angle { a: edge(), b: edge(), reading: Reading::Projected, other_side: false };
+    let square = [[10.0, 0.0], [50.0, 0.0], [0.0, 10.0], [0.0, 50.0]];
+    let layout = laid(&dimension(angle, 20.0, TextPlace::Centred), &read(&square, "90"), &view_at("1:1")).unwrap().layout;
+    let extensions = lines_as(&layout, LineRole::Extension);
+    let at = Vec2::new;
+    assert!(extensions.len() == 2 && same_points(extensions[0], &[at(3.0, 0.0), at(22.0, 0.0)]), "{layout:?}");
+    assert!(same_points(extensions[1], &[at(0.0, 3.0), at(0.0, 22.0)]), "{layout:?}");
+    let along = lines_as(&layout, LineRole::Dimension);
+    assert!(along.len() == 1 && along[0].iter().all(|p| close(p.len(), 20.0)), "{layout:?}");
+    let arrows: Vec<Vec2> = layout.arrows.iter().flat_map(|(tip, dir)| [*tip, *dir]).collect();
+    assert!(same_points(&arrows, &[at(20.0, 0.0), at(0.0, -1.0), at(0.0, 20.0), at(-1.0, 0.0)]), "{layout:?}");
+}
+
 /// Any measured points and offsets, at the sizes and shapes that break layouts (zero spans, equal
 /// points, reversed or parallel lines, huge and tiny values), lay out or say no without a panic; a
-/// scene that takes the group either holds it or says why.
+/// scene that takes the group either holds it or says why, and when it holds it every point of the
+/// layout is finite.
 #[test]
 fn hostile_points_and_offsets_never_panic() {
     let mut state = 0x4896_9193_u64;
@@ -532,9 +710,14 @@ fn hostile_points_and_offsets_never_panic() {
         for kind in kinds {
             let d = dimension(kind, offset, text);
             if let Some(on) = laid(&d, &read(&points, "1"), &view_at("1:5")) {
+                let layout = on.layout;
                 let mut scene = Scene::new(Vec2::new(420.0, 297.0), vec![on.group]);
                 scene.add_fonts(on.fonts);
-                let _ = scene.validate();
+                if scene.validate().is_ok() {
+                    let lines = layout.lines.iter().flat_map(|(_, line)| line);
+                    let mut all = lines.chain(layout.arrows.iter().flat_map(|(tip, dir)| [tip, dir])).chain(layout.text_boxes.iter().flatten());
+                    assert!(all.all(|p| p.is_finite()), "{points:?} {offset}: {layout:?}");
+                }
             }
         }
     }

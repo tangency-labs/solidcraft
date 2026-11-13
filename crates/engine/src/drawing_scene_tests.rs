@@ -2902,6 +2902,53 @@ fn an_uncaptured_move_is_drawn_where_the_design_places_the_part() {
     assert_eq!(bytes(&captured.scene), bytes(&built(&s, sheet).scene));
 }
 
+/// A dimension's layout with an occurrence move not captured yet is where the sheet draws it: the
+/// block's front bottom edge, with the cube moved 30 up and not captured. The design still places the
+/// cube on the block, so the front view's outline is still x 0 to 100 and z 0 to 30, its middle
+/// (50, 15) on (150, 150) at 1:2: the edge at y 150 - 15 / 2 = 142.5, from x 150 - 25 = 125 to 175,
+/// and its line 10 below, at 132.5, the extension lines from the gap below the edge (141.5) to the
+/// overshoot past the line (130.5). Inspect's layout is the one it had before the move, and its tips,
+/// extension lines and text's first corner are the built sheet's, exactly. (Moved and captured, the
+/// cube would reach z 60 and move the view's middle to z 30.)
+#[test]
+fn a_dimensions_layout_with_a_move_not_captured_is_where_the_sheet_draws_it() {
+    let (mut s, sheet, cube) = cube_on_block();
+    let front = s.drawing("test").unwrap().views.iter().find(|v| matches!(v.kind, ViewKind::Base { .. })).unwrap().id;
+    let id = front_edge(&mut s, front);
+    let layout = |s: &mut Session| run(s, "drawing.dimension.inspect", json!({"dimension": ids::encode(id)}))["layout"].clone();
+    let before = layout(&mut s);
+    in_the_model(&mut s, "occurrence.move", json!({"occurrence": cube, "translate": [0, 0, 30], "capture": false}));
+    assert_eq!(s.pending_moves.len(), 1);
+    let now = layout(&mut s);
+    assert_eq!(now, before, "as before the move");
+
+    let point = |v: &Value| Vec2::new(v[0].as_f64().unwrap(), v[1].as_f64().unwrap());
+    let line = |v: &Value| v.as_array().unwrap().iter().map(point).collect::<Vec<Vec2>>();
+    let tips: Vec<Vec2> = now["arrows"].as_array().unwrap().iter().map(|arrow| point(&arrow["tip"])).collect();
+    let near = |a: &[Vec2], b: &[Vec2]| a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.dist(*q) < 1e-9);
+    assert!(near(&tips, &[Vec2::new(125.0, 132.5), Vec2::new(175.0, 132.5)]), "{now}");
+    // In the order the edge's ends are read, whichever that is.
+    let extensions: Vec<Vec<Vec2>> = now["extension_lines"].as_array().unwrap().iter().map(line).collect();
+    let left = [Vec2::new(125.0, 141.5), Vec2::new(125.0, 130.5)];
+    assert!(extensions.len() == 2 && extensions.iter().any(|extension| near(extension, &left)), "{now}");
+
+    let built = built(&s, sheet);
+    let group = group_of(&built.scene, id);
+    let (mut strokes, mut drawn_tips, mut origins): (Vec<Vec<Vec2>>, _, _) = (Vec::new(), Vec::new(), Vec::new());
+    for item in &group.items {
+        match item {
+            Item::Stroke { path, .. } => strokes.push(path.iter().map(|seg| seg.start()).chain(path.last().map(|seg| seg.end())).collect()),
+            Item::Fill { region } => drawn_tips.push(region.outer.segs[0].start()),
+            Item::Text(text) => origins.push(text.origin),
+            Item::Picture(_) => {}
+        }
+    }
+    assert_eq!(tips, drawn_tips);
+    assert!(extensions.iter().all(|extension| strokes.contains(extension)), "{extensions:?} {strokes:?}");
+    let firsts: Vec<Vec2> = now["text_boxes"].as_array().unwrap().iter().map(|corners| point(&corners[0])).collect();
+    assert_eq!(firsts, origins);
+}
+
 /// Seeded mixes of edits, undos, redos, steps and jobs begun, run, cancelled and taken in any
 /// order: once nothing is waiting, the provider's scene is always the built one, byte for byte.
 #[test]

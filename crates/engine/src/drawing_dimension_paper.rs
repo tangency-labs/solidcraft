@@ -67,6 +67,28 @@ impl Text {
     }
 }
 
+/// What a line of a dimension's layout is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineRole {
+    /// From near what it measures to past the dimension line.
+    Extension,
+    /// A dimension line or arc, from arrow tip to arrow tip, with any run-on to a text outside.
+    Dimension,
+}
+
+/// Where a dimension's parts sit, centred on its view as its group is: its lines as laid out, before
+/// an arrowhead stops one at its base, a chain's shared extension line once.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Layout {
+    pub lines: Vec<(LineRole, Vec<Vec2>)>,
+    /// Each arrowhead's tip and the unit direction it points in.
+    pub arrows: Vec<(Vec2, Vec2)>,
+    /// Each set text's box: its cap height and measured width, as the arrows fit by, its corners
+    /// in reading order: start and end on the line's side, then end and start on the far side. A
+    /// text that isn't set has none.
+    pub text_boxes: Vec<[Vec2; 4]>,
+}
+
 /// A dimension on paper.
 pub struct OnPaper {
     pub group: Group,
@@ -76,6 +98,8 @@ pub struct OnPaper {
     pub why: Option<String>,
     /// Whether its text isn't there only until the search for a font to fall back to answers.
     pub pending: bool,
+    /// Where its parts sit ([`Layout`]): a note's is empty.
+    pub layout: Layout,
 }
 
 /// `dimension`, read as `resolved`, on the view through `frame` (centred on the view), its lines in
@@ -87,19 +111,26 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut arrows = Vec::new();
     let (mut texts, mut fonts, mut why, mut pending) = (Vec::new(), Vec::new(), None, false);
+    let mut laid = Layout::default();
     let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering);
     for piece in pieces(dimension, resolved, &on, &set)? {
         let layout = dim_layout_sized(&piece.frame, piece.at, &SIZES, piece.text.half, [None, None]);
+        if !piece.text.runs.is_empty() {
+            laid.text_boxes.push(text_box(layout.text, layout.text_dir, piece.text.half));
+        }
         texts.extend(placed(piece.text.runs, piece.text.half, TEXT_MM, layout.text, layout.text_dir));
         fonts.extend(piece.text.fonts);
         why = why.or(piece.text.why);
         pending |= piece.text.pending;
         // A chain's neighbours share an extension line.
-        for line in layout.lines {
+        for (i, line) in layout.lines.into_iter().enumerate() {
             if !lines.iter().any(|other| same_line(other, &line)) {
+                let role = if i < layout.extensions { LineRole::Extension } else { LineRole::Dimension };
+                laid.lines.push((role, line.clone()));
                 lines.push(line);
             }
         }
+        laid.arrows.extend(&layout.arrows);
         arrows.extend(layout.arrows);
     }
     for (tip, dir) in &arrows {
@@ -110,7 +141,14 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
         items.extend(ARROW.place(*tip, *tip - *dir, line_mm).ok()?.0);
     }
     items.extend(texts);
-    Some(OnPaper { group: Group { object: dimension.id, kind: ObjectKind::Dimension, items }, fonts, why, pending })
+    Some(OnPaper { group: Group { object: dimension.id, kind: ObjectKind::Dimension, items }, fonts, why, pending, layout: laid })
+}
+
+/// The box of a text `half` in size centred on `centre` and running along `dir`, its corners as
+/// [`Layout::text_boxes`] has them. For one line, its first corner is where [`placed`] starts the run.
+fn text_box(centre: Vec2, dir: Vec2, half: Vec2) -> [Vec2; 4] {
+    let (along, up) = (dir * half.x, dir.perp() * half.y);
+    [centre - along - up, centre + along - up, centre + along + up, centre - along + up]
 }
 
 /// `runs` of a text `half` in size, its capitals `cap_mm` high, centred on `centre` and running along
@@ -294,4 +332,4 @@ fn stroke(line: &[Vec2], width_mm: f64) -> Option<Item> {
 
 #[cfg(test)]
 #[path = "drawing_dimension_paper_tests.rs"]
-mod tests;
+pub(crate) mod tests;
