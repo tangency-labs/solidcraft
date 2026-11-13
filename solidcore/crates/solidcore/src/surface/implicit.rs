@@ -68,6 +68,43 @@ pub enum Implicit {
     },
 }
 
+impl Implicit {
+    /// How far `x` is from this surface: the whole surface, not a bounded patch of it
+    /// (`offset_faces::on_target`).
+    #[must_use]
+    pub fn distance(&self, x: Vec3) -> f64 {
+        // the axial and radial parts of `x` about an axis through `o`
+        let about = |o: Vec3, axis: Vec3| {
+            let v = x - o;
+            let h = v.dot(axis);
+            (h, (v - axis * h).length())
+        };
+        match *self {
+            Self::Plane { origin, normal } => (x - origin).dot(normal).abs(),
+            Self::Cone {
+                origin,
+                axis,
+                radius,
+                tan_angle,
+            } => {
+                let (h, rho) = about(origin, axis);
+                (rho - (radius + tan_angle * h)).abs() / (1.0 + tan_angle * tan_angle).sqrt()
+            }
+            Self::Sphere { centre, radius } => ((x - centre).length() - radius).abs(),
+            Self::Torus {
+                centre,
+                axis,
+                major,
+                minor,
+            } => {
+                let (h, rho) = about(centre, axis);
+                let (a, b) = (rho - major, h);
+                ((a * a + b * b).sqrt() - minor).abs()
+            }
+        }
+    }
+}
+
 /// A polynomial in Bernstein form over a patch, degrees `(p, q)`, `c[i (q + 1) + j]`.
 #[derive(Debug, Clone, PartialEq)]
 struct BPoly {

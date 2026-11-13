@@ -11,6 +11,13 @@ thread_local! {
     pub(crate) static CHAIN_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// The angle, in radians (2°), a tangent chain continues through: the most two edges at a shared
+/// vertex, or the two faces along an edge, may turn from tangent and still be one chain. The one
+/// rule for fillet, chamfer, shell and the edge selection that picks a chain, so a near-smooth
+/// outline (lines and arcs meeting a degree or so off tangent) chains whole. Drawing and hiding
+/// edges is a different question with its own, tighter angle (`smooth_edges::ANGLE`, half a degree).
+pub const TANGENT_CHAIN: f64 = 2.0 * std::f64::consts::PI / 180.0;
+
 /// Axis-aligned bounding box.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Aabb3 {
@@ -571,7 +578,7 @@ impl MeshGeom for Mesh {
         let radius = center.dist(a);
         let normal = n.normalized().unwrap_or(Vec3::ZERO);
         let tol = (radius * 1e-6).max(1e-9);
-        let mut rim = self.tangent_chain(edge, 2f64.to_radians());
+        let mut rim = self.tangent_chain(edge, TANGENT_CHAIN);
         if rim.len() < 2 || !radius.is_finite() {
             return single;
         }

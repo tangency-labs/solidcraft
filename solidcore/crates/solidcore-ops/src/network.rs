@@ -23,12 +23,15 @@ fn refused(r: NetworkRefusal) -> Error {
 }
 
 /// The Gordon surface through the u-curves `us` and the v-curves `vs`, one face, and the
-/// certified bound within which every input curve lies on it (at its crossing parameter).
+/// certified bound within which every input curve lies on it.
 ///
-/// The network must be compatible: each family given in order, its curves running one way,
-/// each u-curve crossing every v-curve once, and every v-curve crossing all the u-curves at one
-/// parameter of theirs (and the other way round), within the model's zone tolerance; the
-/// first and last curves of each family cross the other family at its curves' ends. The
+/// Each family is given in order, its curves running one way, and each u-curve crosses every
+/// v-curve once, within the model's zone tolerance; the first and last curves of each family
+/// cross the other family at its curves' ends. The crossings need not be at common parameters
+/// (two curves through the same stations at different heights): a family whose crossings are
+/// not is refitted so they are, and each input curve is then proved within the bound of the
+/// surface between its crossings (`solidcore::nurbs::gordon`); a network that already crosses
+/// at common parameters is built as it is. The
 /// surface's u runs along the u-curves, its v along the v-curves; across each family it is of
 /// degree `min(3, count - 1)`. Each curve is taken over its natural range (a line from its
 /// start to its end, a spline over its knots' domain).
@@ -37,9 +40,10 @@ fn refused(r: NetworkRefusal) -> Error {
 /// [`Error::Argument`] for fewer than two or more than 64 curves a family, a curve refused (a
 /// circle, an ellipse, a traced intersection curve, numbers the kernel refuses), or a family
 /// out of order; [`Error::Unsupported`] for a rational curve; [`Error::NoCrossing`] for a pair
-/// that does not cross once; [`Error::NetworkGap`] for a pair not proved within the zone
-/// tolerance at the common parameters; [`Error::PastTolerance`] for a surface not proved within
-/// it of every curve; the kernel's status.
+/// that does not cross once; [`Error::NetworkGap`] for a first or last curve of a family
+/// crossing a curve of the other short of its end (not proved within the zone tolerance at the
+/// common parameters); [`Error::PastTolerance`] for a surface not proved within it of every
+/// curve; the kernel's status.
 pub fn gordon(us: &[Curve], vs: &[Curve]) -> Result<(Record, f64)> {
     let family = MIN_CURVES..=MAX_CURVES;
     if !family.contains(&us.len()) || !family.contains(&vs.len()) {

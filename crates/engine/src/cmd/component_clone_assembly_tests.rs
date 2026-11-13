@@ -29,7 +29,7 @@ fn joint(id: u64, a: u64, b: u64) -> Joint {
 }
 
 fn occurrence(id: u64) -> Occurrence {
-    Occurrence { id, component: id, parent: 0, name: format!("Occurrence{id}"), transform: IDENTITY, grounded: false, bom_type: None }
+    Occurrence { id, component: id, parent: 0, name: format!("Occurrence{id}"), transform: IDENTITY, grounded: false, expressed_moves: Vec::new(), bom_type: None }
 }
 
 fn documents() -> (Document, Document) {

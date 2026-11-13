@@ -34,7 +34,9 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::num::IntErrorKind;
 
-/// Largest STEP text we parse.
+/// Largest STEP text [`parse`] and [`parse_with`] read. A caller whose user raised the limit
+/// passes its own to [`parse_with_max_bytes`] (SolidCraft's Preferences › General › Largest file
+/// to open, #13329).
 pub const MAX_BYTES: usize = 512 << 20;
 /// Most entity instances in one file, a repeated id counted each time.
 pub const MAX_ENTITIES: usize = 20_000_000;
@@ -59,20 +61,42 @@ pub const MAX_RECORDS: usize = 20_000_000;
 /// counting its separators) would reach it at about 110 MB; it holds under a million.
 pub const MAX_PARAMS: usize = 20_000_000;
 
-/// The counts a parse refuses beyond: [`MAX_ENTITIES`] and [`MAX_PARAMS`] for every caller,
-/// smaller in tests so a limit is reached with a short text.
-#[derive(Clone, Copy)]
+/// The text size and the counts a parse refuses beyond: [`MAX_BYTES`], [`MAX_ENTITIES`],
+/// [`MAX_RECORDS`] and [`MAX_PARAMS`] by default, all raised together when a caller raises the
+/// size ([`Limits::for_bytes`]), smaller in tests so a limit is reached with a short text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Limits {
+    bytes: usize,
     entities: usize,
     records: usize,
     params: usize,
 }
 
 const LIMITS: Limits = Limits {
+    bytes: MAX_BYTES,
     entities: MAX_ENTITIES,
     records: MAX_RECORDS,
     params: MAX_PARAMS,
 };
+
+impl Limits {
+    /// The limits for a text of up to `max_bytes` (never below the defaults). The counts grow in
+    /// proportion to the size, so a larger file of the same density as one the defaults read
+    /// is read too, and the memory they bound stays the same multiple of the text's size.
+    fn for_bytes(max_bytes: usize) -> Self {
+        let bytes = max_bytes.max(MAX_BYTES);
+        let scale = |count: usize| {
+            let scaled = count as u128 * bytes as u128 / MAX_BYTES as u128;
+            usize::try_from(scaled).unwrap_or(usize::MAX)
+        };
+        Self {
+            bytes,
+            entities: scale(MAX_ENTITIES),
+            records: scale(MAX_RECORDS),
+            params: scale(MAX_PARAMS),
+        }
+    }
+}
 
 /// A parameter value.
 #[derive(Clone, Debug, PartialEq)]
@@ -266,11 +290,13 @@ struct Lexer<'a> {
 /// a type; `String::from` gives it back for callers that collect messages.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    /// The text is longer than [`MAX_BYTES`].
-    #[error("STEP file too large ({} MB, limit {} MB)", .bytes >> 20, MAX_BYTES >> 20)]
+    /// The text is longer than the limit ([`MAX_BYTES`] unless the caller raised it).
+    #[error("STEP file too large ({} MB, limit {} MB)", .bytes >> 20, .limit >> 20)]
     TooLarge {
         /// The text's length.
         bytes: usize,
+        /// The limit it is longer than, in bytes.
+        limit: usize,
     },
     /// The text does not start with `ISO-10303-21;`.
     #[error("not a STEP file (no ISO-10303-21 header)")]
@@ -748,14 +774,28 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
     parse_limited(text, watch, LIMITS)
 }
 
+/// [`parse_with`] reading a text of up to `max_bytes` (never less than [`MAX_BYTES`]); the
+/// entity, record and parameter limits grow in proportion. For a caller whose user raised the
+/// largest file to open (#13329).
+pub fn parse_with_max_bytes(
+    text: &str,
+    watch: Option<&dyn Progress>,
+    max_bytes: usize,
+) -> Result<Exchange, Error> {
+    parse_limited(text, watch, Limits::for_bytes(max_bytes))
+}
+
 /// [`parse_with`] with the counts it refuses beyond given.
 fn parse_limited(
     text: &str,
     watch: Option<&dyn Progress>,
     limits: Limits,
 ) -> Result<Exchange, Error> {
-    if text.len() > MAX_BYTES {
-        return Err(Error::TooLarge { bytes: text.len() });
+    if text.len() > limits.bytes {
+        return Err(Error::TooLarge {
+            bytes: text.len(),
+            limit: limits.bytes,
+        });
     }
     // Some writers start the file with a UTF-8 byte order mark.
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
@@ -1203,6 +1243,51 @@ FILE_NAME('a');junk').;ENDSEC;DATA;ENDSEC;END-ISO-10303-21;"
             )
             .unwrap_err(),
             Error::TooManyRecords { limit: 2 }
+        );
+    }
+
+    #[test]
+    fn a_raised_size_limit_reads_a_longer_text_and_raises_the_counts_with_it() {
+        let t = data("#1=A($);");
+        let small = Limits {
+            bytes: t.len() - 1,
+            ..LIMITS
+        };
+        assert_eq!(
+            parse_limited(&t, None, small).unwrap_err(),
+            Error::TooLarge {
+                bytes: t.len(),
+                limit: t.len() - 1
+            }
+        );
+        assert!(
+            parse_limited(
+                &t,
+                None,
+                Limits {
+                    bytes: t.len(),
+                    ..LIMITS
+                }
+            )
+            .is_ok()
+        );
+        // The message names the limit in force, not the default (#13329).
+        let e = Error::TooLarge {
+            bytes: 909 << 20,
+            limit: 2048 << 20,
+        };
+        assert_eq!(e.to_string(), "STEP file too large (909 MB, limit 2048 MB)");
+        // A raised size raises every count by the same factor; a lower one changes nothing.
+        assert_eq!(Limits::for_bytes(0), LIMITS);
+        assert_eq!(Limits::for_bytes(MAX_BYTES), LIMITS);
+        assert_eq!(
+            Limits::for_bytes(4 * MAX_BYTES),
+            Limits {
+                bytes: 4 * MAX_BYTES,
+                entities: 4 * MAX_ENTITIES,
+                records: 4 * MAX_RECORDS,
+                params: 4 * MAX_PARAMS,
+            }
         );
     }
 

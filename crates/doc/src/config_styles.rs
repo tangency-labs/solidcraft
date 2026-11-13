@@ -356,24 +356,25 @@ impl Document {
         }
         // Caps and box faces must share an oriented plane. This rejects generic cap-role
         // collisions while permitting the coplanar pieces of a split supported face.
-        let mesh = body.mesh();
         let mut plane: Option<(Vec3, Vec3)> = None;
-        for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
-            if indices.binary_search(&(*face as usize)).is_err() {
-                continue;
-            }
-            let Some([a, b, c]) = mesh.tri(triangle) else { continue };
-            let Some(normal) = (b - a).cross(c - a).normalized() else { continue };
-            if let Some((point, base)) = plane {
-                let magnitude = [point.x, point.y, point.z, a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z]
+        for &index in &indices {
+            let Some(pf) = body.body.planar_face(index).or_else(|| body.body.face_plane(index)) else {
+                return Err(DocError::Invalid("configured face has no valid surface".into()));
+            };
+            let Some(normal) = pf.normal().normalized() else {
+                return Err(DocError::Invalid("configured face has no valid surface".into()));
+            };
+            let point = pf.origin;
+            if let Some((first_point, base)) = plane {
+                let magnitude = [first_point.x, first_point.y, first_point.z, point.x, point.y, point.z]
                     .iter()
                     .fold(body.body.size(), |scale, value| scale.max(value.abs()));
                 let tolerance = (magnitude * f64::EPSILON * 128.0).max(1e-7);
-                if normal.dot(base) < 1.0 - 1e-6 || [a, b, c].iter().any(|vertex| (*vertex - point).dot(base).abs() > tolerance) {
+                if normal.dot(base) < 1.0 - 1e-6 || (point - first_point).dot(base).abs() > tolerance {
                     return Err(DocError::Invalid("face lineage names more than one oriented surface".into()));
                 }
             } else {
-                plane = Some((a, normal));
+                plane = Some((point, normal));
             }
         }
         if plane.is_none() {

@@ -753,10 +753,10 @@ fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
                 _ => solidcraft_ui_text::format("update.prefs_dev", &[("version", current_version())]),
             };
             assert!(
-                tree.nodes.iter().any(|(_, node)| node.role() == Role::Label && node.value() == Some(note.as_str())),
-                "the platform help stays accessible"
+                tree.nodes.iter().any(|(_, node)| node.role() == Role::Button && node.label() == Some(note.as_str()) && !node.is_disabled()),
+                "the platform help stays accessible as an enabled help button"
             );
-            assert!(!texts.contains(&note.as_str()), "the longer explanation stays in hover help");
+            assert!(!texts.contains(&note.as_str()), "the longer explanation stays behind the help icon");
             assert!(crate::scenario::rect_of("prefs:updates_help").is_some());
             h.step(&json!({"click":{"handle":"prefs:check_now"}})).unwrap();
             h.step(&json!({"widget":"Check at start and once a day"})).unwrap();
