@@ -1,6 +1,6 @@
 [package]
 name = "solidcraft-io"
-description = "SolidCraft file formats: designs (JSON), STL, OBJ, STEP, IGES, 3MF and glTF, and FreeCAD/Rhino import"
+description = "SolidCraft file formats: designs (JSON), STL, OBJ, STEP, IGES, 3MF and glTF, and FreeCAD/Rhino/experimental NX import"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -36,7 +36,7 @@ serde_json = { workspace = true, features = ["raw_value"] }
 sha2 = { workspace = true }
 chardetng = { workspace = true }
 encoding_rs = { workspace = true }
-# FreeCAD and Rhino import (pure Rust, so the browser build has it too).
+# FreeCAD, Rhino and experimental NX import (pure Rust, so the browser build has it too).
 cadmpeg-core = { workspace = true }
 cadmpeg-ir = { workspace = true }
 cadmpeg-registry = { workspace = true }

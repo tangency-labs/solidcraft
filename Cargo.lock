@@ -778,6 +778,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadmpeg-codec-nx"
+version = "0.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1cb572502bf7cfc86575867f775528524dae5157f6b01311d7cc8d3e78c603b"
+dependencies = [
+ "cadmpeg-container",
+ "cadmpeg-core",
+ "cadmpeg-ir",
+ "cadmpeg-parasolid",
+ "flate2",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+]
+
+[[package]]
 name = "cadmpeg-codec-rhino"
 version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -856,12 +873,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadmpeg-parasolid"
+version = "0.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0fd2e8f3683a14802e69e9dfc1e361096aaa7ef37c611c4bbfbed8300938977"
+dependencies = [
+ "cadmpeg-core",
+]
+
+[[package]]
 name = "cadmpeg-registry"
 version = "0.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc163233d5f664337267192848505854de6aeed4843181adf87f58baddcee9a0"
 dependencies = [
  "cadmpeg-codec-freecad",
+ "cadmpeg-codec-nx",
  "cadmpeg-codec-rhino",
  "cadmpeg-codec-step",
  "cadmpeg-container",

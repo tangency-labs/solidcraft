@@ -14,6 +14,10 @@ For sandboxed plugins and parametric timeline
 features that also use `run(command, args)`, see [RFC 0002](rfcs/0002-plugins.md). Desktop MCP in this
 document remains the reference implementation today.
 
+NX `.prt` files can be opened through the ordinary `open` tool or `doc.open` /
+`file.insert_step`. NX geometry import is experimental and does not reconstruct sketches
+or feature history; see [import coverage](step-import.md#freecad-rhino-and-experimental-nx).
+
 ## Start it
 
 ```sh

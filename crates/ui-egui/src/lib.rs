@@ -3059,7 +3059,14 @@ impl SolveApp {
             if let Some(summary) = timeline::import_status(self, &r) {
                 self.set_status(summary, false);
             } else if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {
-                self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
+                self.set_status(
+                    format!(
+                        "imported with {} warning(s): {}",
+                        w.len(),
+                        file_load::import_warning_text(self, w.first().and_then(Value::as_str).unwrap_or(""))
+                    ),
+                    false,
+                );
             }
         }
     }

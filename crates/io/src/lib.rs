@@ -1,7 +1,7 @@
 //! File formats. Designs use JSON or versioned containers (`.sc`; `.solidcraft` and `.solvecraft` still open); the authoritative
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
-//! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
+//! FreeCAD, Rhino and NX files import as a base feature (see [`step_import_feature`]), 3MF and
 //! STL files as mesh bodies (see [`mesh_import_feature`]), PLY and XYZ files as point clouds
 //! (see [`read_point_cloud`]).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -30,7 +30,9 @@ pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
-pub use native_cad::{NATIVE_CAD_EXTS, NativeDesign, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_to_step};
+pub use native_cad::{
+    NATIVE_CAD_EXTS, NX_IMPORT_WARNING, NativeDesign, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_to_step,
+};
 pub mod paper;
 mod ply;
 mod ply_complex;

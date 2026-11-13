@@ -53,7 +53,7 @@ const PICTURE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif
 const TEXT_EXTS: &[&str] = &["svg", "txt", "md", "markdown", "json", "csv", "tsv", "yaml", "yml", "toml", "xml", "log", "ini", "cfg"];
 /// CAD files and meshes, imported into the design (the file picker's list; [`kind`] asks the
 /// importers themselves).
-const CAD_EXTS: &[&str] = &["step", "stp", "igs", "iges", "FCStd", "3dm", "stl", "3mf", "obj", "glb", "gltf"];
+const CAD_EXTS: &[&str] = &["step", "stp", "igs", "iges", "FCStd", "3dm", "prt", "stl", "3mf", "obj", "glb", "gltf"];
 
 /// Every extension the file picker lists first, pictures first (any other file can be chosen too).
 pub fn extensions() -> Vec<&'static str> {
@@ -289,10 +289,18 @@ pub fn read(path: &Path) -> Result<Attachment, String> {
         Kind::Other if matches!(path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("heic" | "heif")) => {
             Err(refused("ui.agent_chat_file_heic", &name, &[]))
         }
-        Kind::Other => {
-            Ok(Attachment { id: 0, name, content: Content::Reference { path: absolute(path), size: meta.len(), mime: mime_of(path) }, thumb: None })
-        }
+        Kind::Other => reference(path),
     }
+}
+
+/// Keep a file by reference, including a `.prt` whose experimental geometry import failed.
+pub(super) fn reference(path: &Path) -> Result<Attachment, String> {
+    let name = name_of(path);
+    let meta = std::fs::metadata(path).map_err(|e| failed(&name, e))?;
+    if !meta.is_file() {
+        return Err(refused("ui.agent_chat_file_not_a_file", &name, &[]));
+    }
+    Ok(Attachment { id: 0, name, content: Content::Reference { path: absolute(path), size: meta.len(), mime: mime_of(path) }, thumb: None })
 }
 
 /// The path as an absolute one, so the agent (working in another folder) finds the file.
@@ -605,6 +613,7 @@ mod tests {
         assert_eq!(kind(Path::new("part.STEP")), Kind::Cad);
         assert_eq!(kind(Path::new("mount.stl")), Kind::Cad);
         assert_eq!(kind(Path::new("frame.3dm")), Kind::Cad);
+        assert_eq!(kind(Path::new("part.PRT")), Kind::Cad);
         assert!(from_rgba("x".into(), 2, 2, &[0; 15]).is_err(), "wrong length");
         assert!(from_rgba("x".into(), 0, 2, &[]).is_err());
         assert!(from_rgba("x".into(), usize::MAX, 2, &[]).is_err());
@@ -661,7 +670,8 @@ mod tests {
         let heic = d.join("photo.HEIC");
         std::fs::write(&heic, b"....ftypheic").unwrap();
         assert!(read(&heic).unwrap_err().contains("HEIC"));
-        for ext in ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "svg", "md", "txt", "step", "FCStd", "3dm", "stl", "3mf", "obj", "glb"] {
+        for ext in ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "svg", "md", "txt", "step", "FCStd", "3dm", "prt", "stl", "3mf", "obj", "glb"]
+        {
             assert!(extensions().contains(&ext), "{ext} can be chosen");
         }
         let _ = std::fs::remove_dir_all(&d);

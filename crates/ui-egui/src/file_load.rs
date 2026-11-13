@@ -245,7 +245,7 @@ const STAGED_THUMBNAIL_TRIANGLES: usize = 1_000_000;
 /// How long a frame spends on a staged STEP import.
 const STAGED_FRAME_MS: f64 = 30.0;
 
-/// Files read in stages: STEP (not IGES, FreeCAD or Rhino, which are first restated as STEP) to
+/// Files read in stages: STEP (not IGES, FreeCAD, Rhino or NX, which are first restated as STEP) to
 /// insert or open, and designs to open (#10198).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn staged_kind(request: &Request) -> bool {
@@ -458,7 +458,16 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     let _ = begin_request(app, request);
 }
 
-/// A STEP, IGES, FreeCAD or Rhino file the app opens or inserts gets a `Group #N` history folder
+/// Translate the NX notice without changing decoder diagnostics returned to scripts.
+pub(crate) fn import_warning_text(app: &SolveApp, warning: &str) -> String {
+    if warning == solidcraft_engine::io::NX_IMPORT_WARNING {
+        solidcraft_ui_text::Locale::for_language(&app.preferences.language).text("file_import.nx_experimental").to_string()
+    } else {
+        warning.to_string()
+    }
+}
+
+/// A STEP, IGES, FreeCAD, Rhino or NX file the app opens or inserts gets a `Group #N` history folder
 /// while "Fold the History bar into groups" is on, and none while it is off (#8885), unless the
 /// caller chose (`folder`).
 pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde_json::Map<String, Value>) {
@@ -1685,7 +1694,11 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                         } else if let Some(summary) = crate::timeline::import_status(app, &made.result) {
                             summary
                         } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
-                            format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
+                            format!(
+                                "imported with {} warning(s): {}",
+                                w.len(),
+                                import_warning_text(app, w.first().and_then(Value::as_str).unwrap_or(""))
+                            )
                         } else {
                             // Built here, outside the window's language scope: in the language
                             // chosen, as the other statuses of this file are.

@@ -9,6 +9,7 @@ use crate::*;
 
 const BLOCK_FCSTD: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/block.FCStd");
 const BLOCK_3DM: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/block.3dm");
+const BLOCK_PRT: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/block.prt");
 const BRACKET_FCSTD: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/bracket.FCStd");
 
 /// `bytes` saved as `name` in a fresh temp directory.
@@ -38,8 +39,8 @@ fn body_names(s: &Session) -> Vec<String> {
 }
 
 #[test]
-fn freecad_and_rhino_files_come_in_as_a_component_named_after_the_file() {
-    for (tag, name, bytes) in [("fc", "block.FCStd", BLOCK_FCSTD), ("rh", "block.3dm", BLOCK_3DM)] {
+fn native_cad_files_come_in_as_a_component_named_after_the_file() {
+    for (tag, name, bytes) in [("fc", "block.FCStd", BLOCK_FCSTD), ("rh", "block.3dm", BLOCK_3DM), ("nx", "block.prt", BLOCK_PRT)] {
         let (dir, path) = file(tag, name, bytes);
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]}));
@@ -77,12 +78,15 @@ fn freecad_and_rhino_files_come_in_as_a_component_named_after_the_file() {
 
 /// A broken file is refused with a message naming it, and the design is left as it was.
 #[test]
-fn a_broken_freecad_or_rhino_file_is_refused_cleanly() {
+fn a_broken_native_cad_file_is_refused_cleanly() {
     let mut cut = BLOCK_FCSTD[..BLOCK_FCSTD.len() / 2].to_vec();
     cut.extend_from_slice(b"garbage");
-    for (tag, name, bytes) in
-        [("bad-fc", "broken.FCStd", cut.as_slice()), ("bad-rh", "broken.3dm", &BLOCK_3DM[..200]), ("acis", "cube.sat", b"700 0 1 0\n")]
-    {
+    for (tag, name, bytes) in [
+        ("bad-fc", "broken.FCStd", cut.as_slice()),
+        ("bad-rh", "broken.3dm", &BLOCK_3DM[..200]),
+        ("acis", "cube.sat", b"700 0 1 0\n"),
+        ("bad-nx", "broken.prt", b"SPLMSSTR"),
+    ] {
         let (dir, path) = file(tag, name, bytes);
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
@@ -93,6 +97,27 @@ fn a_broken_freecad_or_rhino_file_is_refused_cleanly() {
         assert_eq!(s.doc, before, "{name}: the design is unchanged");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// The design keeps the converted STEP, so it reopens without the NX source.
+#[test]
+fn nx_geometry_survives_save_without_the_source_and_insert_is_undoable() {
+    let (dir, path) = file("nx-save", "block.prt", BLOCK_PRT);
+    let design = dir.join("import.sc");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
+    let before = s.doc.clone();
+    let inserted = run(&mut s, "file.insert_step", json!({"path": path}));
+    assert!(inserted["warnings"].as_array().unwrap().iter().any(|w| w.as_str().is_some_and(|w| w.contains("Experimental Siemens NX"))));
+    run(&mut s, "file.save_as", json!({"path": design.to_string_lossy()}));
+    std::fs::remove_file(&path).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": design.to_string_lossy()}));
+    assert!((volume(&mut reopened) - 6125.0).abs() < 1e-6);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.features, before.features);
+    assert!((volume(&mut s) - 125.0).abs() < 1e-6);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A FreeCAD file's history comes in as features in a component named after the file, and stays

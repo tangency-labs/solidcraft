@@ -3595,6 +3595,48 @@ fn a_cad_file_joins_the_message_once_its_import_is_in() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// Ambiguous `.prt` files keep the established reference attachment on import failure;
+/// supported NX geometry still joins the design and the message as an imported part.
+#[test]
+fn prt_attachments_fall_back_to_references_only_when_import_fails() {
+    let d = attachable("prt-reference");
+    std::fs::write(d.join("other.PRT"), b"not an NX part").unwrap();
+    std::fs::write(d.join("block.prt"), include_bytes!("../../../io/src/native_cad/fixtures/block.prt")).unwrap();
+    let mut h = narrow_chat();
+    h.app.agent_chat.backend = Some(Box::new(Script::default()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.frames(2);
+    let document = h.app.session.doc.clone();
+    let model = h.app.session.model.state();
+    let revision = h.app.session.revision;
+    let undo = h.app.session.undo.len();
+    let dirty = h.app.session.is_dirty();
+    attach_path(&mut h.app, &at(&d, "other.PRT")).unwrap();
+    settle_chat(&mut h);
+    let file = h.app.agent_chat.attachments.iter().find(|f| f.name == "other.PRT").unwrap();
+    assert!(
+        matches!(&file.content, attach::Content::Reference { path, size: 14, mime: "application/octet-stream" } if path.is_absolute() && path.ends_with("other.PRT"))
+    );
+    let note = attach::note(std::slice::from_ref(file), true, true, usize::MAX);
+    assert!(note.contains("read it with your own tools") && !note.contains("to the design"), "{note}");
+    assert!(
+        h.app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: true } if text.starts_with("other.PRT:"))),
+        "the decoder diagnostic is retained"
+    );
+    assert!(Arc::ptr_eq(&h.app.session.doc, &document));
+    assert!(Arc::ptr_eq(&h.app.session.model.state(), &model));
+    assert_eq!(h.app.session.revision, revision);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.is_dirty(), dirty);
+
+    attach_path(&mut h.app, &at(&d, "block.prt")).unwrap();
+    settle_chat(&mut h);
+    let file = h.app.agent_chat.attachments.iter().find(|f| f.name == "block.prt").unwrap();
+    assert!(matches!(file.content, attach::Content::Imported));
+    assert!(!h.app.session.model.state().bodies.is_empty(), "successful NX geometry is imported");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// Review of #1744: taking an imported part's chip off leaves the part in the design, and its ×
 /// says so; any other file's × just takes it off.
 #[test]

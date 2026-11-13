@@ -659,18 +659,32 @@ pub(crate) fn warning_text(result: &FeatureResult) -> Option<String> {
 pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
     let reported = |r: &&FeatureResult| r.import_report.as_deref().is_some_and(|r| !r.issues.is_empty());
     let result = match reply.get("feature").and_then(Value::as_u64) {
-        Some(id) => app.session.model.result(id).filter(reported)?,
+        Some(id) => app.session.model.result(id).filter(reported),
         // Only when the open says it has warnings: a design opened with an import in it does not.
         None if reply.get("warnings").and_then(Value::as_array).is_some_and(|w| !w.is_empty()) => {
             let mut imports = app.session.model.results.iter().filter(reported);
             match (imports.next(), imports.next()) {
-                (Some(only), None) => only,
-                _ => return None,
+                (Some(only), None) => Some(only),
+                _ => None,
             }
         }
-        None => return None,
+        None => None,
     };
-    result.import_report.as_deref().map(import_summary)
+    let report = result.and_then(|result| result.import_report.as_deref());
+    let warnings = reply.get("warnings").and_then(Value::as_array);
+    if warnings.is_some_and(|warnings| warnings.iter().any(|warning| warning.as_str() == Some(solidcraft_engine::io::NX_IMPORT_WARNING))) {
+        let mut messages: Vec<_> = report.map(import_summary).into_iter().collect();
+        for warning in warnings.into_iter().flatten().filter_map(Value::as_str) {
+            // The summary already describes the kernel's report. Decoder losses exist only
+            // in the reply, so keep every one alongside the experimental NX notice.
+            if !report.is_some_and(|report| report.issues.iter().any(|issue| issue.detail == warning)) {
+                messages.push(crate::file_load::import_warning_text(app, warning));
+            }
+        }
+        Some(messages.join(" "))
+    } else {
+        report.map(import_summary)
+    }
 }
 
 /// An import's warnings for a person who uses CAD: how many of the file's parts came in as
@@ -1432,6 +1446,40 @@ mod tests {
         // Only repairs: no advice, and a part alone has no "of" count.
         let repaired = ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")] };
         assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
+    }
+
+    #[test]
+    fn nx_import_status_keeps_decoder_losses_with_or_without_a_geometry_report() {
+        use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
+        let mut h = Harness::new();
+        let _english = solidcraft_ui_text::scope("en");
+        let id = h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap()["feature"].as_u64().unwrap();
+        let report = std::sync::Arc::new(ImportReport {
+            parts: 1,
+            solids: 1,
+            issues: vec![ImportIssue {
+                kind: IssueKind::Repaired,
+                item: Some(1),
+                part: String::new(),
+                faces: 0,
+                times: 1,
+                detail: "kernel repair detail".into(),
+            }],
+        });
+        h.app.session.model.results.iter_mut().find(|r| r.id == id).unwrap().import_report = Some(report.clone());
+        let reply = json!({"feature": id, "warnings": [solidcraft_engine::io::NX_IMPORT_WARNING, "decoder loss A", "decoder loss B", "kernel repair detail"]});
+        let status = super::import_status(&h.app, &reply).unwrap();
+        assert_eq!(status, format!("{} {} decoder loss A decoder loss B", super::import_summary(&report), solidcraft_engine::io::NX_IMPORT_WARNING));
+        // A STEP reply still uses the geometry summary without repeating its raw diagnostic.
+        assert_eq!(super::import_status(&h.app, &json!({"feature": id, "warnings": ["kernel repair detail"]})), Some(super::import_summary(&report)));
+        h.app.session.model.results.iter_mut().find(|r| r.id == id).unwrap().import_report = None;
+        for feature in [Some(id), None] {
+            let reply = json!({"feature": feature, "warnings": [solidcraft_engine::io::NX_IMPORT_WARNING, "decoder loss A", "decoder loss B"]});
+            assert_eq!(
+                super::import_status(&h.app, &reply),
+                Some(format!("{} decoder loss A decoder loss B", solidcraft_engine::io::NX_IMPORT_WARNING))
+            );
+        }
     }
 
     #[test]

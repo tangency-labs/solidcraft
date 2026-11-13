@@ -75,7 +75,7 @@ fn matrix_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MatrixParam>, D:
 pub struct InsertStepKeys {
     // Optional in the type and required in the schema (`insert_step_schema`): left out, the
     // handler refuses the call with its own message.
-    /// The file to insert: `.step`, `.stp`, `.igs`, `.iges`, `.fcstd` or `.3dm` (any case), not
+    /// The file to insert: `.step`, `.stp`, `.igs`, `.iges`, `.fcstd`, `.3dm` or `.prt` (any case), not
     /// blank and fewer than 4096 UTF-8 bytes. Any other kind of file is refused.
     #[serde(default, deserialize_with = "path_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
@@ -133,7 +133,7 @@ fn leave_unread(value: &mut Value) {
     }
 }
 
-/// Insert a STEP, IGES, FreeCAD or Rhino file into the design as an Import base feature, in a new
+/// Insert a STEP, IGES, FreeCAD, Rhino or experimental Siemens NX file into the design as an Import base feature, in a new
 /// component named after the file and placed in the active component. An assembly's products
 /// become nested components held as one rigid group until `component.unlock`, and a part the file
 /// places more than once becomes one component with an occurrence per placement.
@@ -166,7 +166,7 @@ impl JsonSchema for InsertStepParams {
     }
 }
 
-const INSERT_STEP: &str = "Insert a STEP, IGES, FreeCAD or Rhino file into the design as an Import base feature, in a new component named after the file and placed in the active component. An assembly's products become nested components held as one rigid group until `component.unlock`, and a part the file places more than once becomes one component with an occurrence per placement.";
+const INSERT_STEP: &str = "Insert a STEP, IGES, FreeCAD, Rhino or experimental Siemens NX file into the design as an Import base feature, in a new component named after the file and placed in the active component. An assembly's products become nested components held as one rigid group until `component.unlock`, and a part the file places more than once becomes one component with an occurrence per placement.";
 
 /// `path` is required, as the handler has it (not blank, fewer than 4096 bytes; `maxLength`
 /// counts characters, so 4095 is as close as the schema gets). `tolerance` has its shape only
