@@ -1108,6 +1108,9 @@ fn between(
     between(g, (mid, &lo), high, best, depth + 1)
 }
 
+/// How many times [`banded_walk`] moves its band onto the walk it found before refusing.
+const BAND_PASSES: usize = 8;
+
 /// A vertex turns more than this (one less the cosine of the angle between the tangents arriving
 /// and leaving, about 26°) to be a corner the band of [`banded_walk`] is anchored at.
 const CORNER_TURN: f64 = 0.1;
@@ -1124,11 +1127,12 @@ fn corners(side: &Side) -> Vec<usize> {
 
 /// The corners of the two loops paired as the pairing pairs the polygons through them (each loop's
 /// corners joined by straight lines, in its frame): `(i, j)` vertex numbers in order from the
-/// first. Empty when either loop has fewer than three corners or their grid is past
-/// [`MAX_CELLS`].
+/// first. Polygons whose grid is past [`MAX_CELLS`] are paired through a band of it
+/// ([`banded_walk`], at their shares of their lengths: every vertex of theirs is a corner). Empty
+/// when either loop has fewer than three corners.
 fn corner_pairs(g: &Grid) -> Vec<(usize, usize)> {
     let (ca, cb) = (corners(&g.a), corners(&g.b));
-    if ca.len() < 3 || cb.len() < 3 || (ca.len() + 1).saturating_mul(cb.len() + 1) > MAX_CELLS {
+    if ca.len() < 3 || cb.len() < 3 {
         return Vec::new();
     }
     let chords = |side: &Side, c: &[usize]| -> Vec<Seg2> {
@@ -1145,7 +1149,12 @@ fn corner_pairs(g: &Grid) -> Vec<(usize, usize)> {
         return Vec::new();
     };
     let small = Grid { a, b };
-    let Ok(w) = best_walk(&small) else {
+    let walked = if (ca.len() + 1).saturating_mul(cb.len() + 1) > MAX_CELLS {
+        banded_walk(&small, false)
+    } else {
+        best_walk(&small)
+    };
+    let Ok(w) = walked else {
         return Vec::new();
     };
     let n = cb.len();
@@ -1203,9 +1212,13 @@ type Band = (Vec<usize>, Vec<(usize, usize)>);
 /// corners ([`corner_pairs`]), each of `a`'s vertices at its share of the length between them;
 /// with no paired corners, from `b`'s vertex that pairs most cheaply with `a`'s vertex 0, at its
 /// share of the length round. With them, the paired corners as (row, column).
-fn band_centres(g: &Grid) -> Option<Band> {
+fn band_centres(g: &Grid, anchored: bool) -> Option<Band> {
     let (m, n) = (g.a.count(), g.b.count());
-    let anchors = corner_pairs(g);
+    let anchors = if anchored {
+        corner_pairs(g)
+    } else {
+        Vec::new()
+    };
     let Some(&(i_first, _)) = anchors.first() else {
         let s = (0..n).min_by(|x, y| g.pair(0, *x).total_cmp(&g.pair(0, *y)))?;
         let mut c = share_columns(g, (0, m), (s, s + n));
@@ -1284,7 +1297,7 @@ fn pin(pinned: &[(usize, usize)], lo: &mut [usize], hi: &mut [usize]) {
 /// such walk.
 fn pinned_walk(g: &Grid) -> Option<Walk> {
     let (m, n) = (g.a.count(), g.b.count());
-    let (centre, pinned) = band_centres(g)?;
+    let (centre, pinned) = band_centres(g, true)?;
     if pinned.is_empty() {
         return None;
     }
@@ -1299,9 +1312,11 @@ fn pinned_walk(g: &Grid) -> Option<Walk> {
 /// share of the length between the corners the polygons through both loops' corners pair), as
 /// wide as the bound allows (the band's cells, at most (m + 1)(2h + 1) + 2n, stay within it:
 /// h is about 400 vertices for two loops of 5000). The corners those polygons pair are paired
-/// ([`pin`]); other vertices pair wherever they lie within the band of where their shares put
-/// them.
-fn banded_walk(g: &Grid) -> Result<Walk> {
+/// ([`pin`]) when `anchored`; other vertices pair wherever they lie within the band of where their
+/// shares put them. A walk that runs along an edge of the band is searched again in the band
+/// centred on it, up to [`BAND_PASSES`] times (so at most that many times [`MAX_CELLS`] cells),
+/// and refused past that; so is a band with no walk that pairs those corners.
+fn banded_walk(g: &Grid, anchored: bool) -> Result<Walk> {
     let (m, n) = (g.a.count(), g.b.count());
     let h = MAX_CELLS
         .saturating_sub(n.saturating_mul(2))
@@ -1316,29 +1331,50 @@ fn banded_walk(g: &Grid) -> Result<Walk> {
             reason: "loft sections too large to pair",
         });
     }
-    let (centre, pinned) = band_centres(g).ok_or_else(unpaired)?;
+    let (mut centre, pinned) = band_centres(g, anchored).ok_or_else(unpaired)?;
     let s = *centre.first().ok_or_else(unpaired)?;
-    // Each row's band also spans the columns of the rows either side, so a walk can step from
-    // any column of one row's band into the next row and run along it.
-    let column = |i: usize, c: usize| centre.get(i).copied().unwrap_or(c);
-    let lo: Vec<usize> = (0..=m)
-        .map(|i| {
-            let c = column(i, s);
-            let before = i.checked_sub(1).map_or(c, |b| column(b, c));
-            c.min(before).saturating_sub(h).max(s)
-        })
-        .collect();
-    let hi: Vec<usize> = (0..=m)
-        .map(|i| {
-            let c = column(i, s);
-            (c.max(column(i + 1, c)) + h).min(s + n)
-        })
-        .collect();
-    let (mut plo, mut phi) = (lo.clone(), hi.clone());
-    pin(&pinned, &mut plo, &mut phi);
-    walk(g, s, &plo, &phi)
-        .or_else(|| walk(g, s, &lo, &hi))
-        .ok_or_else(unpaired)
+    for _ in 0..BAND_PASSES {
+        // Each row's band also spans the columns of the rows either side, so a walk can step
+        // from any column of one row's band into the next row and run along it.
+        let column = |i: usize, c: usize| centre.get(i).copied().unwrap_or(c);
+        let band_lo: Vec<usize> = (0..=m)
+            .map(|i| {
+                let c = column(i, s);
+                let before = i.checked_sub(1).map_or(c, |b| column(b, c));
+                c.min(before).saturating_sub(h).max(s)
+            })
+            .collect();
+        let band_hi: Vec<usize> = (0..=m)
+            .map(|i| {
+                let c = column(i, s);
+                (c.max(column(i + 1, c)) + h).min(s + n)
+            })
+            .collect();
+        let (mut lo, mut hi) = (band_lo.clone(), band_hi.clone());
+        pin(&pinned, &mut lo, &mut hi);
+        // No walk that pairs the paired corners is refused, not walked without them.
+        let w = walk(g, s, &lo, &hi).ok_or_else(unpaired)?;
+        // A walk that runs along an edge of the band (not the grid's) may have been held off a
+        // cheaper one outside it: the band is moved to centre on the walk and searched again.
+        let (vlo, vhi) = w.bounds(m);
+        let held = (0..=m).any(|i| {
+            let at = |v: &[usize], b: &[usize]| v.get(i).zip(b.get(i)).is_some_and(|(x, y)| x == y);
+            (at(&vlo, &band_lo) && band_lo.get(i).is_some_and(|&b| b > s))
+                || (at(&vhi, &band_hi) && band_hi.get(i).is_some_and(|&b| b < s + n))
+        });
+        if !held {
+            return Ok(w);
+        }
+        centre = vlo
+            .iter()
+            .zip(&vhi)
+            .map(|(&a, &b)| a + b.saturating_sub(a).checked_div(2).unwrap_or(0))
+            .collect();
+    }
+    Err(SolidError::InvalidInput {
+        operation: OP,
+        reason: "loft sections too large to pair: the pairing leaves every band it is searched in",
+    })
 }
 
 /// What an event of the correspondence is on one of the loops: one of its vertices, or a point
@@ -1360,7 +1396,7 @@ fn correspond(a: &[Seg2], fa: Frame, b: &[Seg2], fb: Frame) -> Result<Correspond
     };
     let (m, n) = (g.a.count(), g.b.count());
     let w = if (m + 1).saturating_mul(n + 1) > MAX_CELLS {
-        banded_walk(&g)?
+        banded_walk(&g, true)?
     } else if let Some(w) = pinned_walk(&g) {
         w
     } else {
@@ -2731,6 +2767,87 @@ mod tests {
             let k = starts(&m[0])
                 .iter()
                 .position(|q| dist(*q, *x) < 1e-12)
+                .unwrap();
+            assert!(
+                dist(starts(&m[1])[k], y) < 1e-9,
+                "{x:?} runs to {:?}",
+                starts(&m[1])[k]
+            );
+        }
+    }
+
+    /// A `w` x 1 rectangle whose bottom is a comb of `teeth` teeth 0.1 deep: every vertex of the
+    /// comb a sharp corner.
+    fn comb(w: f64, teeth: usize) -> Vec<Seg2> {
+        let mut pts: Vec<(f64, f64)> = (0..2 * teeth)
+            .map(|k| {
+                (
+                    w * k as f64 / (2 * teeth) as f64,
+                    if k % 2 == 1 { -0.1 } else { 0.0 },
+                )
+            })
+            .collect();
+        pts.extend([(w, 0.0), (w, 1.0), (0.0, 1.0)]);
+        poly(&pts)
+    }
+
+    /// A 10-wide and a 1.5-wide comb of 1100 teeth (2203 corners each, so even the grid of the
+    /// polygons through their corners is past [`MAX_CELLS`]) pair every tooth with its tooth and
+    /// the four corners of the rectangles with each other.
+    #[test]
+    fn combs_of_more_corners_than_the_grid_bound_pair_tooth_by_tooth() {
+        let teeth = 1100;
+        let (a, b) = (comb(10.0, teeth), comb(1.5, teeth));
+        assert!((a.len() + 1) * (b.len() + 1) > MAX_CELLS);
+        let m = match_loft_sections(&[at(0.0, a), at(10.0, b)], 20_000).unwrap();
+        sound(&m);
+        assert_eq!(m[0].segs.len(), m[1].segs.len());
+        let tip = |w: f64, k: usize| p(w * (2 * k + 1) as f64 / (2 * teeth) as f64, -0.1);
+        let pairs = (0..teeth).map(|k| (tip(10.0, k), tip(1.5, k))).chain([
+            (p(10.0, 0.0), p(1.5, 0.0)),
+            (p(10.0, 1.0), p(1.5, 1.0)),
+            (p(0.0, 1.0), p(0.0, 1.0)),
+        ]);
+        for (x, y) in pairs {
+            let k = starts(&m[0])
+                .iter()
+                .position(|q| dist(*q, x) < 1e-12)
+                .unwrap();
+            assert!(
+                dist(starts(&m[1])[k], y) < 1e-9,
+                "{x:?} runs to {:?}",
+                starts(&m[1])[k]
+            );
+        }
+    }
+
+    /// A 10 x 1 comb of 1100 teeth and a 1.5-wide one with sides 200 high (2203 corners each):
+    /// the second's teeth take a third of its length and the first's nearly all, so where the
+    /// shares put the right corner and the teeth is some 1300 vertices from where they are,
+    /// three times the band's half width. Moved onto the walk it finds, the band reaches them,
+    /// and every tooth and corner pairs.
+    #[test]
+    fn combs_of_different_proportions_pair_tooth_by_tooth() {
+        let teeth = 1100;
+        let a = comb(10.0, teeth);
+        let mut b = comb(1.5, teeth);
+        let n = b.len();
+        b[n - 3] = line((1.5, 0.0), (1.5, 200.0));
+        b[n - 2] = line((1.5, 200.0), (0.0, 200.0));
+        b[n - 1] = line((0.0, 200.0), (0.0, 0.0));
+        let m = match_loft_sections(&[at(0.0, a), at(10.0, b)], 20_000).unwrap();
+        sound(&m);
+        assert_eq!(m[0].segs.len(), m[1].segs.len());
+        let tip = |w: f64, k: usize| p(w * (2 * k + 1) as f64 / (2 * teeth) as f64, -0.1);
+        let pairs = (0..teeth).map(|k| (tip(10.0, k), tip(1.5, k))).chain([
+            (p(10.0, 0.0), p(1.5, 0.0)),
+            (p(10.0, 1.0), p(1.5, 200.0)),
+            (p(0.0, 1.0), p(0.0, 200.0)),
+        ]);
+        for (x, y) in pairs {
+            let k = starts(&m[0])
+                .iter()
+                .position(|q| dist(*q, x) < 1e-12)
                 .unwrap();
             assert!(
                 dist(starts(&m[1])[k], y) < 1e-9,
