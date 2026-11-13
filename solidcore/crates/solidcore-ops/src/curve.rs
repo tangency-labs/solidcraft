@@ -697,7 +697,9 @@ pub struct CurvePoint {
     pub parameter: f64,
     /// The curve's point there.
     pub point: [f64; 3],
-    /// Its distance from the given point: the kernel solve's (not certified).
+    /// Its distance from the given point: the kernel solve's (not certified). A solution
+    /// within the tolerance of an end is snapped to that end and keeps the solve's distance, so
+    /// it is the distance to `point` within the tolerance.
     pub distance: f64,
 }
 
@@ -758,7 +760,7 @@ pub fn closest_point(curve: &Curve, p: [f64; 3], tolerance: f64) -> Result<Optio
         }
         let at = made.curve.evaluate_point(k, dropped.parameter)?;
         Ok(Ok(Some(CurvePoint {
-            parameter: record_parameter(&record, range, dropped.parameter),
+            parameter: record_parameter(&record, range, dropped.parameter, at),
             point: [at.x, at.y, at.z],
             distance: dropped.distance,
         })))

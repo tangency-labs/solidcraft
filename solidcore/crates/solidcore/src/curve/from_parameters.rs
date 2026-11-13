@@ -141,19 +141,27 @@ pub fn from_parameters(k: &Kernel, record: &Record, interval: [f64; 2]) -> Resul
 }
 
 /// The record's parameter of the kernel's parameter `t` on the curve [`from_parameters`] makes
-/// of `record` over `interval`: the inverse of its map. On a circle or ellipse, `t` in degrees
-/// to radians, moved back by the whole turns [`from_parameters`] moved the interval by; on the
-/// other kinds `t` itself.
+/// of `record` over `interval`, where `at` is the kernel curve's point at `t`: the inverse of its
+/// map. On a circle or ellipse the kernel's conic is a rational quadratic, whose parameter in
+/// degrees is not the angle, so the record's parameter is the angle of `at` on the record's frame
+/// (`atan2(y / ry, x / rx)`, the angle the record evaluates `at` at), taken in the turn of the
+/// interval: the whole turn nearest `t` in radians, moved back by the turns [`from_parameters`]
+/// moved the interval by (the two differ by less than a quarter turn). On the other kinds `t`
+/// itself.
 #[must_use]
-pub fn record_parameter(record: &Record, interval: [f64; 2], t: f64) -> f64 {
-    match record {
-        Record::Circle { .. } | Record::Ellipse { .. } => {
-            let [lo, _] = interval;
-            let [moved, _] = turned(interval);
-            t.to_radians() + (lo - moved)
-        }
-        _ => t,
-    }
+pub fn record_parameter(record: &Record, interval: [f64; 2], t: f64, at: Point3) -> f64 {
+    use core::f64::consts::TAU;
+    let (frame, rx, ry) = match record {
+        Record::Circle { frame, radius } => (frame, *radius, *radius),
+        Record::Ellipse { frame, radii } => (frame, radii[0], radii[1]),
+        _ => return t,
+    };
+    let [lo, _] = interval;
+    let [moved, _] = turned(interval);
+    let near = t.to_radians() + (lo - moved);
+    let d = at - p3(frame.origin);
+    let angle = (d.dot(p3(frame.y_axis)) / ry).atan2(d.dot(p3(frame.x_axis)) / rx);
+    angle + TAU * ((near - angle) / TAU).round()
 }
 
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the
