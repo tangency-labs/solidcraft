@@ -99,6 +99,69 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
     assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
 }
 #[test]
+fn native_file_commands_preserve_caller_scope_and_default_hidden_restrictions() {
+    use solidcraft_io::vfs::{self, PathScope};
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    // Claim a fresh fixture, including when a previous test process left a folder behind.
+    let root = (0_u64..)
+        .find_map(|n| {
+            let path = vfs::temp_dir().join(format!("solidcraft-plugin-native-file-scope-{}-{n}", std::process::id()));
+            match std::fs::create_dir(&path) {
+                Ok(()) => Some(path),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => None,
+                Err(e) => panic!("create fixture {}: {e}", path.display()),
+            }
+        })
+        .unwrap();
+    let _cleanup = Cleanup(root.clone());
+    let mut results = Vec::new();
+    for mode in ["automatic", "unscoped", "explicit"] {
+        let granted = root.join(mode);
+        std::fs::create_dir_all(granted.join(".hidden")).unwrap();
+        let caller = match mode {
+            "automatic" => Some(PathScope::default().with_design_folder(&granted)),
+            "explicit" => Some(PathScope::new([granted.clone()])),
+            _ => None,
+        };
+        let hidden = granted.join(".hidden/export.sc");
+        if let Some(scope) = &caller {
+            assert!(scope.check(&granted.to_string_lossy()).is_ok(), "{mode}: root is admitted");
+            assert_eq!(scope.check(&hidden.to_string_lossy()).is_ok(), mode == "explicit", "{mode}: caller policy");
+        }
+        let mut session = Session::default();
+        session.plugin_state.file_grants.push(FileGrant { name: "project".into(), folder: granted.clone(), read: true, write: true });
+        let mut host = SolidCraftHost {
+            session,
+            transaction: None,
+            sketch_exits: Vec::new(),
+            groups: BTreeSet::from(["file".into()]),
+            file_folders: vec![granted.clone()],
+        };
+        host.begin_transaction().unwrap();
+        vfs::scoped(caller, || {
+            assert_eq!(host.granted_folders().len(), 1, "{mode}: filtering the root cannot protect its descendants");
+            let public = granted.join("public.sc");
+            host.run_command("file.save_as", &json!({"path":public.to_string_lossy(), "format":"json"})).unwrap();
+            assert!(public.is_file(), "{mode}: an empty design can be saved inside the grant");
+            let reply = host.run_command("file.save_as", &json!({"path":hidden.to_string_lossy(), "format":"json"}));
+            // Collect all three cases before asserting so the before-proof shows both refusals.
+            results.push((mode, reply.is_ok(), hidden.is_file(), reply.err().map(|e| e.to_string())));
+        });
+    }
+    let actual: Vec<_> = results.iter().map(|(mode, succeeded, written, _)| (*mode, *succeeded, *written)).collect();
+    assert_eq!(
+        actual,
+        vec![("automatic", false, false), ("unscoped", false, false), ("explicit", true, true)],
+        "native file commands must preserve caller restrictions and default hidden-child policy: {results:?}",
+    );
+}
+
+#[test]
 fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees_only_its_folders() {
     let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-groups-{}", std::process::id()));
     let granted = root.join("granted");

@@ -10,6 +10,46 @@ fn rel(a: f64, b: f64) -> f64 {
 }
 
 #[test]
+fn plugin_data_json_preserves_every_file_at_the_limit() {
+    let mut doc = Document::new("Plugin files without an installed plugin");
+    for i in 0..crate::plugin_data::MAX_FILES {
+        doc.plugin_data.insert(format!("uninstalled-plugin/file-{i:04}.bin"), crate::canvas::base64_encode(&i.to_le_bytes()));
+    }
+    let opened = Document::from_json(&doc.to_json()).unwrap();
+    assert_eq!(opened.plugin_data, doc.plugin_data);
+    assert_eq!(Document::from_json(&opened.to_json()).unwrap().plugin_data, doc.plugin_data);
+}
+
+#[test]
+fn plugin_data_json_refuses_excess_valid_files() {
+    let mut doc = Document::new("Too many opaque plugin files");
+    for i in 0..=crate::plugin_data::MAX_FILES {
+        doc.plugin_data.insert(format!("uninstalled-plugin/file-{i:04}.bin"), crate::canvas::base64_encode(&i.to_le_bytes()));
+    }
+    assert!(
+        matches!(Document::from_json(&doc.to_json()), Err(DocError::Invalid(message)) if message.contains("plugin")),
+        "opening an excess valid file must refuse the document before a save can discard plugin data"
+    );
+}
+
+#[test]
+fn plugin_data_newer_json_preserves_the_opaque_section() {
+    let mut doc = Document::new("Newer opaque plugin files");
+    for i in 0..=crate::plugin_data::MAX_FILES {
+        doc.plugin_data.insert(format!("uninstalled-plugin/file-{i:04}.bin"), crate::canvas::base64_encode(&i.to_le_bytes()));
+    }
+    let mut raw: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
+    raw["format"] = serde_json::json!(crate::format::format_string(crate::format::FORMAT + 1));
+    let opened = Document::from_json(&serde_json::to_string(&raw).unwrap()).unwrap();
+    assert!(opened.newer_file.is_some());
+    let saved: serde_json::Value = serde_json::from_str(&opened.to_json()).unwrap();
+    assert_eq!(saved["plugin_data"], raw["plugin_data"]);
+    let reopened = Document::from_json(&serde_json::to_string(&saved).unwrap()).unwrap();
+    let resaved: serde_json::Value = serde_json::from_str(&reopened.to_json()).unwrap();
+    assert_eq!(resaved["plugin_data"], raw["plugin_data"]);
+}
+
+#[test]
 fn component_lookup_refuses_duplicate_names_and_keeps_explicit_ids() {
     let mut doc = Document::new("A");
     let first = doc.add_component(Some("A"), 0).unwrap();
