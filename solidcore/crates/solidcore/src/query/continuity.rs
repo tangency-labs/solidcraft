@@ -165,6 +165,82 @@ fn side(
     }))
 }
 
+/// The principal curvatures of a face at a point ([`principal_curvatures`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Principal {
+    /// The foot of the point on the face's surface.
+    pub point: Point3,
+    /// The unit normal there, in the sense of the face's upward use.
+    pub normal: Vec3,
+    /// The larger principal curvature, 1/mm, positive where the surface bends away from
+    /// `normal` (convex seen from where the normal points: a sphere's outside reads `1 / r`).
+    pub k1: f64,
+    /// The smaller principal curvature.
+    pub k2: f64,
+    /// The unit tangent direction of `k1`.
+    pub d1: Vec3,
+    /// The unit tangent direction of `k2`.
+    pub d2: Vec3,
+}
+
+/// The principal curvatures of face `f` where `p` drops on its surface (its natural domain,
+/// untrimmed): the surface's own (`EvaluateGeometric`, positive where it bends towards its
+/// natural normal `Su x Sv`), read against the face's upward use's normal and signed convex
+/// positive (each negated and the two exchanged where the use runs with the natural normal), so
+/// `k1 >= k2` and a sphere's outside reads `1 / r` twice. `None` where the drop fails, the
+/// normal is zero, or the surface's forms degenerate there (a pole).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a point not finite, a face without a surface or without a
+/// face use; [`SolidError::Unsupported`] for a face use whose orientation is unknown; those of
+/// the drop; an unported evaluation or a cancellation.
+pub fn principal_curvatures(k: &Kernel, b: &Brep, f: FaceId, p: Point3) -> Result<Option<Principal>> {
+    if !finite(p) {
+        return Err(SolidError::invalid_input(OP, "a point that is not finite"));
+    }
+    let fu = crate::topology::face::p2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP, "a face without a face use"))?;
+    let sign = sense(b, fu, f)?;
+    let s = surface_of(b, f)?;
+    let Some(one) = side(k, s, sign, p, None)? else {
+        return Ok(None);
+    };
+    use crate::nurbs::knots::Side as Span;
+    let g = match s.evaluate_geometric(k, one.uv, Span::Left, Span::Left) {
+        Ok(g) => g,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    // the kernel's bend towards the natural normal; convex positive against the use's normal
+    let (k1, k2, d1, d2) = if sign > 0.0 {
+        (
+            -g.principle_curvature2,
+            -g.principle_curvature1,
+            g.principle_curvature_vector2,
+            g.principle_curvature_vector1,
+        )
+    } else {
+        (
+            g.principle_curvature1,
+            g.principle_curvature2,
+            g.principle_curvature_vector1,
+            g.principle_curvature_vector2,
+        )
+    };
+    if !(k1.is_finite() && k2.is_finite() && finite(d1) && finite(d2)) {
+        return Ok(None);
+    }
+    Ok(Some(Principal {
+        point: one.foot,
+        normal: one.normal,
+        k1,
+        k2,
+        d1,
+        d2,
+    }))
+}
+
 /// The continuity measure across edge `e` at its curve's parameter `t`, between the faces of
 /// `faceuses` (face a's use, then face b's), each normal in its use's sense. `guess`: each
 /// face's parameters to drop from (the last station's), or none. `None` where the station says
@@ -475,4 +551,69 @@ pub fn iso_comb(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernel::KernelOptions;
+    use crate::primitive::api_primitives::{create_cylinder, create_sphere};
+
+    /// The principal curvatures of `b` at `p`, from the face whose foot of `p` is nearest.
+    fn principal_of(k: &Kernel, b: &Brep, p: Point3) -> Principal {
+        b.face_list()
+            .iter()
+            .filter_map(|&f| principal_curvatures(k, b, f, p).unwrap())
+            .min_by(|x, y| x.point.distance(p).total_cmp(&y.point.distance(p)))
+            .unwrap()
+    }
+
+    /// A sphere of radius 4 seen from outside: both principal curvatures 1/4.
+    #[test]
+    fn a_sphere_bends_by_its_inverse_radius_both_ways() {
+        let mut k = Kernel::new(&KernelOptions::default());
+        let b = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 4.0).unwrap();
+        let pr = principal_of(&k, &b, Point3::new(3.0, 4.0, 5.0));
+        assert!((pr.k1 - 0.25).abs() < 1e-9 && (pr.k2 - 0.25).abs() < 1e-9, "{pr:?}");
+        assert!((pr.point.length() - 4.0).abs() < 1e-9, "{pr:?}");
+    }
+
+    /// A cylinder of radius 3 from outside: 1/3 round it, 0 along it.
+    #[test]
+    fn a_cylinder_bends_round_and_not_along() {
+        let mut k = Kernel::new(&KernelOptions::default());
+        let b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 3.0, 10.0).unwrap();
+        let pr = principal_of(&k, &b, Point3::new(5.0, 0.0, 5.0));
+        assert!((pr.k1 - 1.0 / 3.0).abs() < 1e-9, "{pr:?}");
+        assert!(pr.k2.abs() < 1e-9, "{pr:?}");
+        // the curved direction runs round the axis, square to it
+        assert!(pr.d1.z.abs() < 1e-9, "{pr:?}");
+    }
+
+    /// The saddle `z = x y` (a bilinear patch over [-1, 1]^2) at its middle: one curvature up,
+    /// one down, 1 each.
+    #[test]
+    fn a_saddle_bends_both_ways() {
+        use crate::geom::tol::USE_DEFAULT;
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::topology::brep::p3::new_brep;
+        use crate::topology::brep::sheet::face_on;
+        let mut k = Kernel::new(&KernelOptions::default());
+        let patch = BSplineSurface::create_bilinear_surface(
+            Point3::new(-1.0, -1.0, 1.0),
+            Point3::new(1.0, -1.0, -1.0),
+            Point3::new(-1.0, 1.0, -1.0),
+            Point3::new(1.0, 1.0, 1.0),
+        )
+        .unwrap();
+        let surface = Surface::from(patch);
+        let bx = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
+        let f = face_on(&mut k, &mut b, surface, &bx).unwrap();
+        let pr = principal_curvatures(&k, &b, f, Point3::new(0.0, 0.0, 0.5))
+            .unwrap()
+            .unwrap();
+        assert!(pr.k1 > 0.0 && pr.k2 < 0.0, "{pr:?}");
+        assert!((pr.k1 - 1.0).abs() < 1e-9 && (pr.k2 + 1.0).abs() < 1e-9, "{pr:?}");
+    }
 }
