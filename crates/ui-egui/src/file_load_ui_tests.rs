@@ -1182,6 +1182,70 @@ fn bodies(app: &SolveApp) -> usize {
     app.session.world_state().map_or(0, |state| state.bodies.len())
 }
 
+#[test]
+fn opening_a_file_from_home_shows_progress_and_cancel_until_the_design_lands() {
+    let dir = scratch("home-open");
+    let path = large_design(&dir, 0);
+    for size in [vec2(1280.0, 720.0), vec2(640.0, 480.0)] {
+        let mut w = Win::new();
+        w.size = size;
+        w.app.home.open = true;
+        let (started, release) = hold_next(&mut w);
+        crate::file_load::begin(&mut w.app, &path, false);
+        started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+        for _ in 0..3 {
+            w.frame(vec![]);
+        }
+        assert!(w.app.home.open && w.app.file_load.busy(), "Home stays open while the worker waits");
+        let cancel = crate::scenario::handle_at("file_loading:cancel").expect("Home shows the loading card's Cancel button");
+        assert!(Rect::from_min_size(Pos2::ZERO, size).contains(cancel), "Cancel is inside the window at {size:?}");
+        assert!(crate::scenario::rect_of("operations:panel").is_none(), "Home has no operations panel");
+        release.send(()).unwrap();
+        frames_until(&mut w, "the file opened from Home lands", |app| app.file_load.idle());
+        w.frame(vec![]);
+        assert!(!w.app.home.open, "the loaded design replaces Home");
+        assert_eq!(bodies(&w.app), 1);
+        assert!(w.app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, &path)));
+        assert!(crate::scenario::handle_at("file_loading:cancel").is_none(), "the completed load's card disappears");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn returning_home_during_a_file_open_shows_cancel_and_preserves_the_current_design() {
+    let dir = scratch("home-cancel");
+    let path = large_design(&dir, 0);
+    let mut w = Win::new();
+    w.size = vec2(1280.0, 720.0);
+    w.app.home.open = false;
+    w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    let original = w.app.session.doc.clone();
+    let (started, release) = hold_next(&mut w);
+    crate::file_load::begin(&mut w.app, &path, false);
+    started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+    for _ in 0..3 {
+        w.frame(vec![]);
+    }
+    assert!(crate::scenario::rect_of("operations:panel").is_some(), "the workspace shows the operation");
+    assert!(crate::scenario::handle_at("file_loading:cancel").is_none());
+    w.app.home.open = true;
+    for _ in 0..3 {
+        w.frame(vec![]);
+    }
+    assert!(w.app.home.open && w.app.file_load.busy());
+    assert!(crate::scenario::rect_of("operations:panel").is_none());
+    let cancel = crate::scenario::handle_at("file_loading:cancel").expect("Cancel stays available after returning Home");
+    w.gesture(&[cancel]);
+    assert!(!w.app.file_load.busy(), "Home's Cancel button cancels the open");
+    drop(release);
+    w.frame(vec![]);
+    assert!(w.app.home.open);
+    assert!(std::sync::Arc::ptr_eq(&original, &w.app.session.doc));
+    assert_eq!((w.app.docs.count(), bodies(&w.app)), (1, 1));
+    assert!(crate::scenario::handle_at("file_loading:cancel").is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// With the design usable (the default), a file opening is a row of the operations panel, not a
 /// card over the design: the design takes edits meanwhile, and the file opens in a tab of its own
 /// beside the edited design, which keeps the edits.
