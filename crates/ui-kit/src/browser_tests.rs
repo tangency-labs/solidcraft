@@ -264,9 +264,14 @@ fn a_range_never_mixes_kinds_and_rows_that_are_no_items_only_click() {
 #[test]
 fn the_fold_arrow_folds_and_a_folder_label_click_folds_too() {
     let rig = Rig::new();
+    // The click's frame drew the rows before the host had the event; the host's fold shows in the
+    // rows it emits on the next frame.
     assert_eq!(rig.click(rig.at("fold:Bodies")), vec![Event::Fold { id: 1, open: false }]);
+    assert_eq!(rig.labels(), ["Bodies", "A", "B", "C", "G", "Settings"], "drawn before the host folded it");
+    rig.frame(Vec::new());
     assert_eq!(rig.labels(), ["Bodies", "G", "Settings"], "the host folded it");
     assert_eq!(rig.click(rig.at("row:Bodies")), vec![Event::Click(1), Event::Fold { id: 1, open: true }]);
+    rig.frame(Vec::new());
     assert_eq!(rig.labels(), ["Bodies", "A", "B", "C", "G", "Settings"]);
 }
 

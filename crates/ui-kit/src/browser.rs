@@ -3,6 +3,9 @@
 //! with [`Rows::next_visible`] and [`Rows::skip`]); the panel draws them with [`tree_row`] and
 //! returns what the user did as [`Event`]s. It never changes the host's state: selection,
 //! visibility, folds, names and order are the host's, and each event maps to one of its commands.
+//! The events come back after the frame's rows are drawn, so the host's answer shows in the rows it
+//! emits next frame: on [`Event::Fold`] it closes the row and stops emitting its children itself
+//! (the panel draws exactly the rows it is given).
 //!
 //! The panel keeps, per presentation, what only the gesture needs ([`BrowserState`]): the Shift
 //! anchor and the rows' order, the slow second click that renames, the inline name editor, the
