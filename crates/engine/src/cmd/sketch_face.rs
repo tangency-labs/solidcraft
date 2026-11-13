@@ -165,9 +165,6 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 if !super::face_contains(&mesh, tris, local_point, tolerance * 10.0) {
                     continue;
                 }
-                let Some(centroid) = face_centroid(&mesh, tris) else {
-                    continue;
-                };
                 let Some(exact_plane) = (if fixed {
                     body.body.planar_face(index).or_else(|| body.body.face_plane(index))
                 } else {
@@ -175,8 +172,11 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 }) else {
                     continue;
                 };
+                // The exact plane's own origin lies on the face's plane: the distance test and the
+                // picked plane's offset read it, not a centre worked out from the mesh.
                 let normal = exact_plane.normal();
-                if (local_point - centroid).dot(normal).abs() > tolerance * 10.0 {
+                let on_plane = exact_plane.origin;
+                if (local_point - on_plane).dot(normal).abs() > tolerance * 10.0 {
                     continue;
                 }
                 if chosen.is_some() {
@@ -184,8 +184,8 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 }
                 let relative = mat_mul(&author_inverse, &frame);
                 let normal = apply_vector(&relative, normal).normalized().ok_or_else(|| bad(cmd, "invalid planar face normal"))?;
-                let centroid = apply_point(&relative, centroid);
-                let picked = Plane::from_normal(normal * centroid.dot(normal), normal).ok_or_else(|| bad(cmd, "invalid selected planar face"))?;
+                let on_plane = apply_point(&relative, on_plane);
+                let picked = Plane::from_normal(normal * on_plane.dot(normal), normal).ok_or_else(|| bad(cmd, "invalid selected planar face"))?;
                 chosen = Some((body, index, path.clone(), picked));
             }
         }
@@ -235,19 +235,6 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
         Err(error) => return Err(bad(cmd, format!("{error}; choose a supported exact face or explicitly use fixed:true"))),
     };
     Ok(PlaneRef::Face { plane, at, name, anchor })
-}
-
-/// The area-weighted centre of triangles `tris` of `mesh` (one face's, from
-/// [`super::face_triangles`]), as [`solidcraft_kernel::Body::faces`] gives a face's centroid.
-fn face_centroid(mesh: &solidcraft_geom::Mesh, tris: &[usize]) -> Option<solidcore_record::Vec3> {
-    let mut area = 0.0;
-    let mut sum = solidcore_record::Vec3::ZERO;
-    for [a, b, c] in tris.iter().filter_map(|i| mesh.triangles.get(*i)).filter_map(|t| mesh.tri(t)) {
-        let piece = (b - a).cross(c - a).len() * 0.5;
-        area += piece;
-        sum += (a + b + c) * (piece / 3.0);
-    }
-    (area > 0.0).then(|| sum / area)
 }
 
 /// The sole durable face attachment beneath an offset/angle wrapper.
