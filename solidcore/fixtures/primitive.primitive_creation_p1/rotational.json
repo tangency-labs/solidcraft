@@ -1,0 +1,202 @@
+{
+  "cases": [
+    {
+      "name": "rotate_on_axis",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:2227",
+      "inputs": {
+        "op": 5,
+        "data": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "rotate_parallel",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:2227",
+      "inputs": {
+        "op": 5,
+        "data": [
+          0,
+          2,
+          0,
+          0,
+          2,
+          0,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "rotate_perpendicular",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:2227",
+      "inputs": {
+        "op": 5,
+        "data": [
+          0,
+          1,
+          0,
+          1,
+          3,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "rotate_short",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:2227",
+      "inputs": {
+        "op": 5,
+        "data": [
+          0,
+          1,
+          0,
+          0,
+          1.0000001,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "rotate_crossing",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:2227",
+      "inputs": {
+        "op": 5,
+        "data": [
+          0,
+          2,
+          0,
+          -2,
+          -2,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "rotate_quarter_arc",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:2227",
+      "inputs": {
+        "op": 5,
+        "data": [
+          1,
+          0,
+          0,
+          0,
+          2,
+          0,
+          90,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "rotate_half_wrong_axis",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:2227",
+      "inputs": {
+        "op": 5,
+        "data": [
+          1,
+          0,
+          0,
+          0,
+          2,
+          0,
+          180,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "rotate_half_sphere",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:2227",
+      "inputs": {
+        "op": 5,
+        "data": [
+          1,
+          0,
+          0,
+          0,
+          2,
+          -90,
+          90,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "rotate_full_torus",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:2227",
+      "inputs": {
+        "op": 5,
+        "data": [
+          1,
+          3,
+          0,
+          0,
+          1,
+          0,
+          360,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    }
+  ]
+}

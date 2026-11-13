@@ -1,0 +1,8 @@
+#### UB-270. `SmTopologySweep::DoSweep` (whole B-rep, tagging): `TagProfile` reads wire edges `RemoveAllTopology` deleted
+- **Severity:** Crash / undefined behaviour
+- **Area:** Sweeps
+- **Location:** `source/SMLib/src/SmTopologySweep.cpp:883` (`pBrepToSweep->GetWireEdges(sWireEdges)`), `:906` (`pBrepToSweep->RemoveAllTopology()`, which deletes those edges after their copies went to `pWireBrep`), `:1004`-`:1015` (`if (m_bDoTagging)`: `TagProfile(NULL, &sAllEdges, &sShellVerts, ...)` with `sAllEdges` = `sWireEdges` twice), `TagProfile` `:522` (`pE->FindAttribute(SM_AI_TAG)` and `AddAttribute` on each).
+- **What happens:** with tagging on, the whole-B-rep branch tags the original wire edges after deleting them, so `TagProfile` reads and writes freed edges. (It tags only those edges: the silhouette edges swept next stay untagged, and `DoSweepEdgesHigher` then fails its `NER(pETag)`, `:2386`; the copies in `pWireBrep` are not tagged either.)
+- **Trigger:** `SetTagging(TRUE, id)` and a whole-B-rep `DoSweep` (all target arrays NULL) of a body with at least one wire edge.
+- **How found:** `sweep.topology_sweep` difftest case `nm_box_linear_z_tagging_ub270` (`sc_sweep_topology_sweep_body` input `[0,1,0,0,10,0,0,0,0,0,0,0,1,1,7]`: an `SmApiCreateBox(origin, 4, 3, 2)` with a wire edge and a shell vertex, translated by (0,0,10), tag id 7).
+- **Confirmed:** yes, on the C++ reference (Ubuntu x86_64 prebuilt, glibc): 129/200 fresh processes crash and 71/200 return `SM_ERR_NULL_POINTER`. The difftest FFI guard refuses these inputs; without wire edges the same call is compared (both sides `SM_ERR_NULL_POINTER`).

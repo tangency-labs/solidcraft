@@ -1,13 +1,20 @@
 //! Incremental product rasterization. Every phase yields between bounded work units.
+//!
+//! One rasteriser draws both the product image ([`ImageTask`]: the product camera, one tile, then
+//! a PNG) and pictures ([`PictureTask`]: the product camera or an orthographic view frame, any
+//! pixel windows, each handed back as straight-alpha sRGB rows). It prepares once (appearances,
+//! projected triangles, glass sorted back to front) and then draws each tile.
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::Serialize;
-use solidcore_record::Vec3;
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::pixel_grid::{MAX_SIDE_PX, PixelGrid};
 
 use super::{CancelToken, ErrorCode, ImageRequest, JobError, Phase, Progress, Result};
-use crate::{FaceAppearance, Mat4, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};
+use crate::{FaceAppearance, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};
+use solidcraft_viewport::{Camera, Mat4};
 
 #[cfg(test)]
 #[path = "image_tests.rs"]
@@ -17,8 +24,16 @@ pub const MAX_TRIANGLES: u64 = 262_144;
 pub const MAX_GEOMETRY_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_JOB_BYTES: u64 = 384 * 1024 * 1024;
 pub const MAX_PIXEL_TESTS: u64 = 128_000_000;
+/// A picture's, however large: a fixed bound on its time, about a minute at worst on one thread.
+pub const MAX_PICTURE_PIXEL_TESTS: u64 = 400_000_000;
+/// Each tile of a picture looks at every triangle again, projecting it to find its part in the tile: at most this
+/// many looks in all, a bound on that part of its time (1024 tiles at [`MAX_TRIANGLES`]).
+pub const MAX_PICTURE_TILE_VISITS: u64 = 1 << 28;
+// Existing source/task/host fixed preparation allowance. Cursor backing is
+// charged separately; this value is unchanged by prepared submission metadata.
+pub(crate) const PREPARATION_METADATA_BYTES: u64 = 262_144;
+
 const MAX_STEP: usize = 16_384;
-const SS: usize = 2;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct Admission {
@@ -27,6 +42,16 @@ pub struct Admission {
     /// Supersampled raster work only; absent for ray tracing and registered executors.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projected_pixel_tests: Option<u64>,
+    /// Present when the job explicitly refreshes its photon map every pass.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caustic_work: Option<super::caustics::CausticWork>,
+    /// CPU worker count selected during admission and retained through execution.
+    /// Auto records the available parallelism at admission; other producers omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_workers: Option<u16>,
+    /// Native host RAM snapshot and shared reservations; absent without a native host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_memory: Option<super::HostMemoryAdmission>,
     pub geometry_bytes: u64,
     pub pixel_scratch_bytes: u64,
     pub preparation_bytes: u64,
@@ -53,6 +78,18 @@ fn add_bytes(sum: &mut u64, count: usize, size: usize, maximum: u64) -> Result<(
 /// counted even when another owner already holds them. Allocator and codec internals are estimates.
 /// Includes the CPU raster work estimate and its 384 MiB per-job check.
 pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    admit_inner(scene, request, true)
+}
+
+/// Internal byte/header estimate, never a successful public preflight. A host
+/// must finish the strict certificate under its reserved envelope before use.
+pub(crate) fn admit_layout(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    admit_inner(scene, request, false)
+}
+
+fn admit_inner(scene: &ProductScene, request: &ImageRequest, certify: bool) -> Result<Admission> {
+    #[cfg(not(feature = "raytrace-cpu"))]
+    let _ = certify;
     if request.environment.is_some() || (request.textures.is_some() && request.integrator != super::Integrator::Raytrace) {
         return Err(JobError::new(ErrorCode::InvalidRequest, "captured GPU environments and raster textures require a registered image executor"));
     }
@@ -72,7 +109,11 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> 
                 let defaults = super::RaytraceOptions::default();
                 let options = request.raytrace.as_ref().unwrap_or(&defaults);
                 options.validate()?;
-                crate::raytrace::image::admit(scene, request, options)
+                if certify {
+                    crate::raytrace::image::admit(scene, request, options)
+                } else {
+                    crate::raytrace::image::admit_layout(scene, request, options)
+                }
             }
             #[cfg(not(feature = "raytrace-cpu"))]
             {
@@ -84,7 +125,10 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> 
 
 pub(crate) fn admit_base(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
     let mut admission = admit_raster(admit_source(scene, request, MAX_TRIANGLES)?)?;
-    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, request)?);
+    let projection = Projection::Camera { camera: request.camera, width: request.width, height: request.height };
+    let view = projection.view(scene, Supersample::Two.factor())?;
+    let whole = tile_samples(&[PixelWindow { x0: 0, y0: 0, x1: request.width, y1: request.height }], Supersample::Two.factor());
+    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &[], &whole, MAX_PIXEL_TESTS)?);
     Ok(admission)
 }
 
@@ -112,13 +156,27 @@ fn admit_source(scene: &ProductScene, request: &ImageRequest, max_triangles: u64
 /// Ray tracing has no raster projected-triangle lists. Keep a conservative
 /// pixel/codec allowance, then let the ray tracer charge its actual BVH and film.
 #[cfg(feature = "raytrace-cpu")]
-pub(crate) fn admit_raytrace_source(scene: &ProductScene, request: &ImageRequest, budget: super::CpuBudget) -> Result<Admission> {
+pub(crate) fn admit_raytrace_source(
+    scene: &ProductScene,
+    request: &ImageRequest,
+    budget: super::CpuBudget,
+    dimensions: (u32, u32),
+) -> Result<Admission> {
     budget.validate_execution()?;
-    budget.validate_image(request.width, request.height, request.raytrace.as_ref().and_then(|o| o.progressive))?;
-    let source = admit_source_with_budget(scene, request, budget.limits().max_triangles, budget)?;
+    budget.validate_image(
+        dimensions.0,
+        dimensions.1,
+        request.raytrace.as_ref().map(super::RaytraceOptions::camera_sampling).transpose()?.flatten(),
+    )?;
+    validate_request(request)?;
+    let limits = budget.limits();
+    let source =
+        admit_source_with_limits(scene, dimensions, limits.max_triangles, limits.max_bodies, limits.max_geometry_bytes, budget.image_limits(false))?;
     let mut a = source.admission;
+    // The codec and retained previews have the requested final dimensions.
+    a.encoded_limit = u64::from(request.width) * u64::from(request.height) * 8 + 65_536;
     a.pixel_scratch_bytes = source.raster_scratch_bytes;
-    a.preparation_bytes = 262_144;
+    a.preparation_bytes = PREPARATION_METADATA_BYTES;
     a.estimated_total_bytes = a
         .geometry_bytes
         .checked_add(a.pixel_scratch_bytes)
@@ -131,8 +189,16 @@ pub(crate) fn admit_raytrace_source(scene: &ProductScene, request: &ImageRequest
 }
 
 fn admit_source_with_budget(scene: &ProductScene, request: &ImageRequest, max_triangles: u64, budget: super::CpuBudget) -> Result<Source> {
+    validate_request(request)?;
     let limits = budget.limits();
-    admit_source_with_limits(scene, request, max_triangles, limits.max_bodies, limits.max_geometry_bytes, budget.image_limits(false))
+    admit_source_with_limits(
+        scene,
+        (request.width, request.height),
+        max_triangles,
+        limits.max_bodies,
+        limits.max_geometry_bytes,
+        budget.image_limits(false),
+    )
 }
 
 /// A registered executor may request a larger finite source envelope without
@@ -152,22 +218,17 @@ pub fn admit_geometry_with_limits(
         || max_geometry_bytes == 0
         || max_geometry_bytes > 4 * 1024 * 1024 * 1024
         || image_limits.max_dimension > 16_384
-        || image_limits.max_pixels > 67_108_864
+        || image_limits.max_pixels > 134_217_728
         || image_limits.max_scratch_bytes > super::NATIVE_CPU_POOL_BYTES
     {
         return Err(limit("registered source envelope exceeds implementation bounds"));
     }
-    Ok(admit_source_with_limits(scene, request, max_triangles, max_bodies, max_geometry_bytes, image_limits)?.admission)
+    validate_request(request)?;
+    Ok(admit_source_with_limits(scene, (request.width, request.height), max_triangles, max_bodies, max_geometry_bytes, image_limits)?.admission)
 }
 
-fn admit_source_with_limits(
-    scene: &ProductScene,
-    request: &ImageRequest,
-    max_triangles: u64,
-    max_bodies: usize,
-    max_geometry_bytes: u64,
-    image_limits: crate::RenderLimits,
-) -> Result<Source> {
+/// What an image request must be, whichever executor runs it.
+fn validate_request(request: &ImageRequest) -> Result<()> {
     if !request.camera.is_valid() {
         return Err(JobError::new(ErrorCode::InvalidRequest, "invalid image camera"));
     }
@@ -177,6 +238,18 @@ fn admit_source_with_limits(
     if request.integrator == super::Integrator::Raytrace && request.studio_weights.is_some() {
         return Err(JobError::new(ErrorCode::InvalidRequest, "CPU ray tracing uses explicit lights rather than studio_weights"));
     }
+    Ok(())
+}
+
+/// `(width, height)`: the image (or tile) size whose pixel scratch is estimated.
+fn admit_source_with_limits(
+    scene: &ProductScene,
+    (width, height): (u32, u32),
+    max_triangles: u64,
+    max_bodies: usize,
+    max_geometry_bytes: u64,
+    image_limits: crate::RenderLimits,
+) -> Result<Source> {
     if scene.meshes.len() > max_bodies {
         return Err(limit("too many product bodies"));
     }
@@ -190,8 +263,8 @@ fn admit_source_with_limits(
             backend: None,
             mode: RenderMode::Preview,
             operation: RenderOperation::Image,
-            width: u64::from(request.width),
-            height: u64::from(request.height),
+            width: u64::from(width),
+            height: u64::from(height),
             format: Some(RenderFormat::Png),
             features: Vec::new(),
             policy: Default::default(),
@@ -232,12 +305,15 @@ fn admit_source_with_limits(
             return Err(invalid("invalid body opacity"));
         }
     }
-    let encoded_limit = u64::from(request.width) * u64::from(request.height) * 8 + 65_536;
+    let encoded_limit = u64::from(width) * u64::from(height) * 8 + 65_536;
     Ok(Source {
         admission: Admission {
             triangles,
             face_appearances: faces,
             projected_pixel_tests: None,
+            caustic_work: None,
+            cpu_workers: None,
+            host_memory: None,
             geometry_bytes: geometry,
             pixel_scratch_bytes: 0,
             preparation_bytes: 0,
@@ -257,7 +333,7 @@ fn admit_raster(source: Source) -> Result<Admission> {
         .triangles
         .checked_mul(48)
         .and_then(|n| a.face_appearances.checked_mul(160).and_then(|f| n.checked_add(f)))
-        .and_then(|n| n.checked_add(source.bodies * 128 + 262_144))
+        .and_then(|n| n.checked_add(source.bodies * 128 + PREPARATION_METADATA_BYTES))
         .ok_or_else(|| limit("work list size overflow"))?;
     let total = a
         .geometry_bytes
@@ -273,26 +349,289 @@ fn admit_raster(source: Source) -> Result<Admission> {
     Ok(a)
 }
 
-/// The same clipping, supersampling and bounds govern admission and raster work.
-struct Projection {
+fn add_pixel_tests(sum: &mut u64, triangle: &Triangle, within: [usize; 4], max: u64) -> Result<()> {
+    let Some([x0, x1, y0, y1]) = narrowed(triangle.bounds, within) else {
+        return Ok(());
+    };
+    let tests = ((x1 - x0 + 1) as u64).checked_mul((y1 - y0 + 1) as u64).ok_or_else(|| limit("pixel work overflow"))?;
+    *sum = sum.checked_add(tests).ok_or_else(|| limit("pixel work overflow"))?;
+    if *sum > max {
+        return Err(limit(&format!("projected product exceeds {max} pixel tests; reduce image dimensions or visible geometry")));
+    }
+    Ok(())
+}
+
+fn validate_face(face: &FaceAppearance) -> Result<()> {
+    if !face.opacity.is_finite() || !(0.0..=1.0).contains(&face.opacity) {
+        return Err(invalid("invalid face opacity"));
+    }
+    Ok(())
+}
+
+/// Where sample bounds `[x0, x1, y0, y1]` (inclusive) meet `within`, if they do.
+fn narrowed([x0, x1, y0, y1]: [usize; 4], [from_x, to_x, from_y, to_y]: [usize; 4]) -> Option<[usize; 4]> {
+    let bounds = [x0.max(from_x), x1.min(to_x), y0.max(from_y), y1.min(to_y)];
+    (bounds[0] <= bounds[1] && bounds[2] <= bounds[3]).then_some(bounds)
+}
+
+/// Each tile's sample bounds, each non-empty, at `ss` samples a pixel each way: only these are drawn,
+/// so only these are counted, however large the canvas is.
+fn tile_samples(tiles: &[PixelWindow], ss: usize) -> Vec<[usize; 4]> {
+    tiles.iter().map(|t| [t.x0 as usize * ss, t.x1 as usize * ss - 1, t.y0 as usize * ss, t.y1 as usize * ss - 1]).collect()
+}
+
+/// A triangle's pixel tests in every tile: overlapping or repeated tiles each draw it again.
+fn add_tile_tests(sum: &mut u64, triangle: &Triangle, tiles: &[[usize; 4]], max: u64) -> Result<()> {
+    tiles.iter().try_for_each(|&tile| add_pixel_tests(sum, triangle, tile, max))
+}
+
+fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], tiles: &[[usize; 4]], max: u64) -> Result<u64> {
+    let mut tests = 0;
+    for (role, body) in scene.meshes.iter().enumerate() {
+        let mut looks = BTreeMap::new();
+        for face in &body.faces {
+            validate_face(face)?;
+            // Match the document and task policy: the last assignment wins.
+            looks.insert(face.face, face);
+        }
+        for index in 0..body.mesh.triangles.len() {
+            let look = body.mesh.tri_face.get(index).and_then(|face| looks.get(face)).copied();
+            if let Some(triangle) = view.project(body, index, look, paints(roles, role))? {
+                add_tile_tests(&mut tests, &triangle, tiles, max)?;
+            }
+        }
+    }
+    Ok(tests)
+}
+
+fn reserve<T>(count: usize) -> Result<Vec<T>> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(count).map_err(|_| JobError::new(ErrorCode::AllocationFailed, "could not reserve render work memory"))?;
+    Ok(v)
+}
+
+/// How a picture's pixels are sampled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Supersample {
+    /// One sample, at the pixel's centre.
+    One,
+    /// 2 × 2 samples, a quarter and three quarters of the way across the pixel, averaged in
+    /// linear light (the product image's).
+    #[default]
+    Two,
+}
+
+impl Supersample {
+    fn factor(self) -> usize {
+        match self {
+            Self::One => 1,
+            Self::Two => 2,
+        }
+    }
+}
+
+/// What a body is in a picture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BodyRole {
+    /// Drawn in its own colours.
+    #[default]
+    Painted,
+    /// Hides what lies behind it and draws nothing itself (a reference part that hides the model
+    /// while only its lines are drawn).
+    DepthOnly,
+}
+
+/// An orthographic view frame: a point `p` lies on paper at `basis.to_local(p) · scale + shift`
+/// (millimetres, paper y up), seen from the side `basis`'s normal (x × y) points to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OrthoFrame {
+    pub basis: Plane,
+    /// Paper millimetres per model millimetre.
+    pub scale: f64,
+    /// Where the basis's own origin lies on paper.
+    pub shift: Vec2,
+}
+
+impl OrthoFrame {
+    /// Where `p` lies on paper.
+    pub fn to_paper(&self, p: Vec3) -> Vec2 {
+        self.basis.to_local(p) * self.scale + self.shift
+    }
+}
+
+/// What a picture shows and how many pixels it has.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Projection {
+    /// The product camera's view, `width × height` pixels: what [`ImageTask`] draws.
+    Camera { camera: Camera, width: u32, height: u32 },
+    /// An orthographic view frame, on the pixel grid of a paper rectangle.
+    Ortho { frame: OrthoFrame, grid: PixelGrid },
+}
+
+impl Projection {
+    fn size(&self) -> (u32, u32) {
+        match self {
+            Self::Camera { width, height, .. } => (*width, *height),
+            Self::Ortho { grid, .. } => (grid.width, grid.height),
+        }
+    }
+
+    /// The clip-space map onto a canvas of `ss` samples per pixel each way, and the eye.
+    fn view(&self, scene: &ProductScene, ss: usize) -> Result<View> {
+        let (width, height) = self.size();
+        if width == 0 || height == 0 || width > MAX_SIDE_PX || height > MAX_SIDE_PX {
+            return Err(limit(&format!("a picture is 1 to {MAX_SIDE_PX} px on a side")));
+        }
+        let (sw, sh) = (width as usize * ss, height as usize * ss);
+        match *self {
+            Self::Camera { camera, .. } => {
+                if !camera.is_valid() {
+                    return Err(JobError::new(ErrorCode::InvalidRequest, "invalid image camera"));
+                }
+                let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
+                if !radius.is_finite() {
+                    return Err(invalid("invalid product bounds"));
+                }
+                Ok(View {
+                    vp: camera.view_proj(sw as f64 / sh as f64, radius),
+                    back: camera.back(),
+                    eye: (camera.fov > 0.0).then(|| camera.eye()),
+                    reference: camera.target,
+                    sw,
+                    sh,
+                })
+            }
+            Self::Ortho { frame, grid } => {
+                let request = |message: &str| JobError::new(ErrorCode::InvalidRequest, message);
+                solidcraft_geom::section::validate_plane(&frame.basis).map_err(|_| request("an orthographic frame needs an orthonormal basis"))?;
+                if !frame.scale.is_finite() || frame.scale <= 0.0 || !frame.shift.is_finite() {
+                    return Err(request("an orthographic frame needs a finite scale above 0 and a finite shift"));
+                }
+                if ![grid.x0, grid.y0, grid.pitch].iter().all(|v| v.is_finite()) || grid.pitch <= 0.0 {
+                    return Err(request("a picture's pixel grid needs a finite position and pixel size"));
+                }
+                // Depth runs from the nearest corner of the design's box (0) to the farthest (1).
+                let (o, n) = (frame.basis.origin, frame.basis.normal());
+                let b = &scene.bounds;
+                let (mut near, mut far) = (f64::INFINITY, f64::NEG_INFINITY);
+                for corner in 0..8 {
+                    let pick = |bit: usize, lo: f64, hi: f64| if corner & bit == 0 { lo } else { hi };
+                    let p = Vec3::new(pick(1, b.min.x, b.max.x), pick(2, b.min.y, b.max.y), pick(4, b.min.z, b.max.z));
+                    let depth = -(p - o).dot(n);
+                    (near, far) = (near.min(depth), far.max(depth));
+                }
+                let range = if far - near > 1e-9 { far - near } else { 1.0 };
+                let near = if near.is_finite() { near } else { 0.0 };
+                if !range.is_finite() {
+                    return Err(invalid("invalid product bounds"));
+                }
+                // Paper x and y onto -1..1 across the grid (y up, as clip space), depth onto 0..1.
+                let (bx, by) = (frame.basis.x, frame.basis.y);
+                let (kx, ky) = (2.0 * frame.scale / (f64::from(width) * grid.pitch), 2.0 * frame.scale / (f64::from(height) * grid.pitch));
+                let cx = kx * -o.dot(bx) + 2.0 * (frame.shift.x - grid.x0) / (f64::from(width) * grid.pitch) - 1.0;
+                let cy = ky * -o.dot(by) + 2.0 * (frame.shift.y - grid.y0) / (f64::from(height) * grid.pitch) - 1.0;
+                let (bx, by, nv) = ([bx.x, bx.y, bx.z], [by.x, by.y, by.z], [n.x, n.y, n.z]);
+                let column = |i: usize| [kx * bx[i], ky * by[i], -nv[i] / range, 0.0];
+                let vp = Mat4([column(0), column(1), column(2), [cx, cy, (o.dot(n) - near) / range, 1.0]]);
+                if vp.0.iter().flatten().any(|v| !v.is_finite()) {
+                    return Err(request("an orthographic frame too large for its pixel grid"));
+                }
+                Ok(View { vp, back: n, eye: None, reference: o, sw, sh })
+            }
+        }
+    }
+}
+
+/// A window of a picture's pixels: columns `x0..x1` and rows `y0..y1`, row 0 at the top.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PixelWindow {
+    pub x0: u32,
+    pub y0: u32,
+    pub x1: u32,
+    pub y1: u32,
+}
+
+impl PixelWindow {
+    fn width(&self) -> usize {
+        self.x1.saturating_sub(self.x0) as usize
+    }
+    fn height(&self) -> usize {
+        self.y1.saturating_sub(self.y0) as usize
+    }
+}
+
+/// At most this many tiles in one picture.
+pub const MAX_TILES: usize = 65_536;
+
+/// A picture of a product scene, drawn tile by tile.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PictureRequest {
+    pub projection: Projection,
+    /// The windows drawn, in order: each is handed back as its rows ([`PicturePoll::Tile`]).
+    pub tiles: Vec<PixelWindow>,
+    pub supersample: Supersample,
+    /// One role per body of the scene, in order; empty paints every body.
+    pub roles: Vec<BodyRole>,
+    /// `None`: a transparent background.
+    pub background: Option<[u8; 3]>,
+}
+
+/// The checks a picture passes before anything is allocated, and what it costs: the prepared
+/// lists as a product image's, the pixel scratch of its largest tile.
+pub fn admit_picture(scene: &ProductScene, request: &PictureRequest) -> Result<Admission> {
+    let (width, height) = request.projection.size();
+    if request.tiles.is_empty() || request.tiles.len() > MAX_TILES {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "a picture is drawn in 1 to 65536 tiles"));
+    }
+    if request.tiles.iter().any(|t| t.x0 >= t.x1 || t.y0 >= t.y1 || t.x1 > width || t.y1 > height) {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "a tile is an empty window or reaches outside its picture"));
+    }
+    if !request.roles.is_empty() && request.roles.len() != scene.meshes.len() {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "a picture gives every body a role, or none"));
+    }
+    let widest = request.tiles.iter().map(|t| t.x1 - t.x0).max().unwrap_or(1);
+    let tallest = request.tiles.iter().map(|t| t.y1 - t.y0).max().unwrap_or(1);
+    let budget = super::CpuBudget::Compact;
+    let limits = budget.limits();
+    let mut admission = admit_raster(admit_source_with_limits(
+        scene,
+        (widest, tallest),
+        MAX_TRIANGLES,
+        limits.max_bodies,
+        limits.max_geometry_bytes,
+        budget.image_limits(false),
+    )?)?;
+    // Checked first: counting the pixel tests below takes as many looks.
+    if request.tiles.len() as u64 * admission.triangles > MAX_PICTURE_TILE_VISITS {
+        return Err(limit(&format!(
+            "a picture of {} tiles and {} triangles exceeds {MAX_PICTURE_TILE_VISITS} tile visits; draw it in fewer tiles",
+            request.tiles.len(),
+            admission.triangles
+        )));
+    }
+    let view = request.projection.view(scene, request.supersample.factor())?;
+    let tiles = tile_samples(&request.tiles, request.supersample.factor());
+    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &request.roles, &tiles, MAX_PICTURE_PIXEL_TESTS)?);
+    Ok(admission)
+}
+
+/// The map onto the canvas, and where the eye is.
+struct View {
     vp: Mat4,
+    /// Toward the eye (an orthographic view's direction).
     back: Vec3,
-    target: Vec3,
+    /// A perspective view's eye.
+    eye: Option<Vec3>,
+    /// A point the glass's back-to-front depth is measured from.
+    reference: Vec3,
+    /// The canvas's samples each way.
     sw: usize,
     sh: usize,
 }
 
-impl Projection {
-    fn new(scene: &ProductScene, request: &ImageRequest) -> Result<Self> {
-        let (sw, sh) = (request.width as usize * SS, request.height as usize * SS);
-        let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(request.camera.target);
-        if !radius.is_finite() {
-            return Err(invalid("invalid product bounds"));
-        }
-        Ok(Self { vp: request.camera.view_proj(sw as f64 / sh as f64, radius), back: request.camera.back(), target: request.camera.target, sw, sh })
-    }
-
-    fn project(&self, body: &crate::ProductMesh, triangle: usize, look: Option<&FaceAppearance>) -> Result<Option<Triangle>> {
+/// The same clipping, supersampling and bounds govern admission and raster work.
+impl View {
+    fn project(&self, body: &crate::ProductMesh, triangle: usize, look: Option<&FaceAppearance>, paint: bool) -> Result<Option<Triangle>> {
         let mesh = &body.mesh;
         let indices = mesh.triangles.get(triangle).ok_or_else(|| invalid("missing product triangle"))?;
         let vertices = indices.map(|i| mesh.positions.get(i as usize).copied());
@@ -307,15 +646,24 @@ impl Projection {
         }
         // Transmission is physical optical data, never a request to change CPU preview.
         // Keep the existing scalar sorted-alpha shading for glass previews.
-        let (colour, opacity, surface) = look.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |look| {
-            (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
-        });
+        let (colour, opacity, surface) = if !paint {
+            // A depth-only body is solid, whatever it is made of, and is never shaded.
+            (body.color, 1.0, None)
+        } else {
+            look.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |look| {
+                (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
+            })
+        };
         if surface.is_some() && opacity != 1.0 {
             return Err(invalid("opaque PBR requires opacity 1"));
         }
         let normals = if surface.is_some() {
-            [crate::surface::unit_direction(na), crate::surface::unit_direction(nb), crate::surface::unit_direction(nc)]
-                .map(|n| n.map_err(|e| invalid(&e.to_string())))
+            [
+                solidcraft_viewport::surface::unit_direction(na),
+                solidcraft_viewport::surface::unit_direction(nb),
+                solidcraft_viewport::surface::unit_direction(nc),
+            ]
+            .map(|n| n.map_err(|e| invalid(&e.to_string())))
         } else {
             [Ok(normals[0]), Ok(normals[1]), Ok(normals[2])]
         };
@@ -346,7 +694,7 @@ impl Projection {
         if !area.is_finite() {
             return Err(invalid("invalid projected area"));
         }
-        let centre_depth = (world[0] / 3.0 + world[1] / 3.0 + world[2] / 3.0 - self.target).dot(self.back);
+        let centre_depth = (world[0] / 3.0 + world[1] / 3.0 + world[2] / 3.0 - self.reference).dot(self.back);
         if !centre_depth.is_finite() {
             return Err(invalid("invalid triangle depth"));
         }
@@ -358,6 +706,7 @@ impl Projection {
             colour: colour.map(decode),
             opacity,
             surface,
+            paint,
             centre_depth,
             area,
             bounds: [x0 as usize, x1 as usize, y0 as usize, y1 as usize],
@@ -367,47 +716,9 @@ impl Projection {
     }
 }
 
-fn add_pixel_tests(sum: &mut u64, triangle: &Triangle) -> Result<()> {
-    let [x0, x1, y0, y1] = triangle.bounds;
-    let tests = ((x1 - x0 + 1) as u64).checked_mul((y1 - y0 + 1) as u64).ok_or_else(|| limit("pixel work overflow"))?;
-    *sum = sum.checked_add(tests).ok_or_else(|| limit("pixel work overflow"))?;
-    if *sum > MAX_PIXEL_TESTS {
-        return Err(limit("projected product exceeds 128000000 pixel tests; reduce image dimensions or visible geometry"));
-    }
-    Ok(())
-}
-
-fn validate_face(face: &FaceAppearance) -> Result<()> {
-    if !face.opacity.is_finite() || !(0.0..=1.0).contains(&face.opacity) {
-        return Err(invalid("invalid face opacity"));
-    }
-    Ok(())
-}
-
-fn projected_pixel_tests(scene: &ProductScene, request: &ImageRequest) -> Result<u64> {
-    let projection = Projection::new(scene, request)?;
-    let mut tests = 0;
-    for body in &scene.meshes {
-        let mut looks = BTreeMap::new();
-        for face in &body.faces {
-            validate_face(face)?;
-            // Match the document and task policy: the last assignment wins.
-            looks.insert(face.face, face);
-        }
-        for index in 0..body.mesh.triangles.len() {
-            let look = body.mesh.tri_face.get(index).and_then(|face| looks.get(face)).copied();
-            if let Some(triangle) = projection.project(body, index, look)? {
-                add_pixel_tests(&mut tests, &triangle)?;
-            }
-        }
-    }
-    Ok(tests)
-}
-
-fn reserve<T>(count: usize) -> Result<Vec<T>> {
-    let mut v = Vec::new();
-    v.try_reserve_exact(count).map_err(|_| JobError::new(ErrorCode::AllocationFailed, "could not reserve render work memory"))?;
-    Ok(v)
+/// Whether the body at `index` is painted: roles are one per body, or empty for all painted.
+fn paints(roles: &[BodyRole], index: usize) -> bool {
+    roles.get(index).is_none_or(|role| *role == BodyRole::Painted)
 }
 
 #[derive(Clone, Copy, Default)]
@@ -430,15 +741,18 @@ struct Triangle {
     inv_w: [f64; 3],
     colour: [f64; 3],
     opacity: f64,
-    surface: Option<crate::surface::OpaqueSurface>,
+    surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
+    /// Off for a depth-only body.
+    paint: bool,
     centre_depth: f64,
     area: f64,
+    /// Whole-canvas sample bounds `[x0, x1, y0, y1]` (inclusive), narrowed to the tile drawn.
     bounds: [usize; 4],
     x: usize,
     y: usize,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Stage {
     Looks,
     Prepare,
@@ -456,15 +770,32 @@ pub enum TaskPoll {
     Complete(Vec<u8>),
 }
 
-/// CPU product renderer with cooperative preparation, sorting, raster and PNG encoding.
+/// A step of a [`PictureTask`].
+pub enum PicturePoll {
+    Pending(Progress),
+    /// One tile, in the order asked: its straight-alpha sRGB RGBA rows, top row first.
+    Tile(PixelWindow, Vec<u8>),
+    /// Every tile has been handed back.
+    Complete,
+}
+
+/// The CPU rasteriser both the product image and pictures run: it prepares the scene once
+/// (appearances, projected triangles, glass sorted back to front), then draws each tile on a
+/// canvas of its own, sampling at the same whole-picture positions whichever tile a sample falls
+/// in, so tiles put side by side are the picture drawn whole.
 /// Transparency sorts triangle centres and blends in linear space; it is not refraction.
-pub struct ImageTask {
+struct Raster {
     scene: ProductScene,
-    request: ImageRequest,
     admission: Admission,
     cancel: CancelToken,
     stage: Stage,
-    projection: Projection,
+    view: View,
+    ss: usize,
+    roles: Vec<BodyRole>,
+    background: Option<[u8; 3]>,
+    tiles: Vec<PixelWindow>,
+    tile: usize,
+    studio_weights: Option<[f64; 3]>,
     looks: Vec<BTreeMap<u32, FaceAppearance>>,
     body: usize,
     item: usize,
@@ -482,40 +813,63 @@ pub struct ImageTask {
     pixels: Vec<[u8; 4]>,
     depth: Vec<f32>,
     pixel_tests: u64,
+    max_pixel_tests: u64,
+    /// Each tile's sample bounds ([`tile_samples`]), and all their samples, overlapping ones too: each is drawn.
+    samples_in: Vec<[usize; 4]>,
+    drawn_samples: u64,
     pixel_done: u64,
     draw: usize,
     triangle: Option<Triangle>,
     output: Vec<u8>,
-    encoder: Option<super::encoding::PngEncoding>,
 }
 
-impl ImageTask {
-    pub fn new(scene: ProductScene, request: ImageRequest, cancel: CancelToken) -> Result<Self> {
-        cancel.check()?;
-        if request.integrator != super::Integrator::Raster {
-            return Err(JobError::new(ErrorCode::InvalidRequest, "raster task cannot execute a raytrace request"));
-        }
-        let admission = admit(&scene, &request)?;
-        let projection = Projection::new(&scene, &request)?;
-        let (sw, sh) = (projection.sw, projection.sh);
+enum RasterPoll {
+    Pending,
+    Tile(PixelWindow, Vec<u8>),
+}
+
+impl Raster {
+    fn new(
+        scene: ProductScene,
+        request: PictureRequest,
+        studio_weights: Option<[f64; 3]>,
+        admission: Admission,
+        max_pixel_tests: u64,
+        cancel: CancelToken,
+    ) -> Result<Self> {
+        let PictureRequest { projection, tiles, supersample, roles, background } = request;
+        let ss = supersample.factor();
+        let view = projection.view(&scene, ss)?;
+        let samples_in = tile_samples(&tiles, ss);
+        // In u64: a large picture's canvas outgrows a 32-bit usize.
+        let drawn_samples = samples_in.iter().map(|&[x0, x1, y0, y1]| (x1 - x0 + 1) as u64 * (y1 - y0 + 1) as u64).sum();
+        let samples = tiles.iter().map(|t| t.width() * t.height()).max().unwrap_or(0) * ss * ss;
+        let pixels = tiles.iter().map(|t| t.width() * t.height()).max().unwrap_or(0);
         let looks = reserve(scene.meshes.len())?;
         let (opaque, glass, scratch) =
             (reserve(admission.triangles as usize)?, reserve(admission.triangles as usize)?, reserve(admission.triangles as usize)?);
-        let (pixels, depth, output) = (reserve(sw * sh)?, reserve(sw * sh)?, reserve(request.width as usize * request.height as usize * 4)?);
         Ok(Self {
-            scene,
-            request,
-            admission,
-            cancel,
-            stage: Stage::Looks,
-            projection,
             looks,
-            body: 0,
-            item: 0,
-            prepare_done: 0,
             opaque,
             glass,
             scratch,
+            pixels: reserve(samples)?,
+            depth: reserve(samples)?,
+            output: reserve(pixels * 4)?,
+            scene,
+            admission,
+            cancel,
+            stage: Stage::Looks,
+            view,
+            ss,
+            roles,
+            background,
+            tiles,
+            tile: 0,
+            studio_weights,
+            body: 0,
+            item: 0,
+            prepare_done: 0,
             sort_width: 1,
             sort_block: 0,
             sort_left: 0,
@@ -523,65 +877,60 @@ impl ImageTask {
             sort_mid: 0,
             sort_end: 0,
             sort_dst: 0,
-            pixels,
-            depth,
             pixel_tests: 0,
+            max_pixel_tests,
+            samples_in,
+            drawn_samples,
             pixel_done: 0,
             draw: 0,
             triangle: None,
-            output,
-            encoder: None,
         })
     }
 
-    pub fn progress(&self) -> Progress {
+    /// A sample nothing has been drawn on.
+    fn clear(&self) -> [u8; 4] {
+        self.background.map_or([0; 4], |[r, g, b]| [r, g, b, 255])
+    }
+
+    fn window(&self) -> Result<PixelWindow> {
+        self.tiles.get(self.tile).copied().ok_or_else(|| invalid("missing picture tile"))
+    }
+
+    fn progress(&self) -> Progress {
         match self.stage {
             Stage::Looks | Stage::Prepare | Stage::Sort => Progress {
                 phase: Phase::Preparing,
                 done: self.prepare_done,
                 total: self.admission.face_appearances + self.admission.triangles + self.scene.meshes.len() as u64 + self.glass.len() as u64 * 19,
             },
-            Stage::Clear | Stage::Opaque | Stage::Glass | Stage::Downsample => Progress {
-                phase: Phase::Running,
-                done: self.pixel_done,
-                total: self.pixel_tests
-                    + (self.projection.sw * self.projection.sh) as u64
-                    + u64::from(self.request.width) * u64::from(self.request.height),
-            },
-            Stage::Encode => Progress {
-                phase: Phase::Encoding,
-                done: self.encoder.as_ref().map_or(0, |encoder| encoder.row() as u64),
-                total: u64::from(self.request.height),
-            },
+            Stage::Clear | Stage::Opaque | Stage::Glass | Stage::Downsample | Stage::Encode => {
+                let samples = self.drawn_samples;
+                let total = self.pixel_tests + samples + samples / (self.ss * self.ss) as u64;
+                Progress { phase: Phase::Running, done: self.pixel_done.min(total), total }
+            }
             Stage::Done => Progress { phase: Phase::Completed, done: 1, total: 1 },
         }
     }
 
-    /// At most 16384 simple units; encoding additionally yields after at most four rows.
-    pub fn step(&mut self, units: usize) -> Result<TaskPoll> {
-        let mut rows = 0;
+    /// At most `units` simple units, or up to the end of a tile.
+    fn step(&mut self, units: usize) -> Result<RasterPoll> {
         for _ in 0..units.clamp(1, MAX_STEP) {
             self.cancel.check()?;
             match self.stage {
                 Stage::Looks => self.look_step()?,
                 Stage::Prepare => self.prepare_step()?,
                 Stage::Sort => self.sort_step()?,
-                Stage::Clear => self.clear_step(),
+                Stage::Clear => self.clear_step()?,
                 Stage::Opaque | Stage::Glass => self.draw_step()?,
-                Stage::Downsample => self.downsample_step()?,
-                Stage::Encode => {
-                    if let Some(png) = self.encode_step()? {
-                        return Ok(TaskPoll::Complete(png));
-                    }
-                    rows += 1;
-                    if rows >= 4 {
-                        break;
+                Stage::Downsample => {
+                    if let Some(tile) = self.downsample_step()? {
+                        return Ok(tile);
                     }
                 }
-                Stage::Done => return Err(JobError::new(ErrorCode::NotCompleted, "render result already consumed")),
+                Stage::Encode | Stage::Done => return Err(JobError::new(ErrorCode::NotCompleted, "render result already consumed")),
             }
         }
-        Ok(TaskPoll::Pending(self.progress()))
+        Ok(RasterPoll::Pending)
     }
 
     fn look_step(&mut self) -> Result<()> {
@@ -612,7 +961,7 @@ impl ImageTask {
         let body = self.scene.meshes.get(draw.body as usize).ok_or_else(|| invalid("missing product body"))?;
         let look =
             self.looks.get(draw.body as usize).and_then(|looks| body.mesh.tri_face.get(draw.triangle as usize).and_then(|face| looks.get(face)));
-        self.projection.project(body, draw.triangle as usize, look)
+        self.view.project(body, draw.triangle as usize, look, paints(&self.roles, draw.body as usize))
     }
 
     fn prepare_step(&mut self) -> Result<()> {
@@ -629,7 +978,7 @@ impl ImageTask {
         }
         let mut draw = Draw { body: self.body as u32, triangle: self.item as u32, depth: 0.0 };
         if let Some(triangle) = self.project(draw)? {
-            add_pixel_tests(&mut self.pixel_tests, &triangle)?;
+            add_tile_tests(&mut self.pixel_tests, &triangle, &self.samples_in, self.max_pixel_tests)?;
             draw.depth = triangle.centre_depth;
             if triangle.opacity >= 1.0 {
                 self.opaque.push(draw);
@@ -689,19 +1038,24 @@ impl ImageTask {
         Ok(())
     }
 
-    fn clear_step(&mut self) {
-        if self.pixels.len() >= self.projection.sw * self.projection.sh {
+    fn clear_step(&mut self) -> Result<()> {
+        let window = self.window()?;
+        if self.pixels.len() >= window.width() * window.height() * self.ss * self.ss {
             self.stage = Stage::Opaque;
             self.draw = 0;
-            return;
+            return Ok(());
         }
-        let [r, g, b] = self.request.background;
-        self.pixels.push(if self.request.transparent_background { [0; 4] } else { [r, g, b, 255] });
+        self.pixels.push(self.clear());
         self.depth.push(f32::INFINITY);
         self.pixel_done += 1;
+        Ok(())
     }
 
     fn draw_step(&mut self) -> Result<()> {
+        let window = self.window()?;
+        // The tile's canvas samples, in whole-canvas coordinates.
+        let (cx0, cx1) = (window.x0 as usize * self.ss, window.x1 as usize * self.ss - 1);
+        let (cy0, cy1) = (window.y0 as usize * self.ss, window.y1 as usize * self.ss - 1);
         if self.triangle.is_none() {
             let list = if self.stage == Stage::Opaque { &self.opaque } else { &self.glass };
             let Some(draw) = list.get(self.draw).copied() else {
@@ -709,15 +1063,22 @@ impl ImageTask {
                 self.draw = 0;
                 return Ok(());
             };
-            self.triangle = self.project(draw)?;
+            // Only the part of the triangle's bounds inside this tile.
+            self.triangle = self.project(draw)?.and_then(|mut t| {
+                narrowed(t.bounds, [cx0, cx1, cy0, cy1]).map(|bounds| {
+                    (t.bounds, t.x, t.y) = (bounds, bounds[0], bounds[2]);
+                    t
+                })
+            });
             if self.triangle.is_none() {
                 self.draw += 1;
             }
             return Ok(());
         }
+        let clear = self.clear();
         let triangle = self.triangle.as_mut().ok_or_else(|| invalid("missing raster triangle"))?;
-        let eye = (self.request.camera.fov > 0.0).then(|| self.request.camera.eye());
-        raster_pixel(triangle, self.projection.sw, self.projection.back, eye, self.request.studio_weights, &mut self.pixels, &mut self.depth)?;
+        let tile = (cx0, cy0, cx1 - cx0 + 1);
+        raster_pixel(triangle, tile, self.view.back, self.view.eye, self.studio_weights, clear, &mut self.pixels, &mut self.depth)?;
         triangle.x += 1;
         if triangle.x > triangle.bounds[1] {
             triangle.x = triangle.bounds[0];
@@ -731,28 +1092,37 @@ impl ImageTask {
         Ok(())
     }
 
-    fn downsample_step(&mut self) -> Result<()> {
-        let width = self.request.width as usize;
+    /// One output pixel of the tile; the tile's rows once its last pixel is in.
+    fn downsample_step(&mut self) -> Result<Option<RasterPoll>> {
+        let window = self.window()?;
+        let (width, ss) = (window.width(), self.ss);
         let index = self.output.len() / 4;
-        if index >= width * self.request.height as usize {
-            self.encoder =
-                Some(super::encoding::PngEncoding::new(self.request.width, self.request.height, self.admission.encoded_limit, self.cancel.clone())?);
-            self.stage = Stage::Encode;
-            // Pixels and prepared geometry are no longer needed during PNG compression.
-            self.pixels = Vec::new();
-            self.depth = Vec::new();
-            self.opaque = Vec::new();
-            self.glass = Vec::new();
-            self.scratch = Vec::new();
-            self.looks = Vec::new();
-            self.scene.meshes.clear();
-            return Ok(());
+        if index >= width * window.height() {
+            let rows = std::mem::take(&mut self.output);
+            self.tile += 1;
+            if self.tile < self.tiles.len() {
+                self.output = reserve(rows.capacity())?;
+                self.pixels.clear();
+                self.depth.clear();
+                self.stage = Stage::Clear;
+            } else {
+                // Pixels and prepared geometry are no longer needed.
+                self.pixels = Vec::new();
+                self.depth = Vec::new();
+                self.opaque = Vec::new();
+                self.glass = Vec::new();
+                self.scratch = Vec::new();
+                self.looks = Vec::new();
+                self.scene.meshes.clear();
+                self.stage = Stage::Done;
+            }
+            return Ok(Some(RasterPoll::Tile(window, rows)));
         }
         let (x, y) = (index % width, index / width);
         let (mut colour, mut alpha) = ([0.0; 3], 0.0);
-        for dy in 0..SS {
-            for dx in 0..SS {
-                let p = self.pixels.get((y * SS + dy) * self.projection.sw + x * SS + dx).ok_or_else(|| invalid("missing downsample pixel"))?;
+        for dy in 0..ss {
+            for dx in 0..ss {
+                let p = self.pixels.get((y * ss + dy) * width * ss + x * ss + dx).ok_or_else(|| invalid("missing downsample pixel"))?;
                 let a = f64::from(p[3]) / 255.0;
                 for (sum, channel) in colour.iter_mut().zip(p.iter().take(3)) {
                     *sum += decode(*channel) * a;
@@ -761,32 +1131,127 @@ impl ImageTask {
             }
         }
         let rgb = colour.map(|v| if alpha > 1e-12 { encode(v / alpha) } else { 0 });
-        self.output.extend_from_slice(&[rgb[0], rgb[1], rgb[2], (alpha * 255.0 / (SS * SS) as f64).round() as u8]);
+        self.output.extend_from_slice(&[rgb[0], rgb[1], rgb[2], (alpha * 255.0 / (ss * ss) as f64).round() as u8]);
         self.pixel_done += 1;
-        Ok(())
-    }
-
-    fn encode_step(&mut self) -> Result<Option<Vec<u8>>> {
-        let result = self.encoder.as_mut().ok_or_else(|| invalid("missing PNG writer"))?.step(&self.output)?;
-        if result.is_some() {
-            self.output = Vec::new();
-            self.stage = Stage::Done;
-        }
-        Ok(result)
+        Ok(None)
     }
 }
 
+/// A picture drawn tile by tile ([`PictureRequest`]).
+pub struct PictureTask {
+    raster: Raster,
+}
+
+impl PictureTask {
+    pub fn new(scene: ProductScene, request: PictureRequest, cancel: CancelToken) -> Result<Self> {
+        cancel.check()?;
+        let admission = admit_picture(&scene, &request)?;
+        let max_tests = MAX_PICTURE_PIXEL_TESTS;
+        Ok(Self { raster: Raster::new(scene, request, None, admission, max_tests, cancel)? })
+    }
+
+    pub fn progress(&self) -> Progress {
+        self.raster.progress()
+    }
+
+    /// At most 16384 simple units, or up to the end of a tile.
+    pub fn step(&mut self, units: usize) -> Result<PicturePoll> {
+        if self.raster.stage == Stage::Done {
+            return Ok(PicturePoll::Complete);
+        }
+        Ok(match self.raster.step(units)? {
+            RasterPoll::Pending => PicturePoll::Pending(self.raster.progress()),
+            RasterPoll::Tile(window, rows) => PicturePoll::Tile(window, rows),
+        })
+    }
+}
+
+/// CPU product renderer with cooperative preparation, sorting, raster and PNG encoding: a
+/// [`Raster`] of one whole-picture tile from the product camera, then its PNG.
+pub struct ImageTask {
+    raster: Raster,
+    width: u32,
+    height: u32,
+    output: Vec<u8>,
+    encoder: Option<super::encoding::PngEncoding>,
+}
+
+impl ImageTask {
+    pub fn new(scene: ProductScene, request: ImageRequest, cancel: CancelToken) -> Result<Self> {
+        cancel.check()?;
+        if request.integrator != super::Integrator::Raster {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "raster task cannot execute a raytrace request"));
+        }
+        let admission = admit(&scene, &request)?;
+        let (width, height) = (request.width, request.height);
+        let picture = PictureRequest {
+            projection: Projection::Camera { camera: request.camera, width, height },
+            tiles: vec![PixelWindow { x0: 0, y0: 0, x1: width, y1: height }],
+            supersample: Supersample::Two,
+            roles: Vec::new(),
+            background: (!request.transparent_background).then_some(request.background),
+        };
+        let raster = Raster::new(scene, picture, request.studio_weights, admission, MAX_PIXEL_TESTS, cancel)?;
+        Ok(Self { raster, width, height, output: Vec::new(), encoder: None })
+    }
+
+    #[cfg(test)]
+    fn stage(&self) -> Stage {
+        self.raster.stage
+    }
+
+    pub fn progress(&self) -> Progress {
+        match (&self.encoder, self.raster.stage) {
+            (Some(encoder), Stage::Encode) => Progress { phase: Phase::Encoding, done: encoder.row() as u64, total: u64::from(self.height) },
+            _ => self.raster.progress(),
+        }
+    }
+
+    /// At most 16384 simple units; encoding additionally yields after at most four rows.
+    pub fn step(&mut self, units: usize) -> Result<TaskPoll> {
+        if let Some(encoder) = self.encoder.as_mut() {
+            for _ in 0..units.clamp(1, 4) {
+                self.raster.cancel.check()?;
+                if let Some(png) = encoder.step(&self.output)? {
+                    self.output = Vec::new();
+                    self.encoder = None;
+                    self.raster.stage = Stage::Done;
+                    return Ok(TaskPoll::Complete(png));
+                }
+            }
+            return Ok(TaskPoll::Pending(self.progress()));
+        }
+        if self.raster.stage == Stage::Done {
+            return Err(JobError::new(ErrorCode::NotCompleted, "render result already consumed"));
+        }
+        if let RasterPoll::Tile(_, rows) = self.raster.step(units)? {
+            self.output = rows;
+            let limit = self.raster.admission.encoded_limit;
+            self.encoder = Some(super::encoding::PngEncoding::new(self.width, self.height, limit, self.raster.cancel.clone())?);
+            // The tile is the whole picture: the raster has handed it over and the PNG is written.
+            self.raster.stage = Stage::Encode;
+        }
+        Ok(TaskPoll::Pending(self.progress()))
+    }
+}
+
+/// Shades and stores one sample: the triangle's at its cursor `(t.x, t.y)`, in a tile whose
+/// canvas starts at whole-canvas sample `(x0, y0)` and is `width` samples wide. A depth-only
+/// triangle in front puts back `clear`, so it hides what was drawn behind it in either order.
 #[allow(clippy::too_many_arguments)]
 fn raster_pixel(
     t: &Triangle,
-    width: usize,
+    (x0, y0, width): (usize, usize, usize),
     back: Vec3,
     eye: Option<Vec3>,
     studio_weights: Option<[f64; 3]>,
+    clear: [u8; 4],
     pixels: &mut [[u8; 4]],
     depth: &mut [f32],
 ) -> Result<()> {
     let [a, b, c] = t.points;
+    // The sample's position from its whole-canvas integer index, so it is the same number in
+    // every tile and tiles side by side give the whole picture exactly.
     let (x, y) = (t.x as f64 + 0.5, t.y as f64 + 0.5);
     let w0 = ((b[0] - x) * (c[1] - y) - (b[1] - y) * (c[0] - x)) / t.area;
     let w1 = ((c[0] - x) * (a[1] - y) - (c[1] - y) * (a[0] - x)) / t.area;
@@ -807,9 +1272,14 @@ fn raster_pixel(
         }
     }
     let z = (w0 * a[2] + w1 * b[2] + w2 * c[2]) as f32;
-    let index = t.y * width + t.x;
+    let index = (t.y - y0) * width + (t.x - x0);
     let old_depth = depth.get_mut(index).ok_or_else(|| invalid("missing pixel depth"))?;
     if z > *old_depth {
+        return Ok(());
+    }
+    if !t.paint {
+        *old_depth = z;
+        *pixels.get_mut(index).ok_or_else(|| invalid("missing colour pixel"))? = clear;
         return Ok(());
     }
     let weights = [w0 * t.inv_w[0], w1 * t.inv_w[1], w2 * t.inv_w[2]];
@@ -826,12 +1296,12 @@ fn raster_pixel(
         [mapped.x, mapped.y, mapped.z]
     } else if let Some(weights) = studio_weights {
         let [r, g, b] = t.colour;
-        let surface = crate::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
+        let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
         let radiance = crate::studio::shade_weighted(surface, n, back, weights).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {
-        crate::raster::shade(n, back, t.colour)
+        solidcraft_viewport::shade(n, back, t.colour)
     };
     if colour.iter().any(|v| !v.is_finite()) {
         return Err(invalid("non-finite shaded colour"));

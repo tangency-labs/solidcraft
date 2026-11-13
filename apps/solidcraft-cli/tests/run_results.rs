@@ -67,6 +67,9 @@ fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
         (&["--out", "--quiet"][..], "--out needs a value"),
         (&["--ouut", "part.step"][..], "doesn't take --ouut"),
         (&["--unknown"][..], "doesn't take --unknown"),
+        (&["--quality"][..], "--quality needs a value"),
+        (&["--quality", "best"][..], "--quality must be standard, fine or finest, not `best`"),
+        (&["--quality", "standard", "--quality", "best"][..], "--quality is given more than once"),
     ];
     for existing in [false, true] {
         let saved = dir.0.join(format!("{existing}.solidcraft"));
@@ -277,15 +280,61 @@ fn results_still_save_and_export_the_script_once() {
     let saved = dir.0.join("box.json");
     let stl = dir.0.join("box.stl");
     let obj = dir.0.join("box.obj");
+    let glb = dir.0.join("box.glb");
     let result = json_output(
-        cli().arg("run").arg(dir.script()).arg("--results").arg("--save").arg(&saved).arg("--out").arg(&stl).arg("--out").arg(&obj).output().unwrap(),
+        cli()
+            .arg("run")
+            .arg(dir.script())
+            .arg("--results")
+            .arg("--save")
+            .arg(&saved)
+            .arg("--out")
+            .arg(&stl)
+            .arg("--out")
+            .arg(&obj)
+            .arg("--out")
+            .arg(&glb)
+            .output()
+            .unwrap(),
     );
     assert_eq!(result.as_array().unwrap().len(), 1);
     assert_eq!(body_count(&saved), 1);
-    for exported in [&stl, &obj] {
+    for exported in [&stl, &obj, &glb] {
         assert!(std::fs::metadata(exported).unwrap().len() > 0);
         assert_eq!(body_count(exported), 1);
     }
+}
+
+/// The triangles of a binary STL: the count after its 80-byte header.
+fn stl_triangles(path: &Path) -> u32 {
+    let bytes = std::fs::read(path).unwrap();
+    u32::from_le_bytes(bytes[80..84].try_into().unwrap())
+}
+
+/// #12270: `run --out part.stl --quality fine` writes the mesh at that quality, as
+/// `file.export`'s `quality` does, without a script to say so.
+#[test]
+fn run_exports_meshes_at_the_quality_asked_for() {
+    let dir = Scratch::new();
+    let script = dir.0.join("cylinder.json");
+    std::fs::write(&script, json!({"commands": [{"command": "solid.cylinder", "params": {"diameter": 40, "height": 10}}]}).to_string()).unwrap();
+    let export = |name: &str, quality: Option<&str>| {
+        let stl = dir.0.join(name);
+        let mut command = cli();
+        command.arg("run").arg(&script).arg("--quiet").arg("--out").arg(&stl);
+        if let Some(q) = quality {
+            command.args(["--quality", q]);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{quality:?}: {}", String::from_utf8_lossy(&output.stderr));
+        stl_triangles(&stl)
+    };
+    let default = export("default.stl", None);
+    let standard = export("standard.stl", Some("standard"));
+    let fine = export("fine.stl", Some("fine"));
+    let finest = export("finest.stl", Some("finest"));
+    assert_eq!(default, standard);
+    assert!(standard < fine && fine < finest, "standard {standard}, fine {fine}, finest {finest}");
 }
 
 #[test]
@@ -472,7 +521,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
         std::fs::read(&png).unwrap()
     };
     // Pictures are drawn on the GPU: without an adapter only the option checks below run.
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(_) => {
             let alone = shot("alone.png", &[shifted.as_os_str()]);
             let on_base = shot("on_base.png", &[shifted.as_os_str(), "--in".as_ref(), base.as_os_str()]);
@@ -480,7 +529,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
             assert_ne!(alone, on_base, "the script ran on the --in design");
             assert_ne!(base_only, on_base);
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("pictures left out: {e}")
         }
         Err(e) => panic!("{e}"),
@@ -638,6 +687,7 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .unwrap(),
         );
         assert_eq!(result["preflight"]["resolved"]["executor"], "cpu-raytrace");
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "available_ram");
         assert_eq!(result["export"]["frame"]["executor"], "cpu-raytrace");
         assert_eq!(result["preflight"]["request"]["integrator"], "raytrace");
         assert_eq!(result["preflight"]["request"]["raytrace"].get("progressive"), options.get("progressive"));
@@ -654,11 +704,12 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .arg(&saved)
                 .args(["--setup", "Portable setup", "--out"])
                 .arg(&overridden)
-                .args(["--width", "12", "--height", "8", "--exposure", "1.25"])
+                .args(["--width", "12", "--height", "8", "--exposure", "1.25", "--legacy-memory-admission"])
                 .env("SOLIDCRAFT_GPU", "must-not-be-read-for-cpu")
                 .output()
                 .unwrap(),
         );
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "software_pool_only");
         assert_eq!(result["preflight"]["request"]["width"], 12);
         assert_eq!(result["preflight"]["request"]["height"], 8);
         assert_eq!(result["preflight"]["request"]["raytrace"]["exposure_ev"], 1.25);
@@ -738,7 +789,13 @@ fn typed_gpu_render_selects_its_host_without_a_progressive_runtime_flag() {
         let script = render_setup_script(&dir, job.clone());
         let out = dir.0.join("gpu.png");
         let mut command = cli();
-        command.arg("render").arg(&script).args(["--setup", "Portable setup", "--out"]).arg(&out).env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
+        command
+            .arg("render")
+            .arg(&script)
+            .args(["--setup", "Portable setup", "--out"])
+            .arg(&out)
+            .arg("--legacy-memory-admission")
+            .env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
         if job.is_null() {
             command.arg("--progressive");
         }
@@ -775,5 +832,69 @@ fn render_setup_overrides_obey_shared_validation_before_host_initialization() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains(message), "{error}");
         assert!(!out.exists());
+    }
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_policy() {
+    let scratch = Scratch::new();
+    let package = scratch.0.join("sample");
+    std::fs::create_dir(&package).unwrap();
+    let (package_id, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+    let wat = include_str!("../../../crates/engine/src/plugin/fixture.wat")
+        .replace("\r\n", "\n")
+        .replace("__PACKAGE__", package_id)
+        .replace("__VERSION__", version)
+        .replace(
+            "      call $box\n      call $box\n",
+            "      call $box\n      call $box i32.const 2048 memory.grow i32.const -1 i32.eq if unreachable end\n",
+        );
+    assert!(wat.contains("memory.grow"), "the fixture must actually request more than 128 MiB");
+    std::fs::write(package.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
+    std::fs::write(package.join("plugin.json"), manifest.to_string()).unwrap();
+    let args = json!({"path":package}).to_string();
+    let inspected = json_output(cli().args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(inspected["within_host_limits"], false);
+    let run = json!({"path":package,"approval":inspected["approval"],"entry":"make"}).to_string();
+    let refused = cli().args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("user host limits"));
+    let policy = scratch.0.join("limits.json");
+    std::fs::write(&policy, json!({"max_fuel":u64::MAX,"max_memory_mib":512}).to_string()).unwrap();
+    let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(high["within_host_limits"], true);
+    assert_eq!(high["host_limits"]["max_fuel"].as_u64(), Some(u64::MAX));
+    let output = cli().env_remove("RUST_LOG").arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("fuel_consumed="), "fuel diagnostics are opt-in");
+    let debug = cli().env_remove("RUST_LOG").arg("--debug").arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(debug.status.success(), "{}", String::from_utf8_lossy(&debug.stderr));
+    let stderr = String::from_utf8_lossy(&debug.stderr);
+    let fuel = stderr.lines().find(|line| line.contains("craft_plugin_wasm") && line.contains("fuel_consumed="));
+    assert!(fuel.is_some(), "--debug must include shared plugin runtime diagnostics: {stderr}");
+    let fuel = fuel.unwrap();
+    let counter = |name: &str| fuel.split_once(&format!("{name}=")).unwrap().1.split([',', ' ']).next().unwrap().parse::<u64>().unwrap();
+    let (consumed, remaining, limit) = (counter("fuel_consumed"), counter("fuel_remaining"), counter("fuel_limit"));
+    assert!(consumed > 0 && remaining < limit);
+    assert_eq!(limit, 200_000_000_000);
+    assert_eq!(consumed + remaining, limit);
+    let mut bom = vec![0xef, 0xbb, 0xbf];
+    bom.extend(json!({"max_memory_mib":512}).to_string().as_bytes());
+    std::fs::write(&policy, bom).unwrap();
+    let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(high["host_limits"]["max_fuel"].as_u64(), Some(100_000_000_000));
+    assert_eq!(high["host_limits"]["max_memory_mib"], 512);
+    assert_eq!(high["within_host_limits"], false, "omitted fields keep the original ceiling");
+    for extra in [vec!["exec", "plugin.inspect", "{}", "--connect", "127.0.0.1:1"], vec!["mcp"]] {
+        let output = cli().arg(format!("--plugin-limits={}", policy.display())).args(extra).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("controls local sessions"), "refuse before any connection attempt");
+    }
+    for bad in [json!({"max_fuel":0}), json!({"max_memory_mib":4097}), json!({"max_fuel":1.25}), json!({"unknown":true})] {
+        std::fs::write(&policy, bad.to_string()).unwrap();
+        let o = cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+        assert!(!o.status.success());
     }
 }

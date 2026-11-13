@@ -23,7 +23,7 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
             SketchPatternKind::Circular { .. } => ("Circular Pattern", "sketch_circ_pattern"),
         };
         let suffix = pattern.id.strip_prefix("pat").unwrap_or(&pattern.id);
-        let label = format!("{} {suffix}", crate::i18n::tr_label(name));
+        let label = format!("{} {suffix}", solidcraft_ui_text::tr_label(name));
         let active = app.session.active_sketch == Some(sketch);
         // The sources are inputs to the pattern: selecting its row must only delete copies.
         // Select point copies when the point itself is a source; curve endpoints go with curves.
@@ -75,7 +75,7 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.ui.show_browser = true;
-        h.app.preferences.timeline_left = left_history;
+        h.app.run("view.history_layout", json!({"dock":if left_history { "left" } else { "bottom" }})).unwrap();
         h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned Sketch"})).unwrap();
         let sketch = h.app.session.active_sketch.unwrap();
         h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
@@ -143,7 +143,7 @@ mod tests {
                     let mut h = Harness::new();
                     h.app.home.open = false;
                     h.app.ui.show_browser = true;
-                    h.app.preferences.timeline_left = left_history;
+                    h.app.run("view.history_layout", json!({"dock":if left_history { "left" } else { "bottom" }})).unwrap();
                     h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned Sketch"})).unwrap();
                     let sketch = h.app.session.active_sketch.unwrap();
                     h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn left_history_patterns_step_in_from_their_sketch_like_the_browser() {
         let (mut h, sketch, rectangular, _) = harness(true);
-        let label = format!("{} {}", crate::i18n::tr_label("Rectangular Pattern"), rectangular.strip_prefix("pat").unwrap_or(&rectangular));
+        let label = format!("{} {}", solidcraft_ui_text::tr_label("Rectangular Pattern"), rectangular.strip_prefix("pat").unwrap_or(&rectangular));
         h.frame();
         let browser = crate::scenario::rect_of("browser:card").unwrap();
         let in_browser = text_left(&h, &label, browser) - text_left(&h, "Patterned Sketch", browser);

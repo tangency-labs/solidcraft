@@ -1,0 +1,134 @@
+{
+  "area": "import",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          -0.0,
+          1.0
+        ],
+        "distance": 5.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                20.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                20.0,
+                10.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "4561-convert-box-mesh-with-a-zero-area-triangle",
+  "expected": {
+    "body_count": 1,
+    "faces": 6,
+    "method": "the zero-area triangle adds no surface; the mesh is the closed box, a constant-section prism, so it converts: V = 20*10*5 = 1000, 6 faces. The STL is written by hand (box-degenerate.stl, the triage's mesh)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4561"
+    ],
+    "volume_mm3": 1000.0,
+    "what": "Convert Mesh of a 20x10x5 box STL (12 triangles) with one extra zero-area triangle lying on an edge ((0,0,0) (10,0,0) (20,0,0)): refused with 'mesh conversion: degenerate triangle'"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "result": [
+    {
+      "body": "box-degenerate",
+      "made": "b2"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 700.0,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 1000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4561"
+  ],
+  "traced_ops": [
+    "planar_faces",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "Convert Mesh of a 20x10x5 box STL (12 triangles) with one extra zero-area triangle lying on an edge ((0,0,0) (10,0,0) (20,0,0)): refused with 'mesh conversion: degenerate triangle'",
+  "why_not": []
+}

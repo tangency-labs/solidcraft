@@ -1,0 +1,15 @@
+[package]
+name = "solidcraft-format"
+description = "Versioned JSON file formats: the format tag, the registry of versions (hand-written steps, then one folder of changes per version, then the pending changes), the upgrade of an older file and the telling of a newer one"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+# The container: content-addressed blobs (SHA-256) in a ZIP package.
+sha2 = { workspace = true }
+zip = { workspace = true }

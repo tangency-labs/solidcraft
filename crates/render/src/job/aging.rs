@@ -2,8 +2,10 @@
 //! not corrosion kinetics, engineering-property changes or displaced geometry.
 //! Fixed-capacity intent remains copyable, bounded and portable with a saved shot.
 use super::{ErrorCode, JobError, Result};
-use crate::{ProductScene, surface::srgb8_to_linear};
+use crate::ProductScene;
 use serde::{Deserialize, Serialize, de, ser::SerializeSeq};
+use solidcraft_geom::MeshGeom;
+use solidcraft_viewport::surface::srgb8_to_linear;
 use std::fmt;
 
 pub const MAX_AGING_LAYERS: usize = 8;
@@ -282,7 +284,7 @@ impl AgingStack {
         Ok(())
     }
     /// Five aligned vec4s per layer: id/target/class/seed, mask/scale,
-    /// rebased periodic origin, linear coat RGB/roughness, metallic/reserved.
+    /// rebased periodic origin/Scratch cell carry, linear coat RGB/roughness, metallic/reserved.
     pub fn gpu_layers(&self, target: [f64; 3]) -> Result<[[f32; 20]; MAX_AGING_LAYERS]> {
         self.validate()?;
         if target.iter().any(|v| !v.is_finite() || v.abs() > 1e9) {
@@ -301,9 +303,20 @@ impl AgingStack {
             out[5] = layer.coverage as f32;
             out[6] = layer.scale_mm.recip() as f32;
             out[7] = layer.upward_bias as f32;
+            let mut scratch_carry = 0_u32;
+            let mut place = 1_u32;
             for axis in 0..3 {
-                out[8 + axis] = ((target[axis] - layer.origin_mm[axis]) / layer.scale_mm).rem_euclid(4096.0) as f32;
+                let coordinate = (target[axis] - layer.origin_mm[axis]) / layer.scale_mm;
+                out[8 + axis] = coordinate.rem_euclid(4096.0) as f32;
+                if layer.kind == AgingKind::Scratches {
+                    // Noise repeats every4096 cells, while floor(4*q/5)'s
+                    // hashed band also needs the removed quotient modulo5.
+                    // Three base5 digits fit exactly in the reserved f32 lane.
+                    scratch_carry += ((coordinate / 4096.0).floor().rem_euclid(5.0) as u32) * place;
+                    place *= 5;
+                }
             }
+            out[11] = scratch_carry as f32;
             for axis in 0..3 {
                 out[12 + axis] = srgb8_to_linear(layer.color_srgb[axis]) as f32;
             }
@@ -388,5 +401,35 @@ mod tests {
         stack.get_mut(0).unwrap().enabled = false;
         assert_eq!(stack.gpu_layers([0.0; 3]).unwrap(), [[0.0; 20]; 8]);
         assert!(!stack.active());
+    }
+    #[test]
+    fn scratch_rebase_carries_signed_camera_cells_on_all_axes_in_the_same_uniform_size() {
+        let origin = [128.0, -64.0, 32.0];
+        let fraction = [0.125, 0.25, 0.5];
+        let layer = AgingLayer { kind: AgingKind::Scratches, scale_mm: 2.0, origin_mm: origin, ..Default::default() };
+        let mut stack = AgingStack::default();
+        stack.push(layer).unwrap();
+        assert_eq!(std::mem::size_of::<[[f32; 20]; MAX_AGING_LAYERS]>(), 640);
+        for k in [-122000_i32, -7, -1, 0, 1, 4, 5, 122000] {
+            let cells = [k, k + 2, -k];
+            let target = std::array::from_fn(|axis| origin[axis] + 2.0 * (4096.0 * f64::from(cells[axis]) + fraction[axis]));
+            let packed = stack.gpu_layers(target).unwrap();
+            assert_eq!(&packed[0][8..11], &[0.125, 0.25, 0.5]);
+            let expected = cells[0].rem_euclid(5) + 5 * cells[1].rem_euclid(5) + 25 * cells[2].rem_euclid(5);
+            assert_eq!(packed[0][11], expected as f32, "{cells:?}");
+            assert!(packed[1..].iter().flatten().all(|value| value.to_bits() == 0));
+            assert!(packed[0][17..].iter().all(|value| value.to_bits() == 0));
+            // Non-Scratch layers keep their prior five-vec4 bytes. Only the
+            // kind and the Scratch-only reserved carry differ in this pair.
+            let mut ordinary = AgingStack::default();
+            ordinary.push(AgingLayer { kind: AgingKind::Rust, ..layer }).unwrap();
+            let mut expected = packed;
+            expected[0][0] = AgingKind::Rust.code() as f32;
+            expected[0][11] = 0.0;
+            assert_eq!(ordinary.gpu_layers(target).unwrap().map(|row| row.map(f32::to_bits)), expected.map(|row| row.map(f32::to_bits)));
+        }
+        stack.get_mut(0).unwrap().enabled = false;
+        assert!(stack.gpu_layers([999000000.0, -999000000.0, 0.0]).unwrap().iter().flatten().all(|value| value.to_bits() == 0));
+        assert!(AgingStack::default().gpu_layers([999000000.0; 3]).unwrap().iter().flatten().all(|value| value.to_bits() == 0));
     }
 }

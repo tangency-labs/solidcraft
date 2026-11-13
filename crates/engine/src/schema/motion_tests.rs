@@ -2,7 +2,8 @@ use serde_json::{Value, json};
 
 use super::{
     ContactCheck, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetCreated, ContactSetEdited, ContactSets,
-    ContactSwitch, FindLimitsParams, FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted,
+    ContactSwitch, ExplodeCreateParams, ExplodeCreated, ExplodeDeleteParams, ExplodeDeleted, ExplodeListParams, ExplodeShowParams, ExplodeShown,
+    ExplodeViews, FindLimitsParams, FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted,
     MotionStudyParams, MotionStudySaved,
 };
 use crate::Session;
@@ -11,7 +12,10 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<FindLimitsParams>(), &["against", "contact_sets", "index", "joint", "occurrences", "refine", "step"]);
+    assert_keys(
+        input_schema_for::<FindLimitsParams>(),
+        &["against", "contact_sets", "exclude_pairs", "index", "joint", "occurrences", "refine", "step"],
+    );
     assert_keys(input_schema_for::<ContactEnableParams>(), &["enabled"]);
     assert_keys(input_schema_for::<ContactNoParams>(), &[]);
     assert_keys(input_schema_for::<ContactCreateParams>(), &["name", "occurrences"]);
@@ -19,6 +23,10 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<MotionStudyParams>(), &["keys", "name", "steps", "study"]);
     assert_keys(input_schema_for::<MotionListParams>(), &[]);
     assert_keys(input_schema_for::<MotionStudyDeleteParams>(), &["study"]);
+    assert_keys(input_schema_for::<ExplodeCreateParams>(), &["moves", "name", "scale"]);
+    assert_keys(input_schema_for::<ExplodeShowParams>(), &["view"]);
+    assert_keys(input_schema_for::<ExplodeListParams>(), &[]);
+    assert_keys(input_schema_for::<ExplodeDeleteParams>(), &["view"]);
 }
 
 #[test]
@@ -258,4 +266,204 @@ fn motion_studies_reply_with_their_schemas() {
     s.param_check = ParamCheck::Strict;
     let error = s.execute("motion.study", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`step`"), "{error}");
+}
+
+/// The exploded view commands in a design with three occurrences, in Off and in Strict: each call
+/// the handler refuses is refused with the same message. They need the door's occurrences, so
+/// the shared helper doesn't fit.
+#[test]
+fn strict_keeps_the_exploded_views_errors() {
+    let many: Vec<Value> = (0..10_001).map(|_| move_of(json!("Door"), json!([1, 2, 3]))).collect();
+    for (id, p) in [
+        ("explode.create", json!({"moves": null})),
+        ("explode.create", json!({"moves": "Door"})),
+        ("explode.create", json!({"moves": {"occurrence": "Door", "translate": [1, 2, 3]}})),
+        ("explode.create", json!({"moves": many})),
+        ("explode.create", json!({"moves": [{}]})),
+        ("explode.create", json!({"moves": [true]})),
+        ("explode.create", json!({"moves": [move_of(json!(null), json!([1, 2, 3]))]})),
+        ("explode.create", json!({"moves": [move_of(json!(true), json!([1, 2, 3]))]})),
+        ("explode.create", json!({"moves": [move_of(json!(["Door"]), json!([1, 2, 3]))]})),
+        ("explode.create", json!({"moves": [move_of(json!("Nope"), json!([1, 2, 3]))]})),
+        ("explode.create", json!({"moves": [{"occurrence": "Door"}]})),
+        ("explode.create", json!({"moves": [move_of(json!("Door"), json!(null))]})),
+        ("explode.create", json!({"moves": [move_of(json!("Door"), json!([1, 2]))]})),
+        ("explode.create", json!({"moves": [move_of(json!("Door"), json!({"x": 1, "y": 2}))]})),
+        ("explode.create", json!({"moves": [move_of(json!("Door"), json!(["a", 2, 3]))]})),
+        ("explode.create", json!({"moves": [move_of(json!("Door"), json!([1e7, 0, 0]))]})),
+        ("explode.create", json!({"moves": [move_of(json!("Door"), json!([8e6, 8e6, 0]))]})),
+        ("explode.create", json!({"moves": [move_of(json!("Door"), json!([1, 2, 3])), {"translate": [1, 2, 3]}]})),
+        ("explode.create", json!({"scale": "2"})),
+        ("explode.create", json!({"scale": null})),
+        ("explode.create", json!({"scale": true})),
+        ("explode.create", json!({"scale": 100.5})),
+        ("explode.create", json!({"scale": -101})),
+        ("explode.show", json!({"view": true})),
+        ("explode.show", json!({"view": [1]})),
+        ("explode.show", json!({"view": {"id": 1}})),
+        ("explode.show", json!({"view": "Nope"})),
+        ("explode.show", json!({"view": 7})),
+        ("explode.delete", json!({})),
+        ("explode.delete", json!({"view": null})),
+        ("explode.delete", json!({"view": false})),
+        ("explode.delete", json!({"view": ["Apart"]})),
+        ("explode.delete", json!({"view": "Nope"})),
+    ] {
+        let error = |level: ParamCheck| {
+            let mut s = door();
+            s.param_check = level;
+            s.execute(id, &p).err().map(|e| e.to_string())
+        };
+        let off = error(ParamCheck::Off);
+        assert!(off.is_some(), "{id} {p} should fail today");
+        assert_eq!(error(ParamCheck::Strict), off, "{id} {p}");
+    }
+}
+
+fn move_of(occurrence: Value, translate: Value) -> Value {
+    json!({"occurrence": occurrence, "translate": translate})
+}
+
+/// The exploded view types read each key as the handlers do: `scale` only without `moves`, a move
+/// by an occurrence's id or name with a point in either form, `view` left out, `null` or `none`
+/// to show the assembled placement but refused by `explode.delete`, and keys a move carries
+/// besides its two ignored. Each case is also checked against the schema.
+#[test]
+fn the_exploded_view_types_read_the_keys_as_the_handlers_do() {
+    let issues = |id: &str, p: &Value| crate::schema::issues(id, p).into_iter().map(|i| i.message).collect::<Vec<_>>();
+    let ok = |id: &str, p: Value, takes: bool| assert_eq!(issues(id, &p).is_empty(), takes, "{id} {p}: {:?}", issues(id, &p));
+    let schema_takes = |schema: schemars::Schema, p: Value, takes: bool| {
+        let schema = schema.as_value();
+        assert_eq!(conforms(schema, schema, &p), takes, "{p}");
+    };
+    // `scale` is read only when `moves` is not there; `moves` is read when it is there at all.
+    let one = move_of(json!(3), json!({"x": 1, "y": 2, "z": 3}));
+    for (p, takes) in [
+        (json!({}), true),
+        (json!({"name": "Apart", "scale": 2.5}), true),
+        (json!({"scale": -100}), true),
+        (json!({"scale": 101}), false),
+        (json!({"scale": "2"}), false),
+        (json!({"scale": null}), false),
+        (json!({"moves": [], "scale": "ignored"}), true),
+        (json!({"moves": [one.clone()], "scale": null}), true),
+        (json!({"moves": [{"occurrence": "Door", "translate": [0, 0, 5], "note": "ignored"}]}), true),
+        (json!({"moves": null, "scale": 2}), false),
+        (json!({"moves": "Door"}), false),
+        (json!({"moves": [{"occurrence": "Door"}]}), false),
+        (json!({"moves": [{"occurrence": true, "translate": [0, 0, 5]}]}), false),
+        (json!({"moves": [{"occurrence": "Door", "translate": [0, 0, 1e7]}]}), false),
+    ] {
+        ok("explode.create", p, takes);
+    }
+    schema_takes(input_schema_for::<ExplodeCreateParams>(), json!({"moves": [one], "name": "N"}), true);
+    schema_takes(input_schema_for::<ExplodeCreateParams>(), json!({"moves": [{"occurrence": "Door"}]}), false);
+    schema_takes(input_schema_for::<ExplodeCreateParams>(), json!({"scale": 101}), false);
+    // Showing: no view, `null` and `none` in any case show the assembled placement.
+    for (p, takes) in [
+        (json!({}), true),
+        (json!({"view": null}), true),
+        (json!({"view": "None"}), true),
+        (json!({"view": "Apart"}), true),
+        (json!({"view": 4}), true),
+        (json!({"view": true}), false),
+        (json!({"view": ["Apart"]}), false),
+    ] {
+        ok("explode.show", p.clone(), takes);
+        schema_takes(input_schema_for::<ExplodeShowParams>(), p, takes);
+    }
+    // Deleting needs a view, by id or name.
+    for (p, takes) in [(json!({"view": "Apart"}), true), (json!({"view": 4}), true), (json!({}), false), (json!({"view": null}), false)] {
+        schema_takes(input_schema_for::<ExplodeDeleteParams>(), p, takes);
+    }
+    ok("explode.delete", json!({"view": "Apart"}), true);
+    assert_eq!(issues("explode.delete", &json!({"view": null})), ["`view` must be an id or a name"]);
+    assert_eq!(issues("explode.delete", &json!({})), Vec::<String>::new(), "the handler gives its own message for a missing view");
+    assert_eq!(issues("explode.show", &json!({"view": true})), ["`view` must be an id or a name"]);
+    assert_eq!(issues("explode.create", &json!({"scale": "x"})), ["`scale` must be a number up to 100"]);
+    assert_eq!(issues("explode.create", &json!({"moves": 1})), ["`moves` must be a list"]);
+    assert_eq!(issues("explode.create", &json!({"moves": [{}]})), ["an occurrence must be an id or a name"]);
+    assert_eq!(issues("explode.create", &json!({"moves": [{"occurrence": 1}]})), ["each move needs `translate`: [x, y, z]"]);
+    assert_eq!(issues("explode.list", &json!({"x": 1})).len(), 1);
+}
+
+/// Making, showing, listing and deleting exploded views reply as the output schemas say, in Warn
+/// without warnings, with the JSON the handlers have always returned. A misspelt key gets
+/// `param_warnings` in Warn, since the handlers ignore unknown keys, and strict refuses it.
+#[test]
+fn exploded_views_reply_with_their_schemas() {
+    let mut s = door();
+    s.param_check = ParamCheck::Warn;
+    let run = |s: &mut Session, id: &str, p: Value, schema: schemars::Schema| {
+        let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{r}");
+        r
+    };
+    let auto = run(&mut s, "explode.create", json!({}), output_schema_for::<ExplodeCreated>());
+    assert_eq!(auto["name"], "Exploded View1", "{auto}");
+    assert_eq!(auto["moves"].as_array().map(Vec::len), Some(3), "{auto}");
+    assert!(auto["moves"][0]["occurrence"].is_u64() && auto["moves"][0]["translate"].as_array().is_some_and(|t| t.len() == 3), "{auto}");
+    let scaled = run(&mut s, "explode.create", json!({"name": "Far", "scale": 2.5}), output_schema_for::<ExplodeCreated>());
+    assert_eq!(scaled["name"], "Far", "{scaled}");
+    run(&mut s, "explode.create", json!({"scale": -1}), output_schema_for::<ExplodeCreated>());
+    // `scale` is not read with `moves`, so a bad one is no problem.
+    let by_hand = run(
+        &mut s,
+        "explode.create",
+        json!({"name": "Hand", "scale": "ignored", "moves": [move_of(json!("Door"), json!([0, 0, 50])), move_of(json!("Slide"), json!({"x": 1, "y": 2, "z": 3}))]}),
+        output_schema_for::<ExplodeCreated>(),
+    );
+    let (door_id, slide_id) = (by_hand["moves"][0]["occurrence"].clone(), by_hand["moves"][1]["occurrence"].clone());
+    let expected = json!({
+        "view": by_hand["view"],
+        "name": "Hand",
+        "moves": [{"occurrence": door_id, "translate": [0.0, 0.0, 50.0]}, {"occurrence": slide_id, "translate": [1.0, 2.0, 3.0]}]
+    });
+    assert_eq!(by_hand, expected);
+    run(&mut s, "explode.create", json!({"name": "Empty", "moves": []}), output_schema_for::<ExplodeCreated>());
+
+    let list = run(&mut s, "explode.list", json!({}), output_schema_for::<ExplodeViews>());
+    assert_eq!(list["views"].as_array().map(Vec::len), Some(5), "{list}");
+    // Exactly what the design's own views serialize to, as the handler returned them before.
+    assert_eq!(list["views"], serde_json::to_value(&s.doc.assembly.exploded).unwrap_or_default());
+    assert_eq!(list["views"][3], json!({"id": by_hand["view"], "name": "Hand", "moves": [[door_id, [0.0, 0.0, 50.0]], [slide_id, [1.0, 2.0, 3.0]]]}));
+
+    // Shown by name, by id and, to put the assembled placement back, by nothing, `null` or `none`.
+    let r = run(&mut s, "explode.show", json!({"view": "Hand"}), output_schema_for::<ExplodeShown>());
+    assert_eq!(r, json!({"view": by_hand["view"], "name": "Hand"}));
+    let r = run(&mut s, "explode.show", json!({"view": scaled["view"]}), output_schema_for::<ExplodeShown>());
+    assert_eq!(r, json!({"view": scaled["view"], "name": "Far"}));
+    for p in [json!({}), json!({"view": null}), json!({"view": "None"})] {
+        run(&mut s, "explode.show", json!({"view": "Hand"}), output_schema_for::<ExplodeShown>());
+        let r = run(&mut s, "explode.show", p, output_schema_for::<ExplodeShown>());
+        assert_eq!(r, json!({"view": null}));
+    }
+
+    let r = run(&mut s, "explode.delete", json!({"view": "Hand"}), output_schema_for::<ExplodeDeleted>());
+    assert_eq!(r, json!({"deleted": "Hand"}));
+    let r = run(&mut s, "explode.delete", json!({"view": scaled["view"]}), output_schema_for::<ExplodeDeleted>());
+    assert_eq!(r, json!({"deleted": "Far"}));
+
+    // A misspelt key runs in Warn and says so, with a reply that still matches; strict refuses it.
+    run(&mut s, "explode.create", json!({"name": "Typo"}), output_schema_for::<ExplodeCreated>());
+    for (id, p, schema) in [
+        ("explode.create", json!({"nme": "Typo"}), output_schema_for::<ExplodeCreated>()),
+        ("explode.show", json!({"veiw": "Exploded View"}), output_schema_for::<ExplodeShown>()),
+        ("explode.list", json!({"view": 1}), output_schema_for::<ExplodeViews>()),
+        ("explode.delete", json!({"view": "Typo", "name": 1}), output_schema_for::<ExplodeDeleted>()),
+    ] {
+        s.param_check = ParamCheck::Warn;
+        let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        let schema = schema.as_value();
+        assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()) && conforms(schema, schema, &r), "{id}: {r}");
+        s.param_check = ParamCheck::Strict;
+        let error = s.execute(id, &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error.contains("unknown key"), "{id}: {error}");
+    }
+    let before = s.doc.assembly.exploded.len();
+    s.param_check = ParamCheck::Strict;
+    assert!(s.execute("explode.create", &json!({"nme": "Typo"})).is_err());
+    assert_eq!(s.doc.assembly.exploded.len(), before, "strict ran nothing");
 }

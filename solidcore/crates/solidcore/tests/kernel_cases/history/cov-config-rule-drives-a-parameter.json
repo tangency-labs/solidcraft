@@ -1,0 +1,169 @@
+{
+  "area": "history",
+  "bodies": {
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b15": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b20",
+        "b21"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b22"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "cov-config-rule-drives-a-parameter",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        30,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 7,
+    "method": "Long: W = 60, the rule sets H = 20: V = 60 30 20 - pi 25 20 = 36000 - 500 pi; faces 7",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 34429.203673205106,
+    "what": "config.rule drives H to 20 when W is 60 or more"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "cov-config-rule-drives-a-parameter.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b22"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7671.238898039918,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 34429.20367315317
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "config.rule drives H to 20 when W is 60 or more",
+  "why_not": []
+}

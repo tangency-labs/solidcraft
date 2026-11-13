@@ -45,6 +45,13 @@ const TOUCH_AREA: f64 = 1e-6;
 const FOLD_TABS_REJOIN: &str = "not supported yet: folding tabs that join again beyond the bend";
 pub const FOLD_FIXED_OFF_SHEET: &str = "the fold's fixed point is not on the sheet";
 
+/// A bend radius at or below this (mm) is a sharp bend. Its inner face has collapsed to the bend's
+/// inner edge, so the folded solid has only the outer cylindrical face there, as a press brake
+/// makes it with a sharp punch: no inner cylinder. Half the linear tolerance, so the inner arc's
+/// chord (at most √2 · radius) is below it and the end walls' inner edge collapses too; a larger
+/// radius keeps its inner cylinder and the shell stays closed.
+const SHARP_BEND: f64 = LINEAR_TOL / 2.0;
+
 /// The most bores one sheet keeps.
 const MAX_BORES: usize = 1000;
 
@@ -123,7 +130,282 @@ fn planar_region(region: &Region2) -> Result<Region2> {
     region_complexity(std::slice::from_ref(region))?;
     // Free-form loops stay exact: the planar booleans follow them with arcs and hand a loop
     // they leave whole its exact segments back.
-    Ok(Region2 { outer: region.outer.ccw(), holes: region.holes.iter().map(|h| h.ccw().reversed()).collect() })
+    Ok(Region2 { outer: without_hairs(region.outer.ccw()), holes: region.holes.iter().map(|h| without_hairs(h.ccw().reversed())).collect() })
+}
+
+/// Edges shorter than this (mm) are no edges to the planar booleans: SMLib refuses a face whose
+/// loop has one ("status 1001", measured up to 1e-5 mm; 4e-5 mm passes). They come from an
+/// outline with a corner a hair beside a bend zone's edge, split there. Below 0.1 µm: a ledge
+/// 0.1 µm tall beside a flange's setback stays a sliver of the base.
+const HAIR: f64 = 5e-5;
+
+/// `region` with each corner that lies within [`HAIR`] of a bend zone's straight edge
+/// (`seams`: a point and a unit direction each), but not on it, moved onto it: the straight edges
+/// meeting there move that end, an arc meeting there moves whole with its centre (and the edge
+/// beyond it then moves that end too). A cut-out whose edge stops a hair short of a bend line, or
+/// a hair past it, or whose rounded corner ends there, otherwise leaves a sliver of a face that
+/// thin along the line, whose edges the sew cannot tell apart ("ambiguous edge contact"); the
+/// cut moves by under 0.05 µm.
+fn onto_seams(region: Region2, seams: &[(Vec2, Vec2)]) -> Region2 {
+    if seams.is_empty() {
+        return region;
+    }
+    let off = |p: Vec2, (o, d): (Vec2, Vec2)| (p - o).cross(d);
+    let snap_loop = |mut lp: Loop2| -> Loop2 {
+        let n = lp.segs.len();
+        if n < 2 {
+            return lp;
+        }
+        for j in 0..n {
+            let prev = (j + n - 1) % n;
+            let (Some(p), Some(q)) = (lp.segs.get(j).and_then(seg_start), lp.segs.get(prev).and_then(seg_end)) else { continue };
+            if p.dist(q) > LINEAR_TOL {
+                continue;
+            }
+            let Some(&(o, d)) = seams.iter().find(|&&s| off(p, s) != 0.0 && off(p, s).abs() < HAIR) else { continue };
+            let delta = o + d * (p - o).dot(d) - p;
+            if let Some(segs) = shifted(&lp.segs, j, delta) {
+                lp.segs = segs;
+            }
+        }
+        lp
+    };
+    Region2 { outer: snap_loop(region.outer), holes: region.holes.into_iter().map(snap_loop).collect() }
+}
+
+/// `region` passing through each corner in `corners` (the panels' and bend zones' corners) that it
+/// passes within `reach` of, but not through: a corner of its own that near moves onto it, as
+/// [`onto_seams`] moves corners onto a bend line, and a straight edge that near is split there.
+/// Such a corner is a corner of the cut-out to the folded solid, which is sewn with a tolerance
+/// of `reach` (#15269): left apart, SMLib's 2D boolean took the two for one point and handed the
+/// panel's outline back open, or left an edge between them shorter than the sew's tolerance,
+/// which SMLib refused. The cut moves by under `reach`.
+fn onto_corners(region: Region2, corners: &[Vec2], reach: f64) -> Region2 {
+    if corners.is_empty() {
+        return region;
+    }
+    let snap_loop = |mut lp: Loop2| -> Loop2 {
+        let n = lp.segs.len();
+        if n < 2 {
+            return lp;
+        }
+        for j in 0..n {
+            let prev = (j + n - 1) % n;
+            let (Some(p), Some(q)) = (lp.segs.get(j).and_then(seg_start), lp.segs.get(prev).and_then(seg_end)) else { continue };
+            if p.dist(q) > LINEAR_TOL {
+                continue;
+            }
+            // A corner on one of the corners (to rounding) stays there, whatever other corner is
+            // near.
+            if corners.iter().any(|c| c.dist(p) <= NOISE) {
+                continue;
+            }
+            let near = corners.iter().filter(|c| c.dist(p) < reach);
+            let Some(&c) = near.min_by(|a, b| a.dist(p).total_cmp(&b.dist(p))) else { continue };
+            if let Some(segs) = shifted(&lp.segs, j, c - p) {
+                lp.segs = segs;
+            }
+        }
+        let mut segs = Vec::with_capacity(lp.segs.len());
+        for e in lp.segs {
+            let Seg2::Line { a, b } = e else {
+                segs.push(e);
+                continue;
+            };
+            let d = b - a;
+            let mut on: Vec<(f64, Vec2)> = corners
+                .iter()
+                .filter(|c| c.dist(a) >= reach && c.dist(b) >= reach)
+                .filter_map(|&c| {
+                    let t = (c - a).dot(d) / d.len2().max(1e-30);
+                    let off = (a + d * t).dist(c);
+                    ((0.0..=1.0).contains(&t) && off > NOISE && off < reach).then_some((t, c))
+                })
+                .collect();
+            on.sort_by(|x, y| x.0.total_cmp(&y.0));
+            let mut from = a;
+            for (_, c) in on {
+                if c.dist(from) >= reach {
+                    segs.push(Seg2::Line { a: from, b: c });
+                    from = c;
+                }
+            }
+            segs.push(Seg2::Line { a: from, b });
+        }
+        Loop2 { segs }
+    };
+    Region2 { outer: snap_loop(region.outer), holes: region.holes.into_iter().map(snap_loop).collect() }
+}
+
+/// The working tolerance (mm) of the record the kernel's sew builds a solid `size` mm across
+/// from: 10⁻⁶ of its size, at least 10⁻⁵ mm (`sew_impl` in `crates/kernel/src/sew.rs`).
+fn sew_tolerance(size: f64) -> f64 {
+    (size * 1e-6).max(1e-5)
+}
+
+/// `segs` (a closed loop) with the corner where segment `j` starts moved by `delta`: a line
+/// meeting there moves that end, an arc moves whole and passes the move on to the corner at its
+/// other end. None when a curve that cannot move so meets the move, or the move goes round the
+/// whole loop.
+fn shifted(segs: &[Seg2], j: usize, delta: Vec2) -> Option<Vec<Seg2>> {
+    let n = segs.len();
+    let mut out = segs.to_vec();
+    let mut moved = 0;
+    // forward from j (moving starts), then backward from the segment before j (moving ends)
+    for forward in [true, false] {
+        let mut k = if forward { j } else { (j + n - 1) % n };
+        loop {
+            moved += 1;
+            if moved > n {
+                return None;
+            }
+            match out.get(k).copied()? {
+                Seg2::Line { a, b } => {
+                    out[k] = if forward { Seg2::Line { a: a + delta, b } } else { Seg2::Line { a, b: b + delta } };
+                    break;
+                }
+                Seg2::Arc { center, radius, start, sweep } => {
+                    out[k] = Seg2::Arc { center: center + delta, radius, start, sweep };
+                    k = if forward { (k + 1) % n } else { (k + n - 1) % n };
+                }
+                _ => return None,
+            }
+        }
+    }
+    Some(out)
+}
+
+fn seg_start(s: &Seg2) -> Option<Vec2> {
+    match *s {
+        Seg2::Line { a, .. } => Some(a),
+        Seg2::Arc { center, radius, start, .. } => Some(center + Vec2::new(start.cos(), start.sin()) * radius),
+        _ => None,
+    }
+}
+
+fn seg_end(s: &Seg2) -> Option<Vec2> {
+    match *s {
+        Seg2::Line { b, .. } => Some(b),
+        Seg2::Arc { center, radius, start, sweep } => Some(center + Vec2::new((start + sweep).cos(), (start + sweep).sin()) * radius),
+        _ => None,
+    }
+}
+
+/// Whether a cut-out's outline encloses some area: a sliver there and back, or points on a
+/// line, cuts nothing, and SMLib's face builder refuses it (status 1001).
+fn encloses_area(r: &Region2) -> bool {
+    r.outer.signed_area().abs() > 1e-9
+}
+
+/// [`kernel::extrude_planar_regions`] of `regions` with their loops [`welded`] first.
+fn extrude_flat(plane: &Plane, regions: &[Region2], z0: f64, z1: f64) -> kernel::Result<Body> {
+    kernel::extrude_planar_regions(plane, welded_regions(regions).as_ref(), z0, z1)
+}
+
+/// `regions` with their loops [`welded`], borrowed when every loop is closed already.
+fn welded_regions(regions: &[Region2]) -> std::borrow::Cow<'_, [Region2]> {
+    let open = |lp: &Loop2| lp.segs.iter().zip(lp.segs.iter().cycle().skip(1)).any(|(p, q)| p.end().dist(q.start()) > NOISE);
+    if !regions.iter().any(|r| open(&r.outer) || r.holes.iter().any(open)) {
+        return std::borrow::Cow::Borrowed(regions);
+    }
+    std::borrow::Cow::Owned(
+        regions.iter().map(|r| Region2 { outer: welded(r.outer.clone()), holes: r.holes.iter().cloned().map(welded).collect() }).collect(),
+    )
+}
+
+/// Gaps up to this (mm) are rounding, not gaps: left as they are, so a loop and its mirror image
+/// keep their exact mirror coordinates.
+const NOISE: f64 = 1e-9;
+
+/// `lp` with each gap between [`NOISE`] and [`HAIR`] between a segment's end and the next one's start closed:
+/// the next segment starts where the last ends, or the last ends where the next starts when the
+/// next is an arc (whose ends do not move without its centre). The planar booleans close a loop
+/// only within 1 nm; a free-form outline the flat pattern was made of (a torn fold's) came out
+/// of them with its pieces 14 nm apart, which a following boolean refused.
+fn welded(mut lp: Loop2) -> Loop2 {
+    let n = lp.segs.len();
+    let moved = |s: Seg2, start: bool, to: Vec2| -> Option<Seg2> {
+        Some(match s {
+            Seg2::Line { a, b } => {
+                if start {
+                    Seg2::Line { a: to, b }
+                } else {
+                    Seg2::Line { a, b: to }
+                }
+            }
+            Seg2::Cubic { p0, p1, p2, p3 } => {
+                if start {
+                    Seg2::Cubic { p0: to, p1, p2, p3 }
+                } else {
+                    Seg2::Cubic { p0, p1, p2, p3: to }
+                }
+            }
+            Seg2::Conic { a, apex, b, w } => {
+                if start {
+                    Seg2::Conic { a: to, apex, b, w }
+                } else {
+                    Seg2::Conic { a, apex, b: to, w }
+                }
+            }
+            Seg2::Bezier { n: deg, mut p } => {
+                let k = if start { 0 } else { usize::from(deg) };
+                *p.get_mut(k)? = to;
+                Seg2::Bezier { n: deg, p }
+            }
+            Seg2::Arc { .. } => return None,
+        })
+    };
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let (Some(&p), Some(&q)) = (lp.segs.get(i), lp.segs.get(j)) else { continue };
+        let gap = p.end().dist(q.start());
+        if gap <= NOISE || gap >= HAIR {
+            continue;
+        }
+        if let Some(q2) = moved(q, true, p.end()).filter(|s| s.length() >= HAIR) {
+            lp.segs[j] = q2;
+        } else if let Some(p2) = moved(p, false, q.start()).filter(|s| s.length() >= HAIR) {
+            lp.segs[i] = p2;
+        }
+    }
+    lp
+}
+
+/// `lp` without its hair edges (shorter than [`HAIR`]): the line the hair runs on from takes it,
+/// so the corners at the hair's other end stay where they are (an outline split at a bend zone's
+/// edge keeps its corner on that edge, which the zone shares). A hair at a corner goes to the
+/// line after it. A hair between two curves stays.
+fn without_hairs(lp: Loop2) -> Loop2 {
+    let n = lp.segs.len();
+    if n <= 3 || !lp.segs.iter().any(|s| s.length() < HAIR) {
+        return lp;
+    }
+    let along = |line: &Seg2, hair: &Seg2| match (line, (hair.end() - hair.start()).normalized()) {
+        (Seg2::Line { a, b }, Some(d)) => (*b - *a).normalized().is_some_and(|u| u.cross(d).abs() < 1e-3 && u.dot(d) > 0.0),
+        _ => false,
+    };
+    let mut segs = lp.segs;
+    let mut i = 0;
+    while i < segs.len() && segs.len() > 3 {
+        let Some(hair) = segs.get(i).copied().filter(|s| s.length() < HAIR) else {
+            i += 1;
+            continue;
+        };
+        let m = segs.len();
+        let (prev, next) = ((i + m - 1) % m, (i + 1) % m);
+        let prev_takes = segs.get(prev).is_some_and(|p| along(p, &hair)) && !segs.get(next).is_some_and(|q| along(q, &hair));
+        match (prev_takes, segs.get(prev).copied(), segs.get(next).copied()) {
+            (true, Some(Seg2::Line { a, .. }), _) => segs[prev] = Seg2::Line { a, b: hair.end() },
+            (_, _, Some(Seg2::Line { b, .. })) => segs[next] = Seg2::Line { a: hair.start(), b },
+            (_, Some(Seg2::Line { a, .. }), _) => segs[prev] = Seg2::Line { a, b: hair.end() },
+            _ => {
+                i += 1;
+                continue;
+            }
+        }
+        segs.remove(i);
+    }
+    Loop2 { segs }
 }
 
 fn region_complexity(regions: &[Region2]) -> Result<(usize, usize)> {
@@ -193,12 +475,21 @@ impl<'a> NearHoles<'a> {
     }
 }
 
+// The planar booleans this thread ran, for the tests that count them.
+#[cfg(test)]
+thread_local! {
+    static MATERIAL_BOOLEANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn material_boolean(a: &[Region2], b: &[Region2], op: kernel::BoolOp, work: &mut FlatWork) -> Result<Vec<Region2>> {
+    #[cfg(test)]
+    MATERIAL_BOOLEANS.with(|n| n.set(n.get() + 1));
     let (ae, ap) = region_complexity(a)?;
     let (be, bp) = region_complexity(b)?;
     let edges = ae.saturating_add(be);
     work.charge(edges.saturating_mul(edges).saturating_add(edges.saturating_mul(ap.saturating_add(bp))).saturating_mul(8))?;
-    let regions = kernel::planar_regions_boolean(a, b, op, 1e-7)?;
+    let (a, b) = (welded_regions(a), welded_regions(b));
+    let regions = kernel::planar_regions_boolean(a.as_ref(), b.as_ref(), op, 1e-7)?;
     region_complexity(&regions)?;
     Ok(regions)
 }
@@ -221,6 +512,204 @@ pub(crate) fn material_union(regions: Vec<Region2>, work: &mut FlatWork) -> Resu
     }
     Ok(groups.pop().unwrap_or_default())
 }
+
+/// Cut a loop along the line `at`–`tip` and back: a zero-width slit. `at` is anchored on the loop
+/// (a vertex, or the point of a segment that runs through it), `tip` lies inside the material on
+/// the bend line or on another boundary point. The loop keeps its sense and its area; the material
+/// either side of the doubled edge is parted, as a laser cut of the flat pattern leaves it. False
+/// when neither end is on the loop.
+fn slit_loop(lp: &mut Loop2, at: Vec2, tip: Vec2) -> bool {
+    // The boundary end is whichever end lies on the loop; the other is the slit's tip.
+    let (anchor, tip) = if split_loop_at(lp, at).is_some() {
+        (at, tip)
+    } else if split_loop_at(lp, tip).is_some() {
+        (tip, at)
+    } else {
+        return false;
+    };
+    let Some(k) = (0..lp.segs.len()).find(|&k| lp.segs[k].end().dist(anchor) <= 1e-6) else { return false };
+    let anchor = lp.segs[k].end();
+    if tip.dist(anchor) <= 1e-6 {
+        return false;
+    }
+    lp.segs.insert(k + 1, Seg2::Line { a: anchor, b: tip });
+    lp.segs.insert(k + 2, Seg2::Line { a: tip, b: anchor });
+    true
+}
+
+/// Clip a junction cut to the material that remains when the ends it was computed from were cut
+/// away: walk the junction line outward from the bend line and collect every stretch of it that
+/// still runs through material, each end on the outer loop, ordered outward from the bend line.
+/// Returns the pairs to slit between, boundary end first; empty when the line has no material
+/// outward of the bend line: that cut has nothing left to part, an empty stretch of the line rather
+/// than a failed lookup. A re-entrant notch pattern leaves the line crossing material several
+/// times, and each of those stretches is a bridge the folded part separates along, so each one is
+/// returned. Only the stretch of the line from the bend line out to the junction's own tip belongs
+/// to this junction: past it the line runs on through material the bend never reaches (a C-shaped
+/// blank's other arm, for one), which it does not cut.
+fn clip_junction_slits(lp: &Loop2, at: Vec2, tip: Vec2) -> Vec<(Vec2, Vec2)> {
+    let d = tip - at;
+    let len = d.len();
+    if len <= 1e-9 {
+        return Vec::new();
+    }
+    let u = d / len;
+    // How far past the tip a crossing may lie and still count: the same 1e-6 mm the slit's own
+    // anchor and endpoint tests use.
+    const SLACK: f64 = 1e-6;
+    // Where the junction line crosses the boundary, nearest the bend line first. A line and a
+    // circular arc are intersected exactly, so the crossing is a point of the curve itself and the
+    // 1e-6 anchor tolerance of `slit_loop` finds it; only free-form segments follow the 0.001 mm
+    // chords the planar booleans use.
+    let mut hits: Vec<(f64, Vec2)> = Vec::new();
+    for seg in &lp.segs {
+        match *seg {
+            Seg2::Line { a, b } => {
+                let e = b - a;
+                let den = u.cross(e);
+                if den.abs() <= 1e-12 {
+                    continue;
+                }
+                let t = (a - at).cross(e) / den;
+                let s = (at - a).cross(u) / e.cross(u);
+                if t < -1e-9 || t > len + SLACK || !(-1e-9..=1.0 + 1e-9).contains(&s) {
+                    continue;
+                }
+                hits.push((t.max(0.0), at + u * t));
+            }
+            Seg2::Arc { center, radius, start, sweep } => {
+                // The roots of |at + u·t − center|² = radius²: the junction line through the
+                // circle. A root is a crossing only within the arc's sweep.
+                let f = at - center;
+                let b = f.dot(u);
+                let disc = b * b - (f.len2() - radius * radius);
+                if !(disc >= 0.0) || sweep.abs() < 1e-12 {
+                    continue;
+                }
+                let root = disc.sqrt();
+                for t in [-b - root, -b + root] {
+                    if t < -1e-9 || t > len + SLACK {
+                        continue;
+                    }
+                    let turn = ((at + u * t - center).angle() - start) * sweep.signum();
+                    let share = turn.rem_euclid(std::f64::consts::TAU) / sweep.abs();
+                    if share > 1.0 + 1e-9 {
+                        continue;
+                    }
+                    // The crossing on the arc itself, at the angle `split_loop_at` splits it at:
+                    // the returned point is a point of the curve, not a chord's inside of it.
+                    let p = center + Vec2::from_angle(start + sweep * share.clamp(0.0, 1.0)) * radius;
+                    hits.push((t.max(0.0), p));
+                }
+            }
+            _ => {
+                let pts = seg.polyline(1e-3);
+                for w in pts.windows(2) {
+                    let (a, b) = (w[0], w[1]);
+                    let e = b - a;
+                    let den = u.cross(e);
+                    if den.abs() <= 1e-12 {
+                        continue;
+                    }
+                    let t = (a - at).cross(e) / den;
+                    let s = (at - a).cross(u) / e.cross(u);
+                    if t < -1e-9 || t > len + SLACK || !(-1e-9..=1.0 + 1e-9).contains(&s) {
+                        continue;
+                    }
+                    hits.push((t.max(0.0), at + u * t));
+                }
+            }
+        }
+    }
+    hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+    hits.dedup_by(|a, b| (a.0 - b.0).abs() <= 1e-7);
+    let mut out: Vec<(Vec2, Vec2)> = Vec::new();
+    if lp.contains(at) {
+        // The bend line is in material: the first cut runs from it out to the nearest boundary
+        // crossing.
+        if let Some((t, p)) = hits.first()
+            && *t > 1e-9
+        {
+            out.push((*p, at));
+        }
+    }
+    // Beyond a crossing, the stretches between later crossings that lie in material are the bridges
+    // the notches left: each one is a cut. The bend line itself being cut away is the case where the
+    // first stretch is a gap and the pairs below are all that remain.
+    for pair in hits.windows(2) {
+        let ((t0, p0), (t1, p1)) = (pair[0], pair[1]);
+        if p0.dist(p1) <= 1e-6 {
+            continue;
+        }
+        let mid = at + u * ((t0 + t1) / 2.0);
+        if lp.contains(mid) {
+            out.push((p0, p1));
+        }
+    }
+    out
+}
+
+/// Split the loop's segment that runs through `p` into two there, so `p` is a vertex of the loop.
+/// A `p` already at a vertex splits nothing. None when no segment runs through `p`.
+fn split_loop_at(lp: &mut Loop2, p: Vec2) -> Option<usize> {
+    const TOL: f64 = 1e-6;
+    for k in 0..lp.segs.len() {
+        match lp.segs[k] {
+            Seg2::Line { a, b } => {
+                let d = b - a;
+                let len = d.len();
+                if len < TOL {
+                    continue;
+                }
+                let u = d / len;
+                let along = (p - a).dot(u);
+                if (p - (a + u * along)).len() > TOL {
+                    continue;
+                }
+                // A point within the slit's own tolerance of either end is a vertex of the loop as
+                // it stands: there is nothing to split, and saying so is what lets a cut end on a
+                // corner (a stepped far edge, for one) rather than being refused as "not on the
+                // loop". The distance is the test `slit_loop` finds the anchor's segment end with,
+                // so the two always agree.
+                if p.dist(a) <= TOL || p.dist(b) <= TOL {
+                    return Some(k);
+                }
+                if along < 0.0 || along > len {
+                    continue;
+                }
+                lp.segs[k] = Seg2::Line { a, b: p };
+                lp.segs.insert(k + 1, Seg2::Line { a: p, b });
+                return Some(k);
+            }
+            Seg2::Arc { center, radius, start, sweep } => {
+                if ((p - center).len() - radius).abs() > TOL || sweep.abs() < 1e-12 {
+                    continue;
+                }
+                // An arc's ends are judged by the same distance, not by a share of the sweep: a
+                // share is a different kind of number and disagrees with the 1e-6 mm the slit
+                // accepts on a large radius (5e-7 of a 1 rad sweep on R = 100 mm is 5e-5 mm out,
+                // so a cut there was read as "already a vertex" and then dropped as "not on the
+                // loop"). As for a line, an end point is a vertex of the loop already.
+                let start_point = center + Vec2::from_angle(start) * radius;
+                let end_point = center + Vec2::from_angle(start + sweep) * radius;
+                if p.dist(start_point) <= TOL || p.dist(end_point) <= TOL {
+                    return Some(k);
+                }
+                let turn = ((p - center).angle() - start) * sweep.signum();
+                let share = turn.rem_euclid(std::f64::consts::TAU) / sweep.abs();
+                if share > 1.0 {
+                    continue;
+                }
+                lp.segs[k] = Seg2::Arc { center, radius, start, sweep: sweep * share };
+                lp.segs.insert(k + 1, Seg2::Arc { center, radius, start: start + sweep * share, sweep: sweep * (1.0 - share) });
+                return Some(k);
+            }
+            _ => continue,
+        }
+    }
+    None
+}
+
 /// A sheet metal rule. Values are expressions; `Thickness` inside them is the rule's thickness.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SheetRule {
@@ -579,13 +1068,43 @@ pub struct SheetFlange {
 }
 
 /// One edge flange to make: a pick on the sheet's edge, that flange's height (measured as `from`
-/// says) and angle (radians).
+/// says) and angle (radians), and which stretch of the edge it covers.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EdgeFlange {
     pub pick: Vec3,
     pub height: f64,
     pub angle: f64,
     pub from: HeightFrom,
+    /// The stretch of the picked edge this flange covers, as fractions of the stretch the sheet
+    /// still has there: `(0, 1)` is the whole edge, as every edge flange was before segments
+    /// (`sheet.flange`'s `segments`); anything else is one segment of a split edge.
+    pub span: (f64, f64),
+    /// This segment's side, where it has one of its own: it replaces the feature's `flip` outright
+    /// for this stretch rather than turning relative to it, so `Some(false)` is the default
+    /// direction and `Some(true)` the other one, whatever the feature's `flip` is.
+    pub flip: Option<bool>,
+}
+
+/// The whole of a picked edge: the span of an edge flange that isn't split into segments.
+pub const WHOLE_EDGE: (f64, f64) = (0.0, 1.0);
+
+/// The tolerance on a segment list's junctions. `sheet.flange` accepts a list whose stretches meet
+/// within this, and its build snaps such a junction shut, so every list the command accepts tiles
+/// the edge with no gap and no overlap: stretches that match in angle, height and side merge into
+/// the bend the whole-edge flange builds, and stretches that differ build one bend each (#5927,
+/// #5928). Both sides read this one number: a list can never pass validation and then stay split.
+pub const SEGMENT_JOIN_EPS: f64 = 1e-9;
+
+impl EdgeFlange {
+    /// An edge flange over the whole of the picked edge, turning as the feature says.
+    pub fn at(pick: Vec3, height: f64, angle: f64, from: HeightFrom) -> Self {
+        Self { pick, height, angle, from, span: WHOLE_EDGE, flip: None }
+    }
+
+    /// Whether this flange covers the whole edge (no segments).
+    pub fn whole(&self) -> bool {
+        (self.span.0 - WHOLE_EDGE.0).abs() < 1e-12 && (self.span.1 - WHOLE_EDGE.1).abs() < 1e-12
+    }
 }
 
 /// Where an edge flange's height is measured from (#5938). Every one measures along the flange,
@@ -1055,6 +1574,135 @@ fn curved_fold(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<Cu
     })
 }
 
+/// A panel's outline cut exactly across a fold whose zone falls apart into tabs (see
+/// `Sheet::fold_tabs`): the stretches of outline short of the zone, and between them each tab,
+/// as the outline runs into the zone, beyond it and back. Every curve stays as drawn.
+#[derive(Clone, Debug, PartialEq)]
+struct TabCut {
+    /// `near[k]` is followed by `tabs[k]`, which is followed by `near[k + 1]` (round the loop).
+    near: Vec<Vec<Seg2>>,
+    tabs: Vec<CutTab>,
+}
+
+/// One tab of a [`TabCut`]: into the zone, beyond it and back, and its span along the line.
+#[derive(Clone, Debug, PartialEq)]
+struct CutTab {
+    into: Vec<Seg2>,
+    far: Vec<Seg2>,
+    back: Vec<Seg2>,
+    u: (f64, f64),
+}
+
+impl TabCut {
+    /// The part that stays: the outline short of the zone, with the tabs that `fold` keeps
+    /// whole and each one that folds closed off along the zone's near line.
+    fn fixed(&self, fold: impl Fn(usize) -> bool) -> Loop2 {
+        let mut segs = Vec::new();
+        let count = self.near.len();
+        for (k, (near, tab)) in self.near.iter().zip(&self.tabs).enumerate() {
+            segs.extend_from_slice(near);
+            if fold(k) {
+                let (Some(a), Some(b)) = (near.last().map(Seg2::end), self.near.get((k + 1) % count).and_then(|n| n.first()).map(Seg2::start)) else {
+                    continue;
+                };
+                segs.push(Seg2::Line { a, b });
+            } else {
+                segs.extend(tab.into.iter().chain(&tab.far).chain(&tab.back).cloned());
+            }
+        }
+        Loop2 { segs }
+    }
+
+    /// Tab `k`'s material beyond the zone, closed off along the zone's far line.
+    fn moving(&self, k: usize) -> Option<Loop2> {
+        let far = &self.tabs.get(k)?.far;
+        let mut segs = far.clone();
+        segs.push(Seg2::Line { a: far.last()?.end(), b: far.first()?.start() });
+        Some(Loop2 { segs })
+    }
+}
+
+/// `outline` cut at the zone between the lines at `s0` and `s0 + ba` along `n` into the
+/// stretches short of it and the tabs that cross it: each tab goes into the zone on straight
+/// edges, out the far side, and back, once. Anything else (a notch into the zone, a tab that
+/// comes back into the zone beyond it, an edge along either line) is `None`.
+fn tab_cut(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<TabCut> {
+    const ON_LINE: f64 = 1e-6;
+    if outline.segs.len() > MAX_FLAT_POINTS {
+        return None;
+    }
+    let outline = outline.ccw();
+    let mut pieces = Vec::new();
+    for seg in &outline.segs {
+        let mut near = Vec::new();
+        cut_at_level(seg, n, s0, &mut near);
+        for piece in &near {
+            cut_at_level(piece, n, s0 + ba, &mut pieces);
+        }
+    }
+    let mut bands = Vec::with_capacity(pieces.len());
+    for piece in &pieces {
+        let v = piece.mid().dot(n);
+        if !v.is_finite() || (v - s0).abs() <= ON_LINE || (v - s0 - ba).abs() <= ON_LINE {
+            return None;
+        }
+        bands.push(if v < s0 {
+            0
+        } else if v > s0 + ba {
+            2
+        } else {
+            1
+        });
+    }
+    let count = pieces.len();
+    let first = (0..count).find(|&i| bands.get(i) == Some(&0) && bands.get((i + count - 1) % count) != Some(&0))?;
+    let mut runs: Vec<(i32, Vec<Seg2>)> = Vec::new();
+    for k in 0..count {
+        let i = (first + k) % count;
+        let (band, piece) = (*bands.get(i)?, *pieces.get(i)?);
+        match runs.last_mut() {
+            Some((b, run)) if *b == band => run.push(piece),
+            _ => runs.push((band, vec![piece])),
+        }
+    }
+    let on = |q: Vec2, s: f64| (q.dot(n) - s).abs() <= ON_LINE;
+    // Into the zone and back must be straight edges square across it, as the tabs' zone pieces
+    // are rectangles.
+    let square = |run: &[Seg2]| {
+        run.iter().all(|s| match *s {
+            Seg2::Line { a, b } => ((b - a).dot(d)).abs() <= ON_LINE,
+            _ => false,
+        })
+    };
+    let (mut near, mut tabs) = (Vec::new(), Vec::new());
+    for chunk in runs.chunks(4) {
+        let [(0, n0), (1, into), (2, far), (1, back)] = chunk else { return None };
+        let (Some(i0), Some(i1), Some(f0), Some(f1), Some(b0), Some(b1)) = (
+            into.first().map(Seg2::start),
+            into.last().map(Seg2::end),
+            far.first().map(Seg2::start),
+            far.last().map(Seg2::end),
+            back.first().map(Seg2::start),
+            back.last().map(Seg2::end),
+        ) else {
+            return None;
+        };
+        if !(on(i0, s0) && on(i1, s0 + ba) && on(f0, s0 + ba) && on(f1, s0 + ba) && on(b0, s0 + ba) && on(b1, s0) && square(into) && square(back)) {
+            return None;
+        }
+        let u = (i0.dot(d).min(b1.dot(d)), i0.dot(d).max(b1.dot(d)));
+        if u.1 - u.0 <= ON_LINE {
+            return None;
+        }
+        near.push(n0.clone());
+        tabs.push(CutTab { into: into.clone(), far: far.clone(), back: back.clone(), u });
+    }
+    if tabs.len() < 2 {
+        return None;
+    }
+    Some(TabCut { near, tabs })
+}
+
 /// Two counter-clockwise loops joined along a straight edge they share, running opposite ways:
 /// every curve of both exactly as it was, which the planar booleans wouldn't hand back.
 fn join_along_seam(a: &Loop2, b: &Loop2) -> Option<Loop2> {
@@ -1411,6 +2059,23 @@ impl SheetBody {
         (-f.ext.0 - f.slope.0 * f.leg, f.len + f.ext.1 + f.slope.1 * f.leg)
     }
 
+    /// The straight edges of the bend zones that run along their bends, as a point and a unit
+    /// direction each: the lines where the folded solid's faces change from a panel to a bend.
+    fn seams(&self) -> Vec<(Vec2, Vec2)> {
+        let mut out = Vec::new();
+        for f in &self.flanges {
+            let Some(d) = f.d.normalized() else { continue };
+            for e in &self.zone(f).outer.segs {
+                if let Seg2::Line { a, b } = *e
+                    && (b - a).normalized().is_some_and(|u| u.cross(d).abs() < 1e-9)
+                {
+                    out.push((a, d));
+                }
+            }
+        }
+        out
+    }
+
     /// Flat region of a flange's bend zone: square across the bend at both ends, but at a torn
     /// end its far edge ends where the panel's does.
     pub fn zone(&self, f: &SheetFlange) -> Region2 {
@@ -1720,8 +2385,17 @@ impl SheetBody {
         // their fitted arcs there (the flat pattern keeps them exact).
         let mut cuts = Vec::new();
         let mut cut_points = 0usize;
-        for hole in &self.holes {
-            let region = fitted_region(&planar_region(hole)?)?;
+        let seams = self.seams();
+        // The folded solid is sewn with a tolerance of its size, which the flat pattern's size (and
+        // the thickness) bounds.
+        let flat_box = pieces.iter().try_fold(Aabb2::EMPTY, |b, (_, r)| loop_box(&r.outer).map(|r| b.union(&r)))?;
+        let reach = sew_tolerance(flat_box.diagonal() + self.t);
+        let corners: Vec<Vec2> =
+            pieces.iter().flat_map(|(_, r)| std::iter::once(&r.outer).chain(&r.holes)).flat_map(|l| l.segs.iter().map(Seg2::start)).collect();
+        for hole in self.holes.iter().filter(|h| encloses_area(h)) {
+            let hole_corners = hole.holes.iter().fold(hole.outer.segs.len(), |n, h| n.saturating_add(h.segs.len()));
+            work.charge(corners.len().saturating_mul(hole_corners))?;
+            let region = fitted_region(&onto_corners(onto_seams(planar_region(hole)?, &seams), &corners, reach))?;
             cut_points = cut_points.saturating_add(region_complexity(std::slice::from_ref(&region))?.1);
             if cut_points > MAX_FLAT_POINTS {
                 return Err(flat_budget_error());
@@ -1858,6 +2532,13 @@ impl SheetBody {
         };
         let mut faces = Vec::new();
         for (ci, c) in cells.iter().enumerate() {
+            // A sharp bend's inner surface has no area: it is the line where the base's and the
+            // flange's inner faces meet. The outer surface and the zone's end walls close the
+            // solid; the end walls lose their collapsed inner edge below.
+            let inner_sharp = match c.piece {
+                Piece::Zone(i) => self.flanges.get(i).filter(|f| f.radius <= SHARP_BEND).map(|f| if f.angle >= 0.0 { z1 } else { z0 }),
+                Piece::Panel(_) => None,
+            };
             // Top (z1, outward +z) and bottom (z0, outward −z, loops reversed).
             let loops = |z: f64, rev: bool| -> Result<Vec<Vec<EdgeSpec>>> {
                 std::iter::once(&c.outer)
@@ -1873,6 +2554,9 @@ impl SheetBody {
             };
             let centre = c.outer.iter().map(Seg2::start).fold(Vec2::default(), |a, b| a + b) * (1.0 / c.outer.len().max(1) as f64);
             for (z, rev, sign) in [(z1, false, 1.0), (z0, true, -1.0)] {
+                if inner_sharp == Some(z) {
+                    continue;
+                }
                 let surface = match c.piece {
                     Piece::Panel(_) => SurfSpec::Plane,
                     Piece::Zone(i) => {
@@ -1929,13 +2613,30 @@ impl SheetBody {
                     (Piece::Zone(_), _) if matches!(bottom, EdgeSpec::Chain { .. }) => SurfSpec::Ruled { a: bottom.clone(), b: top_ab.clone() },
                     _ => SurfSpec::Plane,
                 };
-                let top = rev_edge(top_ab);
+                // A sharp bend's inner edge is a point on the zone's end wall: drop that
+                // collapsed edge and let the wall end at the point (a three-edge loop). The inner
+                // face is z1 when the bend turns up and z0 when it turns down.
+                let collapsed = |e: &EdgeSpec| match e {
+                    EdgeSpec::Arc { a, b, .. } | EdgeSpec::Line { a, b } => a.dist(*b) < LINEAR_TOL,
+                    EdgeSpec::Chain { .. } => false,
+                };
+                let inner_bottom = inner_sharp == Some(z0) && collapsed(&bottom);
+                let inner_top = inner_sharp == Some(z1) && collapsed(&top_ab);
+                let mut edges = Vec::new();
+                if !inner_bottom {
+                    edges.push(bottom);
+                }
+                edges.push(up_b);
+                if !inner_top {
+                    edges.push(rev_edge(top_ab));
+                }
+                edges.push(down_a);
                 let mid = e.point_at(0.5);
                 let tdir = e.point_at(0.51) - e.point_at(0.49);
                 let right = Vec2::new(tdir.y, -tdir.x);
                 let pm = self.map3(c.piece, mid, (z0 + z1) / 2.0);
                 let outward = self.map3(c.piece, mid + right * 1e-3, (z0 + z1) / 2.0) - pm;
-                faces.push(FaceSpec { loops: vec![vec![bottom, up_b, top, down_a]], surface, probe: Some((pm, outward)) });
+                faces.push(FaceSpec { loops: vec![edges], surface, probe: Some((pm, outward)) });
             }
         }
         Ok(faces)
@@ -1958,9 +2659,14 @@ impl SheetBody {
         self.place_local_solid(body)
     }
 
-    /// The flat pattern as one extrusion (outline with its cut-outs).
+    /// The flat pattern as one extrusion (outline with its cut-outs). The junction slits of
+    /// [`Self::flat_regions`] are zero-width, so the material here is the same; the kernel
+    /// extrudes the material's loops, not the self-touching slit loops.
     pub fn flat_solid(&self) -> Result<Body> {
-        let mut regions = self.flat_regions()?;
+        let mut regions = self.flat_material()?;
+        if regions.is_empty() {
+            return Err(DocError::Invalid("empty flat pattern".into()));
+        }
         if !self.pockets.is_empty() {
             // Pockets are machined by the prism booleans, which read walls of planes and
             // cylinders: the blank they cut follows its fitted arcs then.
@@ -1969,7 +2675,7 @@ impl SheetBody {
         let mut local = self.clone();
         local.frame = Plane::XY;
         local.flat = true;
-        let body = kernel::extrude_planar_regions(&Plane::XY, &regions, 0.0, self.t)?;
+        let body = extrude_flat(&Plane::XY, &regions, 0.0, self.t)?;
         let mut work = FlatWork::new();
         let body = local.machine_pockets(body, &mut work)?;
         let body = local.machine_bores(body, &mut work)?;
@@ -2059,7 +2765,7 @@ impl SheetBody {
             work.charge(100_000)?;
             // The bore's own panel, flat: the bore never reaches a bend or another panel, in
             // the folded part or in its flat pattern.
-            let slab = kernel::extrude_planar_regions(&Plane::XY, &cells, 0.0, self.t)?;
+            let slab = extrude_flat(&Plane::XY, &cells, 0.0, self.t)?;
             let drill = kernel::cylinder(bore.base, bore.axis, bore.radius, bore.height)?;
             let Some(inside) = kernel::boolean(&drill, &slab, kernel::BoolOp::Intersect)? else { continue };
             // Cut with the drill clipped to the panel, its ends flush with the panel's rims.
@@ -2093,7 +2799,7 @@ impl SheetBody {
                     outer: Loop2 { segs: cell.outer.clone() },
                     holes: cell.holes.iter().map(|h| Loop2 { segs: h.clone() }).collect(),
                 })?;
-                kernel::extrude_planar_regions(&self.frame, &[region], 0.0, self.t)?
+                extrude_flat(&self.frame, &[region], 0.0, self.t)?
             } else {
                 kernel::sew_touching(&self.faces(std::slice::from_ref(&cell), 0.0, self.t, &mut work)?)?
             };
@@ -2155,7 +2861,7 @@ impl SheetBody {
         let outlines = self.pockets.iter().map(|p| chorded_region(&p.region)).collect::<Result<Vec<_>>>()?;
         regions_complexity(outlines.iter())?;
         let panels = if self.flat {
-            vec![(None, self.flat_regions()?)]
+            vec![(None, self.flat_material()?)]
         } else {
             self.material_panels(None, work)?.into_iter().map(|(pi, r)| (pi, vec![r])).collect()
         };
@@ -2195,7 +2901,7 @@ impl SheetBody {
                 let plane = plane_of(&w, Vec3::ZERO, Vec3::X, Vec3::Y)?;
                 // BRep replay is costlier than planar clipping; share the command budget.
                 work.charge(100_000)?;
-                let tool = kernel::extrude_planar_regions(&plane, &clipped, pocket.z0, pocket.z1)?;
+                let tool = extrude_flat(&plane, &clipped, pocket.z0, pocket.z1)?;
                 body = kernel::boolean(&body, &tool, kernel::BoolOp::Cut)?
                     .ok_or_else(|| DocError::Invalid("sheet pocket removes all sheet material".into()))?;
             }
@@ -2283,7 +2989,9 @@ impl SheetBody {
 
     /// Pocket operations clipped to the surviving flat material, with exact depth intervals.
     pub fn machining(&self) -> Result<Vec<SheetPocket>> {
-        let material = self.flat_regions()?;
+        // The material without the junction slits: they are zero-width, and the kernel's planar
+        // booleans read the material's loops.
+        let material = self.flat_material()?;
         let mut work = FlatWork::new();
         let mut out = Vec::new();
         for pocket in &self.pockets {
@@ -2301,11 +3009,39 @@ impl SheetBody {
     /// the folded solid; planar unions remove panel/bend seams and turn edge-crossing cuts
     /// into notches. Lines and circular arcs remain exact through clipping and merging; a
     /// free-form loop that comes out whole is the curve it was drawn as, one that is clipped
-    /// follows it with tangent arcs.
+    /// follows it with tangent arcs. Where a split edge's stretches bend to opposite sides the
+    /// blank is cut along their junction (see [`Self::junction_slits`]).
     pub fn flat_regions(&self) -> Result<Vec<Region2>> {
-        let regions = self.flat_material()?;
+        let mut regions = self.flat_material()?;
         if regions.is_empty() {
             return Err(DocError::Invalid("empty flat pattern".into()));
+        }
+        // A junction between stretches that bend to opposite sides is a cut in the blank: the
+        // folded part is parted along it, so the flat pattern and its DXF are too. Same-side
+        // junctions and a whole-edge flange stay joined. The material itself (`flat_material`) is
+        // unchanged: the slit is a zero-width line, so it adds no area and no kernel boolean sees
+        // a self-touching loop.
+        for (at, tip) in self.junction_slits() {
+            if regions.iter_mut().any(|r| slit_loop(&mut r.outer, at, tip)) {
+                continue;
+            }
+            // Neither computed end is a vertex of the material that is left: clip the cut to what
+            // remains, so a required junction cut is never dropped (a notch through the far edge,
+            // for one). A cut with no material outward of the bend line parts nothing, which
+            // `clip_junction_slits` says by returning nothing: an empty stretch of the line, not a
+            // failed lookup. Every stretch of the line that still runs through material is a bridge
+            // the folded part separates along, so each one is slit.
+            let holder = regions.iter().position(|r| r.outer.contains(at));
+            let order: Vec<usize> = match holder {
+                Some(h) => std::iter::once(h).chain((0..regions.len()).filter(|&i| i != h)).collect(),
+                None => (0..regions.len()).collect(),
+            };
+            for i in order {
+                let slits = clip_junction_slits(&regions[i].outer, at, tip);
+                for (anchor, inner) in slits {
+                    slit_loop(&mut regions[i].outer, anchor, inner);
+                }
+            }
         }
         Ok(regions)
     }
@@ -2388,7 +3124,7 @@ impl SheetBody {
         let regions = material_union(regions, &mut work)?;
         let mut cuts = Vec::new();
         let mut cut_points = 0usize;
-        for hole in &self.holes {
+        for hole in self.holes.iter().filter(|h| encloses_area(h)) {
             let region = planar_region(hole)?;
             cut_points = cut_points.saturating_add(region_complexity(std::slice::from_ref(&region))?.1);
             if cut_points > MAX_FLAT_POINTS {
@@ -2397,9 +3133,59 @@ impl SheetBody {
             cuts.push(region);
         }
         cuts.extend(self.through_pocket_regions(&mut work)?);
-        let cuts = material_union(cuts, &mut work)?;
+        // One cut of them all: the planar boolean unites its operand's regions itself (in
+        // balanced rounds, as SMLib sheets), so uniting them first as regions only multiplied the
+        // booleans and their round trips (#13493).
         let regions = if cuts.is_empty() { regions } else { material_boolean(&regions, &cuts, kernel::BoolOp::Cut, &mut work)? };
         Ok(regions)
+    }
+
+    /// Where a split edge's stretches bend to opposite sides: the lines the flat pattern is cut
+    /// along at their junctions. Each runs from the inner bend line out to the nearer stretch's far
+    /// edge, the innermost bend line to the nearest far edge, so the material either side of the
+    /// junction parts there while the blank stays one piece. A whole-edge flange has no junction.
+    fn junction_slits(&self) -> Vec<(Vec2, Vec2)> {
+        let mut out = Vec::new();
+        for (i, a) in self.flanges.iter().enumerate() {
+            for b in self.flanges.iter().skip(i + 1) {
+                if a.parent != b.parent {
+                    continue;
+                }
+                let (Some(da), Some(db)) = (a.d.normalized(), b.d.normalized()) else { continue };
+                // One edge's stretches run the same way along it; one bending up and one down
+                // cannot share the bend line.
+                if da.dot(db) < 1.0 - 1e-9 || (a.angle >= 0.0) == (b.angle >= 0.0) {
+                    continue;
+                }
+                // Adjacent stretches: one ends where the other starts.
+                let (early, late) = if a.p.dot(da) <= b.p.dot(da) { (a, b) } else { (b, a) };
+                let junction = early.p + da * early.len;
+                if (late.p - junction).dot(da).abs() > 1e-6 {
+                    continue;
+                }
+                let Some(n) = a.n.normalized() else { continue };
+                // The material each stretch covers from its bend line out: the inner bend line
+                // and the nearer far edge bound the stretch both cover, which is the junction.
+                let (sa, sb) = (a.p.dot(n), b.p.dot(n));
+                let (fa, fb) = (sa + self.allowance(a) + a.leg, sb + self.allowance(b) + b.leg);
+                // Stretches at different angles have different setbacks, so their bend lines are
+                // offset. The folded part separates over the whole strip between the two bend
+                // lines, so the cut starts at the inner (smaller, deeper) one and covers that
+                // strip; starting at the farther-out bend line left the strip joined in the flat
+                // pattern and its DXF, which cannot fold one stretch up and the next down.
+                // Its outer end is the nearer far edge: past that only the longer stretch's
+                // material remains, so there is nothing of the other stretch left to part, and
+                // cutting on would slit the longer stretch's leg on its own (a C-shaped blank's
+                // far foot, for one).
+                let (start, end) = (sa.min(sb), fa.min(fb));
+                if end <= start + 1e-9 {
+                    continue;
+                }
+                let along = junction.dot(n);
+                out.push((junction + n * (start - along), junction + n * (end - along)));
+            }
+        }
+        out
     }
 
     /// The pieces of flat material that a cut parted from the base: `after` is this sheet's
@@ -2483,7 +3269,10 @@ impl SheetBody {
         if self.flanges.len().saturating_mul(2).saturating_add(1) > MAX_FLAT_PIECES {
             return Err(flat_budget_error());
         }
-        let mut polys: Vec<Vec<Vec2>> = vec![dedup(&flat_polyline(&self.base.outer.ccw())?).into_vec()];
+        let mut polys: Vec<Vec<Vec2>> = Vec::new();
+        if encloses_area(&self.base) {
+            polys.push(dedup(&flat_polyline(&self.base.outer.ccw())?).into_vec());
+        }
         for f in &self.flanges {
             polys.push(dedup(&flat_polyline(&self.zone(f).outer.ccw())?).into_vec());
             if f.leg > 1e-9 {
@@ -2776,8 +3565,12 @@ impl SheetBody {
             let transverse = volume * (3.0 * radius2 + self.t * self.t) / 12.0;
             let own = [[transverse, 0.0, 0.0], [0.0, transverse, 0.0], [0.0, 0.0, volume * radius2 / 2.0]];
             for hole in holes {
-                let world = if self.flat || panels.len() == 1 {
+                // One panel on its own is placed by its own transform: an arc-first contour
+                // has a single flange panel and no base, and that panel is folded.
+                let world = if self.flat {
                     &flat
+                } else if let [(panel_world, _)] = panels.as_slice() {
+                    panel_world
                 } else {
                     &panels.iter().find(|(_, region)| region.contains(hole)).ok_or_else(invalid)?.0
                 };
@@ -2816,9 +3609,13 @@ impl SheetBody {
         Ok((size.x, size.y))
     }
 
-    /// Panels with their regions and world placements: (flange index or None, region).
+    /// Panels with their regions and world placements: (flange index or None, region). A
+    /// profile that starts with an arc has no base panel.
     fn panels(&self) -> Vec<(Option<usize>, Region2)> {
-        let mut v = vec![(None, self.base.clone())];
+        let mut v = Vec::new();
+        if encloses_area(&self.base) {
+            v.push((None, self.base.clone()));
+        }
         for (i, f) in self.flanges.iter().enumerate() {
             if f.leg > 1e-9 {
                 v.push((Some(i), self.panel(f)));
@@ -2992,11 +3789,106 @@ impl SheetBody {
         left.into_iter().min_by(|x, y| away(x).total_cmp(&away(y)))
     }
 
+    /// The edge of a cut-out that opens onto a panel's outline (a notch: a cut across a flange's
+    /// wall leaves its top slanted) nearest `pick` (a world point), when it is nearer than every
+    /// edge of the panels' outlines and within `reach` of the pick: the panel, the cut-out's index
+    /// in `holes`, and the panel's material without it (its outline, with the notch). `None` for a
+    /// pick nearer an outline, or on a cut-out inside a panel or one that parts it.
+    fn notch_at(&self, pick: Vec3, reach: f64) -> Result<Option<(Option<usize>, usize, Region2)>> {
+        let Some(outline) = self.edge_at(pick).map(|e| e.4) else { return Ok(None) };
+        if self.holes.is_empty() || outline <= 1e-9 {
+            return Ok(None);
+        }
+        let mut work = FlatWork::new();
+        let mut best: Option<(f64, Option<usize>, usize, Region2)> = None;
+        for (pi, panel) in self.panels() {
+            let Some(inv) = mat_inverse(&self.world(pi)) else { continue };
+            let q = apply_point(&inv, pick);
+            let q2 = Vec2::new(q.x, q.y);
+            let panel_pts = dedup(&panel.outer.ccw().polyline(1e-3));
+            let panel_box = panel_pts.bounds().inflated(reach);
+            if !panel_box.contains(q2) {
+                continue;
+            }
+            for (k, hole) in self.holes.iter().enumerate() {
+                // Only a cut-out the pick is near can hold its edge.
+                if !hole.outer.polyline(1e-3).bounds().inflated(reach).contains(q2) {
+                    continue;
+                }
+                let left = material_boolean(std::slice::from_ref(&panel), std::slice::from_ref(hole), kernel::BoolOp::Cut, &mut work)?;
+                let [material] = left.as_slice() else { continue };
+                if material.holes.len() != panel.holes.len() || (material.area() - panel.area()).abs() <= TOUCH_AREA {
+                    continue;
+                }
+                let pts = material.outer.ccw().polyline(1e-3);
+                let m = pts.len();
+                for i in 0..m {
+                    let (Some(&a), Some(&b)) = (pts.get(i), pts.get((i + 1) % m)) else { continue };
+                    let d = b - a;
+                    if d.len() < 1e-9 || near_outline(&panel_pts, (a + b) * 0.5, 1e-6) {
+                        continue;
+                    }
+                    let t = ((q2 - a).dot(d) / d.len2()).clamp(0.0, 1.0);
+                    let flat = ((a + d * t) - q2).len();
+                    let dist = flat.hypot(q.z.abs().min((q.z - self.t).abs()));
+                    if dist <= reach && dist < outline - 1e-9 && best.as_ref().is_none_or(|x| dist < x.0) {
+                        best = Some((dist, pi, k, material.clone()));
+                    }
+                }
+            }
+        }
+        Ok(best.map(|(_, pi, k, material)| (pi, k, material)))
+    }
+
+    /// Before an edge flange on the edge of a cut-out that opens onto a panel's outline: that
+    /// cut-out becomes the panel's outline (the base's, or a flange panel's shape), so the flange
+    /// runs along its edge and the cut-out takes nothing of the new flange, which lies where it
+    /// was in the flat. Refused while the cut-out also takes material of another panel or a bend,
+    /// or overlaps another cut-out.
+    /// Says whether the pick was on such an edge.
+    fn open_notch(&mut self, pick: Vec3) -> Result<bool> {
+        let Some((pi, k, material)) = self.notch_at(pick, self.t * 2.0 + 1e-3)? else { return Ok(false) };
+        let hole = self.holes.get(k).cloned().ok_or_else(|| DocError::Invalid("cut-out".into()))?;
+        let mut work = FlatWork::new();
+        let mut others: Vec<Region2> = self.panels().into_iter().filter(|(p, _)| *p != pi).map(|(_, r)| r).collect();
+        others.extend(self.flanges.iter().map(|f| self.zone(f)));
+        others.extend(self.holes.iter().enumerate().filter(|(j, _)| *j != k).map(|(_, h)| h.clone()));
+        for other in &others {
+            let common = material_boolean(std::slice::from_ref(other), std::slice::from_ref(&hole), kernel::BoolOp::Intersect, &mut work)?;
+            if common.iter().map(Region2::area).sum::<f64>() > TOUCH_AREA {
+                return Err(DocError::Invalid(
+                    "not supported yet: a flange on the edge of a cut-out that also cuts another panel, a bend or another cut-out".into(),
+                ));
+            }
+        }
+        self.set_panel_region(pi, material)?;
+        self.holes.remove(k);
+        Ok(true)
+    }
+
+    /// Give a panel (None = the base) this flat region: a flange panel takes its outline as its
+    /// shape (and, with arcs in it, as drawn).
+    fn set_panel_region(&mut self, panel: Option<usize>, region: Region2) -> Result<()> {
+        match panel {
+            None => self.base = region,
+            Some(i) => {
+                let lines = region.outer.segs.iter().all(|s| matches!(s, Seg2::Line { .. }));
+                let outer = region.outer.ccw();
+                let shape = dedup(&outer.polyline(1e-3)).into_vec();
+                let f = self.flanges.get_mut(i).ok_or_else(|| DocError::Invalid("flange".into()))?;
+                f.shape = Some(shape);
+                f.exact = (!lines).then_some(outer);
+            }
+        }
+        Ok(())
+    }
+
     /// Trim a panel's edge a→b back by `by` (toward the panel interior). Where a→b is what a
     /// cut-out left of a longer edge, `cut_at` says at which of its ends (start, end) the
-    /// cut-out is: the base keeps its edge beyond such an end. A flange panel's far edge moves
-    /// whole.
-    fn trim(&mut self, panel: Option<usize>, a: Vec2, b: Vec2, by: f64, cut_at: (bool, bool)) -> Result<()> {
+    /// cut-out is: the base keeps its edge beyond such an end, and so does a flange panel when
+    /// a→b is the edge of a cut-out that `open_notch` made its outline (`notch`). Otherwise a
+    /// flange panel's far edge moves whole.
+    fn trim(&mut self, panel: Option<usize>, a: Vec2, b: Vec2, by: f64, cut_at: (bool, bool), notch: bool) -> Result<()> {
         if by.abs() < 1e-12 {
             return Ok(());
         }
@@ -3063,10 +3955,23 @@ impl SheetBody {
                 if inward.dot(original.n) > 0.99 {
                     return Err(DocError::Invalid("pick a free panel edge, not its connection to the existing bend".into()));
                 }
-                if side && (cut_at.0 || cut_at.1) {
+                if notch {
+                    // Only the strip along a→b goes: the panel keeps its outline beyond both ends.
+                    let region = self.panel(original);
+                    let strip = rect(a, b, b + inward * by, a + inward * by);
+                    let left = material_boolean(&[region], &[strip], kernel::BoolOp::Cut, &mut FlatWork::new())?;
+                    let [kept] = left.as_slice() else {
+                        return Err(DocError::Invalid("not supported yet: a flange setback that splits the panel".into()));
+                    };
+                    let kept = kept.clone();
+                    return self.set_panel_region(panel, kept);
+                }
+                let partial = cut_at.0 || cut_at.1;
+                let shaped = original.shape.is_some() || original.exact.is_some();
+                if side && partial {
                     return Err(DocError::Invalid("not supported yet: a partial side-edge flange beside a cut-out".into()));
                 }
-                let clipped = if side || original.shape.is_some() || original.exact.is_some() {
+                let clipped = if side || shaped {
                     // A panel with curves gives way to its 0.001 mm chords here.
                     let region = self.panel(original);
                     let points = clip(&region.outer.ccw().polyline(1e-3), a + inward * by, inward);
@@ -3118,7 +4023,8 @@ impl SheetBody {
         position: &str,
         flip: bool,
     ) -> Result<(Vec<usize>, Vec<String>)> {
-        let each: Vec<EdgeFlange> = picks.iter().map(|&pick| EdgeFlange { pick, height, angle, from: HeightFrom::Outer }).collect();
+        let each: Vec<EdgeFlange> =
+            picks.iter().map(|&pick| EdgeFlange { pick, height, angle, from: HeightFrom::Outer, span: WHOLE_EDGE, flip: None }).collect();
         self.add_flanges_each(&each, radius, position, flip, ReliefOverride::default())
     }
 
@@ -3209,7 +4115,7 @@ impl SheetBody {
                 None => (pick, top == (turn < 0.0)),
                 Some(&i) => (self.far_edge_pick(i).ok_or_else(|| DocError::Invalid("the flange has no far edge to bend again".into()))?, turn < 0.0),
             };
-            let each = [EdgeFlange { pick: at, height, angle: turn.abs(), from: HeightFrom::Outer }];
+            let each = [EdgeFlange { pick: at, height, angle: turn.abs(), from: HeightFrom::Outer, span: WHOLE_EDGE, flip: None }];
             let own = if k == 0 { relief } else { ReliefOverride::default() };
             let (new, more) = self.add_flanges_each(&each, radius, "inside", flip, own).map_err(line)?;
             made.extend(new);
@@ -3249,6 +4155,12 @@ impl SheetBody {
             if !(e.angle > 1e-6 && e.angle <= std::f64::consts::PI - 1e-6) {
                 return Err(DocError::Invalid(format!("{}the flange angle must be between 0 and 180°", on(k))));
             }
+            // A segment's span runs from where it starts to where it ends. A reversed one would be
+            // measured as the positive distance between its ends and overlap the stretch after it,
+            // so it is refused here, before anything is trimmed or the flat pattern is made.
+            if !(e.span.1 > e.span.0) {
+                return Err(DocError::Invalid(format!("{}a segment of the edge has no length", on(k))));
+            }
             let sharp = (radius + self.t) * (e.angle / 2.0).tan();
             // How far inside the picked edge the bend starts (the base is cut back that far), with
             // bend angle θ, inner radius R and thickness T:
@@ -3286,18 +4198,28 @@ impl SheetBody {
             }
             sizes.push((setback, leg));
         }
-        // A pick on an edge of a notch (a cut-out that opens the base's outline) is on an edge of
-        // the base: its outline runs round the notch first (#5306).
+        // An edge a cut-out left on a panel's outline: the cut-out becomes that outline first.
+        // On the base's outline that is `open_base_to` (#5306): its pick is on an edge of the base
+        // and its flange cuts like any other. On a flange panel it is `open_notch` (#2009). Which
+        // picks are on such an edge is known before any opens: once one has, another pick on the
+        // same cut-out finds its edge on the outline.
+        let reach = self.t * 2.0 + 1e-3;
+        let mut notched = Vec::with_capacity(edges.len());
+        for e in edges {
+            notched.push(self.base_cut_edge_at(e.pick).is_none() && self.notch_at(e.pick, reach)?.is_some());
+        }
         for e in edges {
             if let Some(k) = self.base_cut_edge_at(e.pick) {
                 self.open_base_to(k)?;
+            } else {
+                self.open_notch(e.pick)?;
             }
         }
         // Find every edge before anything moves: of an edge that cut-outs have taken part of, the
         // stretch they leave nearest the pick, and at which of its ends a cut-out is.
         let cuts = self.cut_outs();
         let mut found = Vec::new();
-        for (k, (e, &(setback, leg))) in edges.iter().zip(&sizes).enumerate() {
+        for (k, ((e, &(setback, leg)), &notch)) in edges.iter().zip(&sizes).zip(&notched).enumerate() {
             let (panel, a, b, top, dist) = self.edge_at(e.pick).ok_or_else(|| DocError::Invalid("no sheet edge there".into()))?;
             if dist > self.t * 2.0 + 1e-3 {
                 return Err(DocError::Invalid("pick an edge of the sheet's top or bottom face".into()));
@@ -3331,18 +4253,77 @@ impl SheetBody {
                 None => self.bend_line_runs(a - outward * setback, d, a.dot(d), b.dot(d)),
                 Some(_) => (f64::MIN, f64::MAX),
             };
-            let cut = (s0 > 1e-9, s1 < a.dist(b) - 1e-9);
+            // A cut-out's edge ends where the cut-out does: the panel beyond its ends stays.
+            let cut = (notch || s0 > 1e-9, notch || s1 < a.dist(b) - 1e-9);
             let (a, b) = (if cut.0 { a + d * s0 } else { a }, if cut.1 { a + d * s1 } else { b });
-            found.push((panel, a, b, d, top, setback, leg, e.angle, cut, run));
+            // A split edge's fractions run along a straight line: on a curved edge (an arc of a
+            // converted sheet) they would only follow its chords, so that is refused.
+            if !e.whole() && !self.edge_is_line(panel, a, b) {
+                return Err(DocError::Invalid("not supported yet: segments on a curved edge (pick a straight edge of the sheet)".into()));
+            }
+            found.push((panel, a, b, d, top, setback, leg, e.angle, cut, run, e.span, e.flip.unwrap_or(flip), e.whole()));
         }
-        for (panel, a, b, _, _, setback, _, _, cut, _) in &found {
-            self.trim(*panel, *a, *b, *setback, *cut)?;
+        for ((panel, a, b, _, _, setback, _, _, cut, _, span, _, whole), &notch) in found.iter().zip(&notched) {
+            if *whole {
+                self.trim(*panel, *a, *b, *setback, *cut, notch)?;
+            } else {
+                // A split edge's base steps where its segments differ: each stretch is trimmed
+                // back by its own bend's setback, and only there. That is the notch case's strip
+                // cut, narrowed to the stretch, so a notch's freed ends change nothing here.
+                self.trim_stretch(*panel, *a, *b, *span, *setback)?;
+            }
         }
         let mut made = Vec::new();
         // Whether a cut-out has freed each new bend's ends (start, end) of the base beside them.
         let mut freed = Vec::new();
-        for (panel, a, b, d, top, setback, leg, angle, cut, run) in found {
+        for (panel, a, b, d, top, setback, leg, angle, cut, run, span, flip_here, whole) in found {
             let outward = Vec2::new(d.y, -d.x);
+            if !whole {
+                // One segment of a split edge: its own stretch of the edge, its own setback and
+                // leg, its own angle and side. Only the outermost segments' ends are ends of the
+                // edge; an interior junction gets no relief (the bends butt there, and `corners`
+                // leaves them alone).
+                let inward = Vec2::new(-d.y, d.x);
+                let l = a.dist(b);
+                // A span that runs backwards is refused here, not measured as the distance between
+                // its ends: that distance is positive, so a reversed stretch would pass for one
+                // and overlap the stretch after it.
+                if !(span.1 > span.0) {
+                    return Err(DocError::Invalid("a segment of the edge has no length".into()));
+                }
+                let (sub_a, sub_b) = (a + d * (span.0 * l), a + d * (span.1 * l));
+                let len = (span.1 - span.0) * l;
+                if !(len > 1e-9) {
+                    return Err(DocError::Invalid("a segment of the edge has no length".into()));
+                }
+                let taken = |from: Vec2| clear_of(from, outward * -1.0, setback, &cuts).is_empty();
+                let free = (span.0 > 1e-9 || (cut.0 && taken(sub_a - d * 1e-4)), span.1 < 1.0 - 1e-9 || (cut.1 && taken(sub_b + d * 1e-4)));
+                let up = top != flip_here;
+                self.flanges.push(SheetFlange {
+                    parent: panel,
+                    p: snap(sub_a + inward * setback),
+                    d,
+                    len,
+                    n: outward,
+                    angle: if up { angle } else { -angle },
+                    radius,
+                    leg: leg.max(0.0),
+                    shape: None,
+                    exact: None,
+                    zone_shape: None,
+                    tag: String::new(),
+                    ext: (0.0, 0.0),
+                    slope: (0.0, 0.0),
+                    tear: (false, false),
+                    // An interior junction of a split edge is not torn: `tear_butt_corners` only
+                    // pairs a made flange with one made before it, never with its own segments.
+                    tear_curved: (false, false),
+                    tear_ease: (0.0, 0.0),
+                });
+                made.push(self.flanges.len() - 1);
+                freed.push(free);
+                continue;
+            }
             let line_o = a - outward * setback;
             // The trimmed edge: along d, on the moved line.
             let (start, len) = match panel {
@@ -3415,7 +4396,7 @@ impl SheetBody {
             // bend is free of it where the cut-outs took all of that strip there.
             let taken = |from: Vec2| clear_of(from, outward * -1.0, setback, &cuts).is_empty();
             freed.push((cut.0 && taken(a - d * 1e-4), cut.1 && taken(b + d * 1e-4)));
-            let up = top != flip;
+            let up = top != flip_here;
             self.flanges.push(SheetFlange {
                 parent: panel,
                 p: snap(start),
@@ -3438,8 +4419,8 @@ impl SheetBody {
             made.push(self.flanges.len() - 1);
         }
         let mut notes = Vec::new();
-        for (&i, &free) in made.iter().zip(&freed) {
-            notes.extend(self.relieve_bend_ends(i, free));
+        for ((&i, &free), &notch) in made.iter().zip(&freed).zip(&notched) {
+            notes.extend(self.relieve_bend_ends(i, free, notch));
         }
         notes.extend(self.close_corners(&made, relief));
         notes.extend(self.close_return_corners(&made));
@@ -3448,6 +4429,118 @@ impl SheetBody {
             notes.extend(self.tear_butt_corners(&made));
         }
         Ok((made, notes))
+    }
+
+    /// Whether the stretch a→b runs along one straight line of the panel's outline, with nothing
+    /// else of the outline crossing it: a split edge's fractions run along a straight line, so the
+    /// whole stretch must lie on one. The outline's lines that lie on the stretch's own line cover
+    /// it where their parameter ranges, taken together, reach from a to b with no gap: a straight
+    /// outline a vertex splits in two covers it, a notch or a step between two such lines leaves a
+    /// gap and is refused, and a chord of a curve has no line along it at all. Either end may sit
+    /// inside a line, where a cut-out leaves a shorter stretch of it than the outline has.
+    fn edge_is_line(&self, panel: Option<usize>, a: Vec2, b: Vec2) -> bool {
+        let region = match panel {
+            None => self.base.clone(),
+            Some(i) => match self.flanges.get(i) {
+                Some(f) => self.panel(f),
+                None => return false,
+            },
+        };
+        let Some(stretch) = (b - a).normalized() else { return false };
+        let len = a.dist(b);
+        if !(len > 0.0) {
+            return false;
+        }
+        // The outline's lines that run along the stretch on its own line, as ranges of distance
+        // from a, to the same 1e-9 as the edge arithmetic around here.
+        let mut spans: Vec<(f64, f64)> = Vec::new();
+        for s in &region.outer.segs {
+            let Seg2::Line { a: p, b: q } = s else { continue };
+            let Some(e) = (*q - *p).normalized() else { continue };
+            if (e - stretch).len() > 1e-9 && (e + stretch).len() > 1e-9 {
+                continue;
+            }
+            // On the stretch's own line: both of the outline line's ends are on it.
+            let off = |r: Vec2| (r - a - stretch * (r - a).dot(stretch)).len();
+            if off(*p) > 1e-9 || off(*q) > 1e-9 {
+                continue;
+            }
+            let (u0, u1) = ((*p - a).dot(stretch), (*q - a).dot(stretch));
+            spans.push((u0.min(u1), u0.max(u1)));
+        }
+        spans.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let mut reach = 0.0;
+        for (lo, hi) in spans {
+            // A line that starts past where the covered part ends leaves a gap.
+            if lo > reach + 1e-9 {
+                return false;
+            }
+            reach = reach.max(hi);
+            if reach >= len - 1e-9 {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Trim a panel's edge a→b back by `by` over one stretch of it only (`span`, fractions of the
+    /// edge), as a split edge's segments do: the base steps where their setbacks differ, and
+    /// nothing beside that stretch moves.
+    fn trim_stretch(&mut self, panel: Option<usize>, a: Vec2, b: Vec2, span: (f64, f64), by: f64) -> Result<()> {
+        if by.abs() < 1e-12 {
+            return Ok(());
+        }
+        let d = (b - a).normalized().ok_or_else(|| DocError::Invalid("edge".into()))?;
+        let inward = Vec2::new(-d.y, d.x);
+        let l = a.dist(b);
+        let (u0, u1) = (span.0 * l, span.1 * l);
+        // A span that runs backwards is refused here as well: `u1 - u0` is negative then, so it
+        // never passes for a length and no reversed stretch is trimmed.
+        if !(u1 - u0 > 1e-9) {
+            return Err(DocError::Invalid("a segment of the edge has no length".into()));
+        }
+        let strip = rect(a + d * u0, a + d * u1, a + d * u1 + inward * by, a + d * u0 + inward * by);
+        let mut work = FlatWork::new();
+        let mut take = |region: Region2| -> Result<Region2> {
+            let mut left = material_boolean(&[planar_region(&region)?], std::slice::from_ref(&strip), kernel::BoolOp::Cut, &mut work)?;
+            match (left.pop(), left.is_empty()) {
+                (Some(one), true) => Ok(one),
+                _ => Err(DocError::Invalid("not supported yet: a flange setback that splits the sheet".into())),
+            }
+        };
+        match panel {
+            None => {
+                let base = take(self.base.clone())?;
+                if base.holes.len() != self.base.holes.len() {
+                    return Err(DocError::Invalid("not supported yet: a flange setback that splits the sheet".into()));
+                }
+                self.base = base;
+            }
+            Some(i) => {
+                let region = self.flanges.get(i).map(|f| self.panel(f)).ok_or_else(|| DocError::Invalid("flange".into()))?;
+                let one = take(region)?;
+                let points = one.outer.ccw().polyline(1e-3);
+                if points.len() < 3 {
+                    return Err(DocError::Invalid("the flange's setback removes the whole panel".into()));
+                }
+                let f = self.flanges.get_mut(i).ok_or_else(|| DocError::Invalid("flange".into()))?;
+                f.shape = Some(points.to_vec());
+                f.exact = None;
+            }
+        }
+        Ok(())
+    }
+
+    /// Two bends that butt along a split edge's junction: on the same line, one starting where
+    /// the other ends. There is no corner to close there (`add_flanges_each`).
+    fn junction_pair(&self, a: usize, b: usize) -> bool {
+        let (Some(fa), Some(fb)) = (self.flanges.get(a), self.flanges.get(b)) else { return false };
+        if fa.d.dot(fb.d) < 1.0 - 1e-9 || (fa.p - fb.p).cross(fa.d).abs() > 1e-9 {
+            return false;
+        }
+        let u = |f: &SheetFlange| f.p.dot(f.d);
+        let (ua, ub) = (u(fa), u(fb));
+        (ua + fa.len - ub).abs() < 1e-6 || (ub + fb.len - ua).abs() < 1e-6
     }
 
     fn close_side_corners(&mut self, made: &[usize], relief: ReliefOverride) -> Vec<String> {
@@ -3470,7 +4563,7 @@ impl SheetBody {
                         continue;
                     }
                     for (other_end, end) in [(false, neighbour.p), (true, neighbour.p + neighbour.d * neighbour.len)] {
-                        if end.dist(ca) < 1e-6 {
+                        if end.dist(ca) < 1e-6 && !self.junction_pair(other, child) {
                             pairs.push(ReturnCorner { a: other, a_end: other_end, b: child, b_end: child_end, ca, cb });
                         }
                     }
@@ -3550,11 +4643,20 @@ impl SheetBody {
     /// so that the bend and the flange come free of the base, folded and flat. An end that a
     /// cut-out has freed already (`free`: start, end) gets none. Returns a note for every other
     /// such end left as it is.
-    fn relieve_bend_ends(&mut self, i: usize, free: (bool, bool)) -> Vec<String> {
+    fn relieve_bend_ends(&mut self, i: usize, free: (bool, bool), on_cut_out: bool) -> Vec<String> {
         let Some(f) = self.flanges.get(i).cloned() else { return Vec::new() };
-        if f.parent.is_some() {
-            return Vec::new();
-        }
+        // The panel the bend leaves: the base, or a flange panel whose edge a cut-out made (the
+        // panel runs on beyond the bend's ends there, as the base does beside a cut-out).
+        let parent = f.parent;
+        let mut panel = match parent {
+            None => self.base.clone(),
+            Some(j) if on_cut_out => match self.flanges.get(j) {
+                Some(pf) => self.panel(pf),
+                None => return Vec::new(),
+            },
+            Some(_) => return Vec::new(),
+        };
+        let what = if parent.is_none() { "base" } else { "panel" };
         let (width, depth) = (self.bend_relief.0, self.bend_relief.1.max(0.0));
         let reach = self.allowance(&f) + f.leg;
         let (u0, u1) = self.zone_span(&f);
@@ -3562,27 +4664,27 @@ impl SheetBody {
         for (u, s, free) in [(u0, -1.0, free.0), (u1, 1.0, free.1)] {
             // `du` past this end of the bend, `dv` past the bend line (into the flange).
             let at = |du: f64, dv: f64| f.p + f.d * (u + s * du) + f.n * dv;
-            if free || !self.base.contains(at(1e-4, 1e-4)) {
+            if free || !panel.contains(at(1e-4, 1e-4)) {
                 continue;
             }
             let cut = if !(width >= MIN_BEND_RELIEF) {
                 Err(format!("the relief width {width:.4} mm is below {MIN_BEND_RELIEF} mm"))
-            } else if !self.base.contains(at(width + 1e-4, 1e-4)) {
-                Err(format!("a relief {width:.3} mm wide would take away all of the base beside the bend"))
+            } else if !panel.contains(at(width + 1e-4, 1e-4)) {
+                Err(format!("a relief {width:.3} mm wide would take away all of the {what} beside the bend"))
             } else {
                 let relief = rect(at(0.0, -depth), at(width, -depth), at(width, reach + width), at(0.0, reach + width));
-                planar_region(&self.base)
-                    .and_then(|base| material_boolean(&[base], &[relief], kernel::BoolOp::Cut, &mut FlatWork::new()))
+                planar_region(&panel)
+                    .and_then(|kept| material_boolean(&[kept], &[relief], kernel::BoolOp::Cut, &mut FlatWork::new()))
                     .map_err(|e| e.to_string())
                     .and_then(|mut left| match (left.pop(), left.is_empty()) {
-                        (Some(base), true) if base.holes.is_empty() => Ok(base),
-                        _ => Err("it would not leave the base in one piece".to_string()),
+                        (Some(kept), true) if kept.holes.is_empty() => Ok(kept),
+                        _ => Err(format!("it would not leave the {what} in one piece")),
                     })
             };
-            match cut {
-                Ok(base) => self.base = base,
+            match cut.and_then(|kept| self.set_panel_region(parent, kept.clone()).map(|()| kept).map_err(|e| e.to_string())) {
+                Ok(kept) => panel = kept,
                 Err(why) => {
-                    let w = apply_point(&self.frame_mat(), v3(at(0.0, 0.0)));
+                    let w = apply_point(&self.world(parent), v3(at(0.0, 0.0)));
                     notes.push(format!("no bend relief at ({:.3}, {:.3}, {:.3}): {why}", w.x, w.y, w.z));
                 }
             }
@@ -3958,7 +5060,7 @@ impl SheetBody {
         let mut out = Vec::new();
         for (k, &(a, a_end, c)) in ends.iter().enumerate() {
             for &(b, b_end, c2) in ends.iter().skip(k + 1) {
-                if a != b && c.dist(c2) < 1e-6 && made.contains(&a) && made.contains(&b) {
+                if a != b && c.dist(c2) < 1e-6 && made.contains(&a) && made.contains(&b) && !self.junction_pair(a, b) {
                     out.push(Corner { a, a_end, b, b_end, c });
                 }
             }
@@ -4693,7 +5795,7 @@ impl SheetBody {
         if strips.len() > 1 {
             let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
             let angle = if flip { -angle } else { angle };
-            return self.fold_tabs(panel, &pts, (n, d), (s0, ba), span, (angle, radius), &strips);
+            return self.fold_tabs(panel, (&pts, &outline), (n, d), (s0, ba), span, (angle, radius), &strips);
         }
         // The bend zone is a rectangle across the panel, or straight edges of the sheet slant
         // across it, or curved ones do. Those ends fold to helices and curves, as torn ends and
@@ -4803,7 +5905,7 @@ impl SheetBody {
     fn fold_tabs(
         &mut self,
         panel: Option<usize>,
-        pts: &[Vec2],
+        (pts, outline): (&[Vec2], &Loop2),
         (n, d): (Vec2, Vec2),
         (s0, ba): (f64, f64),
         span: (f64, f64),
@@ -4870,13 +5972,28 @@ impl SheetBody {
             let leg = moving.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
             made.push((u0, u1, n * s0 + d * u0, leg, moving));
         }
-        // Flanges already on this panel: those beyond a folding tab move with it.
+        // Flanges already on this panel: those beyond a folding tab move with it. A flange wholly
+        // beyond the zone sits on one piece of the material beyond it, and goes where that piece
+        // goes, however long its bend is: a rim on a flared wall is longer than the wall's bend
+        // (#15519).
+        let piece_of = |f: &SheetFlange| {
+            let root = f.p + f.d * (f.len / 2.0);
+            beyond.iter().position(|part| near_outline(&Ring::new(part.clone()), root, 1e-6))
+        };
         let mut moves = Vec::new();
         for (k, f) in self.flanges.iter().enumerate() {
             if f.parent != panel {
                 continue;
             }
             let (e0, e1) = (f.p.dot(n) - s0, (f.p + f.d * f.len).dot(n) - s0);
+            if e0.min(e1) >= ba - 1e-9
+                && let Some(piece) = piece_of(f)
+            {
+                if let Some(j) = chosen.iter().position(|i| hangs.get(*i).is_some_and(|h| h.contains(&piece))) {
+                    moves.push((k, j));
+                }
+                continue;
+            }
             let fu = (f.p.dot(d).min((f.p + f.d * f.len).dot(d)), f.p.dot(d).max((f.p + f.d * f.len).dot(d)));
             let crosses = Err(DocError::Invalid("not supported yet: a fold through a flange's bend".into()));
             match made.iter().position(|m| fu.0 >= m.0 - 1e-9 && fu.1 <= m.1 + 1e-9) {
@@ -4892,17 +6009,53 @@ impl SheetBody {
             }
             v.into_iter().map(snap).collect::<Vec<_>>()
         };
+        // The same pieces cut from the exact outline, so its arcs and curves stay as drawn: cut
+        // from the chords, every arc came out as one flat face per chord (a hundred and more for
+        // a few rounded corners). Where the exact cut doesn't come out as the same pieces, the
+        // chords stay.
+        let exact = tab_cut(outline, n, d, s0, ba).and_then(|cut| {
+            if cut.tabs.len() != strips.len() {
+                return None;
+            }
+            let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() <= 1e-4 && (a.1 - b.1).abs() <= 1e-4;
+            let of = strip_u.iter().map(|&u| cut.tabs.iter().position(|t| near(t.u, u))).collect::<Option<Vec<usize>>>()?;
+            let folds = chosen.iter().map(|&i| of.get(i).copied()).collect::<Option<Vec<usize>>>()?;
+            // The chords cut off at most their sagitta (1e-3) along the outline.
+            let close = |exact: &Loop2, poly: &[Vec2]| {
+                let m = poly.len();
+                let perimeter: f64 = (0..m).filter_map(|i| Some(poly.get(i)?.dist(*poly.get((i + 1) % m)?))).sum();
+                (exact.signed_area().abs() - signed_area(poly).abs()).abs() <= 2e-3 * perimeter + 1e-6
+            };
+            let fixed_exact = cut.fixed(|k| folds.contains(&k));
+            if !close(&fixed_exact, &fixed) {
+                return None;
+            }
+            let mut moving = Vec::with_capacity(folds.len());
+            for (&k, m) in folds.iter().zip(&made) {
+                let lp = cut.moving(k)?;
+                if !close(&lp, &m.4) {
+                    return None;
+                }
+                moving.push(lp.ccw());
+            }
+            Some((fixed_exact.ccw(), moving))
+        });
+        let (fixed_exact, mut moving_exact) = match exact {
+            Some((f, m)) => (Some(f), m.into_iter().map(Some).collect()),
+            None => (None, Vec::new()),
+        };
+        moving_exact.resize(made.len(), None);
         match panel {
-            None => self.base = Region2 { outer: Loop2::polygon(&fixed).ccw(), holes: self.base.holes.clone() },
+            None => self.base = Region2 { outer: fixed_exact.unwrap_or_else(|| Loop2::polygon(&fixed).ccw()), holes: self.base.holes.clone() },
             Some(j) => {
                 if let Some(f) = self.flanges.get_mut(j) {
                     f.shape = Some(ccw(fixed));
-                    f.exact = None;
+                    f.exact = fixed_exact;
                 }
             }
         }
         let first = self.flanges.len();
-        for (u0, u1, p0, leg, moving) in made {
+        for ((u0, u1, p0, leg, moving), exact) in made.into_iter().zip(moving_exact) {
             self.flanges.push(SheetFlange {
                 parent: panel,
                 p: snap(p0),
@@ -4918,7 +6071,7 @@ impl SheetBody {
                 tear_curved: (false, false),
                 tear_ease: (0.0, 0.0),
                 shape: Some(ccw(moving)),
-                exact: None,
+                exact,
                 zone_shape: None,
                 tag: String::new(),
             });
@@ -4965,7 +6118,8 @@ impl SheetBody {
     /// The persistent name of the sheet edge nearest a world point. An edge a notch made (see
     /// `base_cut_edge_at`) has none: no line of the base sketch runs along it.
     pub fn edge_name(&self, pick: Vec3) -> Option<String> {
-        if self.base_cut_edge_at(pick).is_some() {
+        // A cut-out's edge has no name of its own: what is made on it keeps its pick.
+        if self.base_cut_edge_at(pick).is_some() || self.notch_at(pick, self.t * 2.0 + 1e-3).ok().flatten().is_some() {
             return None;
         }
         let (panel, a, b, top, _) = self.edge_at(pick)?;
@@ -4976,6 +6130,11 @@ impl SheetBody {
     /// point of that edge nearest `near`, off its very ends, so that what is made on the edge
     /// knows where along it the pick was.
     pub fn edge_by_name(&self, name: &str, near: Vec3) -> Option<Vec3> {
+        // No cut-out's edge has a name: a pick right on one stays there, whatever name it was
+        // saved with (before such an edge could be picked, it took the outline edge's nearest it).
+        if self.notch_at(near, 1e-4).ok().flatten().is_some() {
+            return Some(near);
+        }
         let mut best: Option<(f64, Vec3)> = None;
         for (pi, r) in self.panels() {
             let pts = r.outer.ccw().polyline(1e-3);
@@ -5744,36 +6903,115 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
     if pts.len() < 2 {
         return Err(DocError::Invalid("a contour flange needs an open chain of lines".into()));
     }
+    let segs: Vec<Seg2> = pts.windows(2).map(|w| Seg2::Line { a: w[0], b: w[1] }).collect();
+    contour_flange_path(body, rule, rv, plane, &segs, width, flip)
+}
+
+/// A sheet from an open chain of lines and circular arcs (contour flange): `segs` in `plane`,
+/// the material on the right of the travel (or the left when `flip`), `width` along the plane
+/// normal. A line is a flat panel; an arc is a bend of its own radius. The arc is the profile
+/// surface: when the bend turns toward the material the sheet is outside that surface, so the
+/// bend's inner radius is the arc's less the thickness; when it turns away the arc is the inner
+/// surface and its radius is the bend's. A line-line corner is a sharp corner and gets a bend of
+/// the rule's radius, as a chain of lines always did.
+pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, segs: &[Seg2], width: f64, flip: bool) -> Result<SheetBody> {
+    if segs.is_empty() {
+        return Err(DocError::Invalid("a contour flange needs an open profile".into()));
+    }
+    if !(width.is_finite() && width > 0.0) {
+        return Err(DocError::Invalid("the contour flange distance must be positive".into()));
+    }
     let (t, r) = (rv.thickness, rv.bend_radius);
-    let seg_dir = |i: usize| -> Result<(Vec2, f64)> {
-        let (Some(a), Some(b)) = (pts.get(i), pts.get(i + 1)) else { return Err(DocError::Invalid("chain".into())) };
-        let l = a.dist(*b);
-        Ok(((*b - *a).normalized().ok_or_else(|| DocError::Invalid("zero-length line in the contour".into()))?, l))
-    };
+    // Material side in the sketch: right of travel, or left when flipped.
     let side = if flip { -1.0 } else { 1.0 };
-    // Material side in the sketch: right of travel.
-    let (d0, _) = seg_dir(0)?;
+    let first = segs.first().copied().ok_or_else(|| DocError::Invalid("a contour flange needs an open profile".into()))?;
+    let start = first.start();
+    let d0 = first.start_tangent();
+    let l0 = d0.len();
+    if !(l0.is_finite() && l0 > 1e-12) {
+        return Err(DocError::Invalid("the contour starts with a curve of no direction".into()));
+    }
+    let d0 = d0 / l0;
     let m0 = Vec2::new(d0.y, -d0.x) * side;
-    let start = pts.first().copied().unwrap_or_default();
     let (x, z) = (plane.dir_to_world(d0), plane.dir_to_world(m0));
     let frame = Plane::new(plane.to_world(start), x, z.cross(x)).ok_or_else(|| DocError::Invalid("contour frame".into()))?;
-    // Width along the sketch normal: +y or −y of the frame.
     let ysign = if frame.y.dot(plane.normal()) >= 0.0 { 1.0 } else { -1.0 };
-    let n = pts.len() - 1;
-    // Turn at each corner: angle and whether it bends toward the material (up).
-    let mut corners = Vec::new();
-    for i in 0..n.saturating_sub(1) {
-        let (da, _) = seg_dir(i)?;
-        let (db, _) = seg_dir(i + 1)?;
-        let cross = da.cross(db) * side;
-        let ang = da.dot(db).clamp(-1.0, 1.0).acos();
-        if ang < 1e-9 {
-            return Err(DocError::Invalid("straight corners in a contour flange".into()));
-        }
-        // Right-hand material: turning right (negative cross) bends toward it.
-        corners.push((ang, cross < 0.0));
-    }
+    let (y0, y1) = if ysign > 0.0 { (0.0, width) } else { (-width, 0.0) };
     let setback = |ang: f64, up: bool| if up { (r + t) * (ang / 2.0).tan() } else { r * (ang / 2.0).tan() };
+    // The junction after each segment: a sharp line-line corner (its unsigned turn and whether
+    // it bends toward the material), or none where a line meets an arc tangentially.
+    let mut sharp: Vec<Option<(f64, bool)>> = Vec::with_capacity(segs.len().saturating_sub(1));
+    for i in 0..segs.len().saturating_sub(1) {
+        let (Some(a), Some(b)) = (segs.get(i), segs.get(i + 1)) else { continue };
+        if a.end().dist(b.start()) > 1e-5 {
+            return Err(DocError::Invalid("the contour curves are not connected end to end".into()));
+        }
+        if matches!(a, Seg2::Line { .. }) && matches!(b, Seg2::Line { .. }) {
+            let (Some(da), Some(db)) = (a.end_tangent().normalized(), b.start_tangent().normalized()) else {
+                return Err(DocError::Invalid("zero-length line in the contour".into()));
+            };
+            let ang = da.dot(db).clamp(-1.0, 1.0).acos();
+            if ang < 1e-9 {
+                return Err(DocError::Invalid("straight corners in a contour flange".into()));
+            }
+            sharp.push(Some((ang, da.cross(db) * side < 0.0)));
+        } else {
+            let (Some(ta), Some(tb)) = (a.end_tangent().normalized(), b.start_tangent().normalized()) else {
+                return Err(DocError::Invalid("zero-length curve in the contour".into()));
+            };
+            if ta.dot(tb) < 1.0 - 1e-6 {
+                return Err(DocError::Invalid(
+                    "the contour arcs must be tangent to the curves beside them; a sharp corner beside an arc is not a bend of that arc's radius"
+                        .into(),
+                ));
+            }
+            sharp.push(None);
+        }
+    }
+    // Panels and bends in path order: every line is a panel, every arc a bend, every sharp
+    // line-line corner a bend of the rule's radius. A panel loses the tangent setback at each
+    // sharp corner it ends on.
+    enum Piece {
+        Panel { len: f64 },
+        Bend { angle: f64, radius: f64 },
+    }
+    let mut pieces: Vec<Piece> = Vec::with_capacity(segs.len().saturating_mul(2));
+    for (i, s) in segs.iter().enumerate() {
+        match *s {
+            Seg2::Line { a, b } => {
+                let l = a.dist(b);
+                if !(l.is_finite() && l > 1e-12) {
+                    return Err(DocError::Invalid("zero-length line in the contour".into()));
+                }
+                let before = if i == 0 { 0.0 } else { sharp.get(i - 1).copied().flatten().map(|(ang, up)| setback(ang, up)).unwrap_or(0.0) };
+                let after = sharp.get(i).copied().flatten().map(|(ang, up)| setback(ang, up)).unwrap_or(0.0);
+                let len = l - before - after;
+                if !len.is_finite() || len < -1e-9 {
+                    return Err(DocError::Invalid("a contour line is shorter than its bends".into()));
+                }
+                pieces.push(Piece::Panel { len: len.max(0.0) });
+            }
+            Seg2::Arc { center: _, radius, start: _, sweep } => {
+                if !(radius.is_finite() && radius > 0.0) {
+                    return Err(DocError::Invalid("a contour arc has no radius".into()));
+                }
+                if !(sweep.is_finite() && sweep.abs() > 1e-9 && sweep.abs() < std::f64::consts::TAU - 1e-9) {
+                    return Err(DocError::Invalid("a contour arc must be shorter than a full turn".into()));
+                }
+                let angle = -sweep * side;
+                let up = angle >= 0.0;
+                let inner = if up { radius - t } else { radius };
+                if !(inner.is_finite() && inner > 1e-9) {
+                    return Err(DocError::Invalid("a contour arc's radius is no larger than the sheet is thick".into()));
+                }
+                pieces.push(Piece::Bend { angle, radius: inner });
+            }
+            _ => return Err(DocError::Invalid("not supported yet: a contour flange profile is lines and circular arcs".into())),
+        }
+        if let Some((ang, up)) = sharp.get(i).copied().flatten() {
+            pieces.push(Piece::Bend { angle: if up { ang } else { -ang }, radius: r });
+        }
+    }
     let mut sheet = SheetBody {
         body: body.into(),
         rule: rule.into(),
@@ -5796,48 +7034,54 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
         base_curves: Vec::new(),
         altered_by: None,
     };
-    let (y0, y1) = if ysign > 0.0 { (0.0, width) } else { (-width, 0.0) };
-    // First segment: the base panel.
-    let (_, l0) = seg_dir(0)?;
-    let end0 = l0 - corners.first().map(|(a, u)| setback(*a, *u)).unwrap_or(0.0);
-    if end0 <= 0.0 {
-        return Err(DocError::Invalid("a contour line is shorter than its bends".into()));
-    }
-    sheet.base = rect(Vec2::new(0.0, y0), Vec2::new(end0, y0), Vec2::new(end0, y1), Vec2::new(0.0, y1));
-    let mut parent: Option<usize> = None;
-    let mut at = end0;
-    for (i, (ang, up)) in corners.iter().enumerate() {
-        let (_, l) = seg_dir(i + 1)?;
-        let before = setback(*ang, *up);
-        let after = corners.get(i + 1).map(|(a, u)| setback(*a, *u)).unwrap_or(0.0);
-        let leg = l - before - after;
-        if leg < -1e-9 {
+    // The first panel is the base; a profile that starts with an arc has no base panel.
+    let first_is_panel = matches!(pieces.first(), Some(Piece::Panel { .. }));
+    let mut at = 0.0;
+    if let Some(Piece::Panel { len }) = pieces.first() {
+        if *len <= 1e-9 {
             return Err(DocError::Invalid("a contour line is shorter than its bends".into()));
         }
-        // The material flips sides relative to the panel when the bend goes down.
-        let f = SheetFlange {
-            parent,
-            p: Vec2::new(at, y0),
-            d: Vec2::new(0.0, 1.0),
-            len: y1 - y0,
-            n: Vec2::new(1.0, 0.0),
-            angle: if *up { *ang } else { -*ang },
-            radius: r,
-            leg: leg.max(0.0),
-            ext: (0.0, 0.0),
-            slope: (0.0, 0.0),
-            tear: (false, false),
-            tear_curved: (false, false),
-            tear_ease: (0.0, 0.0),
-            shape: None,
-            exact: None,
-            zone_shape: None,
-            tag: String::new(),
-        };
-        let ba = sheet.allowance(&f);
-        sheet.flanges.push(f);
-        parent = Some(sheet.flanges.len() - 1);
-        at += ba + leg.max(0.0);
+        sheet.base = rect(Vec2::new(0.0, y0), Vec2::new(*len, y0), Vec2::new(*len, y1), Vec2::new(0.0, y1));
+        at = *len;
+    }
+    let mut parent: Option<usize> = None;
+    let mut pending: Option<usize> = None;
+    for piece in pieces.iter().skip(usize::from(first_is_panel)) {
+        match piece {
+            Piece::Panel { len } => {
+                let Some(i) = pending.take() else {
+                    return Err(DocError::Invalid("a contour panel has no bend before it".into()));
+                };
+                let Some(f) = sheet.flanges.get_mut(i) else { return Err(DocError::Invalid("contour bend".into())) };
+                f.leg = *len;
+                at += *len;
+            }
+            Piece::Bend { angle, radius } => {
+                let f = SheetFlange {
+                    parent,
+                    p: Vec2::new(at, y0),
+                    d: Vec2::new(0.0, 1.0),
+                    len: y1 - y0,
+                    n: Vec2::new(1.0, 0.0),
+                    angle: *angle,
+                    radius: *radius,
+                    leg: 0.0,
+                    ext: (0.0, 0.0),
+                    slope: (0.0, 0.0),
+                    tear: (false, false),
+                    tear_curved: (false, false),
+                    tear_ease: (0.0, 0.0),
+                    shape: None,
+                    exact: None,
+                    zone_shape: None,
+                    tag: String::new(),
+                };
+                at += sheet.allowance(&f);
+                sheet.flanges.push(f);
+                parent = Some(sheet.flanges.len() - 1);
+                pending = parent;
+            }
+        }
     }
     Ok(sheet)
 }
@@ -6195,6 +7439,41 @@ mod tests {
     }
 
     #[test]
+    fn a_junction_cut_stops_at_its_own_tip() {
+        // A C-shaped blank: the bar y 0…100, the left arm x 0…30 down to y −40 and the foot
+        // y −40…−30 across to x 200, the flange zone x 30…200 down to its far edge at
+        // y = 3 − (π + 17). The junction line at x = 50 runs from the bend line (50, 3) out to that
+        // far edge; past its tip lies the foot, which the junction does not cut.
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let far = 3.0 - (std::f64::consts::PI + 17.0);
+        let lp = Loop2 {
+            segs: vec![
+                line(Vec2::new(0.0, 100.0), Vec2::new(200.0, 100.0)),
+                line(Vec2::new(200.0, 100.0), Vec2::new(200.0, far)),
+                line(Vec2::new(200.0, far), Vec2::new(30.0, far)),
+                line(Vec2::new(30.0, far), Vec2::new(30.0, -30.0)),
+                line(Vec2::new(30.0, -30.0), Vec2::new(200.0, -30.0)),
+                line(Vec2::new(200.0, -30.0), Vec2::new(200.0, -40.0)),
+                line(Vec2::new(200.0, -40.0), Vec2::new(0.0, -40.0)),
+                line(Vec2::new(0.0, -40.0), Vec2::new(0.0, 100.0)),
+            ],
+        };
+        let at = Vec2::new(50.0, 3.0);
+        let tip = Vec2::new(50.0, far);
+        let slits = clip_junction_slits(&lp, at, tip);
+        assert_eq!(slits.len(), 1, "the junction cut the foot past its own tip: {slits:?}");
+        assert!(
+            slits[0].0.dist(tip) <= 1e-6 && slits[0].1.dist(at) <= 1e-6,
+            "the junction's own cut is not from the bend line to its tip: {slits:?}"
+        );
+        // The foot's own edges are whole: no returned cut crosses y −30…−40 at x = 50.
+        assert!(
+            !slits.iter().any(|(a, b)| (a.x - 50.0).abs() < 1e-6 && (b.x - 50.0).abs() < 1e-6 && a.y < -29.0 && b.y < -29.0),
+            "a cut was returned in the foot, past the junction's tip: {slits:?}"
+        );
+    }
+
+    #[test]
     fn ring_cut_retains_exact_central_material_island() {
         let mut s = plate(100.0, 60.0);
         s.holes.push(Region2 { outer: Loop2::circle(Vec2::new(50.0, 30.0), 10.0), holes: vec![Loop2::circle(Vec2::new(50.0, 30.0), 5.0)] });
@@ -6349,6 +7628,27 @@ mod tests {
         assert_eq!(regions[0].holes.len(), 240);
         let area = 250.0 * 130.0 - 240.0 * std::f64::consts::PI * 2.0 * 2.0;
         assert!((regions[0].area() - area).abs() < 1e-6);
+    }
+
+    /// #13493: a flat with many cut-outs takes them all from the material in one planar boolean,
+    /// not after uniting them one pair at a time (63 more for 64 holes, each rebuilding both
+    /// operands in the kernel). Its holes are the same 64 circles.
+    #[test]
+    fn a_flat_with_many_cutouts_cuts_them_in_one_planar_boolean() {
+        let mut s = plate(250.0, 130.0);
+        for i in 0..8 {
+            for j in 0..8 {
+                s.holes.push(Region2 { outer: Loop2::circle(Vec2::new(15.0 + 30.0 * i as f64, 15.0 + 14.0 * j as f64), 2.0), holes: vec![] });
+            }
+        }
+        MATERIAL_BOOLEANS.with(|n| n.set(0));
+        let regions = s.flat_regions().unwrap();
+        let calls = MATERIAL_BOOLEANS.with(std::cell::Cell::get);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].holes.len(), 64);
+        let area = 250.0 * 130.0 - 64.0 * std::f64::consts::PI * 4.0;
+        assert!((regions[0].area() - area).abs() < 1e-6, "{}", regions[0].area());
+        assert_eq!(calls, 1, "planar booleans for one plate and 64 holes");
     }
 
     #[test]
@@ -6770,6 +8070,147 @@ mod tests {
         }
     }
 
+    /// A notch cut from the flat whose edge along the bend lies a hair (0.01 µm to 10 µm) before
+    /// or past a bend zone's edge, on either side of the zone: it refolds into one valid solid,
+    /// as on the line and clearly away from it. The sliver it left between the cut and the
+    /// zone failed to sew ("ambiguous edge contact").
+    #[test]
+    fn a_notch_edge_a_hair_beside_a_bend_zone_edge_refolds() {
+        let rule = RuleValues { bend_radius: 2.0, ..alu() };
+        let outline = [Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 40.0), Vec2::new(0.0, 40.0)];
+        let mut s = base_flange("Body1", "AL2", &rule, Plane::XY, Region2 { outer: Loop2::polygon(&outline).ccw(), holes: vec![] });
+        s.add_flange(Vec3::new(50.0, 40.0, 2.0), 30.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", false).unwrap();
+        let f = s.flanges[0].clone();
+        let ba = s.allowance(&f);
+        let v0 = vol(&s.solid().unwrap());
+        for (side, line) in [("panel", 0.0), ("flange", ba)] {
+            for off in [0.0, 1e-8, -1e-8, 1.6e-7, -1.6e-7, 1e-5, -1e-5, 0.01, -0.01] {
+                let what = format!("notch on the {side} side, {off} mm beside the zone edge");
+                // The notch runs 20 along the bend from its start, from the zone edge outwards.
+                let edge = line + off;
+                let out = if side == "panel" { -10.0 } else { ba + 40.0 };
+                let (a, b) = (f.p - f.d * 5.0, f.p + f.d * 20.0);
+                let notch = Loop2::polygon(&[a + f.n * edge, b + f.n * edge, b + f.n * out, a + f.n * out]).ccw();
+                let mut cut = s.clone();
+                cut.holes.push(Region2 { outer: notch, holes: vec![] });
+                let body = cut.solid().unwrap_or_else(|e| panic!("{what}: {e}"));
+                assert!(body.validity().is_empty(), "{what}: {:?}", body.validity());
+                assert!(vol(&body) < v0 - 1.0, "{what}: {} vs {v0}", vol(&body));
+            }
+        }
+    }
+
+    /// A loop whose pieces are 14 nm apart (as the planar booleans hand back a torn fold's
+    /// free-form outline) is closed before it is extruded: each segment starts where the one
+    /// before ends, and the plate comes out with the loop's area.
+    #[test]
+    fn a_loop_with_gaps_under_a_hair_is_welded_before_it_is_extruded() {
+        let g = 1.4e-5;
+        let lp = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) },
+                Seg2::Line { a: Vec2::new(10.0 + g, g), b: Vec2::new(10.0, 10.0) },
+                Seg2::Arc { center: Vec2::new(5.0, 10.0), radius: 5.0, start: 0.0, sweep: std::f64::consts::PI },
+                Seg2::Line { a: Vec2::new(-g, 10.0), b: Vec2::new(0.0, g) },
+            ],
+        };
+        let closed = welded(lp.clone());
+        for (p, q) in closed.segs.iter().zip(closed.segs.iter().cycle().skip(1)) {
+            assert_eq!(p.end().dist(q.start()), 0.0, "{p:?} then {q:?}");
+        }
+        let body = extrude_flat(&Plane::XY, &[Region2 { outer: lp, holes: Vec::new() }], 0.0, 2.0).unwrap_or_else(|e| panic!("{e}"));
+        let area = 100.0 + std::f64::consts::PI * 12.5;
+        let volume = body.volume_at(1e-6).unwrap_or(f64::NAN);
+        assert!((volume - 2.0 * area).abs() < 1e-3, "{volume} vs {}", 2.0 * area);
+    }
+
+    /// A rectangle whose outline has an extra vertex on its edge a hair (to 0.01 µm) from where a
+    /// fold's bend zone ends, folded 90° along a line: the flat pattern and the folded solid build,
+    /// as without the vertex. Split there, the panel's loop kept an edge of the hair's length,
+    /// which SMLib's face builder refuses ("SMLib failed (status 1001)").
+    #[test]
+    fn an_outline_vertex_a_hair_from_a_bend_zone_edge_unfolds() {
+        let rule = RuleValues { thickness: 1.5, k_factor: 0.5, bend_radius: 2.0, ..alu() };
+        let line = 30.0;
+        let ba = std::f64::consts::FRAC_PI_2 * (rule.bend_radius + rule.k_factor * rule.thickness);
+        for off in [0.0, 1e-8, 1e-6, -1e-6, 1e-5, -1e-5] {
+            let what = format!("vertex {off} mm from the zone edge");
+            let x = line + ba / 2.0 + off;
+            let outline = [Vec2::new(x, 0.0), Vec2::new(80.0, 0.0), Vec2::new(80.0, 120.0), Vec2::new(0.0, 120.0), Vec2::new(0.0, 0.0)];
+            let mut s = base_flange("Body1", "R", &rule, Plane::XY, Region2 { outer: Loop2::polygon(&outline).ccw(), holes: Vec::new() });
+            let (a, b) = (Vec3::new(line, -200.0, s.t), Vec3::new(line, 200.0, s.t));
+            let mut warning = None;
+            s.add_fold(a, b, std::f64::consts::FRAC_PI_2, rule.bend_radius, "centerline", false, None, &mut warning)
+                .unwrap_or_else(|e| panic!("{what}: {e}"));
+            let flat = s.flat_regions().unwrap_or_else(|e| panic!("{what}: flat: {e}"));
+            assert_eq!(flat.len(), 1, "{what}");
+            let body = s.solid().unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert!(body.validity().is_empty(), "{what}: {:?}", body.validity());
+        }
+    }
+
+    /// As above, with arcs at the zone edge: a notch whose far corner along the edge is rounded,
+    /// and a straight notch with a rounded relief over its edge whose arc ends on the zone edge,
+    /// tangent to it (a corner relief drawn to end on the bend line, which ends 0.03 µm beside it).
+    #[test]
+    fn rounded_cut_corners_a_hair_beside_a_bend_zone_edge_refold() {
+        let rule = RuleValues { bend_radius: 2.0, ..alu() };
+        let outline = [Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 40.0), Vec2::new(0.0, 40.0)];
+        let mut s = base_flange("Body1", "AL2", &rule, Plane::XY, Region2 { outer: Loop2::polygon(&outline).ccw(), holes: vec![] });
+        s.add_flange(Vec3::new(50.0, 40.0, 2.0), 30.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", false).unwrap();
+        let f = s.flanges[0].clone();
+        let ba = s.allowance(&f);
+        let v0 = vol(&s.solid().unwrap());
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let arc = |c: Vec2, a: Vec2, b: Vec2| {
+            let (sa, sb) = ((a - c).y.atan2((a - c).x), (b - c).y.atan2((b - c).x));
+            let mut sweep = sb - sa;
+            while sweep > std::f64::consts::PI {
+                sweep -= std::f64::consts::TAU;
+            }
+            while sweep < -std::f64::consts::PI {
+                sweep += std::f64::consts::TAU;
+            }
+            Seg2::Arc { center: c, radius: a.dist(c), start: sa, sweep }
+        };
+        for (side, zone) in [("panel", 0.0), ("flange", ba)] {
+            for off in [3e-5, -3e-5, 1e-6, -1e-6, 0.0] {
+                let edge = zone + off;
+                let out = if side == "panel" { -10.0 } else { ba + 40.0 };
+                let sg = (out - edge).signum();
+                let p = |t: f64, n: f64| f.p + f.d * t + f.n * n;
+                let r = 3.0;
+                let rounded = Loop2 {
+                    segs: vec![
+                        line(p(-5.0, out), p(-5.0, edge)),
+                        line(p(-5.0, edge), p(20.0 - r, edge)),
+                        arc(p(20.0 - r, edge + sg * r), p(20.0 - r, edge), p(20.0, edge + sg * r)),
+                        line(p(20.0, edge + sg * r), p(20.0, out)),
+                        line(p(20.0, out), p(-5.0, out)),
+                    ],
+                };
+                let notch = Loop2::polygon(&[p(-5.0, edge), p(20.0, edge), p(20.0, out), p(-5.0, out)]);
+                let relief = Loop2 {
+                    segs: vec![
+                        line(p(0.0, edge), p(0.0, edge + sg * 3.0)),
+                        line(p(0.0, edge + sg * 3.0), p(-5.0, edge + sg * 3.0)),
+                        line(p(-5.0, edge + sg * 3.0), p(-5.0, edge - sg * 2.0)),
+                        line(p(-5.0, edge - sg * 2.0), p(-2.0, edge - sg * 2.0)),
+                        arc(p(0.0, edge - sg * 2.0), p(-2.0, edge - sg * 2.0), p(0.0, edge)),
+                    ],
+                };
+                for (shape, holes) in [("rounded notch", vec![rounded]), ("notch and relief", vec![notch, relief])] {
+                    let what = format!("{shape} on the {side} side, {off} mm beside the zone edge");
+                    let mut cut = s.clone();
+                    cut.holes.extend(holes.into_iter().map(|h| Region2 { outer: h.ccw(), holes: vec![] }));
+                    let body = cut.solid().unwrap_or_else(|e| panic!("{what}: {e}"));
+                    assert!(body.validity().is_empty(), "{what}: {:?}", body.validity());
+                    assert!(vol(&body) < v0 - 1.0, "{what}: {} vs {v0}", vol(&body));
+                }
+            }
+        }
+    }
+
     /// Distance between two parallel 3D lines through a0→a1 and b0→b1 (None if not parallel).
     fn parallel_gap(a0: Vec3, a1: Vec3, b0: Vec3, b1: Vec3) -> Option<f64> {
         let (u, v) = ((a1 - a0).normalized()?, (b1 - b0).normalized()?);
@@ -7170,8 +8611,7 @@ mod tests {
             Vec3::new(60.0 + u.x * 90.0, u.y * 90.0, 2.0),
             Vec3::new(u.x * 45.0, u.y * 45.0, 2.0),
         ];
-        let each: Vec<EdgeFlange> =
-            (0..4).map(|i| EdgeFlange { pick: picks[i], height: heights[i], angle: angles[i].to_radians(), from: HeightFrom::Outer }).collect();
+        let each: Vec<EdgeFlange> = (0..4).map(|i| EdgeFlange::at(picks[i], heights[i], angles[i].to_radians(), HeightFrom::Outer)).collect();
         flanges_each(rhombus(), rv, &each)
     }
 
@@ -7201,7 +8641,7 @@ mod tests {
             Vec3::new(l * 0.75, -l * u.y / 2.0, 2.0),
             Vec3::new(l / 4.0, -l * u.y / 2.0, 2.0),
         ];
-        let flange = |i: usize| EdgeFlange { pick: picks[i], height: 38.6, angle: 90f64.to_radians(), from: HeightFrom::Outer };
+        let flange = |i: usize| EdgeFlange::at(picks[i], 38.6, 90f64.to_radians(), HeightFrom::Outer);
         // The round relief reaches r from its corner and the two are 12 mm apart: it fits at both.
         for shape in [ReliefShape::Round, ReliefShape::Rectangular] {
             let what = format!("{shape:?} at two corners opposite each other");
@@ -7352,7 +8792,7 @@ mod tests {
         let pts = [Vec2::new(0.0, 0.0), Vec2::new(9.0, 0.0), Vec2::new(9.0, 40.0), Vec2::new(-20.0, 20.0 * 3.0f64.sqrt())];
         let base = || Region2 { outer: Loop2::polygon(&pts).ccw(), holes: vec![] };
         let picks = [Vec3::new(-10.0, 17.32, 2.0), Vec3::new(4.5, 0.0, 2.0), Vec3::new(9.0, 20.0, 2.0)];
-        let flange = |i: usize| EdgeFlange { pick: picks[i], height: 38.6, angle: 90f64.to_radians(), from: HeightFrom::Outer };
+        let flange = |i: usize| EdgeFlange::at(picks[i], 38.6, 90f64.to_radians(), HeightFrom::Outer);
         for shape in [ReliefShape::Round, ReliefShape::Rectangular] {
             let what = format!("{shape:?} at both ends of a short edge");
             let rv = RuleValues { corner_relief_shape: shape, corner_relief: 4.0, ..alu() };
@@ -7536,7 +8976,14 @@ mod tests {
             let parent = s.flanges.get(wall).unwrap();
             let point = parent.p + parent.d * parent.len + parent.n * (s.allowance(parent) + parent.leg * 0.5);
             let side = apply_point(&s.world(Some(wall)), Vec3::new(point.x, point.y, s.t));
-            let edges = [Vec3::new(120.0, 45.0, 2.0), side].map(|pick| EdgeFlange { pick, height: 20.0, angle, from: HeightFrom::Outer });
+            let edges = [Vec3::new(120.0, 45.0, 2.0), side].map(|pick| EdgeFlange {
+                pick,
+                height: 20.0,
+                angle,
+                from: HeightFrom::Outer,
+                span: WHOLE_EDGE,
+                flip: None,
+            });
             let (_, notes) = s.add_flanges_each(&edges, 1.0, "inside", false, ReliefOverride { shape: Some(shape), size: Some(4.0) }).unwrap();
             assert!(notes.is_empty(), "{shape:?}: {notes:?}");
             assert_eq!(s.holes.len(), 1);
@@ -7685,6 +9132,33 @@ mod tests {
 
     fn turned(x: f64, y: f64, turn: f64) -> Vec2 {
         Vec2::new(x * turn.cos() - y * turn.sin(), x * turn.sin() + y * turn.cos())
+    }
+
+    #[test]
+    fn a_cut_out_passes_through_a_corner_it_passes_a_hair_off() {
+        // Two corners 0.00008 apart, both within reach of each other (#15269).
+        let (a, b, reach) = (Vec2::new(0.0, 0.0), Vec2::new(8e-5, 0.0), 1.6e-4);
+        let square = |p: Vec2| Region2 {
+            outer: Loop2::polygon(&[p, p + Vec2::new(0.0, 1.0), p + Vec2::new(-1.0, 1.0), p + Vec2::new(-1.0, 0.0)]),
+            holes: vec![],
+        };
+        // A cut-out's corner on either corner stays there.
+        for p in [a, b] {
+            assert_eq!(onto_corners(square(p), &[a, b], reach), square(p));
+        }
+        // One a hair off moves onto the nearest corner.
+        let moved = onto_corners(square(Vec2::new(1.1e-4, 1e-5)), &[a, b], reach);
+        assert!(moved.outer.segs.iter().any(|e| e.start() == b), "{moved:?}");
+        // An edge passing a hair off a corner is split there.
+        let strip = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(-1.0, 1e-5), Vec2::new(1.0, 1e-5), Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0)]),
+            holes: vec![],
+        };
+        let split = onto_corners(strip, &[a], reach);
+        assert_eq!(split.outer.segs.len(), 5, "{split:?}");
+        assert!(split.outer.segs.iter().any(|e| e.start() == a), "{split:?}");
+        // Corners beyond reach move nothing.
+        assert_eq!(onto_corners(square(Vec2::new(1e-3, 0.0)), &[a, b], reach), square(Vec2::new(1e-3, 0.0)));
     }
 
     #[test]
@@ -7960,6 +9434,90 @@ mod tests {
             let want = 20_000.0 + 200.0 * (ba + 37.0 - setback) - 60.0 * (12.0 - setback) + 140.0 * (ba + 12.0);
             assert!((flat_area(&s) - want).abs() < 1e-6, "{position}: {} vs {want}", flat_area(&s));
             holds_the_flat_material(&s, position);
+        }
+    }
+
+    #[test]
+    fn an_edge_flange_runs_along_the_edge_a_cut_left_on_a_flanges_panel() {
+        // #2009: a 40 high wall (outside) on the plate's y = 0 edge, its far edge at
+        // y = −(BA + 37) in the flat. A cut takes a triangle off the wall's corner at x = 0: the
+        // wall's edge there runs from a = (0, far + 20) to b = (40, far), 20·√5 long, at obtuse
+        // corners with the wall's side and far edges. A 15 high flange picked on that edge runs
+        // along all of it and no further, and the cut-out becomes the wall's outline. Set inside,
+        // its bend starts 3 inside the edge: the strip under it goes, square to the edge at its
+        // ends, and the wall keeps its corners beyond them. Beside the bend's end at b the wall
+        // gets the rule's 2 × 1 relief, up to the far edge: 7 mm² (the far edge falls 1 for every
+        // 2 along the bend there, from 3 past the bend line). At a the wall's side edge leaves no
+        // room for one, and a note says so. The flange used to land on what the cut left of the
+        // far edge, or run the length of the wall along the moved line.
+        let (ba, quarter) = (std::f64::consts::PI, std::f64::consts::FRAC_PI_2);
+        let far = -(ba + 37.0);
+        let mut wall = plate_with_cuts(&[]);
+        wall.add_flange(Vec3::new(100.0, 0.0, 2.0), 40.0, quarter, 1.0, "outside", false).unwrap();
+        wall.flanges[0].tag = "F3.0".into();
+        let corner = [Vec2::new(-20.0, far - 10.0), Vec2::new(60.0, far - 10.0), Vec2::new(-20.0, far + 30.0)];
+        wall.holes.push(Region2 { outer: Loop2::polygon(&corner).ccw(), holes: vec![] });
+        let pick = apply_point(&wall.world(Some(0)), Vec3::new(20.0, far + 10.0, 2.0));
+        // A cut-out's edge has no name of its own; a pick on one saved with the name of the edge
+        // it was nearest (the far edge) stays on it.
+        assert_eq!(wall.edge_name(pick), None);
+        assert!(wall.edge_by_name("F3.0:far:top", pick).is_some_and(|p| p.dist(pick) < 1e-9));
+        let root5 = 5f64.sqrt();
+        let (d, inward) = (Vec2::new(2.0, -1.0) * (1.0 / root5), Vec2::new(1.0, 2.0) * (1.0 / root5));
+        let len = 20.0 * root5;
+        for (position, setback, relief, notes) in [("outside", 0.0, 0.0, 0), ("inside", 3.0, 7.0, 1)] {
+            let mut s = wall.clone();
+            let (made, said) = s.add_flanges_noted(&[pick], 15.0, quarter, 1.0, position, false).unwrap();
+            assert_eq!(said.len(), notes, "{position}: {said:?}");
+            let f = s.flanges[made[0]].clone();
+            assert!(f.parent == Some(0) && (f.len - len).abs() < 1e-6 && f.d.dist(d) < 1e-9, "{position}: {f:?}");
+            assert!(f.p.dist(Vec2::new(0.0, far + 20.0) + inward * setback) < 1e-6, "{position}: {f:?}");
+            assert!(s.holes.is_empty(), "{position}: {:?}", s.holes);
+            // Flat: the plate, the wall less the cut's 400, the strip and the relief, and
+            // len × (BA + 12) of the new flange.
+            let want = 20_000.0 + 200.0 * (ba + 37.0) - 400.0 - setback * len - relief + len * (ba + 12.0);
+            assert!((flat_area(&s) - want).abs() < 1e-6, "{position}: {} vs {want}", flat_area(&s));
+            holds_the_flat_material(&s, position);
+        }
+    }
+
+    #[test]
+    fn edge_flanges_on_two_edges_of_one_cut_run_along_both() {
+        // #2009: a 40 high wall (outside) on the plate's y = 0 edge, its far edge at
+        // y = −(BA + 37) in the flat. A cut takes a 40 × 15 slot out of the wall's far edge, from
+        // x = 80 to 120. Flanges picked together on both sides of the slot each run along their
+        // side: the first one made opens the slot onto the wall's outline, which must not leave
+        // the second one moving the whole wall's edge (set inside, its bend line would cut the
+        // wall in two). Set inside, each bend starts 3 into the wall and ends beside the wall
+        // past the slot's bottom: there the rule's 2 × 1 relief goes into the wall, 2 wide, from
+        // 1 before the bend line to 2 past the flange's far edge, (BA + 15) × 2 each. Set outside,
+        // the bends lie in the slot and need none.
+        let (ba, quarter) = (std::f64::consts::PI, std::f64::consts::FRAC_PI_2);
+        let far = -(ba + 37.0);
+        let mut wall = plate_with_cuts(&[]);
+        wall.add_flange(Vec3::new(100.0, 0.0, 2.0), 40.0, quarter, 1.0, "outside", false).unwrap();
+        let slot = [Vec2::new(80.0, far - 5.0), Vec2::new(120.0, far - 5.0), Vec2::new(120.0, far + 15.0), Vec2::new(80.0, far + 15.0)];
+        wall.holes.push(Region2 { outer: Loop2::polygon(&slot).ccw(), holes: vec![] });
+        let to_world = wall.world(Some(0));
+        let picks = [80.0, 120.0].map(|x| apply_point(&to_world, Vec3::new(x, far + 7.5, 2.0)));
+        for (position, setback, relief) in [("outside", 0.0, 0.0), ("inside", 3.0, 4.0 * (ba + 15.0))] {
+            let mut s = wall.clone();
+            let (made, said) = s.add_flanges_noted(&picks, 15.0, quarter, 1.0, position, false).unwrap();
+            assert!(said.is_empty(), "{position}: {said:?}");
+            assert!(s.holes.is_empty(), "{position}: {:?}", s.holes);
+            for (&i, x) in made.iter().zip([80.0 - setback, 120.0 + setback]) {
+                let f = &s.flanges[i];
+                assert!(f.parent == Some(0) && f.d.x.abs() < 1e-9 && (f.p.x - x).abs() < 1e-6, "{position}: {f:?}");
+                assert!((f.len - 15.0).abs() < 1e-6, "{position}: {f:?}");
+            }
+            // The wall keeps all but the slot, the strips under the bends and their reliefs.
+            let kept = s.panel(&s.flanges[0]).area();
+            let want = 200.0 * 37.0 - 600.0 - 2.0 * setback * 15.0 - relief;
+            assert!((kept - want).abs() < 1e-6, "{position}: {kept} vs {want}");
+            holds_the_flat_material(&s, position);
+            // Flat: the plate, the wall as kept, and 15 × (BA + 12) of each flange.
+            let want = 20_000.0 + 200.0 * ba + want + 2.0 * 15.0 * (ba + 12.0);
+            assert!((flat_area(&s) - want).abs() < 1e-6, "{position}: {} vs {want}", flat_area(&s));
         }
     }
 
@@ -8256,8 +9814,7 @@ mod tests {
         let base = rect(Vec2::new(0.0, 0.0), Vec2::new(120.0, 0.0), Vec2::new(120.0, 90.0), Vec2::new(0.0, 90.0));
         let t = rv.thickness;
         let picks = [Vec3::new(60.0, 0.0, t), Vec3::new(120.0, 45.0, t), Vec3::new(60.0, 90.0, t), Vec3::new(0.0, 45.0, t)];
-        let each: Vec<EdgeFlange> =
-            (0..4).map(|i| EdgeFlange { pick: picks[i], height: heights[i], angle: angles[i].to_radians(), from: HeightFrom::Outer }).collect();
+        let each: Vec<EdgeFlange> = (0..4).map(|i| EdgeFlange::at(picks[i], heights[i], angles[i].to_radians(), HeightFrom::Outer)).collect();
         flanges_each(base, rv, &each)
     }
 
@@ -8457,8 +10014,7 @@ mod tests {
         let pts = [Vec2::new(0.0, 0.0), Vec2::new(120.0, 0.0), Vec2::new(100.0, 90.0), Vec2::new(20.0, 90.0)];
         let picks = [Vec3::new(60.0, 0.0, 2.0), Vec3::new(110.0, 45.0, 2.0), Vec3::new(60.0, 90.0, 2.0), Vec3::new(10.0, 45.0, 2.0)];
         let (angles, heights) = ([60.0f64, 105.0, 75.0, 120.0], [38.6, 30.0, 45.0, 25.0]);
-        let each: Vec<EdgeFlange> =
-            (0..4).map(|i| EdgeFlange { pick: picks[i], height: heights[i], angle: angles[i].to_radians(), from: HeightFrom::Outer }).collect();
+        let each: Vec<EdgeFlange> = (0..4).map(|i| EdgeFlange::at(picks[i], heights[i], angles[i].to_radians(), HeightFrom::Outer)).collect();
         let (s, notes) = flanges_each(Region2 { outer: Loop2::polygon(&pts).ccw(), holes: vec![] }, &alu(), &each);
         assert!(notes.is_empty(), "{notes:?}");
         for i in 0..4 {
@@ -8482,7 +10038,14 @@ mod tests {
             .iter()
             .map(|&k| {
                 let m = (pts[k] + pts[(k + 1) % n]) * 0.5;
-                EdgeFlange { pick: Vec3::new(m.x, m.y, rv.thickness), height, angle: deg.to_radians(), from: HeightFrom::Outer }
+                EdgeFlange {
+                    pick: Vec3::new(m.x, m.y, rv.thickness),
+                    height,
+                    angle: deg.to_radians(),
+                    from: HeightFrom::Outer,
+                    span: WHOLE_EDGE,
+                    flip: None,
+                }
             })
             .collect();
         let (s, notes) = flanges_each(Region2 { outer: Loop2::polygon(pts).ccw(), holes: vec![] }, rv, &each);
@@ -8802,7 +10365,14 @@ mod tests {
         let (t, g) = (rv.thickness, rv.gap);
         let (mut s, _) = tray(&rv, 90.0, 20.0);
         let each: Vec<EdgeFlange> = (0..4)
-            .map(|i| EdgeFlange { pick: far_edge_pick(&s, i, true), height: 12.0, angle: [90f64, 70.0][i % 2].to_radians(), from: HeightFrom::Outer })
+            .map(|i| EdgeFlange {
+                pick: far_edge_pick(&s, i, true),
+                height: 12.0,
+                angle: [90f64, 70.0][i % 2].to_radians(),
+                from: HeightFrom::Outer,
+                span: WHOLE_EDGE,
+                flip: None,
+            })
             .collect();
         let (made, notes) = s.add_flanges_each(&each, 1.0, "inside", false, ReliefOverride::default()).unwrap();
         assert!(notes.is_empty() && made == [4, 5, 6, 7], "{made:?} {notes:?}");
@@ -8974,7 +10544,14 @@ mod tests {
             let each: Vec<EdgeFlange> = (0..4)
                 .map(|i| {
                     let deg: f64 = if square { 90.0 } else { 180.0 - angles[i] };
-                    EdgeFlange { pick: far_edge_pick(&s, i, true), height: 12.0, angle: deg.to_radians(), from: HeightFrom::Outer }
+                    EdgeFlange {
+                        pick: far_edge_pick(&s, i, true),
+                        height: 12.0,
+                        angle: deg.to_radians(),
+                        from: HeightFrom::Outer,
+                        span: WHOLE_EDGE,
+                        flip: None,
+                    }
                 })
                 .collect();
             let (_, notes) = s.add_flanges_each(&each, 1.0, "inside", false, ReliefOverride::default()).unwrap();
@@ -9114,8 +10691,22 @@ mod tests {
                 for b in SWEEP {
                     let what = format!("corner {alpha}°, flanges {a}° and {b}°");
                     let each = [
-                        EdgeFlange { pick: Vec3::new(60.0, 0.0, 2.0), height: 38.6, angle: a.to_radians(), from: HeightFrom::Outer },
-                        EdgeFlange { pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0), height: 38.6, angle: b.to_radians(), from: HeightFrom::Outer },
+                        EdgeFlange {
+                            pick: Vec3::new(60.0, 0.0, 2.0),
+                            height: 38.6,
+                            angle: a.to_radians(),
+                            from: HeightFrom::Outer,
+                            span: WHOLE_EDGE,
+                            flip: None,
+                        },
+                        EdgeFlange {
+                            pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0),
+                            height: 38.6,
+                            angle: b.to_radians(),
+                            from: HeightFrom::Outer,
+                            span: WHOLE_EDGE,
+                            flip: None,
+                        },
                     ];
                     let (s, notes) = flanges_each(Region2 { outer: Loop2::polygon(&pts).ccw(), holes: vec![] }, &rv, &each);
                     assert!(notes.is_empty(), "{what}: {notes:?}");
@@ -9691,8 +11282,22 @@ mod tests {
                 for b in SWEEP {
                     let what = format!("corner {alpha}°, flanges {a}° and {b}°");
                     let each = [
-                        EdgeFlange { pick: Vec3::new(60.0, 0.0, 2.0), height: 38.6, angle: a.to_radians(), from: HeightFrom::Outer },
-                        EdgeFlange { pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0), height: 38.6, angle: b.to_radians(), from: HeightFrom::Outer },
+                        EdgeFlange {
+                            pick: Vec3::new(60.0, 0.0, 2.0),
+                            height: 38.6,
+                            angle: a.to_radians(),
+                            from: HeightFrom::Outer,
+                            span: WHOLE_EDGE,
+                            flip: None,
+                        },
+                        EdgeFlange {
+                            pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0),
+                            height: 38.6,
+                            angle: b.to_radians(),
+                            from: HeightFrom::Outer,
+                            span: WHOLE_EDGE,
+                            flip: None,
+                        },
                     ];
                     let base = || Region2 { outer: Loop2::polygon(&pts).ccw(), holes: vec![] };
                     let (notch, _) = flanges_each(base(), &alu(), &each);
@@ -9851,8 +11456,22 @@ mod tests {
             let u = Vec2::new(alpha.cos(), alpha.sin());
             let pts = [Vec2::new(0.0, 0.0), Vec2::new(120.0, 0.0), Vec2::new(120.0, 0.0) + u * 90.0, u * 90.0];
             let each = [
-                EdgeFlange { pick: Vec3::new(60.0, 0.0, 2.0), height: 38.6, angle: a.to_radians(), from: HeightFrom::Outer },
-                EdgeFlange { pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0), height: 38.6, angle: b.to_radians(), from: HeightFrom::Outer },
+                EdgeFlange {
+                    pick: Vec3::new(60.0, 0.0, 2.0),
+                    height: 38.6,
+                    angle: a.to_radians(),
+                    from: HeightFrom::Outer,
+                    span: WHOLE_EDGE,
+                    flip: None,
+                },
+                EdgeFlange {
+                    pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0),
+                    height: 38.6,
+                    angle: b.to_radians(),
+                    from: HeightFrom::Outer,
+                    span: WHOLE_EDGE,
+                    flip: None,
+                },
             ];
             let base = || Region2 { outer: Loop2::polygon(&pts).ccw(), holes: vec![] };
             let (notch, none) = flanges_each(base(), &alu(), &each);
@@ -9909,5 +11528,79 @@ mod tests {
         let material = after.flat_material().unwrap();
         assert_eq!(material.len(), 2);
         assert!(after.parted_from_base(&material, &two).unwrap().is_empty());
+    }
+
+    /// A 2.5 mm sheet whose base outline is the closed polygon `pts` (counter-clockwise).
+    fn outline_body(pts: &[Vec2]) -> SheetBody {
+        let plane = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Y).unwrap_or(Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y });
+        base_flange("Body1", "Steel (mm)", &steel(), plane, Region2 { outer: Loop2::polygon(pts), holes: Vec::new() })
+    }
+
+    /// A split edge's fractions run along one straight line of the outline, and the whole stretch
+    /// must lie on it: a stretch across a notch is refused even where two collinear pieces hold one
+    /// end each, while a stretch inside one piece, or a straight outline a vertex splits in two, is
+    /// accepted (#5927, #5928).
+    #[test]
+    fn a_split_edge_covers_one_straight_line_of_the_outline() {
+        let notched = outline_body(&[
+            Vec2::new(0.0, 0.0),
+            Vec2::new(80.0, 0.0),
+            Vec2::new(80.0, 10.0),
+            Vec2::new(120.0, 10.0),
+            Vec2::new(120.0, 0.0),
+            Vec2::new(200.0, 0.0),
+            Vec2::new(200.0, 100.0),
+            Vec2::new(0.0, 100.0),
+        ]);
+        // Two collinear pieces hold one end each, with the notch's walls between them: no one line
+        // covers the stretch, so a flange over it would fold material the edge does not have.
+        assert!(!notched.edge_is_line(None, Vec2::new(0.0, 0.0), Vec2::new(200.0, 0.0)), "the notch is a gap in the line");
+        // Each piece is one straight line of the outline: accepted, ends inside it too.
+        assert!(notched.edge_is_line(None, Vec2::new(120.0, 0.0), Vec2::new(200.0, 0.0)));
+        assert!(notched.edge_is_line(None, Vec2::new(0.0, 0.0), Vec2::new(80.0, 0.0)));
+        assert!(notched.edge_is_line(None, Vec2::new(130.0, 0.0), Vec2::new(170.0, 0.0)), "an end inside a piece is on its line");
+        // A straight outline a vertex splits in two is still one line: its pieces meet, no gap.
+        let split =
+            outline_body(&[Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(200.0, 0.0), Vec2::new(200.0, 100.0), Vec2::new(0.0, 100.0)]);
+        assert!(split.edge_is_line(None, Vec2::new(0.0, 0.0), Vec2::new(200.0, 0.0)), "the pieces meet at the vertex");
+        // A step between two parallel lines is no one line either: the stretch reaches past it.
+        let stepped = outline_body(&[
+            Vec2::new(0.0, 0.0),
+            Vec2::new(100.0, 0.0),
+            Vec2::new(100.0, 5.0),
+            Vec2::new(200.0, 5.0),
+            Vec2::new(200.0, 100.0),
+            Vec2::new(0.0, 100.0),
+        ]);
+        assert!(!stepped.edge_is_line(None, Vec2::new(50.0, 0.0), Vec2::new(150.0, 0.0)));
+        assert!(stepped.edge_is_line(None, Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0)));
+    }
+
+    /// A cut near an arc's end is split by the distance the slit's own anchor test uses, not by a
+    /// fraction of the sweep: on an R = 100 mm arc with a 1 rad sweep, `share = 5e-7` is 5e-5 mm
+    /// from the arc's start, so the point is on the arc's interior and must become a vertex of the
+    /// loop. Judged by share it read as "already a vertex", and the caller's 1e-6 mm distance test
+    /// then found no segment end there and dropped the cut (FR-7 #5932).
+    #[test]
+    fn a_cut_near_an_arcs_end_is_split_by_distance_not_by_its_angle_share() {
+        // A circular segment: an R = 100 mm arc from angle 0 through 1 rad, closed by its chord.
+        let (centre, radius, start, sweep) = (Vec2::new(0.0, 0.0), 100.0, 0.0, 1.0);
+        let arc_start = centre + Vec2::from_angle(start) * radius;
+        let arc_end = centre + Vec2::from_angle(start + sweep) * radius;
+        let mut lp = Loop2 { segs: vec![Seg2::Arc { center: centre, radius, start, sweep }, Seg2::Line { a: arc_end, b: arc_start }] };
+        // The anchor on the arc at share 5e-7, the tip inside the material the slit parts.
+        let anchor = centre + Vec2::from_angle(start + sweep * 5e-7) * radius;
+        let tip = centre + Vec2::from_angle(0.5) * 99.0;
+        assert!(lp.contains(tip), "the tip is inside the circular segment");
+        let off = anchor.dist(arc_start);
+        assert!(off > 1e-6 && off < 1e-4, "the anchor is {off} mm from the arc's start: on its interior, past the 1e-6 mm the slit accepts");
+        let before = lp.segs.len();
+        assert!(slit_loop(&mut lp, anchor, tip), "the slit is inserted at {anchor:?}");
+        assert_eq!(lp.segs.len(), before + 3, "the arc is split at the anchor and the slit's two lines added");
+        assert!(lp.segs.iter().any(|s| s.end().dist(anchor) <= 1e-6), "the anchor is a vertex of the loop");
+        assert!(
+            lp.segs.iter().any(|s| matches!(s, Seg2::Line { a, b } if a.dist(anchor) <= 1e-6 && b.dist(tip) <= 1e-6)),
+            "the slit runs from the anchor to the tip"
+        );
     }
 }

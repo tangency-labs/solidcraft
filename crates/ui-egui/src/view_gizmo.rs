@@ -11,6 +11,7 @@
 //! The snapshot is scaled so its longest side is 2 and packed as 16-bit whole numbers of
 //! 1/10000 ([`snapshot`]): every body is the same size in the gizmo, and the stored form stays
 //! small. Faces and edges keep their identities, so the gizmo can light one face and outline it.
+use solidcraft_engine::geom::MeshGeom;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -19,11 +20,12 @@ use solidcore_record::Vec3;
 use solidcraft_engine::geom::{Mesh, Vec3Geom};
 
 use crate::SolveApp;
-use crate::context_menu::{Item, act};
+use crate::context_menu::act;
 use crate::dialogs::Kind;
 use crate::prefs::{NavigatorStyle, NavigatorTexture};
 use crate::selection::{BODIES, SelInput};
 use crate::ui_kit;
+use crate::ui_kit::Item;
 use solidcraft_engine::Sel;
 
 /// Bodies with more triangles cannot be the gizmo: the snapshot of one at the limit stays well
@@ -350,8 +352,8 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
         .map(|style| {
             let (label, icon) = match style {
                 NavigatorStyle::Axes => (app.tr("prefs.axes"), "origin"),
-                NavigatorStyle::Cube => (crate::i18n::tr_label("Cube"), "box"),
-                NavigatorStyle::Custom => (crate::i18n::tr_label("Custom"), "body"),
+                NavigatorStyle::Cube => (solidcraft_ui_text::tr_label("Cube"), "box"),
+                NavigatorStyle::Custom => (solidcraft_ui_text::tr_label("Custom"), "body"),
             };
             act("ui.navigatorStyle", label, icon).with(json!({ "style": style })).key(if app.preferences.navigator_style == style {
                 "current"
@@ -375,7 +377,7 @@ pub(crate) fn pick_style(app: &mut SolveApp, style: NavigatorStyle) {
 fn set_body(app: &mut SolveApp, name: Option<&str>) -> Result<(), String> {
     let shape = match name {
         None => None,
-        Some(name) => Some(snapshot_of(&app.session, name).map_err(|reason| crate::i18n::tr(reason).to_string())?),
+        Some(name) => Some(snapshot_of(&app.session, name).map_err(|reason| solidcraft_ui_text::tr(reason).to_string())?),
     };
     app.view_gizmo.set(shape);
     Ok(())
@@ -502,31 +504,31 @@ pub(crate) fn rows(app: &SolveApp, ui: &mut egui::Ui, form: &mut Form, inputs: &
         form.preview = body.map(|name| (name.to_string(), snapshot_of(&app.session, name)));
     }
     if let Some((_, Err(reason))) = &form.preview {
-        ui_kit::text(ui, crate::i18n::tr(reason), ui_kit::Text::Error("view_gizmo_refused"));
+        ui_kit::text(ui, solidcraft_ui_text::tr(reason), ui_kit::Text::Error("view_gizmo_refused"));
     }
-    ui_kit::row(ui, crate::i18n::tr("view_gizmo.texture"), |ui| {
+    ui_kit::row(ui, solidcraft_ui_text::tr("view_gizmo.texture"), |ui| {
         let mut texture = usize::from(form.texture == NavigatorTexture::Modeled);
         let changed = ui_kit::segmented(
             ui,
             &mut texture,
-            &[crate::i18n::tr("view_gizmo.themed"), crate::i18n::tr_label("Modeled")],
+            &[solidcraft_ui_text::tr("view_gizmo.themed"), solidcraft_ui_text::tr_label("Modeled")],
             ui_kit::Segments { intrinsic: true, ..Default::default() },
         );
         if changed {
             form.texture = if texture == 1 { NavigatorTexture::Modeled } else { NavigatorTexture::Themed };
         }
     });
-    let arrows = ui_kit::checkbox(ui, crate::i18n::tr("view_gizmo.arrows"), &mut form.arrows);
+    let arrows = ui_kit::checkbox(ui, solidcraft_ui_text::tr("view_gizmo.arrows"), &mut form.arrows);
     crate::scenario::publish_target("view_gizmo:arrows", arrows.rect);
-    let home = ui_kit::checkbox(ui, crate::i18n::tr("view_gizmo.home"), &mut form.home);
+    let home = ui_kit::checkbox(ui, solidcraft_ui_text::tr("view_gizmo.home"), &mut form.home);
     crate::scenario::publish_target("view_gizmo:home", home.rect);
-    ui_kit::text(ui, crate::i18n::tr("view_gizmo.note"), ui_kit::Text::Note("view_gizmo_note"));
+    ui_kit::text(ui, solidcraft_ui_text::tr("view_gizmo.note"), ui_kit::Text::Note("view_gizmo_note"));
 }
 
 /// OK: the custom navigator with the panel's body (or the one it has), texture, arrows and Home.
 pub(crate) fn run_dialog(app: &mut SolveApp, form: &Form, inputs: &[SelInput]) -> Result<(), String> {
     if let Some((_, Err(reason))) = &form.preview {
-        return Err(crate::i18n::tr(reason).to_string());
+        return Err(solidcraft_ui_text::tr(reason).to_string());
     }
     let mut params = json!({"style": NavigatorStyle::Custom, "texture": form.texture, "arrows": form.arrows, "home": form.home});
     if let (Some(body), Some(o)) = (picked(inputs), params.as_object_mut()) {

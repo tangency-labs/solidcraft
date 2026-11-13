@@ -1,0 +1,1755 @@
+{
+  "cases": [
+    {
+      "name": "wire_edges_network_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmRegion.cpp:SetIsVoid; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_wire_0.001_void_None",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:CreateWireEdgeFromCurve; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_face_0.001_void_None",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:CreateFaceFromSurface; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_wire_1_void_None",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:CreateWireEdgeFromCurve; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                1,
+                2,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_face_1_void_None",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:CreateFaceFromSurface; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_wire_1000.0_void_None",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:CreateWireEdgeFromCurve; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                1000.0,
+                2000.0,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_face_1000.0_void_None",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:CreateFaceFromSurface; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000.0,
+            -1000.0,
+            1000.0,
+            1000.0
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_0_1e-07_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_0_1_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_0_1000000.0_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_1_1e-07_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              -0.0
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_1_1_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_1_1000000.0_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              -0.0
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_2_1e-07_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            [
+              1e-07,
+              1e-07,
+              -1e-07
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_2_1_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              1,
+              -1
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_2_1000000.0_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            [
+              1000000.0,
+              1000000.0,
+              -1000000.0
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_4_1e-07_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            [
+              1e-07,
+              1e-07,
+              -1e-07
+            ],
+            [
+              2e-07,
+              2e-07,
+              -0.0
+            ],
+            [
+              3e-07,
+              0.0,
+              -1e-07
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_4_1_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              1,
+              -1
+            ],
+            [
+              2,
+              2,
+              0
+            ],
+            [
+              3,
+              0,
+              -1
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_4_1000000.0_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            [
+              1000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              2000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              3000000.0,
+              0.0,
+              -1000000.0
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_16_1e-07_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            [
+              1e-07,
+              1e-07,
+              -1e-07
+            ],
+            [
+              2e-07,
+              2e-07,
+              -0.0
+            ],
+            [
+              3e-07,
+              0.0,
+              -1e-07
+            ],
+            [
+              4e-07,
+              1e-07,
+              -0.0
+            ],
+            [
+              5e-07,
+              2e-07,
+              -1e-07
+            ],
+            [
+              6e-07,
+              0.0,
+              -0.0
+            ],
+            [
+              7e-07,
+              1e-07,
+              -1e-07
+            ],
+            [
+              8e-07,
+              2e-07,
+              -0.0
+            ],
+            [
+              9e-07,
+              0.0,
+              -1e-07
+            ],
+            [
+              1e-06,
+              1e-07,
+              -0.0
+            ],
+            [
+              1.1e-06,
+              2e-07,
+              -1e-07
+            ],
+            [
+              1.2e-06,
+              0.0,
+              -0.0
+            ],
+            [
+              1.2999999999999998e-06,
+              1e-07,
+              -1e-07
+            ],
+            [
+              1.4e-06,
+              2e-07,
+              -0.0
+            ],
+            [
+              1.5e-06,
+              0.0,
+              -1e-07
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_16_1_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              1,
+              -1
+            ],
+            [
+              2,
+              2,
+              0
+            ],
+            [
+              3,
+              0,
+              -1
+            ],
+            [
+              4,
+              1,
+              0
+            ],
+            [
+              5,
+              2,
+              -1
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              1,
+              -1
+            ],
+            [
+              8,
+              2,
+              0
+            ],
+            [
+              9,
+              0,
+              -1
+            ],
+            [
+              10,
+              1,
+              0
+            ],
+            [
+              11,
+              2,
+              -1
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              1,
+              -1
+            ],
+            [
+              14,
+              2,
+              0
+            ],
+            [
+              15,
+              0,
+              -1
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_16_1000000.0_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            [
+              1000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              2000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              3000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              4000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              5000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              6000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              7000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              8000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              9000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              10000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              11000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              12000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              13000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              14000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              15000000.0,
+              0.0,
+              -1000000.0
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_64_1e-07_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            [
+              1e-07,
+              1e-07,
+              -1e-07
+            ],
+            [
+              2e-07,
+              2e-07,
+              -0.0
+            ],
+            [
+              3e-07,
+              0.0,
+              -1e-07
+            ],
+            [
+              4e-07,
+              1e-07,
+              -0.0
+            ],
+            [
+              5e-07,
+              2e-07,
+              -1e-07
+            ],
+            [
+              6e-07,
+              0.0,
+              -0.0
+            ],
+            [
+              7e-07,
+              1e-07,
+              -1e-07
+            ],
+            [
+              8e-07,
+              2e-07,
+              -0.0
+            ],
+            [
+              9e-07,
+              0.0,
+              -1e-07
+            ],
+            [
+              1e-06,
+              1e-07,
+              -0.0
+            ],
+            [
+              1.1e-06,
+              2e-07,
+              -1e-07
+            ],
+            [
+              1.2e-06,
+              0.0,
+              -0.0
+            ],
+            [
+              1.2999999999999998e-06,
+              1e-07,
+              -1e-07
+            ],
+            [
+              1.4e-06,
+              2e-07,
+              -0.0
+            ],
+            [
+              1.5e-06,
+              0.0,
+              -1e-07
+            ],
+            [
+              1.6e-06,
+              1e-07,
+              -0.0
+            ],
+            [
+              1.6999999999999998e-06,
+              2e-07,
+              -1e-07
+            ],
+            [
+              1.8e-06,
+              0.0,
+              -0.0
+            ],
+            [
+              1.9e-06,
+              1e-07,
+              -1e-07
+            ],
+            [
+              2e-06,
+              2e-07,
+              -0.0
+            ],
+            [
+              2.1e-06,
+              0.0,
+              -1e-07
+            ],
+            [
+              2.2e-06,
+              1e-07,
+              -0.0
+            ],
+            [
+              2.3e-06,
+              2e-07,
+              -1e-07
+            ],
+            [
+              2.4e-06,
+              0.0,
+              -0.0
+            ],
+            [
+              2.4999999999999998e-06,
+              1e-07,
+              -1e-07
+            ],
+            [
+              2.5999999999999997e-06,
+              2e-07,
+              -0.0
+            ],
+            [
+              2.7e-06,
+              0.0,
+              -1e-07
+            ],
+            [
+              2.8e-06,
+              1e-07,
+              -0.0
+            ],
+            [
+              2.8999999999999998e-06,
+              2e-07,
+              -1e-07
+            ],
+            [
+              3e-06,
+              0.0,
+              -0.0
+            ],
+            [
+              3.1e-06,
+              1e-07,
+              -1e-07
+            ],
+            [
+              3.2e-06,
+              2e-07,
+              -0.0
+            ],
+            [
+              3.2999999999999997e-06,
+              0.0,
+              -1e-07
+            ],
+            [
+              3.3999999999999996e-06,
+              1e-07,
+              -0.0
+            ],
+            [
+              3.5e-06,
+              2e-07,
+              -1e-07
+            ],
+            [
+              3.6e-06,
+              0.0,
+              -0.0
+            ],
+            [
+              3.6999999999999997e-06,
+              1e-07,
+              -1e-07
+            ],
+            [
+              3.8e-06,
+              2e-07,
+              -0.0
+            ],
+            [
+              3.9e-06,
+              0.0,
+              -1e-07
+            ],
+            [
+              4e-06,
+              1e-07,
+              -0.0
+            ],
+            [
+              4.1e-06,
+              2e-07,
+              -1e-07
+            ],
+            [
+              4.2e-06,
+              0.0,
+              -0.0
+            ],
+            [
+              4.2999999999999995e-06,
+              1e-07,
+              -1e-07
+            ],
+            [
+              4.4e-06,
+              2e-07,
+              -0.0
+            ],
+            [
+              4.5e-06,
+              0.0,
+              -1e-07
+            ],
+            [
+              4.6e-06,
+              1e-07,
+              -0.0
+            ],
+            [
+              4.7e-06,
+              2e-07,
+              -1e-07
+            ],
+            [
+              4.8e-06,
+              0.0,
+              -0.0
+            ],
+            [
+              4.9e-06,
+              1e-07,
+              -1e-07
+            ],
+            [
+              4.9999999999999996e-06,
+              2e-07,
+              -0.0
+            ],
+            [
+              5.0999999999999995e-06,
+              0.0,
+              -1e-07
+            ],
+            [
+              5.199999999999999e-06,
+              1e-07,
+              -0.0
+            ],
+            [
+              5.3e-06,
+              2e-07,
+              -1e-07
+            ],
+            [
+              5.4e-06,
+              0.0,
+              -0.0
+            ],
+            [
+              5.5e-06,
+              1e-07,
+              -1e-07
+            ],
+            [
+              5.6e-06,
+              2e-07,
+              -0.0
+            ],
+            [
+              5.7e-06,
+              0.0,
+              -1e-07
+            ],
+            [
+              5.7999999999999995e-06,
+              1e-07,
+              -0.0
+            ],
+            [
+              5.899999999999999e-06,
+              2e-07,
+              -1e-07
+            ],
+            [
+              6e-06,
+              0.0,
+              -0.0
+            ],
+            [
+              6.1e-06,
+              1e-07,
+              -1e-07
+            ],
+            [
+              6.2e-06,
+              2e-07,
+              -0.0
+            ],
+            [
+              6.3e-06,
+              0.0,
+              -1e-07
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_64_1_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              1,
+              -1
+            ],
+            [
+              2,
+              2,
+              0
+            ],
+            [
+              3,
+              0,
+              -1
+            ],
+            [
+              4,
+              1,
+              0
+            ],
+            [
+              5,
+              2,
+              -1
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              1,
+              -1
+            ],
+            [
+              8,
+              2,
+              0
+            ],
+            [
+              9,
+              0,
+              -1
+            ],
+            [
+              10,
+              1,
+              0
+            ],
+            [
+              11,
+              2,
+              -1
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              1,
+              -1
+            ],
+            [
+              14,
+              2,
+              0
+            ],
+            [
+              15,
+              0,
+              -1
+            ],
+            [
+              16,
+              1,
+              0
+            ],
+            [
+              17,
+              2,
+              -1
+            ],
+            [
+              18,
+              0,
+              0
+            ],
+            [
+              19,
+              1,
+              -1
+            ],
+            [
+              20,
+              2,
+              0
+            ],
+            [
+              21,
+              0,
+              -1
+            ],
+            [
+              22,
+              1,
+              0
+            ],
+            [
+              23,
+              2,
+              -1
+            ],
+            [
+              24,
+              0,
+              0
+            ],
+            [
+              25,
+              1,
+              -1
+            ],
+            [
+              26,
+              2,
+              0
+            ],
+            [
+              27,
+              0,
+              -1
+            ],
+            [
+              28,
+              1,
+              0
+            ],
+            [
+              29,
+              2,
+              -1
+            ],
+            [
+              30,
+              0,
+              0
+            ],
+            [
+              31,
+              1,
+              -1
+            ],
+            [
+              32,
+              2,
+              0
+            ],
+            [
+              33,
+              0,
+              -1
+            ],
+            [
+              34,
+              1,
+              0
+            ],
+            [
+              35,
+              2,
+              -1
+            ],
+            [
+              36,
+              0,
+              0
+            ],
+            [
+              37,
+              1,
+              -1
+            ],
+            [
+              38,
+              2,
+              0
+            ],
+            [
+              39,
+              0,
+              -1
+            ],
+            [
+              40,
+              1,
+              0
+            ],
+            [
+              41,
+              2,
+              -1
+            ],
+            [
+              42,
+              0,
+              0
+            ],
+            [
+              43,
+              1,
+              -1
+            ],
+            [
+              44,
+              2,
+              0
+            ],
+            [
+              45,
+              0,
+              -1
+            ],
+            [
+              46,
+              1,
+              0
+            ],
+            [
+              47,
+              2,
+              -1
+            ],
+            [
+              48,
+              0,
+              0
+            ],
+            [
+              49,
+              1,
+              -1
+            ],
+            [
+              50,
+              2,
+              0
+            ],
+            [
+              51,
+              0,
+              -1
+            ],
+            [
+              52,
+              1,
+              0
+            ],
+            [
+              53,
+              2,
+              -1
+            ],
+            [
+              54,
+              0,
+              0
+            ],
+            [
+              55,
+              1,
+              -1
+            ],
+            [
+              56,
+              2,
+              0
+            ],
+            [
+              57,
+              0,
+              -1
+            ],
+            [
+              58,
+              1,
+              0
+            ],
+            [
+              59,
+              2,
+              -1
+            ],
+            [
+              60,
+              0,
+              0
+            ],
+            [
+              61,
+              1,
+              -1
+            ],
+            [
+              62,
+              2,
+              0
+            ],
+            [
+              63,
+              0,
+              -1
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    },
+    {
+      "name": "wire_edges_vertices_64_1000000.0_void_None",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; SmBrep.cpp:MakeShellVertex; SmShell.cpp:130 GetWireEdges",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              -0.0
+            ],
+            [
+              1000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              2000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              3000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              4000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              5000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              6000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              7000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              8000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              9000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              10000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              11000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              12000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              13000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              14000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              15000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              16000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              17000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              18000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              19000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              20000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              21000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              22000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              23000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              24000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              25000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              26000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              27000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              28000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              29000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              30000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              31000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              32000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              33000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              34000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              35000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              36000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              37000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              38000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              39000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              40000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              41000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              42000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              43000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              44000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              45000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              46000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              47000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              48000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              49000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              50000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              51000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              52000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              53000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              54000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              55000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              56000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              57000000.0,
+              0.0,
+              -1000000.0
+            ],
+            [
+              58000000.0,
+              1000000.0,
+              -0.0
+            ],
+            [
+              59000000.0,
+              2000000.0,
+              -1000000.0
+            ],
+            [
+              60000000.0,
+              0.0,
+              -0.0
+            ],
+            [
+              61000000.0,
+              1000000.0,
+              -1000000.0
+            ],
+            [
+              62000000.0,
+              2000000.0,
+              -0.0
+            ],
+            [
+              63000000.0,
+              0.0,
+              -1000000.0
+            ]
+          ]
+        },
+        "void_state": null,
+        "wires": true
+      }
+    }
+  ]
+}

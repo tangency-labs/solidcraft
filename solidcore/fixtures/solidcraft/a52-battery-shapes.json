@@ -1,0 +1,331 @@
+{
+  "issue": "none: user's design (a52.solidcraft)",
+  "pr": "none: user's design (a52.solidcraft)",
+  "test": "none: user's design (a52.solidcraft)",
+  "summary": "Operations of the user's e-bike battery model (a52.solidcraft, v2) on solidcore: extrude (SmApiCreateLinearSweep), revolve (SmApiCreateRotationalSweep), mirror (SmBrep::Mirror) and booleans. Dimensions are the model's own: the grommet pocket and bores are Sketch3 (rounded rectangle 43 x 21, corner radius 4, from points p5..p12) and Sketch4 (two circles r 4.2 at x +-11 = grommet_spacing / 2), with the pocket tool (z 3.3 = grommet_panel up to 5, i.e. wall - grommet_panel + 1 = 1.7 long from 1 mm above the wall) and the bore tool (wall + 2 = 6 long); the rail is the rail section reduced to its outline trapezoid (y +-28 at z -0.5, y +-24 at z 12, arcs and cable slots left out) swept from rail_start 44 to rail_end 308, clipped by the rail-ends sketch (trapezoid in XZ through 43..309 / 56..296, z -1.5..12, 108 = depth + 20 deep) and cut by the tunnel sketch (9.6 = band_w + band_fit wide, z 1.5 = tunnel_z to 3.6, clamp_count 4 at clamp_pitch (rail_end - rail_start - 2 * clamp_margin) / 3 from rail_start + clamp_margin 25); the bosses are the ground bosses (four circles r 4 = boss_dia / 2 at x 72.21, 140.31, 185.71, 253.81 and z -4.5, 8 = insert_depth + 1 long) mirrored in XZ; the socket plate is the cell holder plate with its sockets (socket_dia 21.6, socket_depth 3.6, pitch 22.7, plate lip + socket_depth = 5.2 thick); the grommet is the model grommet reduced to a stepped ring (wire_dia 5.5 bore, grommet_flange 13 and grommet_bore 8.4 outside, grommet_panel 3.3 neck). Stand-ins, not in the model: the wall slabs (60 x 40 x wall 4, and 210 x 4 x 30 at y 40..44 for the bosses; the real wall is the rim shell), the plate outline (69.4 x 46.7), the 2 mm flange thickness (gasket_seat) and the 1 mm edge round (bumper_fillet). Every expected volume is a closed form written in its formula. The model's chamfers (rim_chamfer, plate_chamfer, ...) and pipes (the wire harness) have no step; the fillet case stands for them and defers. Both mirror cases run SmBrep::Mirror (SMLib-level, not in SM_API) through solidcore only: a copy of the body is mirrored, so the C++ reference cannot run these steps; the unit topology.brep_mirror compares SmBrep::Mirror against C++.",
+  "cases": [
+    {
+      "name": "grommet_pocket",
+      "note": "grommet pocket: a rounded-rectangle pocket cut 0.7 deep into the wall (the tool starts 1 mm above it)",
+      "steps": [
+        { "op": "box", "id": "wall", "origin": [-30, -20, 0], "size": [60, 40, 4] },
+        {
+          "op": "extrude",
+          "id": "pocket",
+          "origin": [0, 0, 3.3],
+          "distance": 1.7,
+          "profile": [
+            { "kind": "line", "from": [-17.5, -10.5], "to": [17.5, -10.5] },
+            { "kind": "arc", "center": [17.5, -6.5], "radius": 4, "start_deg": -90, "end_deg": 0 },
+            { "kind": "line", "from": [21.5, -6.5], "to": [21.5, 6.5] },
+            { "kind": "arc", "center": [17.5, 6.5], "radius": 4, "start_deg": 0, "end_deg": 90 },
+            { "kind": "line", "from": [17.5, 10.5], "to": [-17.5, 10.5] },
+            { "kind": "arc", "center": [-17.5, 6.5], "radius": 4, "start_deg": 90, "end_deg": 180 },
+            { "kind": "line", "from": [-21.5, 6.5], "to": [-21.5, -6.5] },
+            { "kind": "arc", "center": [-17.5, -6.5], "radius": 4, "start_deg": 180, "end_deg": 270 }
+          ]
+        },
+        { "op": "difference", "id": "result", "a": "wall", "b": "pocket" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 8977.51416228,
+          "tol": 0.01,
+          "formula": "60 * 40 * 4 - (43 * 21 - (4 - pi) * 4^2) * 0.7 (the pocket area is the 43 x 21 rectangle less the four corner squares' (4 - pi) r^2, 0.7 deep: 3.3 to the wall top at 4)"
+        }
+      }
+    },
+    {
+      "name": "grommet_pocket_and_bores",
+      "note": "grommet pocket then grommet bores: two r 4.2 bores through the wall, crossing the pocket floor",
+      "steps": [
+        { "op": "box", "id": "wall", "origin": [-30, -20, 0], "size": [60, 40, 4] },
+        {
+          "op": "extrude",
+          "id": "pocket",
+          "origin": [0, 0, 3.3],
+          "distance": 1.7,
+          "profile": [
+            { "kind": "line", "from": [-17.5, -10.5], "to": [17.5, -10.5] },
+            { "kind": "arc", "center": [17.5, -6.5], "radius": 4, "start_deg": -90, "end_deg": 0 },
+            { "kind": "line", "from": [21.5, -6.5], "to": [21.5, 6.5] },
+            { "kind": "arc", "center": [17.5, 6.5], "radius": 4, "start_deg": 0, "end_deg": 90 },
+            { "kind": "line", "from": [17.5, 10.5], "to": [-17.5, 10.5] },
+            { "kind": "arc", "center": [-17.5, 6.5], "radius": 4, "start_deg": 90, "end_deg": 180 },
+            { "kind": "line", "from": [-21.5, 6.5], "to": [-21.5, -6.5] },
+            { "kind": "arc", "center": [-17.5, -6.5], "radius": 4, "start_deg": 180, "end_deg": 270 }
+          ]
+        },
+        {
+          "op": "extrude",
+          "id": "bores",
+          "origin": [0, 0, -1],
+          "distance": 6,
+          "profile": [
+            { "kind": "circle", "center": [-11, 0], "radius": 4.2 },
+            { "kind": "circle", "center": [11, 0], "radius": 4.2 }
+          ]
+        },
+        { "op": "difference", "id": "pocketed", "a": "wall", "b": "pocket" },
+        { "op": "difference", "id": "result", "a": "pocketed", "b": "bores" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 8611.75737918,
+          "tol": 0.01,
+          "formula": "60 * 40 * 4 - (43 * 21 - (4 - pi) * 4^2) * 0.7 - 2 * pi * 4.2^2 * 3.3 (the bores lie inside the pocket outline, so below its floor at 3.3 they remove 3.3 of wall each)"
+        }
+      }
+    },
+    {
+      "name": "rail_tunnels",
+      "note": "rail + rail tunnel + tunnel pattern: the rail trapezoid swept along X, four band tunnels cut across it",
+      "steps": [
+        {
+          "op": "extrude",
+          "id": "rail",
+          "plane": "yz",
+          "origin": [44, 0, 0],
+          "distance": 264,
+          "profile": [{ "kind": "polygon", "points": [[-28, -0.5], [28, -0.5], [24, 12], [-24, 12]] }]
+        },
+        { "op": "box", "id": "tunnel", "origin": [64.2, -60, 1.5], "size": [9.6, 120, 2.1] },
+        {
+          "op": "difference",
+          "id": "result",
+          "a": "rail",
+          "b": "tunnel",
+          "pattern": { "count": [4, 1], "pitch": [[71.33333333333333, 0, 0], [0, 0, 0]] }
+        }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 167241.56928,
+          "tol": 0.2,
+          "formula": "650 * 264 - 4 * 9.6 * int_1.5^3.6 (56 - 8 (z + 0.5) / 12.5) dz, where 650 = (56 + 48) / 2 * 12.5 is the section area and the integral is 56 * 2.1 - 0.64 * ((3.6 + 0.5)^2 - (1.5 + 0.5)^2) / 2 = 113.5008"
+        }
+      }
+    },
+    {
+      "name": "rail_clipped_ends",
+      "note": "rail ends (intersect): the rail prism cut back by a trapezoid prism whose slanted ends bite into it above z -0.46",
+      "steps": [
+        {
+          "op": "extrude",
+          "id": "rail",
+          "plane": "yz",
+          "origin": [44, 0, 0],
+          "distance": 264,
+          "profile": [{ "kind": "polygon", "points": [[-28, -0.5], [28, -0.5], [24, 12], [-24, 12]] }]
+        },
+        {
+          "op": "extrude",
+          "id": "ends",
+          "plane": "zx",
+          "origin": [0, -54, 0],
+          "distance": 108,
+          "profile": [{ "kind": "polygon", "points": [[-1.5, 43], [-1.5, 309], [12, 296], [12, 56]] }]
+        },
+        { "op": "intersection", "id": "result", "a": "rail", "b": "ends" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 164024.61159763,
+          "tol": 0.2,
+          "formula": "int_-0.5^12 w(z) L(z) dz with w(z) = 56 - 0.64 (z + 0.5) and, with s = 13 / 13.5 and z1 = -1.5 + 1 / s, L = 264 for z <= z1 (the rail ends at 44 and 308 bind) and L = 266 - 2 s (z + 1.5) above (the slanted end faces bind); integrand quadratic per piece, evaluated exactly by Simpson"
+        }
+      }
+    },
+    {
+      "name": "rail_clipped_with_tunnels",
+      "note": "rail joint chain: extrude, intersect, then the four tunnels",
+      "steps": [
+        {
+          "op": "extrude",
+          "id": "rail",
+          "plane": "yz",
+          "origin": [44, 0, 0],
+          "distance": 264,
+          "profile": [{ "kind": "polygon", "points": [[-28, -0.5], [28, -0.5], [24, 12], [-24, 12]] }]
+        },
+        {
+          "op": "extrude",
+          "id": "ends",
+          "plane": "zx",
+          "origin": [0, -54, 0],
+          "distance": 108,
+          "profile": [{ "kind": "polygon", "points": [[-1.5, 43], [-1.5, 309], [12, 296], [12, 56]] }]
+        },
+        { "op": "intersection", "id": "clipped", "a": "rail", "b": "ends" },
+        { "op": "box", "id": "tunnel", "origin": [64.2, -60, 1.5], "size": [9.6, 120, 2.1] },
+        {
+          "op": "difference",
+          "id": "result",
+          "a": "clipped",
+          "b": "tunnel",
+          "pattern": { "count": [4, 1], "pitch": [[71.33333333333333, 0, 0], [0, 0, 0]] }
+        }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 159666.18087763,
+          "tol": 0.2,
+          "formula": "the rail_clipped_ends volume less the rail_tunnels cut 4 * 9.6 * 113.5008 = 4358.43072 (the tunnels, x 64.2..73.8 to 278.2..287.8, lie where the clip leaves the full width)"
+        }
+      }
+    },
+    {
+      "name": "boss_pair_mirror_union",
+      "note": "ground bosses + their mirror: four bosses joined to a wall (one face flush with the wall's), the half mirrored in the XZ plane and joined to its original",
+      "steps": [
+        { "op": "box", "id": "slab", "origin": [60, 40, -20], "size": [210, 4, 30] },
+        {
+          "op": "extrude",
+          "id": "bosses",
+          "plane": "zx",
+          "origin": [0, 36, 0],
+          "distance": 8,
+          "profile": [
+            { "kind": "circle", "center": [-4.5, 72.21], "radius": 4 },
+            { "kind": "circle", "center": [-4.5, 140.31], "radius": 4 },
+            { "kind": "circle", "center": [-4.5, 185.71], "radius": 4 },
+            { "kind": "circle", "center": [-4.5, 253.81], "radius": 4 }
+          ]
+        },
+        { "op": "union", "id": "half", "a": "slab", "b": "bosses" },
+        { "op": "mirror", "id": "other", "body": "half", "normal": "y", "at": 0 },
+        { "op": "union", "id": "result", "a": "half", "b": "other" }
+      ],
+      "expect": {
+        "lumps": 2,
+        "volume": {
+          "value": 52008.49543864,
+          "tol": 0.05,
+          "formula": "2 * (210 * 4 * 30 + 4 * pi * 4^2 * 4) (each half is the slab plus four bosses, 4 of whose 8 length stand clear of the slab: y 36..40; the mirror image at y -44..-36 shares nothing with it)"
+        }
+      }
+    },
+    {
+      "name": "rail_mirror_stack",
+      "note": "Mirror1-style reflection of the clipped rail in its top plane z = 12, the two joined face to face along the shared top trapezoid",
+      "steps": [
+        {
+          "op": "extrude",
+          "id": "rail",
+          "plane": "yz",
+          "origin": [44, 0, 0],
+          "distance": 264,
+          "profile": [{ "kind": "polygon", "points": [[-28, -0.5], [28, -0.5], [24, 12], [-24, 12]] }]
+        },
+        {
+          "op": "extrude",
+          "id": "ends",
+          "plane": "zx",
+          "origin": [0, -54, 0],
+          "distance": 108,
+          "profile": [{ "kind": "polygon", "points": [[-1.5, 43], [-1.5, 309], [12, 296], [12, 56]] }]
+        },
+        { "op": "intersection", "id": "clipped", "a": "rail", "b": "ends" },
+        { "op": "mirror", "id": "other", "body": "clipped", "normal": "z", "at": 12 },
+        { "op": "union", "id": "result", "a": "clipped", "b": "other" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 328049.22319526,
+          "tol": 0.4,
+          "formula": "2 * the rail_clipped_ends volume 164024.61159763 (the mirror image lies at z 12..24.5 and shares only the top face)"
+        }
+      }
+    },
+    {
+      "name": "grommet_revolve_full",
+      "note": "grommet: a stepped ring revolved a full turn about the Y axis",
+      "steps": [
+        {
+          "op": "revolve",
+          "id": "result",
+          "axis_point": [0, 0, 0],
+          "axis_dir": [0, 1, 0],
+          "angle_deg": 360,
+          "profile": [{ "kind": "polygon", "points": [[2.75, 0], [6.5, 0], [6.5, 2], [4.2, 2], [4.2, 5.3], [2.75, 5.3]] }]
+        }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 322.42401023,
+          "tol": 0.01,
+          "formula": "pi * ((6.5^2 - 2.75^2) * 2 + (4.2^2 - 2.75^2) * 3.3) (Pappus: the flange ring 2 thick and the neck ring 3.3 long)"
+        }
+      }
+    },
+    {
+      "name": "grommet_revolve_270",
+      "note": "grommet with angle 270 instead of 360: the capped partial sweep",
+      "steps": [
+        {
+          "op": "revolve",
+          "id": "result",
+          "axis_point": [0, 0, 0],
+          "axis_dir": [0, 1, 0],
+          "angle_deg": 270,
+          "profile": [{ "kind": "polygon", "points": [[2.75, 0], [6.5, 0], [6.5, 2], [4.2, 2], [4.2, 5.3], [2.75, 5.3]] }]
+        }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 241.81800767,
+          "tol": 0.01,
+          "formula": "3 / 4 * pi * ((6.5^2 - 2.75^2) * 2 + (4.2^2 - 2.75^2) * 3.3)"
+        }
+      }
+    },
+    {
+      "name": "socket_pattern",
+      "note": "cell holder plate + sockets: a 3 x 2 grid of cylindrical sockets 3.6 deep on the 22.7 pitch",
+      "steps": [
+        { "op": "box", "id": "plate", "origin": [-12, -12, 0], "size": [69.4, 46.7, 5.2] },
+        { "op": "cylinder", "id": "socket", "origin": [0, 0, 1.6], "radius": 10.8, "height": 4 },
+        {
+          "op": "difference",
+          "id": "result",
+          "a": "plate",
+          "b": "socket",
+          "pattern": { "count": [3, 2], "pitch": [[22.7, 0, 0], [0, 22.7, 0]] }
+        }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 8938.09207032,
+          "tol": 0.01,
+          "formula": "69.4 * 46.7 * 5.2 - 6 * pi * 10.8^2 * 3.6 (the sockets, 21.6 across on a 22.7 pitch, leave 1.1 between them)"
+        },
+        "cylinder_faces_max": 6
+      }
+    },
+    {
+      "name": "plate_edge_fillet",
+      "note": "the model's fillets (bumper_fillet 1 mm and the like) on a wall slab edge; no Rust SmApiFilletEdges yet, so this defers",
+      "steps": [
+        { "op": "box", "id": "wall", "origin": [-30, -20, 0], "size": [60, 40, 4] },
+        { "op": "fillet", "id": "result", "body": "wall", "edges": [[0, -20, 4]], "radius": 1 }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 9587.1238898,
+          "tol": 0.01,
+          "formula": "60 * 40 * 4 - (1 - pi / 4) * 1^2 * 60 (a quarter-round of radius 1 along the 60 long edge)"
+        }
+      }
+    }
+  ]
+}

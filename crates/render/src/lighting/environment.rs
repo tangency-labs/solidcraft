@@ -39,7 +39,7 @@ impl SkyGradient {
         }
         Ok(())
     }
-    fn evaluate(self, z: f64) -> [f32; 3] {
+    pub(crate) fn evaluate(self, z: f64) -> [f32; 3] {
         let endpoint = if z >= 0.0 { self.zenith } else { self.ground };
         let blend = z.abs().sqrt() as f32;
         std::array::from_fn(|i| self.horizon[i] * (1.0 - blend) + endpoint[i] * blend)
@@ -199,69 +199,200 @@ pub struct PreparedEnvironment {
     width: u32,
     height: u32,
     texels: Vec<EnvironmentTexel>,
+    preserves_positive_support: bool,
+    luminance_integral: f64,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BuildStage {
+    Masses,
+    Black,
+    Entries,
+    Alias,
+    Ready,
+}
+
+/// One bounded alias-table operation per step; source pixels remain owned by the caller.
+/// CPU jobs charge these steps to the same ledger as decoding and transport.
+pub(crate) struct EnvironmentBuilder {
+    width: u32,
+    height: u32,
+    count: usize,
+    cursor: usize,
+    total: f64,
+    preserves_positive_support: bool,
+    luminance_integral: f64,
+    stage: BuildStage,
+    masses: Vec<f64>,
+    small: Vec<usize>,
+    large: Vec<usize>,
+    texels: Vec<EnvironmentTexel>,
+}
+impl EnvironmentBuilder {
+    fn count(width: u32, height: u32) -> Result<usize> {
+        if width == 0
+            || height == 0
+            || width > super::MAX_HDR_WIDTH
+            || height > super::MAX_HDR_HEIGHT
+            || height.checked_mul(2) != Some(width)
+            || u64::from(width) * u64::from(height) > super::MAX_HDR_PIXELS
+        {
+            return Err(invalid("environment table requires bounded 2:1 dimensions"));
+        }
+        usize::try_from(u64::from(width) * u64::from(height)).map_err(|_| invalid("environment table size overflow"))
+    }
+    pub(crate) fn admitted_bytes(width: u32, height: u32) -> Result<u64> {
+        let count = Self::count(width, height)? as u64;
+        count
+            .checked_mul((std::mem::size_of::<EnvironmentTexel>() + std::mem::size_of::<f64>() + 2 * std::mem::size_of::<usize>()) as u64)
+            .ok_or_else(|| invalid("environment table admission overflow"))
+    }
+    pub(crate) fn new(width: u32, height: u32) -> Result<Self> {
+        let count = Self::count(width, height)?;
+        let masses = reserve(count)?;
+        let small = reserve(count)?;
+        let large = reserve(count)?;
+        let texels = reserve(count)?;
+        if [masses.capacity(), small.capacity(), large.capacity(), texels.capacity()].into_iter().any(|capacity| capacity != count) {
+            return Err(JobError::new(ErrorCode::LimitExceeded, "environment table capacity exceeds admission"));
+        }
+        Ok(Self {
+            width,
+            height,
+            count,
+            cursor: 0,
+            total: 0.0,
+            preserves_positive_support: true,
+            luminance_integral: 0.0,
+            stage: BuildStage::Masses,
+            masses,
+            small,
+            large,
+            texels,
+        })
+    }
+    pub(crate) fn ready(&self) -> bool {
+        self.stage == BuildStage::Ready
+    }
+    pub(crate) fn step(&mut self, pixels: &[[f32; 3]]) -> Result<()> {
+        if pixels.len() != self.count {
+            return Err(invalid("invalid environment storage"));
+        }
+        match self.stage {
+            BuildStage::Masses => {
+                let rgb = pixels.get(self.cursor).ok_or_else(|| invalid("environment mass index"))?;
+                if rgb.iter().any(|v| !v.is_finite() || !(0.0..=1e8).contains(v)) {
+                    return Err(invalid("invalid environment radiance"));
+                }
+                let mass = texel_luminance_mass(self.width, self.height, self.cursor, *rgb);
+                self.total += mass;
+                self.masses.push(mass);
+                self.cursor += 1;
+                if self.cursor == self.count {
+                    self.cursor = 0;
+                    self.luminance_integral = self.total;
+                    self.stage = if self.total == 0.0 {
+                        self.total = 4.0 * PI;
+                        BuildStage::Black
+                    } else {
+                        BuildStage::Entries
+                    };
+                }
+            }
+            BuildStage::Black => {
+                *self.masses.get_mut(self.cursor).ok_or_else(|| invalid("environment black mass index"))? =
+                    row_solid_angle(self.width, self.height, self.cursor / self.width as usize);
+                self.cursor += 1;
+                if self.cursor == self.count {
+                    self.cursor = 0;
+                    self.stage = BuildStage::Entries;
+                }
+            }
+            BuildStage::Entries => {
+                let mass = self.masses.get_mut(self.cursor).ok_or_else(|| invalid("environment entry mass index"))?;
+                let probability = *mass / self.total;
+                let rgb = *pixels.get(self.cursor).ok_or_else(|| invalid("environment entry pixel index"))?;
+                let pdf = (probability / row_solid_angle(self.width, self.height, self.cursor / self.width as usize)) as f32;
+                // Subnormal packed probabilities lose relative precision. Keep
+                // GPU table bytes unchanged and let the CPU use its full-support
+                // legacy proposal for such extreme dynamic ranges.
+                if !pdf.is_normal() && rgb.into_iter().any(|value| value > 0.0) {
+                    self.preserves_positive_support = false;
+                }
+                self.texels.push(EnvironmentTexel { rgb, pdf, threshold: 1.0, alias: self.cursor as u32 });
+                *mass = probability * self.count as f64;
+                if *mass < 1.0 {
+                    self.small.push(self.cursor);
+                } else {
+                    self.large.push(self.cursor);
+                }
+                self.cursor += 1;
+                if self.cursor == self.count {
+                    self.stage = BuildStage::Alias;
+                }
+            }
+            BuildStage::Alias => {
+                if self.small.is_empty() || self.large.is_empty() {
+                    self.stage = BuildStage::Ready;
+                    return Ok(());
+                }
+                let low = self.small.pop().ok_or_else(|| invalid("invalid alias table"))?;
+                let high = self.large.pop().ok_or_else(|| invalid("invalid alias table"))?;
+                let value = *self.masses.get(low).ok_or_else(|| invalid("invalid alias mass"))?;
+                let entry = self.texels.get_mut(low).ok_or_else(|| invalid("invalid alias index"))?;
+                entry.threshold = value as f32;
+                if value > 0.0 && !entry.threshold.is_normal() {
+                    self.preserves_positive_support = false;
+                }
+                entry.alias = high as u32;
+                let remaining = self.masses.get_mut(high).ok_or_else(|| invalid("invalid alias mass"))?;
+                *remaining = (*remaining + value - 1.0).max(0.0);
+                if *remaining < 1.0 {
+                    self.small.push(high);
+                } else {
+                    self.large.push(high);
+                }
+            }
+            BuildStage::Ready => {}
+        }
+        Ok(())
+    }
+    pub(crate) fn finish(self) -> Result<PreparedEnvironment> {
+        if !self.ready() {
+            return Err(invalid("environment table is incomplete"));
+        }
+        Ok(PreparedEnvironment {
+            width: self.width,
+            height: self.height,
+            texels: self.texels,
+            preserves_positive_support: self.preserves_positive_support,
+            luminance_integral: self.luminance_integral,
+        })
+    }
 }
 impl PreparedEnvironment {
     fn new(width: u32, height: u32, pixels: Vec<[f32; 3]>, cancel: &CancelToken) -> Result<Self> {
-        let count = (width * height) as usize;
-        if count != pixels.len() || count == 0 {
-            return Err(invalid("invalid environment storage"));
-        }
-        let mut masses = reserve(count)?;
-        let mut total = 0.0;
-        for (i, rgb) in pixels.iter().enumerate() {
-            if i % 1024 == 0 {
-                cancel.check()?;
-            }
-            let mass = (0.2126 * f64::from(rgb[0]) + 0.7152 * f64::from(rgb[1]) + 0.0722 * f64::from(rgb[2]))
-                * row_solid_angle(width, height, i / width as usize);
-            total += mass;
-            masses.push(mass);
-        }
-        if total == 0.0 {
-            for (i, mass) in masses.iter_mut().enumerate() {
-                *mass = row_solid_angle(width, height, i / width as usize);
-            }
-            total = 4.0 * PI;
-        }
-        let mut small = reserve(count)?;
-        let mut large = reserve(count)?;
-        let mut texels = reserve(count)?;
-        for (i, (rgb, mass)) in pixels.into_iter().zip(masses.iter_mut()).enumerate() {
-            if i % 1024 == 0 {
-                cancel.check()?;
-            }
-            let probability = *mass / total;
-            texels.push(EnvironmentTexel {
-                rgb,
-                pdf: (probability / row_solid_angle(width, height, i / width as usize)) as f32,
-                threshold: 1.0,
-                alias: i as u32,
-            });
-            *mass = probability * count as f64;
-            if *mass < 1.0 {
-                small.push(i);
-            } else {
-                large.push(i);
-            }
-        }
-        while !small.is_empty() && !large.is_empty() {
+        cancel.check()?;
+        let mut builder = EnvironmentBuilder::new(width, height)?;
+        while !builder.ready() {
             cancel.check()?;
-            let low = small.pop().ok_or_else(|| invalid("invalid alias table"))?;
-            let high = large.pop().ok_or_else(|| invalid("invalid alias table"))?;
-            let value = *masses.get(low).ok_or_else(|| invalid("invalid alias mass"))?;
-            let entry = texels.get_mut(low).ok_or_else(|| invalid("invalid alias index"))?;
-            entry.threshold = value as f32;
-            entry.alias = high as u32;
-            let remaining = masses.get_mut(high).ok_or_else(|| invalid("invalid alias mass"))?;
-            *remaining = (*remaining + value - 1.0).max(0.0);
-            if *remaining < 1.0 {
-                small.push(high);
-            } else {
-                large.push(high);
+            for _ in 0..1024 {
+                if builder.ready() {
+                    break;
+                }
+                builder.step(&pixels)?;
             }
         }
         cancel.check()?;
-        Ok(Self { width, height, texels })
+        builder.finish()
+    }
+    #[cfg(any(feature = "raytrace-cpu", test))]
+    pub(crate) fn preserves_positive_support(&self) -> bool {
+        self.preserves_positive_support
+    }
+    /// Physical source integral, before intensity; black stays zero even when
+    /// the sampling table uses its uniform fallback.
+    pub fn luminance_integral(&self) -> f64 {
+        self.luminance_integral
     }
     pub fn dimensions(&self) -> [u32; 2] {
         [self.width, self.height]
@@ -288,13 +419,63 @@ impl PreparedEnvironment {
         let radius = (1.0 - z * z).max(0.0).sqrt();
         Ok((Vec3::new(radius * phi.cos(), radius * phi.sin(), z), selected.rgb, selected.pdf))
     }
+    /// Two independent variates cover alias selection and the selected texel.
+    /// The branch-conditional coin residual is uniform, including alias targets.
+    pub(crate) fn sample_pair(&self, [choice, azimuth]: [f64; 2]) -> Result<(Vec3, [f32; 3], f32)> {
+        if [choice, azimuth].into_iter().any(|v| !v.is_finite() || !(0.0..1.0).contains(&v)) {
+            return Err(invalid("environment samples must be in [0,1)"));
+        }
+        if !self.preserves_positive_support {
+            let z = 1.0 - 2.0 * choice;
+            let radius = ((1.0 - z) * (1.0 + z)).max(0.0).sqrt();
+            let phi = TAU * azimuth;
+            let direction = Vec3::new(radius * phi.cos(), radius * phi.sin(), z);
+            return Ok((direction, self.evaluate(direction)?.0, (1.0 / (4.0 * PI)) as f32));
+        }
+        let scaled = choice * self.texels.len() as f64;
+        let column = scaled.floor() as usize;
+        let coin = scaled - column as f64;
+        let entry = self.texels.get(column).ok_or_else(|| invalid("environment sample index"))?;
+        let threshold = f64::from(entry.threshold);
+        let vertical = if coin < threshold { coin / threshold } else { (coin - threshold) / (1.0 - threshold) };
+        let index = if coin < threshold { column } else { entry.alias as usize };
+        let selected = self.texels.get(index).ok_or_else(|| invalid("environment alias index"))?;
+        let row = index / self.width as usize;
+        let column = index % self.width as usize;
+        let top = (PI * row as f64 / f64::from(self.height)).cos();
+        let bottom = (PI * (row + 1) as f64 / f64::from(self.height)).cos();
+        // Keep finite-precision boundary samples inside their selected cell.
+        // The margin covers normalization and the rotation/inverse-rotation
+        // round trip, which otherwise can send a polar sample to a zero-PDF cell.
+        let margin = 8.0 * f64::EPSILON;
+        let z = (top + (bottom - top) * vertical).clamp(bottom + margin, top - margin);
+        let left = TAU * column as f64 / f64::from(self.width);
+        let right = TAU * (column + 1) as f64 / f64::from(self.width);
+        let phi = (TAU * (column as f64 + azimuth) / f64::from(self.width)).clamp(left + margin * TAU, right - margin * TAU);
+        let radius = ((1.0 - z) * (1.0 + z)).max(0.0).sqrt();
+        Ok((Vec3::new(radius * phi.cos(), radius * phi.sin(), z), selected.rgb, selected.pdf))
+    }
+    pub(crate) fn pdf_at_uv(&self, [u, v]: [f64; 2]) -> Result<f32> {
+        if [u, v].into_iter().any(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+            return Err(invalid("invalid environment coordinates"));
+        }
+        if !self.preserves_positive_support {
+            return Ok((1.0 / (4.0 * PI)) as f32);
+        }
+        let column = ((u * f64::from(self.width)) as usize).min(self.width as usize - 1);
+        let row = ((v * f64::from(self.height)) as usize).min(self.height as usize - 1);
+        self.texels.get(row * self.width as usize + column).map(|texel| texel.pdf).ok_or_else(|| invalid("environment PDF index"))
+    }
     pub fn evaluate(&self, direction: Vec3) -> Result<([f32; 3], f32)> {
-        let d = crate::surface::unit_direction(direction).map_err(|_| invalid("invalid environment direction"))?;
+        let d = solidcraft_viewport::surface::unit_direction(direction).map_err(|_| invalid("invalid environment direction"))?;
         let column = ((d.y.atan2(d.x).rem_euclid(TAU) / TAU * f64::from(self.width)) as usize).min(self.width as usize - 1);
         let row = ((d.z.clamp(-1.0, 1.0).acos() / PI * f64::from(self.height)) as usize).min(self.height as usize - 1);
         let texel = self.texels.get(row * self.width as usize + column).ok_or_else(|| invalid("environment lookup index"))?;
         Ok((texel.rgb, texel.pdf))
     }
+}
+pub(crate) fn texel_luminance_mass(width: u32, height: u32, index: usize, rgb: [f32; 3]) -> f64 {
+    (0.2126 * f64::from(rgb[0]) + 0.7152 * f64::from(rgb[1]) + 0.0722 * f64::from(rgb[2])) * row_solid_angle(width, height, index / width as usize)
 }
 fn row_solid_angle(width: u32, height: u32, row: usize) -> f64 {
     // Stable difference of cosines at polar rows.

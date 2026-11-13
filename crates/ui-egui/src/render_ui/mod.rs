@@ -2,10 +2,10 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::{
     SolveApp,
-    theme::Tokens,
-    ui_kit::{self, Container, Edge},
+    ui_kit::{self, Container},
 };
 use egui::{Rect, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn reset_shell(app: &mut SolveApp) {
     app.shell.workspace_panels.retain(|id, _| !id.starts_with("render:"));
@@ -16,14 +16,13 @@ pub(crate) fn focused(app: &SolveApp) -> bool {
     crate::render_workspace::active(app) && app.shell.render_focus
 }
 
-pub(crate) fn compact(app: &SolveApp, width: f32) -> bool {
-    width < 1100.0 || app.ui.layout == crate::shell::LayoutMode::Docked
-}
-
-pub(crate) fn focus_shortcut(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if crate::render_workspace::active(app) && !ui.ctx().text_edit_focused() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+pub(crate) fn focus_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
+    if crate::render_workspace::active(app)
+        && !ctx.text_edit_focused()
+        && !ctx.egui_wants_keyboard_input()
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
     {
-        ui.ctx().memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+        ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
         app.start("view.render_focus");
     }
 }
@@ -77,7 +76,22 @@ pub(crate) fn stage_bar(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     crate::scenario::publish_rect("render:stage_header", Rect::from_min_max(rect.min, egui::pos2(rect.right(), split)));
     crate::scenario::publish_rect("render:stage_divider", Rect::from_min_size(egui::pos2(rect.left(), split), vec2(rect.width(), 1.0)));
     crate::scenario::publish_rect("render:stage_tools", Rect::from_min_max(egui::pos2(rect.left(), split), rect.max));
-    ui_kit::StageBar::row(ui, rect, true, |ui| stage_tools(app, ui));
+    ui_kit::StageBar::row(ui, rect, true, |ui| {
+        // Keep the renderer settings reachable before the horizontally scrolling
+        // Look tools and source text, including on a narrow window.
+        if app.render_workspace.view.stage == Stage::Look
+            && !crate::render_workspace::result_active(app)
+            && !crate::render_workspace::comparison_active(app)
+        {
+            let settings = ui_kit::StageBar::icon_action(ui, "settings", app.tr("render.live.source_settings_help"));
+            crate::scenario::publish_target("render:preview:settings", settings.rect);
+            if settings.clicked() {
+                let _ = app.run("view.render_select", serde_json::json!({"kind":"output"}));
+            }
+        }
+        crate::render_workspace::live::controls(app, ui);
+        stage_tools(app, ui);
+    });
 }
 
 fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -127,27 +141,24 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             crate::render_workspace::assign::banner(app, ui);
-            ui_kit::StageBar::separator(ui);
-            let note = ui_kit::StageBar::note(ui, app.tr("render.stage_preview_note")).backing_on_hover_text(app.tr("render.preview_lighting_help"));
-            crate::scenario::publish_rect("render:preview_note", note.rect);
-            if ui_kit::StageBar::icon_action(ui, "settings", app.tr("render.preview_image_settings_help")).clicked() {
+            if !crate::render_workspace::result_active(app) && !crate::render_workspace::comparison_active(app) {
+                ui_kit::StageBar::separator(ui);
+                let (label, help) = crate::render_workspace::live::source_note(app);
+                let t = Tokens::get();
+                let available = (ui.available_width() - (t.control_height - t.space_2) - ui.spacing().item_spacing.x).max(0.0);
+                let note = ui_kit::StageBar::note_bounded(ui, &label, available).backing_on_hover_text(format!("{label}\n\n{}", app.tr(help)));
+                crate::scenario::publish_rect("render:preview_note", note.rect);
+            }
+            if ui_kit::StageBar::icon_action(ui, "camera", app.tr("render.preview_image_settings_help")).clicked() {
                 app.start("render.settings.get");
             }
         }
         Stage::Light => {
-            ui_kit::text(ui, app.tr("render.lights_fixed_to"), ui_kit::Text::Inline);
-            ui.add_enabled_ui(false, |ui| {
-                let mut selected = usize::MAX;
-                ui_kit::segmented(
-                    ui,
-                    &mut selected,
-                    &[app.tr("render.fixed_camera"), app.tr("render.fixed_world")],
-                    ui_kit::Segments { intrinsic: true, ..Default::default() },
-                );
-            })
-            .response
-            .backing_on_disabled_hover_text(app.tr("render.light_anchor_pending"));
-            ui_kit::text(ui, app.tr("render.light_anchor_pending"), ui_kit::Text::Inline);
+            // Light geometry is authored in world coordinates, including the implicit studio.
+            // This describes the existing rig; it is not an editable coordinate-frame setting.
+            let note = ui_kit::StageBar::note_bounded(ui, app.tr("render.light_space_world"), ui.available_width())
+                .backing_on_hover_text(app.tr("render.light_space_world_help"));
+            crate::scenario::publish_rect("render:light_space_note", note.rect);
         }
         Stage::Frame => {
             let mut projection = usize::from(app.cam.fov == 0.0);
@@ -176,13 +187,15 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Draw render controls and status above the active model or image viewport.
 pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
-    crate::shell::register_panel(app, "render:focus:exit", None, None);
+    crate::render_workspace::show_shader_preparation(app, ui.ctx());
+    crate::shell::register_panel(app, "render:focus:exit", None);
     if focused(app) {
-        dock_chip(app, ui, "render:focus:exit", "render.exit_focus", "view.render_focus", serde_json::json!({"on":false}));
+        focus_exit(app, ui);
     }
     let Some(viewport) = app.viewport.rect else { return };
-    let free = canvas(app, ui.max_rect());
+    let free = crate::shell::workspace_content(app, crate::shell::panel_bounds(app, viewport));
     if !free.is_positive() {
         return;
     }
@@ -194,55 +207,53 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.set_max_width((free.width() - t.space_24).min(t.form_card_width * 2.0).max(0.0));
             crate::render_workspace::progress_pill(app, ui, "render:progress");
         });
-        crate::shell::register_panel(app, "render:progress-pill", Some(pill.response.rect), None);
+        crate::shell::register_panel(app, "render:progress-pill", Some(pill.response.rect));
         crate::scenario::publish_rect("render:progress-pill", pill.response.rect);
     } else {
-        crate::shell::register_panel(app, "render:progress-pill", None, None);
+        crate::shell::register_panel(app, "render:progress-pill", None);
     }
     crate::render_workspace::environment_overlay(app, ui, viewport);
     crate::render_workspace::assign::selection_bar(app, ui, free);
     crate::render_workspace::assign::replacement_dialog(app, ui.ctx());
-    if !app.universal_panel_host_enabled() {
-        crate::navigation_bar_view::show(app, ui, viewport);
-    }
-    crate::shell::register_panel(app, "render:compare-controls", None, None);
+    crate::shell::register_panel(app, "render:compare-controls", None);
     if !crate::render_workspace::result_active(app) && app.session.render_selected_result().is_some() {
         let free = if crate::render_workspace::job_busy(app) { Container::below_navigation_row(free) } else { free };
         let card =
             Container::navigation_card(ui.ctx(), egui::Id::unique("sc_render_compare_controls"), free.center_top(), egui::Align2::CENTER_TOP, |ui| {
                 crate::render_workspace::comparison_controls(app, ui)
             });
-        crate::shell::register_panel(app, "render:compare-controls", Some(card.response.rect), None);
+        crate::shell::register_panel(app, "render:compare-controls", Some(card.response.rect));
     }
     if !focused(app) {
         shots_pill(app, ui, free);
     }
+    // The Design viewport is not drawn here: its frame-rate readout's anchor is from another
+    // workspace (or none), so the panel would stack on nothing in this one.
+    app.frame_rate.top = None;
+    crate::operations::show(app, ui, viewport);
     crate::viewport::transient_messages(app, ui, viewport, None);
 }
 
-/// Shared kit chip at the Browser's remembered side, below the stage bar.
-pub(crate) fn dock_chip(app: &mut SolveApp, ui: &mut egui::Ui, id: &'static str, label: &str, command: &str, params: serde_json::Value) {
+fn focus_exit(app: &mut SolveApp, ui: &mut egui::Ui) {
+    const ID: &str = "render:focus:exit";
     let bounds = crate::shell::panel_bounds(app, ui.max_rect());
-    let t = Tokens::get();
-    if bounds.width() < t.control_height || bounds.height() < t.control_height {
+    let tokens = Tokens::get();
+    if bounds.width() < tokens.control_height || bounds.height() < tokens.control_height {
         return;
     }
-    let left = app.preferences.render_browser_side == "left";
-    let position = if left { bounds.left_top() + vec2(t.space_8, 0.0) } else { bounds.right_top() - vec2(t.space_8, 0.0) };
-    let ctx = ui.ctx().clone();
-    let chip =
-        Container::navigation_card(&ctx, egui::Id::unique(id), position, if left { egui::Align2::LEFT_TOP } else { egui::Align2::RIGHT_TOP }, |ui| {
-            let response = ui_kit::choice_chip(ui, id, app.tr(label), false);
-            crate::scenario::publish_target(id, response.rect);
-            if response.clicked() {
-                let _ = app.run(command, params);
-            }
-        });
-    crate::shell::register_panel(app, id, Some(chip.response.rect), None);
+    let position = bounds.left_top() + vec2(tokens.space_8, 0.0);
+    let chip = Container::navigation_card(ui.ctx(), egui::Id::unique(ID), position, egui::Align2::LEFT_TOP, |ui| {
+        let response = ui_kit::choice_chip(ui, ID, app.tr("render.exit_focus"), false);
+        crate::scenario::publish_target(ID, response.rect);
+        if response.clicked() {
+            let _ = app.run("view.render_focus", serde_json::json!({"on":false}));
+        }
+    });
+    crate::shell::register_panel(app, ID, Some(chip.response.rect));
 }
 
 fn shots_pill(app: &mut SolveApp, ui: &mut egui::Ui, free: Rect) {
-    crate::shell::register_panel(app, "render:shots:show", None, None);
+    crate::shell::register_panel(app, "render:shots:show", None);
     if app.preferences.render_shots_strip {
         return;
     }
@@ -253,30 +264,13 @@ fn shots_pill(app: &mut SolveApp, ui: &mut egui::Ui, free: Rect) {
         free.left_bottom() + vec2(Tokens::get().space_8, -Tokens::get().space_8),
         egui::Align2::LEFT_BOTTOM,
         |ui| {
-            let response =
-                ui_kit::strip_toggle(ui, false, crate::i18n::tr_label("Shots")).backing_on_hover_text(crate::i18n::tr_label("Show Shots strip"));
+            let response = ui_kit::strip_toggle(ui, false, solidcraft_ui_text::tr_label("Shots"))
+                .backing_on_hover_text(solidcraft_ui_text::tr_label("Show Shots strip"));
             crate::scenario::publish_target("render:shots:show", response.rect);
             if response.clicked() {
                 let _ = app.run("view.shots_strip", serde_json::json!({"visible":true}));
             }
         },
     );
-    crate::shell::register_panel(app, "render:shots:show", Some(pill.response.rect), None);
-}
-
-/// Existing saved-shot and job actions inside the shared floating bottom-strip host.
-pub(crate) fn shots_strip(app: &mut SolveApp, ui: &mut egui::Ui) {
-    crate::shell::register_panel(app, "render:shots_strip", None, None);
-    if focused(app) || !app.preferences.render_shots_strip {
-        return;
-    }
-    let available = ui.available_rect_before_wrap();
-    let content = ui_kit::Panel::bottom_strip(ui, "sc_render_shots_strip", available, Tokens::get().form_footer_height, |ui| {
-        crate::render_workspace::shots::contents(app, ui);
-    });
-    let rect = content.map(|c| c.response.rect);
-    crate::shell::register_panel(app, "render:shots_strip", rect, Some(Edge::Bottom));
-    if let Some(rect) = rect {
-        crate::scenario::publish_rect("render:shots_strip", rect);
-    }
+    crate::shell::register_panel(app, "render:shots:show", Some(pill.response.rect));
 }

@@ -6,6 +6,27 @@ use super::*;
 const HEADER: &[u8] = b"SCPCAT01";
 
 impl CatalogueState {
+    /// Transform a private candidate, retaining exact unchanged records and all
+    /// rejected recovery bytes. A failure never publishes a partially mapped set.
+    pub fn map_envelopes(
+        &self,
+        registry: &PanelRegistry,
+        mut map: impl FnMut(&[u8], LayoutEnvelope) -> PanelResult<LayoutEnvelope>,
+    ) -> PanelResult<Self> {
+        let mut next = self.clone();
+        for record in next.builtins.values_mut().chain(next.users.values_mut()).chain(next.remembered.values_mut()) {
+            let original = decode_retained_record(record.bytes(), registry)?;
+            let mapped = map(record.bytes(), original.clone())?;
+            if mapped.layout.workspace != original.layout.workspace {
+                return Err(error(Rule::Schema, "catalogue mapper cannot change record workspace"));
+            }
+            if mapped != original {
+                *record = StoredEnvelope::new(&mapped, record.rejected(), registry)?;
+            }
+        }
+        next.validate()?;
+        Ok(next)
+    }
     /// Export all immutable registrations, mutable users and remembered full
     /// envelopes. No storage, live action, selection or Session is touched.
     pub fn export(&self) -> PanelResult<Vec<u8>> {
@@ -52,7 +73,7 @@ impl CatalogueState {
                 if preset_name(&name)? != name {
                     return Err(error(Rule::Schema, "stored preset name is not normalised"));
                 }
-                if next.builtins.contains_key(&name) || next.users.contains_key(&name) {
+                if next.find_preset_name(&name).is_some() {
                     return Err(error(Rule::DuplicateId, "duplicate stored preset identity"));
                 }
                 let record = reader.record(registry)?;

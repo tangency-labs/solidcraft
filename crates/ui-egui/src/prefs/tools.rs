@@ -7,7 +7,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_heading(ui, app.tr("prefs.structure.tools"), app.tr("prefs.structure.tools_note"));
         ui_kit::settings_section(ui, "create", app.tr("ui.create"), |ui| {
             create_card(ui, |ui| {
-                create_row(ui, app.tr("ui.hole"), &["hole"], true, |ui| {
+                create_row(ui, app.tr("ui.hole"), None, &["hole"], true, |ui| {
                     for (setting, help, key, legacy) in [
                         (
                             setting::hole_snaps as fn(&mut SolveApp, &mut egui::Ui) -> egui::Response,
@@ -16,18 +16,20 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             "Snap to face and edge centres",
                         ),
                         (setting::hole_moves, "prefs.design_tools.hole_moves_help", "hole_moves", "Move holes by clicking or dragging"),
+                        (setting::hole_several, "prefs.design_tools.hole_several_help", "hole_several", "Several holes on one face"),
+                        (setting::hole_group, "prefs.design_tools.hole_group_help", "hole_group", "Group holes made together"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
                             let response = setting(app, ui).backing_on_hover_text(app.tr(help));
                             crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
                             crate::scenario::publish_target(&format!("dialog:{legacy}"), response.rect);
-                            if !crate::prefs_search::suppress_chrome(ui) {
+                            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                                 ui_kit::help_icon(ui, app.tr(help));
                             }
                         });
                     }
                 });
-                create_row(ui, app.tr_label("Extrude"), &["extrude"], false, |ui| {
+                create_row(ui, app.tr_label("Extrude"), None, &["extrude"], false, |ui| {
                     for (setting, help, key) in [
                         (
                             setting::extrude_auto_to_object as fn(&mut SolveApp, &mut egui::Ui) -> egui::Response,
@@ -40,7 +42,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ui.horizontal_wrapped(|ui| {
                             let response = setting(app, ui).backing_on_hover_text(app.tr(help));
                             crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
-                            if !crate::prefs_search::suppress_chrome(ui) {
+                            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                                 ui_kit::help_icon(ui, app.tr(help));
                             }
                         });
@@ -54,19 +56,26 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("prefs:extrude_view_return", response.rect);
                     });
                 });
-                create_row(ui, app.tr("prefs.design_tools.placement_group"), &["rest", "boss", "snap_fit"], false, |ui| {
+                // Found by the name of every feature that has the marker, as well as by the label.
+                let placed = PLACED_FEATURES.iter().map(|key| app.tr(key)).collect::<Vec<_>>().join(" ");
+                create_row(ui, app.tr("prefs.design_tools.placement_group"), Some(&placed), &["rest", "boss", "snap_fit"], false, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         let response = setting::placement_handles(app, ui).backing_on_hover_text(app.tr("ui.placement_handles_tip"));
                         crate::scenario::publish_target("prefs:placement_handles", response.rect);
-                        if !crate::prefs_search::suppress_chrome(ui) {
+                        if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                             ui_kit::help_icon(ui, app.tr("ui.placement_handles_tip"));
                         }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        let response = setting::snap_points(app, ui);
+                        crate::scenario::publish_target("prefs:snap_points", response.rect);
                     });
                 });
             });
         });
         ui_kit::settings_section(ui, "command_dialog_values", app.tr("prefs.command_dialog_values"), |ui| {
             setting::remember_dialog_values(app, ui);
+            setting::fillet_legacy_radius(app, ui);
         });
         ui_kit::settings_section(ui, "joint_move", app.tr("joint_move.settings"), |ui| {
             tool_group(ui, "", ui_kit::paint_assembly_move, |ui| {
@@ -74,7 +83,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let response = setting::assembly_move_handles(app, ui).backing_on_hover_text(app.tr("joint_move.legacy_hint"));
                     crate::scenario::publish_target("prefs:assembly_move_handles", response.rect);
                     crate::scenario::publish_target("dialog:Use joint motion handles for assembly Move", response.rect);
-                    if !crate::prefs_search::suppress_chrome(ui) {
+                    if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                         ui_kit::help_icon(ui, app.tr("joint_move.legacy_hint"));
                     }
                 });
@@ -84,7 +93,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let tip = app.tr("prefs.move_drag_highlights_tip");
                     let response = setting::move_drag_highlights(app, ui).backing_on_hover_text(tip);
                     crate::scenario::publish_target("prefs:move_drag_highlights", response.rect);
-                    if !crate::prefs_search::suppress_chrome(ui) {
+                    if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                         ui_kit::help_icon(ui, tip);
                     }
                 });
@@ -160,12 +169,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// A single original figure beside a tool's complete setting stack. The columns wrap together
 /// with their translated labels; search uses the same block gate as other compound preferences.
 fn tool_group(ui: &mut egui::Ui, label: &str, figure: fn(&egui::Painter, egui::Rect), add: impl FnOnce(&mut egui::Ui)) {
-    let gate = crate::prefs_search::block_gate(ui, label, None);
-    let before = crate::prefs_search::hits(ui);
+    let gate = crate::ui_kit::settings_search::block_gate(ui, label, None);
+    let before = crate::ui_kit::settings_search::hits(ui);
     if gate.as_ref().is_some_and(|gate| !gate.show) {
-        crate::prefs_search::run_hidden(ui, label, add);
+        crate::ui_kit::settings_search::run_hidden(ui, label, add);
         if let Some(gate) = &gate {
-            crate::prefs_search::block_finish(ui, gate, false, before);
+            crate::ui_kit::settings_search::block_finish(ui, gate, false, before);
         }
         return;
     }
@@ -188,14 +197,14 @@ fn tool_group(ui: &mut egui::Ui, label: &str, figure: fn(&egui::Painter, egui::R
         ui.allocate_ui_with_layout(egui::vec2(controls_width, 0.0), egui::Layout::top_down(egui::Align::Min), add);
     });
     if let Some(gate) = &gate {
-        crate::prefs_search::block_finish(ui, gate, true, before);
+        crate::ui_kit::settings_search::block_finish(ui, gate, true, before);
     }
 }
 
 /// The Create section's card: one border around a row per tool.
 fn create_card(ui: &mut egui::Ui, rows: impl FnOnce(&mut egui::Ui)) {
     let t = Tokens::get();
-    if crate::prefs_search::suppress_chrome(ui) {
+    if crate::ui_kit::settings_search::suppress_chrome(ui) {
         rows(ui);
         return;
     }
@@ -212,18 +221,24 @@ fn create_card(ui: &mut egui::Ui, rows: impl FnOnce(&mut egui::Ui)) {
 
 /// One tool in the Create card: its icons in tiles and its name on the left, its settings on the
 /// right, a rule above every row but the first. Search uses the same block gate as `tool_group`.
-fn create_row(ui: &mut egui::Ui, label: &str, icons: &[&str], first: bool, add: impl FnOnce(&mut egui::Ui)) {
-    let gate = crate::prefs_search::block_gate(ui, label, None);
-    let before = crate::prefs_search::hits(ui);
+/// The features with a placement marker, by their name keys: Preferences search finds the
+/// Placed features row by any of them.
+const PLACED_FEATURES: [&str; 9] =
+    ["cmd.plastic_rest", "cmd.plastic_boss", "cmd.plastic_snap_fit", "ui.box", "ui.cylinder", "ui.cone", "ui.sphere", "ui.torus", "ui.coil"];
+
+/// A tool's row; `hint` is more text the search finds the row by (it is not shown).
+fn create_row(ui: &mut egui::Ui, label: &str, hint: Option<&str>, icons: &[&str], first: bool, add: impl FnOnce(&mut egui::Ui)) {
+    let gate = crate::ui_kit::settings_search::block_gate(ui, label, hint);
+    let before = crate::ui_kit::settings_search::hits(ui);
     if gate.as_ref().is_some_and(|gate| !gate.show) {
-        crate::prefs_search::run_hidden(ui, label, add);
+        crate::ui_kit::settings_search::run_hidden(ui, label, add);
         if let Some(gate) = &gate {
-            crate::prefs_search::block_finish(ui, gate, false, before);
+            crate::ui_kit::settings_search::block_finish(ui, gate, false, before);
         }
         return;
     }
     let t = Tokens::get();
-    let chrome = !crate::prefs_search::suppress_chrome(ui);
+    let chrome = !crate::ui_kit::settings_search::suppress_chrome(ui);
     let margin = egui::Margin::symmetric(t.space_14 as i8, t.space_10 as i8);
     let row = egui::Frame::NONE.inner_margin(margin).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -246,7 +261,7 @@ fn create_row(ui: &mut egui::Ui, label: &str, icons: &[&str], first: bool, add: 
                     }
                     ui.add_space(t.space_4);
                     if !label.is_empty() {
-                        ui.label(egui::RichText::new(label).font(crate::fonts::semibold(t.font_label)).color(t.form_ink));
+                        ui.label(egui::RichText::new(label).font(crate::ui_kit::type_face::semibold(t.font_label)).color(t.form_ink));
                     }
                 },
             );
@@ -258,6 +273,6 @@ fn create_row(ui: &mut egui::Ui, label: &str, icons: &[&str], first: bool, add: 
         ui.painter().hline(row.response.rect.x_range(), row.response.rect.top(), egui::Stroke::new(1.0, t.dialog_rule));
     }
     if let Some(gate) = &gate {
-        crate::prefs_search::block_finish(ui, gate, true, before);
+        crate::ui_kit::settings_search::block_finish(ui, gate, true, before);
     }
 }

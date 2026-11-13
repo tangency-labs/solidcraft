@@ -192,7 +192,7 @@ fn solidcore_case(name: &str) -> Got {
     };
     let got = r.map(|(b, closed)| {
         let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         let size = if is_sheet(name) { area(&b, 1e-8) } else { volume(&b, 1e-8) }.unwrap();
         Measured { size, counts: counts(&b).unwrap(), closed, bounds: bounds(&b).unwrap(), kinds: kinds(&rec) }
     });

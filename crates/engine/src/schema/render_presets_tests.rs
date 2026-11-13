@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::{PresetParams, QualityParams, QualityPlan, StudioComposition};
+use super::{PresetParams, QualityParams, QualityPlan, QualityResult, StudioComposition};
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -26,7 +26,7 @@ fn budget(id: &str) -> Value {
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PresetParams>(), &["expected_revision", "id", "name", "replace_lighting_and_environment", "replace_stage", "set"]);
-    assert_keys(input_schema_for::<QualityParams>(), &["acknowledge_omissions", "id", "variant"]);
+    assert_keys(input_schema_for::<QualityParams>(), &["acknowledge_omissions", "cpu", "id", "variant"]);
 }
 
 /// The handlers refuse these calls after reading them; strict refuses them with their message.
@@ -100,7 +100,7 @@ fn preset_commands_reply_with_their_schemas() {
 
 /// `set` names the render setup's fields: `patched_settings` reads the patched setup as a
 /// `RenderSetup`, which refuses any other key, so the schema refuses a misspelt one too (and
-/// more than 13 at once).
+/// more than 15 at once).
 #[test]
 fn the_set_schema_names_the_setup_fields() {
     let root = input_schema_for::<PresetParams>();
@@ -112,5 +112,36 @@ fn the_set_schema_names_the_setup_fields() {
         assert_eq!(conforms(root, set, &patch), takes, "{patch}");
     }
     // `conforms` doesn't read `maxProperties`, so the limit is pinned here.
-    assert_eq!((set["maxProperties"].as_u64(), set["properties"].as_object().map(|p| p.len())), (Some(13), Some(super::SETUP_FIELDS.len())), "{set}");
+    assert_eq!((set["maxProperties"].as_u64(), set["properties"].as_object().map(|p| p.len())), (Some(15), Some(super::SETUP_FIELDS.len())), "{set}");
+}
+
+#[test]
+fn cpu_quality_and_studio_contracts_preserve_both_executors() {
+    let plan_schema = output_schema_for::<QualityResult>();
+    let composition_schema = output_schema_for::<StudioComposition>();
+    for level in [ParamCheck::Warn, ParamCheck::Strict] {
+        let mut s = with_a_shot(level);
+        for id in ["Q-001", "Q-002", "Q-003"] {
+            let request = json!({"id":id,"variant":"cpu_progressive_png","acknowledge_omissions":true,
+                "cpu":{"minimum_budget":"studio"}});
+            let before = s.doc.clone();
+            let reply = s.execute("render.quality.prepare", &request).unwrap();
+            let schema = plan_schema.as_value();
+            assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+            assert!(reply.get("param_warnings").is_none(), "{reply}");
+            assert_eq!(reply["variant"], "cpu_progressive_png");
+            assert_eq!(reply["cpu_context"]["minimum_budget"], "studio");
+            assert_eq!(s.doc, before);
+        }
+        if cfg!(feature = "bundled-render-library") {
+            s.execute("render.settings.set", &json!({"name":"Cpu","set":{"job":{"method":"cpu_raytrace"}}})).unwrap();
+            let before = s.doc.clone();
+            let reply = s.execute("render.preset.resolve", &json!({"id":"NATIVE-STUDIO-001","name":"Cpu","set":{"coats":[]}})).unwrap();
+            let schema = composition_schema.as_value();
+            assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+            assert_eq!(reply["executor"], "cpu-raytrace");
+            assert!(reply.get("param_warnings").is_none(), "{reply}");
+            assert_eq!(s.doc, before);
+        }
+    }
 }

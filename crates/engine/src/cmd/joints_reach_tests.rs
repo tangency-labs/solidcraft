@@ -255,6 +255,46 @@ fn a_lone_slider_travels_all_the_way() {
     assert_eq!((&r["reached"], &r["moved"]), (&json!(true), &json!(true)), "{r}");
 }
 
+/// A ball joint at rest tilts toward a small nudge in any direction, not only along its pitch
+/// (#12873): its yaw and roll turn about the same axis at pitch 0, so a solve over those angles
+/// can't tilt it the other way. It tilts the least way there, without spinning about its axis, and
+/// a pitch limit still holds it, with the limit named.
+#[test]
+fn a_ball_joint_at_rest_tilts_every_way() {
+    let tip = Vec3::new(0.0, 0.0, 21.0);
+    for (dx, dy) in [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0), (0.7, -0.7)] {
+        let mut s = Session::default();
+        part(&mut s, "Socket", [-1.0, -1.0, -3.0]);
+        part(&mut s, "Stick", [-1.0, -1.0, 20.0]);
+        let socket = occ(&s, "Socket");
+        run(&mut s, "occurrence.ground", json!({"occurrence": socket, "grounded": true}));
+        pin(&mut s, "ball", "Ball", "Socket", "Stick", Vec3::ZERO, Vec3::Z);
+        // A point 1 mm across, on the tip's sphere about the joint.
+        let off = Vec3::new(dx, dy, 21.0);
+        let to = off * (21.0 / off.len());
+        let r = reach(&mut s, "Stick", tip, json!({"point": pt(to)}));
+        assert_eq!((&r["reached"], &r["moved"]), (&json!(true), &json!(true)), "toward ({dx}, {dy}): {r}");
+        assert!(place(&s, "Stick", tip).dist(to) < 1e-6, "toward ({dx}, {dy}): {:?}", place(&s, "Stick", tip));
+        // The least turn: a point off the axis moves about as far as the tip, not round it.
+        let side = Vec3::new(10.0, 0.0, 21.0);
+        assert!(place(&s, "Stick", side).dist(side) < 1.5, "toward ({dx}, {dy}) it spun: {:?}", place(&s, "Stick", side));
+    }
+    // A cone of 10°: a target 30° over stops at the limit, toward it, and names it.
+    let mut s = Session::default();
+    part(&mut s, "Socket", [-1.0, -1.0, -3.0]);
+    part(&mut s, "Stick", [-1.0, -1.0, 20.0]);
+    let socket = occ(&s, "Socket");
+    run(&mut s, "occurrence.ground", json!({"occurrence": socket, "grounded": true}));
+    pin(&mut s, "ball", "Ball", "Socket", "Stick", Vec3::ZERO, Vec3::Z);
+    run(&mut s, "joint.limits", json!({"joint": "Ball", "index": 1, "min": -10, "max": 10}));
+    let a = 30f64.to_radians();
+    let r = reach(&mut s, "Stick", tip, json!({"point": [21.0 * a.sin(), 0.0, 21.0 * a.cos()]}));
+    assert_eq!(r["reached"], false, "{r}");
+    let at = place(&s, "Stick", tip);
+    assert!((at.z / 21.0).acos().to_degrees() - 10.0 < 1e-6 && at.x > 0.0 && at.y.abs() < 1e-6, "{at:?} {r}");
+    assert_eq!(r["stopped_by_limit"][0]["joint"], "Ball", "{r}");
+}
+
 /// The four-bar's rocker reaches a point on its swing, the crank and coupler following with the
 /// loop closed; past its toggle position it stops there, and the loop is named.
 #[test]
@@ -384,4 +424,63 @@ fn quarter_turn_reaches_keep_the_four_bar_closed_and_diagnostics_current() {
             assert_eq!(full.dof.get(&occ(&s, part)), Some(&1));
         }
     }
+}
+
+/// A grounded block A and a block B on a slider toward it, 10 mm clear, in one contact set:
+/// `contact` turns contact sets on or off. The slider stops 10 mm past the touch.
+fn blocks_on_a_rail(contact: bool) -> Session {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    let a = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"}));
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 10}));
+    run(&mut s, "joint.limits", json!({"joint": "Rail", "index": 0, "min": -10, "max": 100}));
+    run(&mut s, "contact.create", json!({"occurrences": ["A", "B"]}));
+    run(&mut s, "contact.enable_sets", json!({"enabled": contact}));
+    s
+}
+
+/// A drag (joint.reach) stops where a contact set says two parts touch, as joint.drive does, and
+/// says so, not the limit further on; with contact sets off it goes on to that limit (#14682).
+#[test]
+fn a_reach_stops_where_a_contact_set_touches() {
+    // B's near face, in its own coordinates; the drag pulls its centre 25 mm toward A, 15 mm past
+    // where B touches A.
+    let near_face = Vec3::new(20.0, 5.0, 5.0);
+    let pull = |s: &mut Session| {
+        let from = place(s, "B", Vec3::new(25.0, 5.0, 5.0));
+        let to = from - Vec3::new(25.0, 0.0, 0.0);
+        reach(s, "B", Vec3::new(25.0, 5.0, 5.0), json!({"point": pt(to)}))
+    };
+    let mut s = blocks_on_a_rail(true);
+    let start = place(&s, "B", near_face).x;
+    assert!((start - 20.0).abs() < 1e-6, "B starts 10 mm clear of A: {start}");
+    let r = pull(&mut s);
+    assert!(r["stopped_by_contact"].is_object(), "{r}");
+    assert!(r["stopped_by_limit"].is_null(), "the contact stopped it, not the limit: {r}");
+    assert_eq!(r["reached"], false, "{r}");
+    let x = place(&s, "B", near_face).x;
+    assert!((10.0 - 1e-6..10.0 + 1e-3).contains(&x), "B stops touching A, not through it: its face at x = {x}");
+    let collisions = run(&mut s, "contact.check", json!({}));
+    assert!(collisions["collisions"].as_array().is_some_and(Vec::is_empty), "{collisions}");
+    // Contact sets off: the same drag goes through A, to the slider's limit.
+    let mut s = blocks_on_a_rail(false);
+    let r = pull(&mut s);
+    assert!(r["stopped_by_contact"].is_null(), "{r}");
+    assert!(r["stopped_by_limit"].is_array(), "{r}");
+    let x = place(&s, "B", near_face).x;
+    assert!(x.abs() < 1e-6, "B's face at x = {x}, not at the limit, 0");
+}
+
+#[test]
+fn body_centre_uses_exact_body_bounds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    let c = super::body_centre(&s, 0);
+    assert!((c.x - 5.0).abs() < 1e-6 && (c.y - 10.0).abs() < 1e-6 && (c.z - 15.0).abs() < 1e-6, "got {c:?}");
 }

@@ -143,6 +143,8 @@ impl S3 {
             }
             Surface::RationalSpline { u_knots, v_knots, homogeneous } => S3::Nurbs(Box::new(Nurbs::new(u_knots, v_knots, homogeneous)?)),
             Surface::PlacedRevolution { .. } => placed_revolution(face)?,
+            // A label with no surface of its own: its face is drawn as its NURBS form.
+            Surface::Blend { .. } => return Err(HlrError::Unsupported("a blend's label (draw its NURBS form)")),
             label => S3::bounded(label, form_box(face, label)?)?,
         })
     }
