@@ -444,6 +444,22 @@ pub(crate) fn delete_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
     }
 }
 
+/// Suppress in a feature's menu, in both timelines, when it acts on several selected features:
+/// its label, saying how many, and `timeline.suppress`'s parameters, one undo step for them all.
+/// It unsuppresses them when all of them are suppressed, else suppresses them all (#16245).
+/// `None` when the menu acts on one feature. It is an extra entry: the feature's own Suppress
+/// entry stays and acts on that feature alone.
+pub(crate) fn suppress_selected(app: &SolveApp, id: u64) -> Option<(String, Value)> {
+    let targets = menu_targets(app, id);
+    if targets.len() < 2 {
+        return None;
+    }
+    let all_suppressed = targets.iter().all(|id| app.session.doc.feature(*id).is_some_and(|f| f.suppressed));
+    let key = if all_suppressed { "timeline.unsuppress_many" } else { "timeline.suppress_many" };
+    let label = solidcraft_ui_text::format(key, &[("count", &targets.len().to_string())]);
+    Some((label, json!({ "features": targets, "suppressed": !all_suppressed })))
+}
+
 /// The features from design position `from` to the end, only the `shown` positions (ascending)
 /// when the timeline shows some of the design's features.
 fn features_from(app: &SolveApp, from: usize, shown: Option<&[usize]>) -> Vec<u64> {
@@ -505,6 +521,12 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .with(json!({ "features": targets, "parent": parent }))
             .off_because(app.session.group_refusal(&targets, parent)),
         Item::action("timeline.suppress", solidcraft_ui_text::tr(suppress), "suppress").with(json!({ "feature": id })),
+    ]);
+    // An extra entry for the selection; the one above still acts on this feature alone.
+    if let Some((label, params)) = suppress_selected(app, id) {
+        v.push(Item::action("timeline.suppress", &label, "suppress").with(params));
+    }
+    v.extend([
         Item::action("timeline.roll_to", "Roll History Marker Here", "rollback").with(json!({ "feature": id })),
         Item::action("ui.findBrowser", "Find in Browser", "list").with(json!({ "feature": id })),
         Item::sep(),
@@ -2766,6 +2788,63 @@ mod tests {
             assert_eq!(names(&h), ["Third"], "left: {left}");
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(names(&h), ["First", "Second", "Third"], "left: {left}");
+        }
+    }
+
+    /// The menu of a selected feature adds an entry that suppresses the whole selection in one
+    /// undo step and says how many; when every selected feature is already suppressed it offers
+    /// to unsuppress them instead, and a mixed selection is suppressed. The single-feature entry
+    /// stays and still acts on the right-clicked feature alone. The same in both timelines
+    /// (#16245).
+    #[test]
+    fn the_feature_menu_suppresses_the_selected_features() {
+        fn suppressed(h: &Harness) -> Vec<String> {
+            h.app.session.doc.features.iter().filter(|f| f.suppressed).map(|f| f.name.clone()).collect()
+        }
+        fn menu_on_first_and_second(h: &mut Harness) {
+            h.app.run("select.clear", json!({})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
+        }
+        for left in [false, true] {
+            let mut h = three_boxes(left);
+            // The single-feature entry stays as it was beside the new one, and still acts on
+            // the right-clicked feature alone.
+            let single = if left { "Suppress Feature" } else { "Suppress Features" };
+            menu_on_first_and_second(&mut h);
+            h.step(&json!({"widget": single})).unwrap();
+            h.settle();
+            assert_eq!(suppressed(&h), ["Second"], "left: {left}");
+            h.app.run("edit.undo", json!({})).unwrap();
+            h.settle();
+            assert!(suppressed(&h).is_empty(), "left: {left}");
+
+            menu_on_first_and_second(&mut h);
+            assert!(h.widget(single).is_some(), "left: {left}");
+            assert!(h.widget("Unsuppress 2 Selected Features").is_none(), "left: {left}");
+            h.step(&json!({"widget": "Suppress 2 Selected Features"})).unwrap();
+            h.settle();
+            assert_eq!(suppressed(&h), ["First", "Second"], "left: {left}");
+            h.app.run("edit.undo", json!({})).unwrap();
+            h.settle();
+            assert!(suppressed(&h).is_empty(), "one undo step restores both, left: {left}");
+
+            h.app.run("timeline.suppress", json!({"features": ["First", "Second"], "suppressed": true})).unwrap();
+            h.settle();
+            menu_on_first_and_second(&mut h);
+            assert!(h.widget("Suppress 2 Selected Features").is_none(), "left: {left}");
+            h.step(&json!({"widget": "Unsuppress 2 Selected Features"})).unwrap();
+            h.settle();
+            assert!(suppressed(&h).is_empty(), "left: {left}");
+
+            h.app.run("timeline.suppress", json!({"feature": "First", "suppressed": true})).unwrap();
+            h.settle();
+            menu_on_first_and_second(&mut h);
+            h.step(&json!({"widget": "Suppress 2 Selected Features"})).unwrap();
+            h.settle();
+            assert_eq!(suppressed(&h), ["First", "Second"], "a mixed selection is suppressed, left: {left}");
         }
     }
 
