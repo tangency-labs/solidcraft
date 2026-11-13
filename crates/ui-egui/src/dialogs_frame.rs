@@ -61,7 +61,7 @@ pub struct Member {
     pub pair_ids: Vec<Option<String>>,
     /// Ghost Frame Members: every frame member and End Cap body is drawn see-through while the
     /// dialog is open, its faces and edges left out of picks, so the points behind and its own
-    /// vertices and centreline ends can be picked. Ticked whenever the dialog opens.
+    /// vertices and centreline ends can be picked. Unticked whenever the dialog opens.
     pub ghost: bool,
     /// The tubes clicked in the view (their centrelines' ids, [`Centreline::id`]), for Remove Tube.
     pub picked_tubes: Vec<String>,
@@ -297,7 +297,7 @@ impl Member {
             path: Vec::new(),
             refs: Vec::new(),
             pair_ids: Vec::new(),
-            ghost: true,
+            ghost: false,
             picked_tubes: Vec::new(),
         }
     }
