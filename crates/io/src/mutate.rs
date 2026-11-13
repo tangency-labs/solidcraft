@@ -214,7 +214,7 @@ fn gltf_survives_mutation() {
     assert!(crate::read_gltf(&glb, "fuzz.glb", &mut no_files).is_ok());
     survives("glTF (.glb)", &mutations(&glb, false, 0x91b), usize::MAX, |b| crate::read_gltf(b, "fuzz.glb", &mut no_files).ok().map(|_| 1));
     // The JSON form, its buffer embedded as a data URI.
-    let uri = format!("data:application/octet-stream;base64,{}", base64(&f.bin));
+    let uri = format!("data:application/octet-stream;base64,{}", solidcraft_doc::canvas::base64_encode(&f.bin));
     let gltf = f.json(Some(&uri)).to_string().into_bytes();
     assert!(crate::read_gltf(&gltf, "fuzz.gltf", &mut no_files).is_ok());
     survives("glTF (.gltf)", &mutations(&gltf, true, 0x917), usize::MAX, |b| crate::read_gltf(b, "fuzz.gltf", &mut no_files).ok().map(|_| 1));
@@ -415,21 +415,4 @@ fn paper_scenes_survive_mutation_into_pdf() {
     };
     assert!(write(&json).is_some());
     survives("paper scene to PDF", &mutations(&json, true, 0x5a7), usize::MAX, write);
-}
-
-/// Standard base64 (RFC 4648) of `bytes`, for a data URI.
-fn base64(bytes: &[u8]) -> String {
-    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut s = String::new();
-    for c in bytes.chunks(3) {
-        let v = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
-        for k in 0..4 {
-            if k <= c.len() {
-                s.push(char::from(A[(v >> (18 - 6 * k)) as usize & 63]));
-            } else {
-                s.push('=');
-            }
-        }
-    }
-    s
 }

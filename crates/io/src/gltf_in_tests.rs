@@ -295,20 +295,24 @@ fn gltf_with_external_and_embedded_buffers() {
         assert!(r.is_err() && !called, "{uri}");
     }
     // Embedded as a data URI.
-    let b64 = {
-        const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut s = String::new();
-        for c in f.bin.chunks(3) {
-            let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
-            for k in 0..4 {
-                s.push(if k <= c.len() { A[((n >> (18 - 6 * k)) & 63) as usize] as char } else { '=' });
-            }
-        }
-        s
-    };
+    let b64 = solidcraft_doc::canvas::base64_encode(&f.bin);
     let text = f.json(Some(&format!("data:application/octet-stream;base64,{b64}"))).to_string();
     let g = read_gltf(text.as_bytes(), "model.gltf", &mut no_files).unwrap();
     assert!(close(volume(&meshes(&g)[0]), 1000.0));
+    // Some exporters write the URL-safe alphabet (`-`, `_`); those files opened before and still open.
+    // Three bytes on a 3-byte boundary make sure the text has both: "+/+/" standard, "-_-_" URL-safe.
+    let mut bin = f.bin.clone();
+    bin.resize(bin.len().next_multiple_of(3), 0);
+    bin.extend([0xfb, 0xff, 0xbf]);
+    let url_safe = solidcraft_doc::canvas::base64_encode(&bin).replace('+', "-").replace('/', "_");
+    assert!(url_safe.ends_with("-_-_"), "{url_safe}");
+    let text = f.json(Some(&format!("data:application/octet-stream;base64,{url_safe}"))).to_string();
+    let g = read_gltf(text.as_bytes(), "model.gltf", &mut no_files).unwrap();
+    assert!(close(volume(&meshes(&g)[0]), 1000.0));
+    // The rest of what the old reader took: the two alphabets mixed, padding left out or too much.
+    assert_eq!(data_uri_base64("+_8").as_deref(), Some(&[0xfb, 0xff][..]));
+    assert_eq!(data_uri_base64("TWE==").as_deref(), Some(&b"Ma"[..]));
+    assert_eq!(data_uri_base64("TW=Fu"), None);
     // The GLB route through mesh_import_feature builds every body where it is.
     let mut f2 = Fixture::default();
     let m = f2.cube_mesh("Cube", 0.01);

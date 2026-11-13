@@ -1,6 +1,7 @@
 //! The content blocks a tool result is made of (MCP `CallToolResult`), and the contents a resource
 //! read sends (MCP `ReadResourceResult`).
 
+use base64::Engine as _;
 use serde_json::{Value, json};
 
 /// What `resources/read` sends for one resource: text of a MIME type, or bytes of a MIME type,
@@ -47,18 +48,5 @@ pub fn image_result(data: &[u8], mime: &str, text: impl Into<String>) -> Value {
 
 /// Standard base64 with padding (RFC 4648), as MCP image content carries it.
 pub fn base64(data: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b = [chunk.first().copied().unwrap_or(0), chunk.get(1).copied().unwrap_or(0), chunk.get(2).copied().unwrap_or(0)];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        for (i, shift) in [18u32, 12, 6, 0].into_iter().enumerate() {
-            if i <= chunk.len() {
-                out.push(char::from(T[((n >> shift) & 63) as usize]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
+    ::base64::engine::general_purpose::STANDARD.encode(data)
 }

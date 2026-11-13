@@ -454,6 +454,9 @@ mod tests {
             resource[key] = value;
             assert!(serde_json::from_value::<HdrResources>(json!({(id.clone()):resource})).is_err(), "{key}");
         }
+        // One payload, one text: the bytes are hashed, so spare bits in the last digit are refused.
+        assert_eq!(crate::render_resources::decode_base64("AA==", 1).unwrap(), [0]);
+        assert!(crate::render_resources::decode_base64("AB==", 1).is_err());
         assert!(serde_json::from_value::<HdrResources>(json!({("0".repeat(64)):valid})).unwrap_err().to_string().contains("hash mismatch"));
         let duplicate = format!("{{\"{id}\":{valid},\"{id}\":{valid}}}");
         assert!(serde_json::from_str::<HdrResources>(&duplicate).unwrap_err().to_string().contains("duplicate"));

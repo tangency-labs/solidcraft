@@ -2,6 +2,8 @@
 
 use std::{collections::BTreeMap, fmt};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Serialize, de::DeserializeSeed, ser::SerializeStruct};
 use sha2::{Digest, Sha256};
 pub use solidcraft_render::lighting::MAX_HDR_BYTES;
@@ -262,51 +264,19 @@ pub fn encode_hdr_base64(bytes: &[u8]) -> Result<String> {
     if bytes.is_empty() || bytes.len() > MAX_HDR_BYTES {
         return Err(invalid("HDR source must contain at most 16 MiB"));
     }
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut encoded = String::new();
     encoded.try_reserve_exact(bytes.len().div_ceil(3) * 4).map_err(|_| invalid("could not reserve HDR base64"))?;
-    for triple in bytes.chunks(3) {
-        let n = triple.iter().fold(0u32, |n, byte| (n << 8) | u32::from(*byte)) << ((3 - triple.len()) * 8);
-        for i in 0..4 {
-            if i <= triple.len() {
-                let index = ((n >> (18 - i * 6)) & 63) as usize;
-                let byte = ALPHABET.get(index).copied().ok_or_else(|| invalid("invalid base64 digit"))?;
-                encoded.push(char::from(byte));
-            } else {
-                encoded.push('=');
-            }
-        }
-    }
+    STANDARD.encode_string(bytes, &mut encoded);
     Ok(encoded)
 }
 
+/// Canonical base64 only (padding as needed, no spare bits, no spaces): the bytes are hashed, so
+/// one payload has one text. The length and the cap are checked before anything is reserved.
 pub(crate) fn decode_base64(value: &str, maximum: usize) -> Result<Vec<u8>> {
-    let length = base64_length(value, maximum)?;
-    let padding = if value.ends_with("==") { 2 } else { usize::from(value.ends_with('=')) };
+    base64_length(value, maximum)?;
     let mut bytes = Vec::new();
-    bytes.try_reserve_exact(length).map_err(|_| invalid("could not reserve embedded HDR bytes"))?;
-    for (i, group) in value.as_bytes().as_chunks::<4>().0.iter().enumerate() {
-        let last = (i + 1) * 4 == value.len();
-        let mut n = 0u32;
-        for (j, byte) in group.iter().copied().enumerate() {
-            let digit = match byte {
-                b'A'..=b'Z' => byte - b'A',
-                b'a'..=b'z' => byte - b'a' + 26,
-                b'0'..=b'9' => byte - b'0' + 52,
-                b'+' => 62,
-                b'/' => 63,
-                b'=' if last && j >= 4 - padding => 0,
-                _ => return Err(invalid("noncanonical HDR base64")),
-            };
-            n = (n << 6) | u32::from(digit);
-        }
-        if last && ((padding == 2 && n & 0xffff != 0) || (padding == 1 && n & 0xff != 0)) {
-            return Err(invalid("noncanonical HDR base64 padding bits"));
-        }
-        for offset in 0..if last { 3 - padding } else { 3 } {
-            bytes.push(((n >> (16 - offset * 8)) & 255) as u8);
-        }
-    }
+    bytes.try_reserve_exact(base64::decoded_len_estimate(value.len())).map_err(|_| invalid("could not reserve embedded HDR bytes"))?;
+    STANDARD.decode_vec(value, &mut bytes).map_err(|_| invalid("noncanonical HDR base64"))?;
     Ok(bytes)
 }
 

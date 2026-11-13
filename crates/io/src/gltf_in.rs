@@ -337,7 +337,7 @@ impl Buffers<'_, '_> {
         }
         let data = if let Some(rest) = uri.strip_prefix("data:") {
             let (_, payload) = rest.split_once(";base64,").ok_or("an embedded buffer that isn't base64")?;
-            base64(payload).ok_or("an embedded buffer with bad base64")?
+            data_uri_base64(payload).ok_or("an embedded buffer with bad base64")?
         } else {
             let path = relative_path(uri)?;
             let data = (self.load)(&path).map_err(|e| format!("buffer file `{path}`: {e}"))?;
@@ -385,32 +385,15 @@ fn relative_path(uri: &str) -> std::result::Result<String, String> {
     Ok(path)
 }
 
-/// Standard base64 (padding optional).
-fn base64(s: &str) -> Option<Vec<u8>> {
-    let value = |c: u8| match c {
-        b'A'..=b'Z' => Some(c - b'A'),
-        b'a'..=b'z' => Some(c - b'a' + 26),
-        b'0'..=b'9' => Some(c - b'0' + 52),
-        b'+' | b'-' => Some(62),
-        b'/' | b'_' => Some(63),
-        _ => None,
-    };
-    let s = s.trim_end_matches('=').as_bytes();
-    let mut out = Vec::with_capacity(s.len() / 4 * 3 + 3);
-    for chunk in s.chunks(4) {
-        let mut n = 0u32;
-        for (k, c) in chunk.iter().enumerate() {
-            n |= u32::from(value(*c)?) << (18 - 6 * k);
-        }
-        let bytes = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
-        match chunk.len() {
-            4 => out.extend_from_slice(&bytes),
-            3 => out.extend_from_slice(&bytes[..2]),
-            2 => out.push(bytes[0]),
-            _ => return None,
-        }
+/// The bytes of a data URI's base64, read as exporters write it. RFC 2397 means the standard
+/// alphabet, but some write the URL-safe `-` and `_`, or more padding than needed: files that
+/// opened before keep opening. The rest is doc's reader (spaces, missing padding, spare bits).
+fn data_uri_base64(payload: &str) -> Option<Vec<u8>> {
+    let payload = payload.trim_end_matches('=');
+    if payload.contains(['-', '_']) {
+        return solidcraft_doc::canvas::base64_decode(&payload.replace('-', "+").replace('_', "/"));
     }
-    Some(out)
+    solidcraft_doc::canvas::base64_decode(payload)
 }
 
 /// Uniform scale.

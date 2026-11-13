@@ -93,6 +93,9 @@ ed25519-dalek = { version = "2.1", default-features = false, features = ["std", 
 pgp = { version = "=0.21.1", default-features = false, features = ["wasm"] }
 moxcms = { version = "0.8.1", default-features = false, features = ["extended_range"] }
 semver = "1"
+# Base64 (RFC 4648) for every encoder and decoder: canvases, render resources, glTF data URIs, MCP
+# and agent chat pictures (MIT OR Apache-2.0, pure Rust; already in the tree through cadmpeg and ureq).
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 
 # constrained Delaunay + Ruppert refinement for trimmed faces (MIT OR Apache-2.0).
 spade = { version = "2.15", default-features = false, features = ["std"] }

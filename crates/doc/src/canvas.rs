@@ -1,6 +1,9 @@
 //! Canvases: reference images placed on a plane (Insert Canvas), kept in the design.
 //! The image bytes travel inside the design file (base64), so it reopens without the original.
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
@@ -150,44 +153,28 @@ pub fn image_info(b: &[u8]) -> Option<(&'static str, [u32; 2])> {
     None
 }
 
-const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+/// Base64 as text from outside writes it (RFC 4648's standard alphabet): the padding may be left
+/// out, and spare bits in the last digit are let pass.
+const LENIENT: GeneralPurpose = GeneralPurpose::new(
+    &base64::alphabet::STANDARD,
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent).with_decode_allow_trailing_bits(true),
+);
 
+/// Standard base64 with padding (RFC 4648), as designs, plugin data and replies carry bytes.
 pub fn base64_encode(b: &[u8]) -> String {
-    let mut out = String::with_capacity(b.len().div_ceil(3) * 4);
-    for c in b.chunks(3) {
-        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
-        for k in 0..4 {
-            if k <= c.len() {
-                out.push(char::from(B64[((n >> (18 - 6 * k)) & 63) as usize]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
+    STANDARD.encode(b)
 }
 
+/// The bytes of base64 text, read as agents and other programs write it: line breaks and spaces
+/// anywhere (MIME wraps lines), padding or none, spare bits in the last digit. `=` only at the end
+/// and never more than it needs, the standard alphabet only. No size cap: callers cap the text.
 pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
-    let mut out = Vec::with_capacity(s.len() / 4 * 3);
-    let (mut acc, mut bits) = (0u32, 0u32);
-    for ch in s.bytes() {
-        let v = match ch {
-            b'A'..=b'Z' => ch - b'A',
-            b'a'..=b'z' => ch - b'a' + 26,
-            b'0'..=b'9' => ch - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            b'=' | b'\n' | b'\r' | b' ' => continue,
-            _ => return None,
-        };
-        acc = (acc << 6) | u32::from(v);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(((acc >> bits) & 0xFF) as u8);
-        }
+    let spacing = |c: u8| matches!(c, b'\n' | b'\r' | b' ');
+    if s.bytes().any(spacing) {
+        let packed: Vec<u8> = s.bytes().filter(|c| !spacing(*c)).collect();
+        return LENIENT.decode(packed).ok();
     }
-    Some(out)
+    LENIENT.decode(s).ok()
 }
 
 #[cfg(test)]
@@ -201,6 +188,21 @@ mod tests {
             assert_eq!(base64_decode(&base64_encode(&b)).unwrap(), b);
         }
         assert_eq!(base64_encode(b"Man"), "TWFu");
+        // RFC 4648 §10.
+        for (plain, coded) in
+            [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")]
+        {
+            assert_eq!(base64_encode(plain.as_bytes()), coded);
+            assert_eq!(base64_decode(coded).as_deref(), Some(plain.as_bytes()), "{coded}");
+        }
+        // Text from outside: line breaks and spaces, padding left out, spare bits in the last digit.
+        for (coded, plain) in [("TWFu\nTWFu", "ManMan"), ("TW Fu\r\n", "Man"), ("TWE", "Ma"), ("TWE=", "Ma"), ("TR", "M")] {
+            assert_eq!(base64_decode(coded).as_deref(), Some(plain.as_bytes()), "{coded:?}");
+        }
+        // Padding only at the end and never too much, no leftover digit, the standard alphabet only.
+        for coded in ["TW=Fu", "TWFuT", "TWE==", "*", "TW-u", "TW_u"] {
+            assert_eq!(base64_decode(coded), None, "{coded:?}");
+        }
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend(640u32.to_be_bytes());
         png.extend(480u32.to_be_bytes());
