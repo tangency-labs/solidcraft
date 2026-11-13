@@ -339,7 +339,8 @@ pub fn load_preferences(app: &mut crate::SolveApp, saved: &Value) {
     }
     let record = saved.get(PREFERENCES_KEY).cloned();
     if preferences_enabled(app) {
-        if restore_preferences(app, record).is_err() {
+        let production = app.panel_runtime.as_ref().is_some_and(|runtime| runtime.production.is_some());
+        if (record.is_some() || !production) && restore_preferences(app, record).is_err() {
             report_notice(app);
         }
         return;
@@ -449,7 +450,7 @@ pub fn restore_preferences(app: &mut crate::SolveApp, value: Option<Value>) -> P
             None => integration.preferences.as_ref().ok_or_else(|| error(Rule::Lifecycle, "panel preferences disappeared"))?.initial.clone(),
         };
         integration.restore_preference_record(&app.session, record)?;
-        if value.is_none() {
+        if value.is_none() && integration.production.is_none() {
             integration.preferences = None;
         }
     }

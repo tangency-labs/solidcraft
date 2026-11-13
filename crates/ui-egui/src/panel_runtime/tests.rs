@@ -7069,6 +7069,7 @@ fn boundary_app() -> (crate::scenario::Harness, FixtureProbe, BoundaryProbe) {
             )
             .unwrap();
     }
+    h.app.disable_panel_runtime().unwrap();
     h.app.enable_panel_runtime(runtime, Box::new(BoundaryServices::new(trace.clone()))).unwrap();
     prepare_app_commands(&mut h.app);
     h.app.dispatch_panel_layout(transaction(vec![fixture_open("fixture.editor", "editor", "editor-section", Zone::Left, 0).unwrap()])).unwrap();
@@ -13143,7 +13144,9 @@ fn production_content_harness(combined_history: bool, assistant: bool) -> crate:
         h.app.run("sketch.create", serde_json::json!({"plane":"XY","name":name})).unwrap();
         h.app.run("sketch.finish", serde_json::json!({})).unwrap();
     }
-    h.app.preferences.shared_panel_layout = true;
+    h.app.disable_panel_runtime().unwrap();
+    // These fixtures seed first-run settings, without restoring the harness's earlier layout.
+    h.app.panel_layout_preferences = Default::default();
     super::production::enable_production(&mut h.app).unwrap();
     h.frames(3);
     h
@@ -13277,33 +13280,28 @@ fn production_browser_and_assistant_refuse_bottom_without_changing_live_content(
 }
 
 #[test]
-fn production_setting_cancel_preserves_classic_and_apply_enables_the_real_host() {
+fn production_host_ignores_the_retired_classic_switch() {
     let mut h = crate::scenario::Harness::new();
+    let mut saved: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+    saved["preferences"]["shared_panel_layout"] = serde_json::json!(false);
+    h.app.disable_panel_runtime().unwrap();
+    h.app.load_prefs(&saved.to_string());
     h.app.home.open = false;
-    assert!(!h.app.preferences.shared_panel_layout);
-    assert!(h.app.panel_runtime().is_none());
-    crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Layout"})).unwrap();
-    h.app.preferences.shared_panel_layout = true;
-    h.frames(2);
-    assert!(h.app.panel_runtime().is_none(), "an unapplied checkbox cannot replace Classic during the Preferences preview");
-    crate::prefs::control(&mut h.app, &serde_json::json!({"button":"cancel"})).unwrap();
-    h.frames(2);
-    assert!(!h.app.preferences.shared_panel_layout);
-    assert!(h.app.panel_runtime().is_none());
-    crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Layout"})).unwrap();
-    h.app.preferences.shared_panel_layout = true;
-    crate::prefs::control(&mut h.app, &serde_json::json!({"button":"apply"})).unwrap();
-    assert!(h.app.prefs_window.shell.open, "Apply keeps Preferences open");
-    assert!(h.app.panel_runtime().is_some(), "Apply accepts the production-host preference");
-    h.app.preferences.shared_panel_layout = false;
-    crate::prefs::control(&mut h.app, &serde_json::json!({"button":"cancel"})).unwrap();
     h.frames(3);
-    assert!(h.app.preferences.shared_panel_layout, "Cancel restores the last applied setting");
     assert!(h.app.universal_panel_frame().is_some());
-    let saved = h.app.prefs();
-    let mut restored = crate::SolveApp::new(Default::default(), Default::default());
-    restored.load_prefs(&saved);
-    assert!(restored.preferences.shared_panel_layout, "the opt-in setting survives the existing preference envelope");
+    assert!(!h.app.prefs().contains("shared_panel_layout"));
+}
+
+#[test]
+fn production_preferences_without_a_panel_record_preserve_the_live_catalogue() {
+    let mut h = production_content_harness(false, false);
+    let mut saved: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+    saved.as_object_mut().unwrap().remove(super::preferences::PREFERENCES_KEY);
+    let current = super::preferences::preferences_value(&h.app).unwrap();
+    h.app.load_prefs(&saved.to_string());
+    h.frames(2);
+    assert_eq!(super::preferences::preferences_value(&h.app).unwrap(), current);
+    assert!(super::preferences::preferences_enabled(&h.app));
 }
 
 #[test]
@@ -13446,7 +13444,7 @@ fn production_render_panels_reopen_independently_with_existing_controls() {
     assert!(!presented(&h.app, "render-library"));
     assert!(presented(&h.app, "render-inspector"));
     assert!(presented(&h.app, "render-shots"));
-    assert!(super::production::reveal_render_library(&mut h.app));
+    h.app.render_workspace.view.library_focus_pending = true;
     h.frames(3);
     assert!(presented(&h.app, "render-library"));
     assert!(!presented(&h.app, "render-browser"));
@@ -13528,13 +13526,54 @@ fn production_bottom_history_has_fixed_height_without_collapse_or_height_changes
 }
 
 #[test]
+fn production_history_play_preference_updates_the_visible_shared_controls() {
+    let mut h = production_content_harness(false, false);
+    let play_is_visible = |app: &crate::SolveApp| {
+        app.universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .any(|section| section.instance == id("history") && section.actions.iter().any(|(action, _)| action.0 == "play"))
+    };
+    assert!(play_is_visible(&h.app));
+    h.app.preferences.history_play_button = false;
+    h.frames(2);
+    assert!(!play_is_visible(&h.app));
+    h.app.preferences.history_play_button = true;
+    h.frames(2);
+    assert!(play_is_visible(&h.app));
+}
+
+#[test]
+fn production_history_compatibility_command_updates_the_shared_layout() {
+    let mut h = production_content_harness(false, false);
+    h.app.run("view.history_layout", serde_json::json!({"dock":"left","width":340.0,"collapsed":true})).unwrap();
+    let layout = h.app.panel_runtime().unwrap().layout().layout();
+    let history = layout.containing(&id("history")).unwrap();
+    assert_eq!(history.location.zone(), Zone::Left);
+    assert!(history.collapsed);
+    assert_eq!(layout.column(history.column.as_ref().unwrap()).unwrap().width, 340.0);
+    let browser = layout.containing(&id("browser")).unwrap();
+    assert_ne!(history.column, browser.column);
+    assert_eq!(layout.column(browser.column.as_ref().unwrap()).unwrap().width, crate::prefs::DEFAULT_BROWSER_WIDTH);
+
+    h.app.run("view.history_layout", serde_json::json!({"dock":"bottom"})).unwrap();
+    let history = h.app.panel_runtime().unwrap().layout().layout().containing(&id("history")).unwrap();
+    assert_eq!(history.location.zone(), Zone::Bottom);
+    assert!(!history.collapsed);
+}
+
+#[test]
 fn production_fixed_bottom_history_ignores_a_legacy_collapsed_preference() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     h.app.ui.show_timeline = true;
     h.app.preferences.timeline_left = false;
     h.app.preferences.timeline_collapsed = true;
-    h.app.preferences.shared_panel_layout = true;
+    h.app.disable_panel_runtime().unwrap();
+    // These fixtures seed first-run settings, without restoring the harness's earlier layout.
+    h.app.panel_layout_preferences = Default::default();
     super::production::enable_production(&mut h.app).unwrap();
     h.frames(6);
     let section = h.app.panel_runtime().unwrap().layout().layout().containing(&id("history")).unwrap();
