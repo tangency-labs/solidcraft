@@ -1397,6 +1397,10 @@ preference_settings! {
     /// shows: one component's while it shows one (#11430). Off: they step through every feature of
     /// the design, as they did before.
     history_steps_component: bool = true, PAGE_LAYOUT;
+    /// With "History steps by component" on, Last (and Forward onto the last slot) stop just after
+    /// the active component's last feature, as they did before #15974, leaving later features of
+    /// other components rolled back. Off, the default: they go to the end of the design.
+    history_last_stops_at_component: bool = false, PAGE_LAYOUT;
     /// On, two or more joints show as one button with their count in the History, and a click
     /// shows each one (#8884). Off, the default, shows each joint as the History always has.
     history_group_joints: bool = false, PAGE_LAYOUT;
@@ -6732,6 +6736,7 @@ mod tests {
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),
+            ("history_last_stops_at_component", json!(true), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
             ("color_vision", json!("protan"), PAGE_APPEARANCE),

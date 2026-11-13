@@ -456,6 +456,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.history_steps_component,
                     "history_steps_component",
                 );
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_last_stops_at_component"),
+                    app.tr("prefs.history_last_stops_at_component_note"),
+                    &mut app.preferences.history_last_stops_at_component,
+                    "history_last_stops_at_component",
+                );
             });
         });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {

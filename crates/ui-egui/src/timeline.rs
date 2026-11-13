@@ -60,8 +60,9 @@ fn step_position(app: &SolveApp, marker: usize, control: crate::ui_kit::HistoryT
     let backwards = matches!(control, HistoryTransport::First | HistoryTransport::Back);
     // Past the last feature shown, every later feature belongs to components the bar leaves out:
     // Forward and Last go to the end of the design, so none of them stays rolled back with nothing
-    // in the bar saying so (#15974).
-    let position = if !backwards && slot == len { n } else { view.index(slot) };
+    // in the bar saying so (#15974), unless the preference keeps the old stop.
+    let to_end = !backwards && slot == len && !app.preferences.history_last_stops_at_component;
+    let position = if to_end { n } else { view.index(slot) };
     // From a marker outside the shown features, the nearest shown slot can lie the other way:
     // First and Back never add features, and Forward and Last never roll any back.
     if (backwards && position > marker) || (!backwards && position < marker) { None } else { Some(position) }
@@ -2330,6 +2331,13 @@ mod tests {
             h.settle();
             assert_eq!(h.app.session.doc.marker, position, "{control}");
         }
+        // The preference keeps the old stop, just after A's last feature.
+        h.app.preferences.history_last_stops_at_component = true;
+        for (control, position) in [("back", Some(0)), ("last", Some(1)), ("back", Some(0)), ("forward", Some(1))] {
+            h.step(&json!({"click": {"handle": format!("history:{control}")}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.marker, position, "old stop: {control}");
+        }
     }
 
     /// A component with no features of its own lists nothing, so the controls leave the marker
@@ -2423,6 +2431,21 @@ mod tests {
             h.settle();
             assert_eq!(h.app.session.doc.marker, position, "{control}");
         }
+    }
+
+    /// Preferences > Layout shows the preference that keeps Last's old stop (#15974), off by
+    /// default; a click turns it on and off.
+    #[test]
+    fn the_layout_page_has_a_checkbox_for_the_old_stop_of_last() {
+        let mut h = Harness::new();
+        h.call("ui.prefs", json!({"language": "en", "open": "Layout"}));
+        let value = |h: &mut Harness| h.call("ui.prefs", json!({}))["result"]["history_last_stops_at_component"].clone();
+        assert_eq!(value(&mut h), false, "off by default");
+        crate::prefs::reveal_preference(&mut h, "prefs:history_last_stops_at_component");
+        h.step(&json!({"click": {"handle": "prefs:history_last_stops_at_component"}})).unwrap();
+        assert_eq!(value(&mut h), true, "a click turns it on");
+        h.step(&json!({"click": {"handle": "prefs:history_last_stops_at_component"}})).unwrap();
+        assert_eq!(value(&mut h), false, "a second click turns it off again");
     }
 
     /// Preferences > Layout shows "History steps by component" as a
