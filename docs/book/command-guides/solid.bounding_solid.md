@@ -11,7 +11,7 @@ Put a box around a part: the size of the raw stock it's cut from. Margin adds cl
 | Choice in the dialog | Meaning | Example or reason to choose it |
 | --- | --- | --- |
 | Bodies (all if none) | The bodies to put the box around. A body selected when you start is picked for you. Clear it to use every body in the design. | Pick one part when the design has several. |
-| Margin | Stock added on every side of the box. The overall size grows by twice the Margin in each direction. It starts at 2 mm; set 0 for the part's exact size. | 0.0625 in on each side to leave room to face and square up a sawn blank. |
+| Margin | Stock added on every side of the box. The overall size grows by twice the Margin in each direction. It starts at 2 in the design's unit; set 0 for the part's exact size. | 0.0625 in on each side to leave room to face and square up a sawn blank. |
 
 #### Try it: size the stock for a plate
 
