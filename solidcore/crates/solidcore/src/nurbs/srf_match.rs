@@ -198,12 +198,14 @@ pub fn match_boundary(
     // G1: the row behind it so the boundary leaves into the target's tangent plane
     if k >= 1 {
         let c1 = p as f64 / span(&u, p + 1, 1)?;
-        let mut across = Vec::with_capacity(stations.len());
-        for st in &stations {
-            let d = derivs(&s, u_lo(&u)?, st.g, &v)?;
-            let su = at2(&d, 1, 0)?;
-            across.push((su - st.normal * su.dot(st.normal)) * (1.0 / c1));
-        }
+        let across = stations
+            .iter()
+            .map(|st| -> Result<Vec3> {
+                let d = derivs(&s, u_lo(&u)?, st.g, &v)?;
+                let su = at2(&d, 1, 0)?;
+                Ok((su - st.normal * su.dot(st.normal)) * (1.0 / c1))
+            })
+            .collect::<Result<Vec<Vec3>>>()?;
         let lean = interp(&across, &params, &v, q)?;
         let row1: Vec<Vec3> = zip_with(row_of(&new, 0)?, &lean, |a, b| a + b)?;
         set_moved(&mut new, &old, 1, row1)?;
@@ -216,22 +218,27 @@ pub fn match_boundary(
         carry_into(&mut new, &old, 2)?;
         let trial = with_rows(&s, &new)?;
         let c2 = (p * (p - 1)) as f64 / (span(&u, p + 1, 2)? * span(&u, p + 2, 2)?);
-        let mut lift = Vec::with_capacity(stations.len());
-        for st in &stations {
-            let d = derivs(&trial, u_lo(&u)?, st.g, &v)?;
-            let (su, suu) = (at2(&d, 1, 0)?, at2(&d, 2, 0)?);
-            let want = st.normal_curvature(su)? * su.length_squared();
-            lift.push(Vec3::new((want - suu.dot(st.normal)) / c2, 0.0, 0.0));
-        }
+        let lift = stations
+            .iter()
+            .map(|st| -> Result<Vec3> {
+                let d = derivs(&trial, u_lo(&u)?, st.g, &v)?;
+                let (su, suu) = (at2(&d, 1, 0)?, at2(&d, 2, 0)?);
+                let want = st.normal_curvature(su)? * su.length_squared();
+                Ok(Vec3::new((want - suu.dot(st.normal)) / c2, 0.0, 0.0))
+            })
+            .collect::<Result<Vec<Vec3>>>()?;
         let lift = interp(&lift, &params, &v, q)?;
         let behind = row_of(&new, 2)?.clone();
-        let mut row2 = Vec::with_capacity(behind.len());
-        for (j, b) in behind.iter().enumerate() {
-            let (Some(st), Some(l)) = (stations.get(j), lift.get(j)) else {
-                return Err(invalid("a column without a station"));
-            };
-            row2.push(*b + st.normal * l.x);
-        }
+        let row2 = behind
+            .iter()
+            .enumerate()
+            .map(|(j, b)| -> Result<Vec3> {
+                let (Some(st), Some(l)) = (stations.get(j), lift.get(j)) else {
+                    return Err(invalid("a column without a station"));
+                };
+                Ok(*b + st.normal * l.x)
+            })
+            .collect::<Result<Vec<Vec3>>>()?;
         set_moved(&mut new, &old, 2, row2)?;
     } else {
         spread(&mut new, &old, 2, how)?;
@@ -551,16 +558,17 @@ fn stations(s: &Surface, edge: &TargetEdge<'_>, reversed: bool) -> Result<Vec<St
     let (_, q) = s.degrees();
     let v = s.v_knots();
     let r = s.parameter_bounds();
-    let mut out = Vec::with_capacity(s.m() + 1);
-    for j in 0..=s.m() {
-        let g = if q == 0 {
-            v.get(j).copied().unwrap_or(r.vb)
-        } else {
-            let sum: f64 = v.iter().skip(j + 1).take(q).sum();
-            sum / q as f64
-        };
-        out.push(edge.at(edge.mapped(g, r.vb, r.vt, reversed), g)?);
-    }
+    let out = (0..=s.m())
+        .map(|j| {
+            let g = if q == 0 {
+                v.get(j).copied().unwrap_or(r.vb)
+            } else {
+                let sum: f64 = v.iter().skip(j + 1).take(q).sum();
+                sum / q as f64
+            };
+            edge.at(edge.mapped(g, r.vb, r.vt, reversed), g)
+        })
+        .collect::<Result<Vec<_>>>()?;
     let Some(first) = out.first().map(|st| st.point) else {
         return Err(invalid("a boundary without stations"));
     };
