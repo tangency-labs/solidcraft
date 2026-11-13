@@ -1960,12 +1960,29 @@ fn cam_profile(s: &Session, p: &Value, cmd: &str) -> Result<CamProfile> {
         .iter()
         .map(|q| {
             let near = |b: &&solidcraft_doc::ModelBody| {
-                b.mesh()
-                    .edges
-                    .iter()
-                    .flat_map(|e| e.windows(2))
-                    .filter_map(|w| Some(q.dist_to_segment(*w.first()?, *w.get(1)?)))
-                    .fold(f64::MAX, f64::min)
+                if b.body.is_mesh() {
+                    return f64::MAX;
+                }
+                let record = b.body.record();
+                let mut min_d = f64::MAX;
+                for e in &record.edges {
+                    let Ok(c) = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()) else { continue };
+                    let [t0, t1] = e.interval;
+                    let n = match &e.curve {
+                        solidcore_record::brep::Curve::Line { .. } => 1,
+                        _ => 16,
+                    };
+                    let step = (t1 - t0) / (n as f64);
+                    let mut prev = c.point(t0);
+                    for i in 1..=n {
+                        let curr = c.point(t0 + step * (i as f64));
+                        if let (Some(p0), Some(p1)) = (prev, curr) {
+                            min_d = min_d.min(q.dist_to_segment(p0, p1));
+                        }
+                        prev = curr;
+                    }
+                }
+                min_d
             };
             bodies
                 .iter()
