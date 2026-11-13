@@ -397,6 +397,167 @@ fn a_picked_face_with_no_corner_is_skipped() {
 }
 
 #[test]
+fn an_edge_between_two_faces_of_one_plane_is_smooth() {
+    // A 20 mm cube imprinted across x = 10: its top, bottom, front and back are each split
+    // there, by an edge between two faces of one plane.
+    crate::session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied())
+        .unwrap();
+    let body = crate::boolean::imprint(
+        make_box([0.0; 3], [20.0, 20.0, 20.0]).unwrap(),
+        make_box([10.0, -10.0, -10.0], [40.0, 40.0, 40.0]).unwrap(),
+    )
+    .unwrap()
+    .0;
+    let r = record(&body);
+    let across: Vec<usize> = (0..r.edges.len())
+        .filter(|&i| {
+            let e = &r.edges[i];
+            matches!(e.curve, Curve::Line { .. })
+                && e.vertices
+                    .iter()
+                    .all(|v| (point(&r, *v)[0] - 10.0).abs() < 1e-9)
+        })
+        .collect();
+    assert_eq!(across.len(), 4);
+    let p = plan(&r, &across, &[], &options(Style::Normal)).unwrap();
+    assert_eq!(p.tools, []);
+    assert_eq!(p.skipped.len(), 4);
+    assert!(
+        p.skipped
+            .iter()
+            .all(|s| s.why == Why::Smooth && s.edge.is_some()),
+        "{:?}",
+        p.skipped
+    );
+}
+
+#[test]
+fn an_edge_not_between_two_faces_is_skipped() {
+    // A pocket corner, relieved as the record is; then its uses altered.
+    let r = record(&pocketed());
+    let e = vertical_edges(&r, &[[10.0, 8.0]])[0];
+    assert_eq!(
+        plan(&r, &[e], &[], &options(Style::Normal))
+            .unwrap()
+            .tools
+            .len(),
+        1
+    );
+    let why = |b: &Brep| {
+        let p = plan(b, &[e], &[], &options(Style::Normal)).unwrap();
+        assert_eq!(p.tools, []);
+        assert_eq!(p.skipped.len(), 1, "{:?}", p.skipped);
+        (p.skipped[0].edge, p.skipped[0].why)
+    };
+    // A sheet's edge: one face uses it.
+    let mut sheet = r.clone();
+    sheet.edges[e].uses.truncate(1);
+    assert_eq!(why(&sheet), (Some(e), Why::NotTwoFaces));
+    // Three uses of it.
+    let mut three = r.clone();
+    let u = three.edges[e].uses[0];
+    three.edges[e].uses.push(u);
+    assert_eq!(why(&three), (Some(e), Why::NotTwoFaces));
+    // A seam: one face uses it twice.
+    let mut seam = r;
+    seam.edges[e].uses[1].face = seam.edges[e].uses[0].face;
+    assert_eq!(why(&seam), (Some(e), Why::NotTwoFaces));
+}
+
+/// The four corners of a 20 x 20 pocket in a 40 x 40 x 10 plate, counter-clockwise about +z.
+const SQUARE: [[f64; 2]; 4] = [[10.0, 10.0], [30.0, 10.0], [30.0, 30.0], [10.0, 30.0]];
+
+#[test]
+fn a_t_bone_bites_every_corner_of_a_square_pocket_the_same_way_round() {
+    // The walls at each corner are equally long by design.
+    let body = cut(
+        make_box([0.0; 3], [40.0, 40.0, 10.0]).unwrap(),
+        vec![make_box([10.0, 10.0, 4.0], [20.0, 20.0, 7.0]).unwrap()],
+    );
+    let r = record(&body);
+    let edges = vertical_edges(&r, &SQUARE);
+    assert_eq!(edges.len(), 4);
+    let p = plan(
+        &r,
+        &edges,
+        &[],
+        &options(Style::TBone { side: Side::Longer }),
+    )
+    .unwrap();
+    assert!(p.skipped.is_empty(), "{:?}", p.skipped);
+    assert_eq!(p.tools.len(), 4);
+    // Each relief's centre from its corner: R along one of the walls.
+    let offsets: Vec<[f64; 2]> = SQUARE
+        .iter()
+        .map(|c| {
+            let t = p
+                .tools
+                .iter()
+                .find(|t| (t.at[0] - c[0]).abs() < 1e-9 && (t.at[1] - c[1]).abs() < 1e-9)
+                .unwrap();
+            let o = [t.cylinder.base[0] - c[0], t.cylinder.base[1] - c[1]];
+            let along_x = (o[0].abs() - R).abs() < 1e-9 && o[1].abs() < 1e-9;
+            let along_y = o[0].abs() < 1e-9 && (o[1].abs() - R).abs() < 1e-9;
+            assert!(along_x || along_y, "{t:?}");
+            o
+        })
+        .collect();
+    // A quarter turn about the pocket's middle takes each corner to the next; it takes each
+    // relief to the next corner's: every corner bites the same way round.
+    for (o, next) in offsets.iter().zip(offsets.iter().cycle().skip(1)) {
+        assert!(
+            (next[0] + o[1]).abs() < 1e-9 && (next[1] - o[0]).abs() < 1e-9,
+            "{offsets:?}"
+        );
+    }
+}
+
+#[test]
+fn a_relief_runs_past_a_sloped_open_end_by_more_than_the_radius() {
+    // A 40 x 30 x 30 block whose top slopes, z = 2 + 0.75 y (its outward normal
+    // (0, -0.6, 0.8): tan β = 0.75 from the z axis), with a 20 x 6 slot through it.
+    let slope = make_box([-10.0, -30.0, 0.0], [60.0, 90.0, 60.0]).unwrap();
+    // A turn about x taking z to (0, -0.6, 0.8), then up 2.
+    slope
+        .transform(&[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.8, 0.6, 0.0],
+            [0.0, -0.6, 0.8, 0.0],
+            [0.0, 0.0, 2.0, 1.0],
+        ])
+        .unwrap();
+    let body = cut(
+        make_box([0.0; 3], [40.0, 30.0, 30.0]).unwrap(),
+        vec![
+            slope,
+            make_box([10.0, 12.0, -1.0], [20.0, 6.0, 40.0]).unwrap(),
+        ],
+    );
+    let r = record(&body);
+    let corners = [[10.0, 12.0], [30.0, 12.0], [30.0, 18.0], [10.0, 18.0]];
+    let edges = vertical_edges(&r, &corners);
+    assert_eq!(edges.len(), 4);
+    let p = plan(&r, &edges, &[], &options(Style::Normal)).unwrap();
+    assert!(p.skipped.is_empty(), "{:?}", p.skipped);
+    assert_eq!(p.tools.len(), 4);
+    for t in &p.tools {
+        let c = t.cylinder;
+        let (lo, hi) = if c.axis[2] > 0.0 {
+            (c.base[2], c.base[2] + c.height)
+        } else {
+            (c.base[2] - c.height, c.base[2])
+        };
+        // The edge runs from the flat bottom (z = 0) to the sloped top, at twice its middle's
+        // height. Past the bottom by the radius; past the top by r + 2r tan β, the reach of the
+        // relief's section (2r from the edge line) times the slope, plus r.
+        let top = 2.0 * t.at[2];
+        assert!((lo + R).abs() < 1e-9, "{c:?}");
+        assert!((hi - top - 2.5 * R).abs() < 1e-9, "{t:?}");
+        assert!(hi - top > R, "{t:?}");
+    }
+}
+
+#[test]
 fn hostile_plans_are_refused() {
     let r = record(&pocketed());
     assert_eq!(
