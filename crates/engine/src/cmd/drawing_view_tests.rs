@@ -2097,70 +2097,70 @@ fn a_projected_view_draws_its_parents_exploded_view_until_it_sets_its_own() {
     assert!((width(&mut s, above) - 70.0).abs() < 1e-6, "null follows the parent again");
 }
 
-/// Dimensions, balloons and notes on a view's model read the design's placements, so on an exploded
-/// view they would measure the parts assembled: they are refused there until they read what the
-/// view draws. An edit that would explode a view holding one, itself or through a view that follows
-/// it, is refused and changes nothing; one whose follower draws assembled goes ahead. A note on the
-/// view itself is no hindrance, unless a branch points at its model; on an exploded view, a note's
-/// branches can't be edited.
+/// Whether a dimension's `reply` reads ok, near `want`.
+fn near_value(reply: &Value, want: f64) -> bool {
+    reply["status"] == "ok" && reply["value"].as_f64().is_some_and(|v| (v - want).abs() < 1e-6)
+}
+
+/// Whether `reply` reads ok with its arrow ending on `p`.
+fn ends_near(reply: &Value, p: [f64; 3]) -> bool {
+    let point = reply["point"].as_array().map(|p| p.iter().filter_map(Value::as_f64).collect::<Vec<_>>()).unwrap_or_default();
+    reply["status"] == "ok" && point.len() == 3 && point.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-6)
+}
+
+/// Dimensions, balloons and notes on a view's model read where the view draws its parts (#13048), so a
+/// view holding them can be exploded, itself or through a view that follows it, and they follow it. From
+/// the first cube's left corner to the second's right one reads 40 assembled and 40 + 30 = 70 with the
+/// second moved out; a balloon and a note on the second's bottom front edge end on its middle, (35, 0, 0)
+/// assembled and (65, 0, 0) exploded. New ones go on the exploded view, and a note's branches can be
+/// edited there.
 #[test]
-fn an_exploded_view_refuses_what_would_measure_its_parts_assembled() {
-    let (mut s, view, [first, _], apart) = exploded_pair();
+fn an_exploded_view_takes_what_measures_its_parts_where_it_draws_them() {
+    let (mut s, view, [first, second], apart) = exploded_pair();
     let on_view = |view: u64| ids::encode(view);
-    let unchanged = |s: &mut Session, view: u64, set: Value, says: &str| {
-        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
-        let e = edit_refused(s, view, set);
-        assert!(e.contains(says), "{e}");
-        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
-    };
-    let blocked = "not supported yet: an exploded view with dimensions, balloons or notes on its model";
-
-    run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": {"length": {"edge": first_cubes_edge(first)}}}));
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]}));
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
-    run(&mut s, "drawing.note.add", note);
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    let branched = json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Deburr", "branches": [{"edge": first_cubes_edge(first)}]});
+    let across =
+        json!({"linear": {"a": {"point": [0, 0, 0], "path": [first]}, "b": {"point": [40, 0, 0], "path": [second]}, "direction": "horizontal"}});
+    let edge = json!({"point": [35, 0, 0], "path": [second]});
+    let dimension = run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": across}))["dimension"].clone();
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": edge, "at": [60, 40]}))["balloon"].clone();
+    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": edge}}, "at": [60, 40], "content": "Deburr"});
+    let note = run(&mut s, "drawing.note.add", note)["note"].clone();
+    let branched = json!({"anchor": {"view": on_view(view)}, "at": [60, -40], "content": "Both", "branches": [{"edge": edge}]});
     run(&mut s, "drawing.note.add", branched.clone());
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    run(&mut s, "edit.undo", json!({}));
-    let plain = run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Exploded"}))["note"].clone();
+    assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimension})), 40.0));
+
     edit_view(&mut s, view, json!({"exploded": apart}));
-    assert!((width(&mut s, view) - 70.0).abs() < 1e-6, "a note on the view isn't on its model");
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6);
+    let read = run(&mut s, "drawing.dimension.inspect", json!({"dimension": dimension}));
+    assert!(near_value(&read, 70.0), "{read}");
+    let read = run(&mut s, "drawing.balloon.inspect", json!({"balloon": balloon}));
+    assert!(ends_near(&read, [65.0, 0.0, 0.0]), "{read}");
+    let read = run(&mut s, "drawing.note.inspect", json!({"note": note}));
+    assert!(ends_near(&read, [65.0, 0.0, 0.0]), "{read}");
 
-    // New ones on an exploded view.
-    let e = s
-        .execute("drawing.dimension.add", &json!({"view": on_view(view), "kind": {"length": {"edge": first_cubes_edge(first)}}}))
-        .unwrap_err()
-        .to_string();
-    assert!(e.contains("not supported yet: dimensions on an exploded view"), "{e}");
-    let e =
-        s.execute("drawing.balloon.add", &json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]})).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: balloons on an exploded view"), "{e}");
-    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
-    let e = s.execute("drawing.note.add", &note).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
-    let e = s.execute("drawing.note.add", &branched).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
-    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    // New ones on the exploded view.
+    let length = run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": {"length": {"edge": edge}}}));
+    assert!(near_value(&length, 10.0), "{length}");
+    let added = run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": edge, "at": [-60, 40]}));
+    assert!(ends_near(&added, [65.0, 0.0, 0.0]), "{added}");
+    run(
+        &mut s,
+        "drawing.note.add",
+        json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "A"}),
+    );
+    run(&mut s, "drawing.note.add", branched);
+    let plain = run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_view(view)}, "at": [0, -40], "content": "Exploded"}))["note"].clone();
     let add = json!({"note": plain, "set": {"branches": {"remove": [], "add": [{"edge": first_cubes_edge(first)}]}}});
-    let e = s.execute("drawing.note.edit", &add).unwrap_err().to_string();
-    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
-    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    assert_eq!(run(&mut s, "drawing.note.edit", add)["changed"], json!(["branches"]));
 
-    // Through a follower: its dimension blocks its parent's edit, until it draws assembled itself.
+    // Through a follower: the view above, holding a dimension of its own, follows its parent's explode.
     edit_view(&mut s, view, json!({"exploded": "assembled"}));
     let (_, above) = create(&mut s, PROJECTED, json!({"parent": on_view(view), "side": "above", "place": {"at": [150, 250]}}));
-    run(&mut s, "drawing.dimension.add", json!({"view": on_view(above), "kind": {"length": {"edge": first_cubes_edge(first)}}}));
-    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
-    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    let on_above = run(&mut s, "drawing.dimension.add", json!({"view": on_view(above), "kind": across}))["dimension"].clone();
+    assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": on_above})), 40.0));
     edit_view(&mut s, view, json!({"exploded": apart}));
-    assert!((width(&mut s, view) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 40.0).abs() < 1e-6);
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 70.0).abs() < 1e-6);
+    assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": on_above})), 70.0));
 }
 
 /// A shaded view's pictures are rendered from the design as it places its parts, so an exploded view
@@ -2569,25 +2569,37 @@ fn a_study_holds_only_the_values_it_keys_and_a_closed_loop_moves_the_rest() {
     assert!((angle - want[0].to_degrees()).abs() < 1e-6 && (slide - want[1]).abs() < 1e-6, "drawn {angle}°, {slide} mm; play {want:?}: {pose}");
 }
 
-/// Dimensions on a posed view would measure the design's placement: they are refused there, by the
-/// rule an exploded view follows, and an edit that would pose a view holding one is refused.
+/// Dimensions on a posed view read where it draws its parts (#13048), by the rule an exploded view
+/// follows: a view holding one can be posed, and the dimension follows it, and new ones go on a posed
+/// view. The plate's far top corner to the leaf's free top corner reads 40 with the leaf flat and 18
+/// with it turned up 90° about the hinge line (y 20, z 0): (0, 40, 2) goes to (0, 20 - 2, 20). The
+/// plate's top front edge, which doesn't move, reads 40 in both. A shaded posed view is still refused:
+/// its pictures are rendered from the design's placement.
 #[test]
-fn a_posed_view_refuses_what_would_measure_it_in_the_designs_place() {
+fn a_posed_view_takes_what_measures_it_where_it_draws_it() {
     let (mut s, view, _) = hinge_pair();
     let (_, other) = {
         let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
         create(&mut s, BASE, json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 250]}))
     };
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    let across = |view: u64| {
+        let kind = json!({"linear": {"a": [0, 0, 2], "b": {"point": [0, 40, 2], "path": [leaf]}, "direction": "vertical"}});
+        json!({"view": ids::encode(view), "kind": kind})
+    };
     // The plate's top front edge.
     let edge = |view: u64| json!({"view": ids::encode(view), "kind": {"length": {"edge": {"point": [20, 0, 2], "path": []}}}});
-    run(&mut s, "drawing.dimension.add", edge(other));
-    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
-    let e = edit_refused(&mut s, other, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
-    assert!(e.contains("dimensions, balloons or notes on its model"), "{e}");
-    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    let free = run(&mut s, "drawing.dimension.add", across(other))["dimension"].clone();
+    let front = run(&mut s, "drawing.dimension.add", edge(other))["dimension"].clone();
+    let read = |s: &mut Session, d: &Value| run(s, "drawing.dimension.inspect", json!({"dimension": d}));
+    assert!(near_value(&read(&mut s, &free), 40.0));
+    edit_view(&mut s, other, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    assert!(near_value(&read(&mut s, &free), 18.0) && near_value(&read(&mut s, &front), 40.0));
     edit_view(&mut s, view, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
-    let e = s.execute("drawing.dimension.add", &edge(view)).err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(e.contains("not supported yet") && e.contains("a position of its own"), "{e}");
+    assert!(near_value(&run(&mut s, "drawing.dimension.add", across(view)), 18.0));
+    assert!(near_value(&run(&mut s, "drawing.dimension.add", edge(view)), 40.0));
+    let e = edit_refused(&mut s, other, json!({"visual_style": "shaded"}));
+    assert!(e.contains("not supported yet: a shaded view in a position of its own"), "{e}");
 }
 
 /// A view exploded from a position: the leaf turned up, then moved out 30 mm along Y. Exploded alone,

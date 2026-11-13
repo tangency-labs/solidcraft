@@ -905,6 +905,27 @@ fn a_sheet_makes_one_copy_for_each_choice_it_draws() {
     built(&s, sheet);
 }
 
+/// An exploded view's copy holds its moves in its own design (#13048), so every reader of where the
+/// parts are sees them. Its bodies are placed as `explode.show`'s pending moves place them, body for
+/// body, nothing is left pending, and the design keeps its placements.
+#[test]
+fn an_exploded_copy_holds_its_moves_in_its_own_design() {
+    use crate::cmd::motion::{explode_moves, exploded_at};
+    let (s, _, [.., apart], _) = two_assembled_one_apart();
+    let placed = s.doc.occurrences.clone();
+    let view = s.drawing("test").unwrap().resolve_view(apart).unwrap();
+    let copy = crate::drawing_view::copy_for(&s, &Choice::of(&view)).unwrap();
+    let mut shown = s.scratch();
+    shown.pending_moves = exploded_at(&explode_moves(&shown, &s.doc.assembly.exploded[0]), 1.0);
+    let boxes = |s: &Session| -> Vec<(String, String)> {
+        s.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), format!("{:?}", b.body.exact_bounds().unwrap()))).collect()
+    };
+    assert_eq!(boxes(&copy), boxes(&shown));
+    assert_ne!(copy.doc.occurrences, placed, "the moves are in the copy's design");
+    assert!(copy.pending_moves.is_empty());
+    assert_eq!(s.doc.occurrences, placed);
+}
+
 /// Two views at one step of a motion study share one copy, and a view at another step has its own.
 #[test]
 fn views_at_one_study_step_share_one_copy() {
@@ -968,77 +989,160 @@ fn a_gone_joint_keeps_a_posed_views_lines_and_says_why() {
     assert_eq!(why(&answer), Some(Some("its position names 1 joint the design no longer has".into())));
 }
 
-/// A file can hold a dimension on a view that draws an exploded view, though no command makes one
-/// (#13048). Its view holds it back, unread and undrawn, so every command that reads the sheet
-/// lists it out of date: the scene, the export and `drawing.status`. No update would read it, so the
-/// drawing isn't held. Deferred and updated, it is still listed.
-#[test]
-fn a_dimension_an_exploded_view_holds_back_is_out_of_date_everywhere() {
-    let (mut s, sheet, [assembled, ..], apart) = two_assembled_one_apart();
-    let first = s.doc.occurrences[0].id;
-    let edge = json!({"point": [5, 0, 0], "path": [first]});
-    let id = run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(assembled), "kind": {"length": {"edge": edge}}}))["dimension"].clone();
-    // As a file holds it: drawing.view.edit refuses to explode a view with a dimension on it.
-    let mut d = (**s.drawing("test").unwrap()).clone();
-    let view = d.views.iter_mut().find(|v| v.id == assembled).unwrap();
-    Arc::make_mut(view).settings.exploded = Some(Exploded::View(apart));
-    d.validate().unwrap();
-    s.doc_mut().put_drawing(Arc::new(d));
-    settled(&mut s, sheet);
-    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
-    assert_eq!(scene["out_of_date"], json!([id]), "{scene}");
-    assert_eq!(scene["dimensions"], json!([]), "not drawn: {scene}");
-    assert_eq!(listed(&mut s, sheet), std::slice::from_ref(&id), "as the export lists it");
-    let (reply, words) = status_of(&mut s);
-    assert!(all_are(&words, "current"), "{reply}");
-    assert_eq!(out_of_date_dimensions(&reply), std::slice::from_ref(&id), "{reply}");
-    assert!(reply.get("held").is_none(), "{reply}");
-
-    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
-    run(&mut s, "drawing.update", json!({}));
-    settled(&mut s, sheet);
-    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
-    assert_eq!(scene["out_of_date"], json!([id]), "deferred: {scene}");
-    assert_eq!(out_of_date_dimensions(&status_of(&mut s).0), [id], "deferred");
+/// How far apart the tips of `group`'s two arrowheads are on paper.
+fn tips_apart(group: &Group) -> f64 {
+    let tips = text_and_tips(group).1;
+    assert_eq!(tips.len(), 2, "{tips:?}");
+    tips[0].dist(tips[1])
 }
 
-/// A note on the model of a view that draws an exploded view, as a file can hold it, is held back as
-/// a dimension is: unread, undrawn and listed out of date by the scene and the export, whether its
-/// anchor or only a branch points at the model. A note on the view itself is drawn.
+/// From the first cube's left corner to the second's right one in [`two_cubes`], horizontal: 40
+/// assembled.
+fn across_the_cubes(s: &Session) -> Value {
+    let (first, second) = (s.doc.occurrences[0].id, s.doc.occurrences[1].id);
+    json!({"linear": {"a": {"point": [0, 0, 0], "path": [first]}, "b": {"point": [40, 0, 0], "path": [second]}, "direction": "horizontal"}})
+}
+
+/// A dimension on a view that draws an exploded view is read and drawn where the view draws its parts
+/// (#13048), not held back: across the cubes, 40 apart assembled, it is drawn 40 + 30 = 70 apart at
+/// 1:1 once the view is exploded, and nothing lists it out of date: not the scene, the export or
+/// `drawing.status`. Drawing the view from another exploded view, the second cube 60 out, draws it
+/// again, 100 apart, and so does a deferred drawing once updated.
 #[test]
-fn a_note_on_the_model_an_exploded_view_holds_back_is_out_of_date() {
+fn a_dimension_on_an_exploded_view_is_drawn_where_the_view_draws_its_parts() {
     let (mut s, sheet, [assembled, ..], apart) = two_assembled_one_apart();
-    let first = s.doc.occurrences[0].id;
-    let edge = json!({"point": [5, 0, 0], "path": [first]});
+    let kind = across_the_cubes(&s);
+    let id = id_in(run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(assembled), "kind": kind})), "dimension");
+    assert!((tips_apart(group_of(&built(&s, sheet).scene, id)) - 40.0).abs() < 1e-6);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(assembled), "set": {"exploded": apart}}));
+    let shown = settled(&mut s, sheet);
+    assert!((tips_apart(group_of(&shown.scene, id)) - 70.0).abs() < 1e-6);
+    assert_eq!(bytes(&shown.scene), bytes(&built(&s, sheet).scene));
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    assert!(scene.get("out_of_date").is_none(), "{scene}");
+    let drawn: Vec<(Value, Value)> = scene["dimensions"].as_array().unwrap().iter().map(|d| (d["dimension"].clone(), d["drawn"].clone())).collect();
+    assert_eq!(drawn, [(json!(ids::encode(id)), json!(true))], "{scene}");
+    assert!(listed(&mut s, sheet).is_empty(), "nor does the export");
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "current") && out_of_date_dimensions(&reply).is_empty(), "{reply}");
+
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    let second = s.doc.occurrences[1].id;
+    run(&mut s, "explode.create", json!({"name": "Further", "moves": [{"occurrence": second, "translate": [60, 0, 0]}]}));
+    run(&mut s, "drawing.open", drawing);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(assembled), "set": {"exploded": "Further"}}));
+    assert!((tips_apart(group_of(&settled(&mut s, sheet).scene, id)) - 100.0).abs() < 1e-6);
+
+    // Deferred and updated, it is read where the view draws its parts too.
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    assert!((tips_apart(group_of(&settled(&mut s, sheet).scene, id)) - 100.0).abs() < 1e-6, "deferred");
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    assert!(scene.get("out_of_date").is_none(), "deferred: {scene}");
+    assert!(out_of_date_dimensions(&status_of(&mut s).0).is_empty(), "deferred");
+}
+
+/// A note on the model of a view that draws an exploded view is read and drawn where the view draws
+/// its parts, as a dimension is, whether its anchor or only a branch points at the model, and nothing
+/// lists it out of date, deferred and updated too. Exploded, the view (at (60, 150), 1:1) is centred on the box's middle (35, 5),
+/// so the second cube's bottom front edge's middle, (35 + 30, 0, 0), is at (60 + 30, 150 - 5).
+#[test]
+fn a_note_on_the_model_of_an_exploded_view_is_drawn_where_the_view_draws_its_parts() {
+    let (mut s, sheet, [assembled, ..], apart) = two_assembled_one_apart();
+    let second = s.doc.occurrences[1].id;
+    let edge = json!({"point": [35, 0, 0], "path": [second]});
     let view = ids::encode(assembled);
-    let note = |s: &mut Session, add: Value| run(s, "drawing.note.add", add)["note"].clone();
+    let note = |s: &mut Session, add: Value| id_in(run(s, "drawing.note.add", add), "note");
     let on_edge = note(&mut s, json!({"anchor": {"edge": {"view": view, "edge": edge}}, "at": [60, 40], "content": "Deburr"}));
     let branched = note(&mut s, json!({"anchor": {"view": view}, "at": [60, -40], "content": "Both", "branches": [{"edge": edge}]}));
     let plain = note(&mut s, json!({"anchor": {"view": view}, "at": [0, -40], "content": "Exploded"}));
-    // As a file holds them: drawing.view.edit refuses to explode a view with a note on its model.
-    let mut d = (**s.drawing("test").unwrap()).clone();
-    let record = d.views.iter_mut().find(|v| v.id == assembled).unwrap();
-    Arc::make_mut(record).settings.exploded = Some(Exploded::View(apart));
-    d.validate().unwrap();
-    s.doc_mut().put_drawing(Arc::new(d));
-    // By view and id, as every list of a view's dimensions and notes is.
-    let mut held = [on_edge, branched];
-    held.sort_by_key(|id| ids::decode(id.as_str().unwrap()).unwrap());
-    settled(&mut s, sheet);
+    run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"exploded": apart}}));
+    let shown = settled(&mut s, sheet);
+    for id in [on_edge, branched] {
+        let tips = text_and_tips(group_of(&shown.scene, id)).1;
+        assert!(tips.len() == 1 && tips[0].dist(Vec2::new(90.0, 145.0)) < 1e-6, "{id}: {tips:?}");
+    }
+    let mut notes = [on_edge, branched, plain];
+    notes.sort_unstable();
+    let drawn: Vec<u64> = shown.scene.groups.iter().filter(|g| g.kind == ObjectKind::Note).map(|g| g.object).collect();
+    assert_eq!(drawn, notes);
     let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
-    assert_eq!(scene["out_of_date"], json!(held), "{scene}");
-    let listed_notes: Vec<(Value, Value)> = scene["notes"].as_array().unwrap().iter().map(|n| (n["note"].clone(), n["drawn"].clone())).collect();
-    assert_eq!(listed_notes, [(plain.clone(), json!(true))], "{scene}");
-    let drawn: Vec<u64> = built(&s, sheet).scene.groups.iter().filter(|g| g.kind == ObjectKind::Note).map(|g| g.object).collect();
-    assert_eq!(drawn, [ids::decode(plain.as_str().unwrap()).unwrap()]);
-    assert_eq!(listed(&mut s, sheet), held, "as the export lists them");
-    assert!(status_of(&mut s).0.get("held").is_none());
+    assert!(scene.get("out_of_date").is_none(), "{scene}");
+    assert!(listed(&mut s, sheet).is_empty(), "nor does the export");
 
+    // Deferred and updated, they are read where the view draws its parts too.
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
-    settled(&mut s, sheet);
+    let shown = settled(&mut s, sheet);
+    for id in [on_edge, branched] {
+        let tips = text_and_tips(group_of(&shown.scene, id)).1;
+        assert!(tips.len() == 1 && tips[0].dist(Vec2::new(90.0, 145.0)) < 1e-6, "deferred {id}: {tips:?}");
+    }
     let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
-    assert_eq!(scene["out_of_date"], json!(held), "deferred: {scene}");
+    assert!(scene.get("out_of_date").is_none(), "deferred: {scene}");
+}
+
+/// A dimension on a view in a position of its own is read and drawn where the view draws its parts
+/// (#13048), not held back: on [`hinge_pair`]'s view posed at 90°, from the plate's far top corner
+/// (0, 0, 2) to the leaf's free top corner, (0, 40, 2) as designed, turned about the hinge line (y 20,
+/// z 0) to y 20 + 20 cos 90° - 2 sin 90° = 18: 18 apart at 1:1. Posed at 30° instead, it is drawn
+/// again: 20 + 20 cos 30° - 2 sin 30° = 36.3205 apart.
+#[test]
+fn a_dimension_on_a_posed_view_is_drawn_and_follows_its_position() {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"pose": [{"joint": "Hinge", "values": [90]}]}}));
+    let kind = json!({"linear": {"a": [0, 0, 2], "b": {"point": [0, 40, 2], "path": [leaf]}, "direction": "vertical"}});
+    let id = id_in(run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(view), "kind": kind})), "dimension");
+    let before = settled(&mut s, sheet);
+    assert!((tips_apart(group_of(&before.scene, id)) - 18.0).abs() < 1e-6);
+    assert!(run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)})).get("out_of_date").is_none());
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"pose": [{"joint": "Hinge", "values": [30]}]}}));
+    let after = settled(&mut s, sheet);
+    let turned = 20.0 + 20.0 * 30f64.to_radians().cos() - 2.0 * 30f64.to_radians().sin();
+    assert!((tips_apart(group_of(&after.scene, id)) - turned).abs() < 1e-6, "{turned}");
+    assert_eq!(bytes(&after.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// Each dimension on a sheet takes its own view's answer, whatever order its view's records come in
+/// (#13048). [`hinge_pair`] with a pin and exploded view Apart moving the leaf 30 mm out along y, and
+/// three top views at 1:1 whose ids put the exploded one first and the one of the design's placement
+/// last, the other way round from the order their states sort in. One dimension on each, from the
+/// plate's far top corner (0, 0, 2) to the leaf's free top corner (0, 40, 2): 40 + 30 = 70 exploded,
+/// 20 - 2 = 18 posed at 90° (the corner turned up about the hinge line, y 20, z 0), 40 as designed.
+#[test]
+fn each_dimension_on_a_sheet_takes_its_own_views_answer() {
+    use solidcraft_doc::drawing_view::{JointPose, Pose};
+    let (mut s, _, hinge) = hinge_pair();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    add_a_pin(&mut s);
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    let apart =
+        run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": leaf, "translate": [0, 30, 0]}]}))["view"].as_u64().unwrap();
+    run(&mut s, "drawing.open", drawing);
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
+    let posed = Some(Pose::Joints(vec![JointPose { joint: hinge, values: vec![std::f64::consts::FRAC_PI_2] }].into()));
+    // By id: exploded, posed, designed.
+    let made = [(11, [80.0, 200.0], None, Some(Exploded::View(apart))), (12, [200.0, 200.0], posed, None), (13, [320.0, 200.0], None, None)];
+    for (id, at, pose, exploded) in made {
+        let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), pose, exploded, ..ViewOverrides::default() };
+        let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Top) };
+        d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0 })]);
+    }
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    let kind = json!({"linear": {"a": [0, 0, 2], "b": {"point": [0, 40, 2], "path": [leaf]}, "direction": "vertical"}});
+    let on = |s: &mut Session, view: u64| id_in(run(s, "drawing.dimension.add", json!({"view": ids::encode(view), "kind": kind})), "dimension");
+    let want = [(on(&mut s, 11), 70.0), (on(&mut s, 12), 18.0), (on(&mut s, 13), 40.0)];
+    let built = built(&s, sheet);
+    for (id, apart) in want {
+        assert!((tips_apart(group_of(&built.scene, id)) - apart).abs() < 1e-6, "{id}: {}", tips_apart(group_of(&built.scene, id)));
+    }
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built.scene));
 }
 
 /// A deferred drawing draws nothing until `drawing.update`: then from the model as it is now, until
@@ -2130,7 +2234,7 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
     let frames: BTreeMap<_, _> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let line_group = |view: u64| on.iter().find(|(id, ..)| *id == view).map(|(_, v, _)| v.line_group.value);
     let wanted = dimensions_on(&d, on.iter().map(|(id, ..)| *id));
-    let dimensions = draw_dimensions(&s, &d, &wanted, |view| Some((*frames.get(&view)?, line_group(view)?)), true);
+    let dimensions = draw_dimensions(&s, None, &d, &wanted, |view| Some((*frames.get(&view)?, line_group(view)?)), true);
     // The other way round from `build`: the sheet's note joins first.
     assembly.add_sheet_notes(&notes);
     assembly.add_dimensions(dimensions.iter());

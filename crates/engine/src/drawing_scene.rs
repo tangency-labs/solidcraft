@@ -76,7 +76,7 @@ use solidcraft_sketch::PaperFonts;
 
 use crate::drawing_picture::{picture_items, view_parts};
 use crate::drawing_view::{
-    CHORD_MM, Choice, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, ViewSessions, copy_for, draws_apart, paper_lines,
+    CHORD_MM, Choice, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, ViewSessions, copy_for, paper_lines,
 };
 use crate::params::bad;
 use crate::title_block_text::{self, CellText, Set};
@@ -206,9 +206,7 @@ pub struct SheetScene {
     pub dimensions: Vec<DimensionState>,
     /// Each note of a view on the sheet, by view and id, then each note on the sheet, by id.
     pub notes: Vec<NoteState>,
-    /// The views, dimensions and notes a deferred drawing shows as they last were ([`as_shown`]), and
-    /// the dimensions and notes on its model a view drawing its parts apart holds back
-    /// ([`held_apart`]).
+    /// The views, dimensions and notes a deferred drawing shows as they last were ([`as_shown`]).
     pub out_of_date: Vec<u64>,
     /// What each view whose lines are in the scene drew them from: its world state and its bodies.
     drawn: Vec<(Arc<ModelState>, Arc<Owners>)>,
@@ -381,15 +379,17 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let (notes, _) = sheet_notes(s, drawing, sheet, &lettering, true);
     let (images, logos) = (crate::drawing_pictures::groups(drawing, sheet), crate::drawing_pictures::logo_items(drawing, sheet));
     let mut assembly = assemble(record, drawing.projection, &text, &images, &logos, drawn)?;
-    // After the views, as they need the views' frames: one read for the sheet's dimensions.
+    // After the views, as they need the views' frames: one read for the sheet's dimensions, each on
+    // the session its view drew from.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let wanted = dimensions_on(drawing, on.iter().map(|(id, ..)| *id));
     let group = |view: u64| on.binary_search_by_key(&view, |(id, ..)| *id).ok().and_then(|at| on.get(at)).map(|(_, v, _)| v.line_group.value);
-    let dimensions = draw_dimensions(s, drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)), true);
+    let dimensions = draw_dimensions(s, Some(&mut sessions), drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)), true);
     assembly.add_dimensions(dimensions.iter());
     assembly.add_sheet_notes(&notes);
     let (scene, views, objects, dimensions, notes) = assembly.finish()?;
-    let out_of_date = held_apart(drawing, on.iter().map(|(id, ..)| *id));
+    // Drawn at once, so nothing is as it last was.
+    let out_of_date = Vec::new();
     // Each drawn view's bodies with the world state of the session it drew from: a view that draws its
     // parts apart has its copy's, as the sheet shows them.
     let state_of = |choice: &Choice| Some(shown.get(choice)?.as_ref().ok()?.state.clone());
@@ -410,7 +410,7 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
     // again here against its old lines. `stale_dimensions` and `stale_notes` hold those of the views up
     // to date.
     let up_to_date = shown.stale_dimensions.into_iter().chain(shown.stale_notes);
-    let annotations = out_of_date_annotations(d, views_on(d, sheet)?.iter().map(|(id, ..)| *id), &shown.stale, up_to_date);
+    let annotations = out_of_date_annotations(d, &shown.stale, up_to_date);
     let out_of_date = shown.stale.iter().copied().chain(annotations).collect();
     let (scene, objects) = (Arc::unwrap_or_clone(shown.scene), shown.objects.to_vec());
     // Each view in the scene as it was last drawn, from the world state it was drawn from.
@@ -601,11 +601,28 @@ pub(crate) const NOT_DRAWN: &str = "its view isn't drawn";
 /// Why a sheet leaves out a dimension that measures something its view has no place to draw.
 pub(crate) const NO_PLACE: &str = "what it measures has no place to draw on its view";
 
-/// The records of `wanted` read once, each by its kind, each drawn through its view's frame (`None`:
-/// its view isn't drawn), in its line group, in `wanted`'s order. A record that can't be read says so
-/// instead.
+/// `records` (each its id and its view's) of `d` as `read` gives them: each on the session its view
+/// draws from in `sessions` ([`ViewSessions::read_on`]), or with none, all on `s`, which is then the
+/// one view's own session (a job's copy).
+fn read_with<T>(
+    s: &Session,
+    sessions: Option<&mut ViewSessions>,
+    d: &Drawing,
+    records: &[(u64, u64)],
+    read: impl Fn(&solidcraft_doc::Document, &solidcraft_doc::Model, &Drawing, &[u64]) -> solidcraft_doc::Result<Vec<T>>,
+) -> solidcraft_doc::Result<Vec<T>> {
+    match sessions {
+        Some(sessions) => sessions.read_on(d, records, read),
+        None => read(&s.doc, &s.model, d, &records.iter().map(|(id, _)| *id).collect::<Vec<_>>()),
+    }
+}
+
+/// The records of `wanted` read once, each by its kind on the session its view draws from
+/// ([`read_with`]), each drawn through its view's frame (`None`: its view isn't drawn), in its line
+/// group, in `wanted`'s order. A record that can't be read says so instead.
 fn draw_dimensions(
     s: &Session,
+    mut sessions: Option<&mut ViewSessions>,
     d: &Drawing,
     wanted: &[Annotation],
     frame: impl Fn(u64) -> Option<(ViewFrame, LineGroup)>,
@@ -613,9 +630,10 @@ fn draw_dimensions(
 ) -> Vec<DrawnDimension> {
     let records: Vec<&Arc<Dimension>> = wanted.iter().filter_map(|a| if let Annotation::Dimension(r) = a { Some(r) } else { None }).collect();
     let notes: Vec<&Arc<Note>> = wanted.iter().filter_map(|a| if let Annotation::Note(n, _) = a { Some(n) } else { None }).collect();
-    let read = s.doc.resolve_dimensions(&s.model, d, &records.iter().map(|record| record.id).collect::<Vec<_>>());
+    let on: Vec<(u64, u64)> = records.iter().map(|record| (record.id, record.view)).collect();
+    let read = read_with(s, sessions.as_deref_mut(), d, &on, solidcraft_doc::Document::resolve_dimensions);
     let lettering = PaperFonts::new(&d.font, &d.language, wait);
-    let mut noted = drawn_notes(s, d, &notes, &frame, &lettering).into_iter();
+    let mut noted = drawn_notes(s, sessions, d, &notes, &frame, &lettering).into_iter();
     let one = |at: usize, record: &Arc<Dimension>| match read.as_ref().map(|all| all.get(at)) {
         Ok(Some(resolved)) => {
             let paper = frame(record.view)
@@ -658,26 +676,22 @@ fn draw_dimensions(
     lines
 }
 
-/// The dimensions and notes of `d` a sheet shows as they last were, or not at all, by id: those of
-/// each view out of date (`stale_views`), as their view is, then `up_to_date`, those of the views up
-/// to date that were read from another record, model, drawing of their view, lettering or revision
-/// ([`Cache::stale_dimensions`]), then those the views among `views` hold back as they draw their
-/// parts apart ([`held_apart`]).
-fn out_of_date_annotations(
-    d: &Drawing,
-    views: impl Iterator<Item = u64>,
-    stale_views: &[u64],
-    up_to_date: impl IntoIterator<Item = u64>,
-) -> Vec<u64> {
+/// The dimensions and notes of `d` a sheet shows as they last were, by id: those of each view out of
+/// date (`stale_views`), as their view is, then `up_to_date`, those of the views up to date that were
+/// read from another record, model, drawing of their view, lettering or revision
+/// ([`Cache::stale_dimensions`]).
+fn out_of_date_annotations(d: &Drawing, stale_views: &[u64], up_to_date: impl IntoIterator<Item = u64>) -> Vec<u64> {
     let held = dimensions_on(d, stale_views.iter().copied()).into_iter().map(|record| record.id());
-    held.chain(up_to_date).chain(held_apart(d, views)).collect()
+    held.chain(up_to_date).collect()
 }
 
-/// `notes`, each on its view (`frame`, as [`draw_dimensions`] gives it), read once: its text with its
-/// fields read for its view's sheet, and its leader to where it points now, through the view's frame.
-/// A note whose view isn't drawn has no lines; one that can't be read says so.
+/// `notes`, each on its view (`frame`, as [`draw_dimensions`] gives it), read once, as dimensions are
+/// ([`read_with`]): its text with its fields read for its view's sheet, and its leader to where it
+/// points now, through the view's frame. A note whose view isn't drawn has no lines; one that can't
+/// be read says so.
 fn drawn_notes(
     s: &Session,
+    sessions: Option<&mut ViewSessions>,
     d: &Drawing,
     notes: &[&Arc<Note>],
     frame: &impl Fn(u64) -> Option<(ViewFrame, LineGroup)>,
@@ -686,7 +700,8 @@ fn drawn_notes(
     if notes.is_empty() {
         return Vec::new();
     }
-    let read = s.doc.resolve_notes(&s.model, d, &notes.iter().map(|note| note.id).collect::<Vec<_>>());
+    let on: Vec<(u64, u64)> = notes.iter().map(|note| (note.id, note.anchor.view().unwrap_or_default())).collect();
+    let read = read_with(s, sessions, d, &on, solidcraft_doc::Document::resolve_notes);
     let state = s.model.state();
     let mut tree = Tree::new(&s.doc, &state);
     let one = |at: usize, note: &Arc<Note>, tree: &mut Tree<'_>| {
@@ -740,30 +755,8 @@ fn sheet_notes(s: &Session, d: &Drawing, sheet: u64, lettering: &Lettering, wait
     (notes, pending)
 }
 
-/// Whether `record`'s view holds it back as it draws its parts apart ([`draws_apart`]): neither read
-/// nor drawn, and listed out of date. A dimension, or a note on the model ([`Note::on_model`]): both
-/// read the design's placements.
-fn held_back(d: &Drawing, record: &Annotation) -> bool {
-    let on_model = match record {
-        Annotation::Dimension(_) => true,
-        Annotation::Note(note, _) => note.on_model(),
-    };
-    on_model && draws_apart(d, record.view()).is_some()
-}
-
-/// The dimensions and notes of `views` of `d` that are held back ([`held_back`]), by view and id.
-pub(crate) fn held_apart(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<u64> {
-    annotations_on(d, views).iter().filter(|record| held_back(d, record)).map(Annotation::id).collect()
-}
-
-/// The dimensions and the notes of `views` of `d`, by view and id, less those held back
-/// ([`held_back`]).
-fn dimensions_on(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<Annotation> {
-    annotations_on(d, views).into_iter().filter(|record| !held_back(d, record)).collect()
-}
-
 /// The dimensions and the notes of `views` of `d`, by view and id.
-fn annotations_on(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<Annotation> {
+fn dimensions_on(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<Annotation> {
     let views: BTreeSet<u64> = views.collect();
     let dimensions = d.dimensions.iter().filter(|record| views.contains(&record.view)).map(|record| Annotation::Dimension(record.clone()));
     let notes = d.notes.iter().filter_map(|note| Some(Annotation::Note(note.clone(), note.anchor.view().filter(|view| views.contains(view))?)));
@@ -1334,8 +1327,7 @@ pub struct ViewStanding {
 pub struct Standing {
     /// Each view, in id order.
     pub views: Vec<ViewStanding>,
-    /// The dimensions and notes its sheets show as they last were, or hold back on a view drawing an
-    /// exploded view ([`out_of_date_annotations`]).
+    /// The dimensions and notes its sheets show as they last were ([`out_of_date_annotations`]).
     pub annotations: Vec<u64>,
 }
 
@@ -1372,7 +1364,7 @@ pub fn standing(s: &mut Session, d: &Drawing) -> Standing {
     let on: Vec<(u64, ResolvedView, Vec2)> =
         d.views.iter().filter_map(|v| Some((v.id, d.resolve_view(v.id).ok()?, d.view_centre(v.id).ok()?))).collect();
     let stale_dimensions = state.as_ref().map_or_else(Vec::new, |state| cache.stale_dimensions(d, &on, state, &lettering, revision));
-    let annotations = out_of_date_annotations(d, d.views.iter().map(|v| v.id), &stale, stale_dimensions.iter().map(Annotation::id));
+    let annotations = out_of_date_annotations(d, &stale, stale_dimensions.iter().map(Annotation::id));
     Standing { views, annotations }
 }
 
@@ -1531,7 +1523,8 @@ impl Job {
         // The view's dimensions and notes through its new frame, taken in the same swap as its lines.
         let frame = drawn.frame.map(|frame| (frame, ticket.resolved.line_group.value));
         let dimensions = dimensions_on(&drawing, std::iter::once(ticket.view));
-        let lines = draw_dimensions(&copy, &drawing, &dimensions, |_| frame, false);
+        // `copy` is the session the view draws from, so its records are read on it.
+        let lines = draw_dimensions(&copy, None, &drawing, &dimensions, |_| frame, false);
         let shown = Choice::of(&ticket.resolved).is_placed().then_some((state, shown));
         Done { ticket, drawn, shows, dimensions, lines, shown }
     }
@@ -1621,7 +1614,7 @@ fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)
     let entry = s.drawing_scenes.views.get(&view);
     let frame = entry.and_then(|e| Some((e.drawn.frame?, e.view.line_group.value)));
     let view_serial = entry.map_or(0, |e| e.serial);
-    let lines = draw_dimensions(s, d, &these, |_| frame, false);
+    let lines = draw_dimensions(s, Some(&mut ViewSessions::new(s)), d, &these, |_| frame, false);
     let cache = &mut s.drawing_scenes;
     cache.serial += 1;
     cache.keep_dimensions(these, lines, state, view_serial, &lettering, revision);
@@ -1651,7 +1644,8 @@ fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView
         return;
     }
     let cache = &s.drawing_scenes;
-    let lines = draw_dimensions(s, d, &waiting, |view| cache.views.get(&view).and_then(|e| Some((e.drawn.frame?, e.view.line_group.value))), false);
+    let frame = |view: u64| cache.views.get(&view).and_then(|e| Some((e.drawn.frame?, e.view.line_group.value)));
+    let lines = draw_dimensions(s, Some(&mut ViewSessions::new(s)), d, &waiting, frame, false);
     let set: Vec<(Annotation, DrawnDimension)> = waiting.into_iter().zip(lines).filter(|(_, drawn)| !drawn.pending).collect();
     let cache = &mut s.drawing_scenes;
     for (record, drawn) in set {
