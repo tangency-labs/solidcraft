@@ -17,6 +17,7 @@ use solidcore::query::api_queries::brep_is_closed_touching_solids;
 use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p3::{brep_copy, brep_copy_mapped};
+use solidcore::topology::brep::sheet::turn_over_sheet;
 use solidcore::topology::brep::{is_outward_solid, is_valid_and_outward};
 use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::FaceId;
@@ -242,6 +243,19 @@ impl Body {
         }
         with_body("SmBrep::Transform", self, |k, b| {
             Ok(transform_matrix(k, b, matrix, true).map_err(status))
+        })?
+    }
+
+    /// Turns this sheet over ([`turn_over_sheet`]): each face's side the other way, its surface,
+    /// loops and edges as they were, so in its record each face's `forward` in its shell is
+    /// negated. Turning a sheet over twice gives it back.
+    ///
+    /// # Errors
+    /// [`Error::Unsupported`] for a body with a closed shell (turned over, a solid would be inside
+    /// out), the body as it was; the kernel's status.
+    pub fn turn_over(&self) -> Result<()> {
+        with_body("turn_over_sheet", self, |_, b| {
+            Ok(turn_over_sheet(b).map_err(status))
         })?
     }
 

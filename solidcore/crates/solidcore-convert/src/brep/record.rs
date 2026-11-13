@@ -19,7 +19,8 @@
 //!   over (the kernel says so; no area is measured).
 //! - **Shells and regions:** a closed boundary's two runtime shells become one record, its faces
 //!   as the side in the region that is not material uses them; a sheet's one shell keeps the
-//!   `same` use of each face; the infinite region is never a void.
+//!   upward use of each face (the side the face is turned to); the infinite region is never a
+//!   void.
 //! - **Touching:** an edge or vertex solids touching each other share is copied once per solid;
 //!   an edge one solid touches itself along (four or more uses in a shell) is copied once per
 //!   pair of faces the kernel's radial order puts across one sector round it.
@@ -34,6 +35,7 @@ use solidcore::curve::from_parameters::{intersection_tolerance, record_of, recor
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
+use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::surface::face_surface::record_face;
 use solidcore::surface::procedural_blend::convert::face_definition;
 use solidcore::topology::brep::outer_shells::outer_shells;
@@ -41,6 +43,7 @@ use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep_data::{BrepData, NO_OBJECT, UNDEF_ULONG};
 use solidcore::topology::brep_data_write::{data_regions, FromBrepEnv};
 use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
+use solidcore::topology::face::p2 as fp2;
 use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::EdgeuseId;
@@ -339,15 +342,23 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
     // Each record shell is one closed boundary of material: the faces of one runtime shell on
     // the material side, as the empty side uses them. Solids touching along an edge or at a
     // vertex share their empty side's runtime shell but not their material side's, so each
-    // gets its own record shell. A sheet's one shell holds both uses of each face: the `same`
-    // one is kept.
+    // gets its own record shell. A sheet's one shell holds both uses of each face: the upward
+    // one is kept, the side the face is turned to (`turn_over`; as built, the `same` one).
+    let upward_same = face_ids
+        .iter()
+        .map(|&f| -> R<bool> {
+            let fu = fp2::upward_faceuse(b, f)?
+                .ok_or(Unsupported::Invalid("a face without its upward use"))?;
+            Ok(b.faceuse(fu)?.orientation == OrientType::Same)
+        })
+        .collect::<R<Vec<bool>>>()?;
     let mut groups: Vec<Group> = Vec::new();
     for (s, uses) in shell_faceuses.iter().enumerate() {
         for fu in uses.clone() {
             let (f, same) = faceuse(fu)?;
             let key = match face_uses.get(f).map(Vec::as_slice) {
                 Some([(a, _), (c, _)]) if a == c => {
-                    if !same {
+                    if same != *at(&upward_same, f)? {
                         continue;
                     }
                     Side::Sheet(*a)
