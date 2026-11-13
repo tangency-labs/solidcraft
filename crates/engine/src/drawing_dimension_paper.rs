@@ -245,7 +245,8 @@ fn across(a: [Vec2; 2], b: [Vec2; 2], direction: LinearDirection, offset: f64, p
 }
 
 /// The angle between two lines (each from one end to the other), at the point they meet on the view,
-/// `offset` out from it. `None` when they are parallel there, as they then never meet.
+/// `offset` out from it. Its text is towards its `place`, or else in the middle when it fits there, or
+/// beyond an arrow ([`DimText::Across`]). `None` when they are parallel there, as they then never meet.
 fn angular(a: [Vec2; 2], b: [Vec2; 2], other_side: bool, offset: f64, place: &TextPlace, text: Text) -> Option<Piece> {
     let [a0, a1] = a;
     let [b0, b1] = b;
@@ -263,9 +264,10 @@ fn angular(a: [Vec2; 2], b: [Vec2; 2], other_side: bool, offset: f64, place: &Te
     let cross = from_a.perp().dot(from_b);
     let d0 = if cross >= 0.0 { from_a } else { from_b };
     let sweep = cross.abs().atan2(from_a.dot(from_b));
-    let middle = Vec2::from_angle(d0.angle() + sweep * 0.5);
-    let towards = at_of(place).and_then(|at| (at - vertex).normalized()).unwrap_or(middle);
-    Some(Piece { frame: DimFrame::Angular { vertex, d0, sweep }, at: DimText::At(towards * offset.abs()), text })
+    // A place with no direction from the vertex (on it) gives none: the text goes as an unplaced one.
+    let towards = at_of(place).and_then(|at| (at - vertex).normalized());
+    let at = towards.map_or(DimText::Across(offset.abs()), |u| DimText::At(u * offset.abs()));
+    Some(Piece { frame: DimFrame::Angular { vertex, d0, sweep }, at, text })
 }
 
 /// A circle's or an arc's radius or diameter, from its centre and the arc's start, middle and end,
