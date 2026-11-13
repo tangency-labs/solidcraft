@@ -850,9 +850,9 @@ fn inspect_lists_each_sheets_views_in_order() {
 }
 
 /// Inspect lists everything on each sheet, from the one rule the Browser and a sheet's delete use
-/// ([`Drawing::on_sheet`]): a note in a view under its view, a note on the sheet with the sheet, and the
-/// sheet's tables, images and revision tags, each on its own sheet only. An empty sheet lists nothing, a
-/// deleted object is gone, and nothing is evaluated.
+/// ([`Drawing::on_sheet`]): its views, a note in a view under its view, a note on the sheet with the
+/// sheet, and the sheet's tables, images and revision tags, each on its own sheet only. An empty sheet
+/// lists nothing, a deleted object is gone, and nothing is evaluated.
 #[test]
 fn inspect_lists_everything_on_each_sheet() {
     let (mut s, [front, ..]) = crate::cmd::drawing_view::tests::three_views();
@@ -904,6 +904,9 @@ fn inspect_lists_everything_on_each_sheet() {
         notes.extend(listed["views"].as_array().unwrap().iter().flat_map(|view| view["notes"].as_array().unwrap().clone()));
         notes.sort_by_key(|id| ids::decode(id.as_str().unwrap()));
         assert_eq!(json!(notes), encoded(&on.notes), "sheet {at}");
+        let mut views: Vec<Value> = listed["views"].as_array().unwrap().iter().map(|view| view["id"].clone()).collect();
+        views.sort_by_key(|id| ids::decode(id.as_str().unwrap()));
+        assert_eq!(json!(views), encoded(&on.views), "sheet {at}: its views are the rule's");
     }
 
     // Deleted, each by its own command, is gone from its list. Selection delete takes notes; a table and a

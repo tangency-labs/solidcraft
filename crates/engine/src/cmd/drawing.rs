@@ -349,7 +349,7 @@ fn sheet_contents(d: &Drawing, id: u64) -> [(&'static str, Value); 5] {
     let encoded = |objects: &[u64]| objects.iter().map(|object| ids::encode(*object)).collect::<Vec<_>>();
     let on_sheet: Vec<u64> = on.notes.iter().copied().filter(|note| d.notes.by_id(*note).is_some_and(|note| note.anchor.view().is_none())).collect();
     [
-        ("views", json!(sheet_views(d, id, &in_views))),
+        ("views", json!(sheet_views(d, &on.views, &in_views))),
         ("notes", json!(encoded(&on_sheet))),
         ("tables", json!(encoded(&on.tables))),
         ("images", json!(encoded(&on.images))),
@@ -357,16 +357,16 @@ fn sheet_contents(d: &Drawing, id: u64) -> [(&'static str, Value); 5] {
     ]
 }
 
-/// Sheet `sheet`'s views as `drawing.inspect` lists them: those with no parent on it by id, each
-/// followed by the views projected from it. `[dimensions, balloons, notes]` hold each view's, by its id.
-fn sheet_views(d: &Drawing, sheet: u64, [dimensions, balloons, notes]: &[BTreeMap<u64, Vec<String>>; 3]) -> Vec<Value> {
-    let on: BTreeSet<u64> = d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id).collect();
+/// A sheet's views `on` (by id, as [`Drawing::on_sheet`] lists them) as `drawing.inspect` lists them:
+/// those with no parent on it by id, each followed by the views projected from it. `[dimensions,
+/// balloons, notes]` hold each view's, by its id.
+fn sheet_views(d: &Drawing, on: &[u64], [dimensions, balloons, notes]: &[BTreeMap<u64, Vec<String>>; 3]) -> Vec<Value> {
     let mut first = Vec::new();
     let mut projected: BTreeMap<u64, Vec<&View>> = BTreeMap::new();
-    for view in d.views.iter().filter(|v| on.contains(&v.id)) {
+    for view in on.iter().filter_map(|id| d.view(*id)) {
         match view.kind {
-            ViewKind::Projected { parent, .. } if on.contains(&parent) => projected.entry(parent).or_default().push(view),
-            _ => first.push(&**view),
+            ViewKind::Projected { parent, .. } if on.binary_search(&parent).is_ok() => projected.entry(parent).or_default().push(view),
+            _ => first.push(view),
         }
     }
     let mut stack: Vec<&View> = first.into_iter().rev().collect();
