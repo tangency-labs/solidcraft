@@ -190,8 +190,10 @@ fn probe() -> Value {
                 "recommended_height": view.recommended_image_rect_height,
                 "max_width": view.max_image_rect_width,
                 "max_height": view.max_image_rect_height,
-                "recommended_swapchain_count": view.recommended_swapchain_sample_count,
-                "max_swapchain_count": view.max_swapchain_sample_count,
+                // These are samples per pixel (MSAA), not image counts: the runtime
+                // chooses how many images a swapchain has, and the app asks afterwards.
+                "recommended_sample_count": view.recommended_swapchain_sample_count,
+                "max_sample_count": view.max_swapchain_sample_count,
             }));
         }
         vc_list.push(json!({
@@ -290,10 +292,8 @@ fn headset_name(report: &Value) -> Option<&str> {
 
 /// The recommended per-eye image size of the primary stereo view configuration.
 fn stereo_eye_size(report: &Value) -> Option<(u64, u64)> {
-    let stereo = report["openxr"]["view_configurations"]
-        .as_array()?
-        .iter()
-        .find(|c| c.get("type").and_then(Value::as_str) == Some("primary_stereo"))?;
+    let stereo =
+        report["openxr"]["view_configurations"].as_array()?.iter().find(|c| c.get("type").and_then(Value::as_str) == Some("primary_stereo"))?;
     let view = stereo.get("views")?.as_array()?.first()?;
     Some((view.get("recommended_width")?.as_u64()?, view.get("recommended_height")?.as_u64()?))
 }
@@ -339,6 +339,31 @@ mod tests {
         assert!(s.contains("Valve Index"), "{s}");
         assert!(s.contains("1440 x 1600 per eye"), "{s}");
         assert!(s.contains("Vulkan support ..... yes"), "{s}");
+    }
+
+    /// The same verdict, but against a report the probe actually produced: Meta Quest 3S
+    /// through the Oculus runtime, captured on real hardware. The hand-built fixture above
+    /// pins the logic; this one pins the shape of a real report, including a 36-entry
+    /// extension list and a two-view stereo configuration, so a change in the probe that
+    /// stops parsing real output is caught here rather than by the next person testing.
+    #[test]
+    fn a_report_from_real_hardware_passes() {
+        let report: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/quest3s-oculus-1.208.0.json")))
+            .expect("fixture is valid JSON");
+
+        let s = summary(&report);
+        assert!(s.contains("RESULT: PASS"), "{s}");
+        assert!(s.contains("Oculus 1.208.0"), "{s}");
+        assert!(s.contains("Meta Quest 3S"), "{s}");
+        assert!(s.contains("1824 x 1872 per eye"), "{s}");
+        assert!(s.contains("Vulkan support ..... yes"), "{s}");
+
+        // Phase 1 adopts the runtime's Vulkan instance through this extension; if a
+        // future runtime stops exposing it, the fixture should be replaced, not the test.
+        assert!(
+            report["openxr"]["instance_extensions"].as_array().expect("extensions are an array").iter().any(|e| e["name"] == "XR_KHR_vulkan_enable2"),
+            "fixture should record the Vulkan adoption path Phase 1 needs"
+        );
     }
 
     #[test]

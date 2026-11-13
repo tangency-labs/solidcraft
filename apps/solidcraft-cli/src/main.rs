@@ -101,8 +101,7 @@ const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
 /// `gpu`'s lines in the usage.
 const USAGE_GPU: &str = "  solidcraft-cli gpu [--policy auto|hardware|software|cpu]\n      (the GPU adapters a headless render can open, best first, the one the policy picks and the tier it\n       lands on: gpu, gpu-software, or the CPU rasterizer (auto with no adapter, or cpu); the policy defaults\n       to SOLIDCRAFT_GPU, else auto; exits with an error when hardware or software finds no such adapter)\n";
 /// `xr-info`'s lines in the usage.
-const USAGE_XR_INFO: &str =
-    "  solidcraft-cli xr-info [--summary]\n      (probe the OpenXR runtime, head-mounted display and Vulkan compatibility; --summary prints a\n       plain-language verdict for someone testing on their own headset; Phase 0 of #2172)\n";
+const USAGE_XR_INFO: &str = "  solidcraft-cli xr-info [--summary]\n      (probe the OpenXR runtime, head-mounted display and Vulkan compatibility; --summary prints a\n       plain-language verdict for someone testing on their own headset; Phase 0 of #2172)\n";
 /// `icon`'s lines in the usage.
 const USAGE_ICON: &str = "  solidcraft-cli icon --out icon.png [--size 256] | --out icon.ico\n";
 /// `fuzz-one`'s lines in the usage: a seed and the flags of one fuzz run.
