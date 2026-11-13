@@ -2,6 +2,8 @@
 //! Serialized bounds are never evidence: both the section and the complete net are
 //! re-enclosed from the stored numbers before the surface is returned: a saved net on its
 //! regenerated net's basis by their control nets span by span, any other by Bezier cells.
+//! A face's record keeps its wall over the face's own turns alone ([`ProceduralSweep::to_record_over`]),
+//! so a wall split into many faces is not written once per face in full.
 //! Deviations: no upstream counterpart. No recursion; counts use the screw-net budgets.
 
 use crate::blend::fillet_section::interval::Ivl;
@@ -10,6 +12,7 @@ use crate::blend::fillet_section::recertify::{
 };
 use crate::error::{Result, SolidError};
 use crate::eval::geometry::sweep as r;
+use crate::geom::extent2d::Extent2d;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -160,6 +163,23 @@ impl ProceduralSweep {
         })
     }
 
+    /// [`ProceduralSweep::to_record`] over the face box `uv` (in the net's own parameters):
+    /// the same profile, motion and law, with only the stations whose spans the box's turns
+    /// cross and the net's control points over those spans, and the bound certified for that
+    /// piece. A face cut from a long wall then carries its own turns, not the whole wall's. A
+    /// wall the piece would not be the same surface of in the same parameters (an offset
+    /// wall, a remapped turn parameter, a net not on its stations) goes whole.
+    ///
+    /// # Errors
+    /// Those of [`ProceduralSweep::to_record`]; a net whose counts do not hold together.
+    pub fn to_record_over(
+        &self,
+        net: &BSplineSurface,
+        uv: &Extent2d,
+    ) -> Result<r::ProceduralSweepRecord> {
+        restricted(self.to_record(net)?, uv)
+    }
+
     /// Reconstructs a saved screw surface and re-certifies its actual net against its
     /// exact definition. A claimed bound smaller than the newly established bound is
     /// replaced by the conservative certified bound; it never authorises net evaluation.
@@ -168,6 +188,18 @@ impl ProceduralSweep {
     /// Refuses malformed data, unsupported offset sources, singular maps, oversized
     /// records and nets whose relation to the definition cannot be certified.
     pub fn from_record(record: &r::ProceduralSweepRecord) -> Result<Surface> {
+        let (mut definition, net) = Self::proved(record)?;
+        if definition.offset.is_none() {
+            definition.bound = record.bound.max(definition.bound);
+        }
+        let mut result = Surface::from(net);
+        result.set_sweep_definition(definition);
+        Ok(result)
+    }
+
+    /// The definition and net a saved screw record holds, the definition's bound the
+    /// certificate of the net against it alone, the record's claimed bound no operand.
+    fn proved(record: &r::ProceduralSweepRecord) -> Result<(Self, BSplineSurface)> {
         if !record.bound.is_finite()
             || record.bound <= 0.0
             || !record.half.is_finite()
@@ -277,10 +309,146 @@ impl ProceduralSweep {
             if !certified.is_finite() {
                 return Err(bad("saved screw net error is not certified finite"));
             }
-            definition.bound = record.bound.max(certified);
+            definition.bound = certified;
         }
-        let mut result = Surface::from(net);
-        result.set_sweep_definition(definition);
-        Ok(result)
+        Ok((definition, net))
     }
+}
+
+/// `whole` restricted to the stations `t_i0 <= .. <= t_i1` whose spans hold the face box
+/// `uv`'s turns, `i0` the last station at or below the box and `i1` the first at or above it,
+/// and its net to the control points over them. The record is kept whole where that is not
+/// the same wall in the same parameters: an offset wall (its net is refined independently of
+/// its stations), a map that does not take the net's turn parameter to the definition's as
+/// the identity, or turn knots that are not the stations (triple at the ends, double
+/// between, degree 2).
+///
+/// **Why it is the same surface.** The wall's definition on a span reads only that span's two
+/// stations ([`ProceduralSweep::turn_at`]: its middle and width) and the motion and law, which
+/// are absolute in the turn angle; so on the kept spans the restricted definition is the
+/// whole one. On the net, a station is a knot of multiplicity 2 in degree 2: there the net
+/// interpolates its control point, and the spans on either side read disjoint control points
+/// but that one. The control points `2 i0 ..= 2 i1` with the knots
+/// `t_i0 (3), t_i0+1 (2), .., t_i1 (3)` are then the same piecewise rational map over
+/// `[t_i0, t_i1]`, every number copied, in the same parameters: every point, pcurve and name
+/// on the face reads as it did. The box lies within `[t_i0, t_i1]` by the choice of `i0` and
+/// `i1`, compared on the knots themselves.
+///
+/// **The bound.** Not the whole wall's, inherited: the piece's own certificate
+/// ([`ProceduralSweep::proved`], the proof [`ProceduralSweep::from_record`] reads it back
+/// with), the definition on the kept stations certified ([`ProceduralSweep::certify`]) plus
+/// the kept net's enclosed distance from the net regenerated on those stations, so the bound
+/// is sound whatever the whole wall's was. Against the whole wall's certificate: each term of
+/// `certify` (the largest half angle, the law's largest change per span, the floor's largest
+/// turn) is a largest over the stations, here over fewer of them, so none is larger; the kept
+/// net is the whole net's own coefficients on the kept spans, and the regenerated one differs
+/// from the whole regenerated net's only at the piece's last station, where the regeneration
+/// places the end of the motion as its cap rather than turning the point (a rounding of the
+/// point, which the floor's smaller largest turn exceeds). The regression test checks every
+/// piece's certificate against its whole wall's.
+fn restricted(whole: r::ProceduralSweepRecord, uv: &Extent2d) -> Result<r::ProceduralSweepRecord> {
+    let r::SweepDefinitionRecord::Screw { offset, .. } = &whole.definition;
+    let identity = whole.map_a.get(1) == Some(&0.0) && whole.map_b.get(1) == Some(&1.0);
+    if offset.is_some() || !identity {
+        return Ok(whole);
+    }
+    let n = &whole.net;
+    let (u_degree, v_degree) = (n.u_degree, n.v_degree);
+    let (degree, knots, [lo, hi]) = if whole.swapped {
+        (n.u_degree, &n.u_knots, [uv.u_min(), uv.u_max()])
+    } else {
+        (n.v_degree, &n.v_knots, [uv.v_min(), uv.v_max()])
+    };
+    let st = &whole.stations;
+    let last = st.len().saturating_sub(1);
+    let pattern = |stations: &[f64]| -> Vec<f64> {
+        let end = stations.len().saturating_sub(1);
+        stations
+            .iter()
+            .enumerate()
+            .flat_map(|(i, &t)| std::iter::repeat_n(t, if i == 0 || i == end { 3 } else { 2 }))
+            .collect()
+    };
+    let on_stations = |knots: &[f64]| {
+        let expected = pattern(st);
+        knots.len() == expected.len()
+            && knots
+                .iter()
+                .zip(&expected)
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+    };
+    if degree != 2 || last == 0 || !on_stations(knots) {
+        return Ok(whole);
+    }
+    let i0 = st
+        .partition_point(|&t| t <= lo)
+        .saturating_sub(1)
+        .min(last - 1);
+    let i1 = st.partition_point(|&t| t < hi).max(i0 + 1).min(last);
+    if i0 == 0 && i1 == last {
+        return Ok(whole);
+    }
+    let stations = st
+        .get(i0..=i1)
+        .ok_or_else(|| bad("a face's turns are past its wall's stations"))?
+        .to_vec();
+    let rows = usize::try_from(n.u_count).map_err(|_| bad("a screw net's count"))?;
+    let columns = usize::try_from(n.v_count).map_err(|_| bad("a screw net's count"))?;
+    let kept = |k: usize| k >= 2 * i0 && k <= 2 * i1;
+    let cell = |at: usize| {
+        let (i, j) = (at.checked_div(columns)?, at.checked_rem(columns)?);
+        Some(if whole.swapped { kept(i) } else { kept(j) })
+    };
+    if n.points.len() != rows.saturating_mul(columns)
+        || n.weights
+            .as_ref()
+            .is_some_and(|w| w.len() != n.points.len())
+    {
+        return Err(bad("a screw net's points are not its counts"));
+    }
+    let pick = |at: usize| cell(at).unwrap_or(false);
+    let points = n
+        .points
+        .iter()
+        .enumerate()
+        .filter(|&(at, _)| pick(at))
+        .map(|(_, p)| *p)
+        .collect();
+    let weights = n.weights.as_ref().map(|w| {
+        w.iter()
+            .enumerate()
+            .filter(|&(at, _)| pick(at))
+            .map(|(_, w)| *w)
+            .collect()
+    });
+    let count = u32::try_from(2 * (i1 - i0) + 1).map_err(|_| bad("a screw net's count"))?;
+    let knots = pattern(&stations);
+    let (u_count, v_count, u_knots, v_knots) = if whole.swapped {
+        (count, n.v_count, knots, n.v_knots.clone())
+    } else {
+        (n.u_count, count, n.u_knots.clone(), knots)
+    };
+    let half = stations
+        .windows(2)
+        .fold(0.0_f64, |largest, pair| match pair {
+            [a, b] => largest.max((b - a) * 0.5),
+            _ => largest,
+        });
+    let mut part = r::ProceduralSweepRecord {
+        net: r::NurbsSurfaceRecord {
+            u_degree,
+            v_degree,
+            u_count,
+            v_count,
+            u_knots,
+            v_knots,
+            points,
+            weights,
+        },
+        stations,
+        half,
+        ..whole
+    };
+    part.bound = ProceduralSweep::proved(&part)?.0.bound;
+    Ok(part)
 }

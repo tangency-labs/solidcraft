@@ -852,7 +852,7 @@ impl Brep {
     /// For a record from outside the kernel (a file, the control channel, pasted data): it is
     /// refused past [`MAX_ITEMS`] items, so hostile input is bounded before anything walks it.
     pub fn validate(&self) -> Result<()> {
-        self.validate_within(Budget::input())
+        self.validate_within(&mut Budget::input())
     }
 
     /// [`Brep::validate`] for a record the kernel built in memory (an operation's result, a
@@ -860,13 +860,27 @@ impl Brep {
     /// record already sits in memory, its size set by inputs that were bounded where they came
     /// in, and the checks are linear in it; a cap here would only refuse a real result.
     pub fn validate_built(&self) -> Result<()> {
-        self.validate_within(Budget {
+        self.validate_within(&mut Budget {
             used: 0,
             limit: usize::MAX,
         })
     }
 
-    fn validate_within(&self, mut budget: Budget) -> Result<()> {
+    /// The items [`Brep::validate`] counts against [`MAX_ITEMS`] for this record, when every
+    /// other check passes: what reading it in from outside the kernel takes.
+    ///
+    /// # Errors
+    /// What [`Brep::validate_built`] refuses.
+    pub fn items(&self) -> Result<usize> {
+        let mut budget = Budget {
+            used: 0,
+            limit: usize::MAX,
+        };
+        self.validate_within(&mut budget)?;
+        Ok(budget.used)
+    }
+
+    fn validate_within(&self, budget: &mut Budget) -> Result<()> {
         require(self.version == VERSION, "unsupported version")?;
         tolerance(self.tolerance)?;
         require(
@@ -880,7 +894,7 @@ impl Brep {
         budget.add(self.regions.len() + self.faces.len() + self.edges.len())?;
         budget.add(self.screw_owners.len())?;
         for owner in &self.screw_owners {
-            sweep::check(owner, &mut budget)?;
+            sweep::check(owner, budget)?;
             // Converted DTO, temporary recertification data, and certified
             // kernel net. All edges share this owner rather than a display net.
             budget.add(
@@ -890,7 +904,7 @@ impl Brep {
             )?;
         }
         for v in &self.vertices {
-            points(&[v.point], &mut budget)?;
+            points(&[v.point], budget)?;
             tolerance(v.tolerance)?;
         }
         for e in &self.edges {
@@ -913,15 +927,15 @@ impl Brep {
                         .checked_mul(2)
                         .ok_or(Invalid("item budget"))?,
                 )?;
-                curve2_with_runtime_copies(uv_curve, &mut budget)?;
+                curve2_with_runtime_copies(uv_curve, budget)?;
                 let natural = sweep_natural(owner)?;
                 interval(u_domain, natural[0])?;
                 interval(v_domain, natural[1])?;
             } else {
-                curve(&e.curve, 0, &mut budget)?;
+                curve(&e.curve, 0, budget)?;
             }
             if let Some(n) = &e.nurbs {
-                curve(n, 0, &mut budget)?;
+                curve(n, 0, budget)?;
                 require(
                     matches!(n, Curve::Spline { .. } | Curve::RationalSpline { .. }),
                     "NURBS form is not a NURBS",
@@ -952,12 +966,12 @@ impl Brep {
         }
         for f in &self.faces {
             if f.nurbs.is_some() {
-                face_label(&f.surface, &mut budget)?;
+                face_label(&f.surface, budget)?;
             } else {
-                surface(&f.surface, 0, &mut budget)?;
+                surface(&f.surface, 0, budget)?;
             }
             if let Some(n) = &f.nurbs {
-                surface(n, 0, &mut budget)?;
+                surface(n, 0, budget)?;
                 require(
                     matches!(n, Surface::Spline { .. } | Surface::RationalSpline { .. }),
                     "NURBS form is not a NURBS",
@@ -1000,7 +1014,7 @@ impl Brep {
                 if let Loop::Edges { edges } = l {
                     budget.add(edges.len())?;
                     for e in edges {
-                        curve2::curve2(&e.pcurve, &mut budget)?;
+                        curve2::curve2(&e.pcurve, budget)?;
                     }
                 }
             }
