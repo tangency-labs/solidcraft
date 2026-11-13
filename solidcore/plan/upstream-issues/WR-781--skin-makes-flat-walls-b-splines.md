@@ -1,4 +1,4 @@
-#### WR-778. The skin makes its flat walls B-splines
+#### WR-781. The skin makes its flat walls B-splines
 - **Severity:** Missing feature (the shape is right; its walls are not recognised as planes)
 - **Area:** Sweep
 - **Location:** `SmApiCreateSkinPrimitive` (`SmPrimitiveCreation::CreateSkinPrimitive`); solidcore `sweep/api_surfaces.rs` `skin_primitive`.

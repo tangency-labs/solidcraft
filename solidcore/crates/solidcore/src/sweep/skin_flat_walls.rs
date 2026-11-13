@@ -1,4 +1,4 @@
-//! Not upstream: a skin's flat walls as planes (WR-778), always (upstream every wall is a B-spline).
+//! Not upstream: a skin's flat walls as planes (WR-781), always (upstream every wall is a B-spline).
 //!
 //! `SmApiCreateSkinPrimitive` makes every side wall a B-spline surface, also where the wall is
 //! flat: a loft whose sections' corners line up (through three or more sections, or with lines
