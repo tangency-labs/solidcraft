@@ -7,12 +7,13 @@ use solidcraft_geom::subdivision::{
 use std::collections::{BTreeMap, BTreeSet};
 
 impl Form {
-    pub fn insert_loop(&mut self, edge: [usize; 2], fraction: f64) -> Result<()> {
+    pub fn insert_loop(&mut self, edge: [usize; 2], fraction: f64) -> Result<Vec<[usize; 2]>> {
         if self.hierarchy.is_some() {
             return Err(error("whole edge-loop insertion requires a base cage"));
         }
-        let (cage, _) = self.cage.insert_edge_ring(edge, fraction).map_err(error)?;
-        self.replace_cage(cage)
+        let (cage, seams) = self.cage.insert_edge_ring(edge, fraction).map_err(error)?;
+        self.replace_cage(cage)?;
+        Ok(seams)
     }
     pub(crate) fn restore_logical_holes(&mut self, edges: &[[usize; 2]], vertices: &[usize], single: bool, tolerance: f64) -> Result<()> {
         if self.matching.is_some() {
@@ -364,12 +365,7 @@ impl Form {
             return Err(error("aligned Match continuation changed the original evaluator topology or sharpness"));
         }
         for (&actual, &expected) in self.cage.points.iter().zip(&expected.points) {
-            // This bound only permits arithmetic roundoff in the continued
-            // control net. It is independent of user CAD/Match fit tolerances.
-            let scale =
-                actual.x.abs().max(actual.y.abs()).max(actual.z.abs()).max(expected.x.abs()).max(expected.y.abs()).max(expected.z.abs()).max(1.0);
-            let roundoff = 128.0 * f64::EPSILON * scale * (levels + 1).pow(2) as f64;
-            if !actual.is_finite() || !expected.is_finite() || actual.dist(expected) > roundoff {
+            if !crate::kernel::form_curves::continued_control_within_roundoff(actual, expected, levels) {
                 return Err(error("aligned insertion needs a constrained correction that would move the original continued source"));
             }
         }
@@ -435,18 +431,32 @@ impl Form {
         if symmetry.partners.get(..original.partners.len()) != Some(original.partners.as_slice()) {
             return Err(error("Insert Loop changed an existing mirror partner identity"));
         }
-        let endpoints: BTreeMap<_, _> =
-            records.iter().zip(inserted).zip(targets).map(|((record, &vertex), &target)| (loop_key(record.0), (vertex, target))).collect();
-        for (&edge, &(vertex, target)) in &endpoints {
+        let mut endpoints = BTreeMap::<_, Vec<_>>::new();
+        for ((&(edge, fraction), &vertex), &target) in records.iter().zip(inserted).zip(targets) {
+            endpoints.entry(loop_key(edge)).or_default().push((loop_fraction(edge, fraction), vertex, target));
+        }
+        for (&edge, stations) in &endpoints {
             let a = *original.partners.get(edge[0]).ok_or_else(|| error("missing original mirror endpoint"))?;
             let b = *original.partners.get(edge[1]).ok_or_else(|| error("missing original mirror endpoint"))?;
-            let &(partner, other) = endpoints.get(&loop_key([a, b])).ok_or_else(|| error("missing mirrored insertion target"))?;
-            if symmetry.partners.get(vertex) != Some(&partner) {
-                return Err(error("inserted controls do not retain the planned mirror identities"));
-            }
-            let reflected = source.placement.point(original.reflect(source.placement.local_point(target)));
-            if reflected.dist(other) > tolerance.max(1e-8) {
-                return Err(error("original CAD insertion targets are incompatible with the mirror plane"));
+            let others = endpoints.get(&loop_key([a, b])).ok_or_else(|| error("missing mirrored insertion target"))?;
+            for &(fraction, vertex, target) in stations {
+                let mirrored = loop_fraction([a, b], fraction);
+                let partner = symmetry.partners.get(vertex).ok_or_else(|| error("missing new mirrored control"))?;
+                let matching = others.iter().filter(|&&(other, _, _)| (other - mirrored).abs() <= 4.0 * f64::EPSILON);
+                let reflected = source.placement.point(original.reflect(source.placement.local_point(target)));
+                let mut found = false;
+                for &(_, id, other) in matching {
+                    if id != *partner {
+                        return Err(error("inserted controls do not retain the planned mirror identities"));
+                    }
+                    if reflected.dist(other) > tolerance.max(1e-8) {
+                        return Err(error("original CAD insertion targets are incompatible with the mirror plane"));
+                    }
+                    found = true;
+                }
+                if !found {
+                    return Err(error("missing mirrored insertion target"));
+                }
             }
         }
         symmetry.validate_reflection(&self.cage).map_err(error)?;

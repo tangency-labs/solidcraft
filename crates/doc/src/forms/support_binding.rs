@@ -4,7 +4,6 @@ use crate::forms::association::{NamedEdge, SupportRef};
 use crate::{ModelBody, ModelState, Result};
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -61,31 +60,23 @@ impl IntrinsicCurve {
             .control_points()
             .filter(|c| (2..=256).contains(&c.len()))
             .ok_or_else(|| invalid("periodic support requires a bounded exact rational parameterization"))?;
-        let inverse = crate::mat_inverse(&body.source_transform).ok_or_else(|| invalid("support source transform is singular"))?;
+        let inverse = crate::kernel::affine::inverse(&body.source_transform).map_err(|_| invalid("support source transform is singular"))?;
         let first = curve.curve.knots.first().copied().ok_or_else(|| invalid("missing intrinsic knots"))?;
         let last = curve.curve.knots.last().copied().ok_or_else(|| invalid("missing intrinsic knots"))?;
         if !first.is_finite() || !last.is_finite() || last <= first {
             return Err(invalid("invalid intrinsic knot interval"));
         }
-        let weight = controls.first().map(|c| c[3]).filter(|w| w.is_finite() && *w > 0.0).ok_or_else(|| invalid("invalid intrinsic curve weight"))?;
         let source = body.body.record().edges.get(index).ok_or_else(|| invalid("missing intrinsic source edge"))?;
         let value = serde_json::to_value(source.parameters()).map_err(|e| invalid(e.to_string()))?;
         let kind = value.get("kind").and_then(serde_json::Value::as_str).ok_or_else(|| invalid("missing intrinsic source curve kind"))?.to_owned();
-        let points = controls
-            .iter()
-            .map(|c| {
-                if !c[3].is_finite() || c[3] <= 0.0 {
-                    return Err(invalid("invalid intrinsic rational control"));
-                }
-                Ok(crate::apply_point(&inverse, Vec3::new(c[0] / c[3], c[1] / c[3], c[2] / c[3])))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let (points, weights) = crate::kernel::form_curves::rational_controls_in_frame(controls, &inverse)
+            .ok_or_else(|| invalid("invalid intrinsic rational control"))?;
         let out = Self {
             kind,
             degree: curve.curve.degree,
             interval: source.interval.map(|t| (t - first) / (last - first)),
             knots: curve.curve.knots.iter().map(|x| (*x - first) / (last - first)).collect(),
-            weights: controls.iter().map(|c| c[3] / weight).collect(),
+            weights,
             points,
         };
         out.validate()?;
@@ -101,22 +92,7 @@ impl IntrinsicCurve {
         {
             return false;
         }
-        let n = self.points.len() as f64;
-        let before = self.points.iter().copied().fold(Vec3::ZERO, |a, p| a + p) / n;
-        let after = current.points.iter().copied().fold(Vec3::ZERO, |a, p| a + p) / n;
-        let old_size = self.points.iter().map(|p| (*p - before).len2()).sum::<f64>();
-        let new_size = current.points.iter().map(|p| (*p - after).len2()).sum::<f64>();
-        let scale = (new_size / old_size).sqrt();
-        if !scale.is_finite() || !(1e-9..=1e9).contains(&scale) {
-            return false;
-        }
-        let extent = (new_size / n).sqrt();
-        let position = current.points.iter().map(|p| p.x.abs().max(p.y.abs()).max(p.z.abs())).fold(0.0_f64, f64::max);
-        let tolerance = extent * 1e-8 + position * 64.0 * f64::EPSILON;
-        if !tolerance.is_finite() || tolerance >= extent * 0.01 {
-            return false;
-        }
-        self.points.iter().zip(&current.points).all(|(a, b)| (after + (*a - before) * scale).dist(*b) <= tolerance)
+        crate::kernel::form_curves::controls_follow(&self.points, &current.points)
     }
 }
 /// Knot normalization subtracts and divides native size-dependent parameters.
@@ -399,12 +375,12 @@ impl crate::walk::Walk for BoundaryBinding {
     fn walk_refs_mut<'a>(&'a mut self, _f: &mut dyn FnMut(crate::walk::RefItemMut<'a>)) {}
     fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(crate::walk::GeoItem<'a>)) {
         for curve in &self.curves {
-            f(crate::walk::Geo::Pick(&curve.edge.pick));
+            f(crate::walk::Geo::Pos(&curve.edge.pick));
         }
     }
     fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(crate::walk::GeoItemMut<'a>)) {
         for curve in &mut self.curves {
-            f(crate::walk::Geo::Pick(&mut curve.edge.pick));
+            f(crate::walk::Geo::Pos(&mut curve.edge.pick));
         }
     }
 }

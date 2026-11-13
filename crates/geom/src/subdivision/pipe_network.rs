@@ -71,7 +71,7 @@ impl Network {
             let (Some(&a), Some(&b)) = (edge.points.first(), edge.points.last()) else {
                 return Err(bad("empty pipe source edge"));
             };
-            if edge.points.len() < 2 || length(&edge.points) < JOIN_TOLERANCE {
+            if edge.points.len() < 2 || solidcore_ops::form_pipe::length(&edge.points).map_err(|error| bad(&error.to_string()))? < JOIN_TOLERANCE {
                 return Err(bad("pipe source edges must have positive length"));
             }
             let mut indices = [0; 2];
@@ -119,38 +119,14 @@ impl Network {
         if !(1..=20).contains(&samples) {
             return Err(bad("pipe path samples must be 1..20"));
         }
-        let lengths = chain
+        let paths = chain
             .edges
             .iter()
-            .map(|&(i, _)| self.edges.get(i).map(|e| length(&e.points)))
+            .map(|&(i, forward)| self.edges.get(i).map(|edge| (edge.points.as_slice(), forward)))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| bad("pipe chain lost a source edge"))?;
-        let total = lengths.iter().sum::<f64>();
-        if !total.is_finite() || total <= JOIN_TOLERANCE {
-            return Err(bad("pipe chain has no finite length"));
-        }
-        let target = (samples * lengths.len()).max(if chain.nodes[0] == chain.nodes[1] { 3 } else { 1 });
-        let mut counts = vec![1usize; lengths.len()];
-        // Split the widest remaining interval. Unlike proportional rounding with
-        // a reserved minimum, this does not oversample short source edges.
-        for _ in lengths.len()..target {
-            let mut widest = 0;
-            for i in 1..lengths.len() {
-                if lengths[i] / counts[i] as f64 > lengths[widest] / counts[widest] as f64 {
-                    widest = i;
-                }
-            }
-            counts[widest] += 1;
-        }
-        let mut out = Vec::with_capacity(target + 1);
-        for ((&(id, forward), &count), &len) in chain.edges.iter().zip(&counts).zip(&lengths) {
-            let points = &self.edges[id].points;
-            for i in usize::from(!out.is_empty())..=count {
-                let t = i as f64 / count as f64;
-                out.push(at_length(points, if forward { t * len } else { (1.0 - t) * len })?);
-            }
-        }
-        Ok(out)
+        let minimum = if chain.nodes[0] == chain.nodes[1] { 3 } else { 1 };
+        solidcore_ops::form_pipe::sample(&paths, samples, minimum).map_err(|error| bad(&error.to_string()))
     }
 }
 
@@ -186,20 +162,6 @@ fn trace(
     }
     Err(bad("pipe chain traversal exceeded its budget"))
 }
-fn length(points: &[Vec3]) -> f64 {
-    points.windows(2).map(|p| p[0].dist(p[1])).sum()
-}
-fn at_length(points: &[Vec3], mut distance: f64) -> Result<Vec3> {
-    for pair in points.windows(2) {
-        let len = pair[0].dist(pair[1]);
-        if distance <= len && len > 0.0 {
-            return Ok(pair[0] + (pair[1] - pair[0]) * (distance / len).clamp(0.0, 1.0));
-        }
-        distance -= len;
-    }
-    points.last().copied().ok_or_else(|| bad("pipe source edge has no endpoint"))
-}
-
 fn budget(cage: &Cage) -> Result<()> {
     if cage.points.len() > MAX_POINTS || cage.faces.len() > MAX_FACES {
         return Err(bad("pipe control cage exceeds its editing budget"));

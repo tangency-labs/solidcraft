@@ -413,7 +413,8 @@ pub(super) fn topology(app: &mut SolveApp, ui: &mut egui::Ui) {
                         return;
                     }
                 };
-                let d = app.forms_prototype.axis.vector(constraint_axes(app, dirs)).unwrap_or(dirs[2]) * distance;
+                let direction = app.forms_prototype.axis.vector(constraint_axes(app, dirs)).unwrap_or(dirs[2]);
+                let d = solidcore_ops::form_transform::translate(Vec3::ZERO, direction, distance);
                 // Numeric extrusion has the same evaluated-surface displacement
                 // contract as dragging. Keep legacy raw topology commands intact.
                 let (faces, edges) = if tool == "extrude_faces" { (faces, Vec::new()) } else { (Vec::new(), edges) };

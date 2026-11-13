@@ -217,6 +217,7 @@ impl Cage {
         out.finish_edit()
     }
     pub fn weld(&self, selected: &[usize]) -> Result<Self> {
+        self.validate()?;
         let set: BTreeSet<_> = selected.iter().copied().collect();
         if set.len() < 2 || set.len() != selected.len() {
             return Err(bad("weld requires at least two distinct vertices"));
@@ -241,6 +242,23 @@ impl Cage {
             }
         }
         out.faces.retain(|f| f.len() >= 3);
+        let representative = |id| if set.contains(&id) { first } else { id };
+        let mut edge_weights = BTreeMap::<_, f64>::new();
+        for crease in &self.edge_creases {
+            let [a, b] = crease.edge.map(representative);
+            if a != b {
+                edge_weights.entry(key(a, b)).and_modify(|weight| *weight = weight.max(crease.sharpness)).or_insert(crease.sharpness);
+            }
+        }
+        let mut vertex_weights = BTreeMap::<_, f64>::new();
+        for crease in &self.vertex_creases {
+            vertex_weights
+                .entry(representative(crease.vertex))
+                .and_modify(|weight| *weight = weight.max(crease.sharpness))
+                .or_insert(crease.sharpness);
+        }
+        out.edge_creases = edge_weights.into_iter().map(|((a, b), sharpness)| super::EdgeCrease { edge: [a, b], sharpness }).collect();
+        out.vertex_creases = vertex_weights.into_iter().map(|(vertex, sharpness)| super::VertexCrease { vertex, sharpness }).collect();
         out.finish_edit()
     }
     /// Detach a face region into a separate connected component, keeping its shape.
@@ -283,24 +301,12 @@ impl Cage {
         if self.points.len().saturating_mul(2) > super::MAX_POINTS || self.faces.len().saturating_mul(2) + walls > super::MAX_FACES {
             return Err(bad("thickened cage exceeds the editing budget"));
         }
-        let mut normals = vec![Vec3::ZERO; self.points.len()];
-        for face in &self.faces {
-            let origin = self.point(face[0])?;
-            let mut n = Vec3::ZERO;
-            for i in 1..face.len() - 1 {
-                n += (self.point(face[i])? - origin).cross(self.point(face[i + 1])? - origin);
-            }
-            for &v in face {
-                normals[v] += n;
-            }
-        }
+        let moved = solidcore_ops::form_cage::offset_controls(&self.points, &self.faces, distance).map_err(|error| bad(&error.to_string()))?;
         let mut out = self.clone();
         let n = self.points.len();
         out.vertex_creases.extend(self.vertex_creases.iter().map(|c| super::VertexCrease { vertex: c.vertex + n, sharpness: c.sharpness }));
         out.edge_creases.extend(self.edge_creases.iter().map(|c| super::EdgeCrease { edge: c.edge.map(|v| v + n), sharpness: c.sharpness }));
-        for (&p, normal) in self.points.iter().zip(normals) {
-            out.points.push(p + normal.normalized().ok_or_else(|| bad("undefined vertex normal"))? * distance);
-        }
+        out.points.extend(moved);
         // For positive thickness the source is the lower side.
         if distance > 0.0 {
             for f in &mut out.faces {
@@ -875,6 +881,57 @@ mod tests {
     }
 
     #[test]
+    fn legacy_face_extrusion_and_unweld_copy_creases_to_both_rims() {
+        let cage = Parameters { kind: "face".into(), segments: [2, 1, 1], ..Default::default() }.build().unwrap();
+        let mut seam = cage.faces[0].iter().copied().filter(|point| cage.faces[1].contains(point));
+        let edge = [seam.next().unwrap(), seam.next().unwrap()];
+        let cage = cage.with_creases(&[edge], &[edge[0]], 2.75).unwrap();
+        let extruded = cage.extrude_faces(&[0], Vec3::Z).unwrap();
+        let unwelded = cage.unweld(&[0]).unwrap();
+        for (edited, shift) in [(&extruded, Vec3::Z), (&unwelded, Vec3::ZERO)] {
+            assert_eq!(edited.edge_creases.len(), 2);
+            assert_eq!(edited.vertex_creases.len(), 2);
+            let locations = edited
+                .edge_creases
+                .iter()
+                .map(|crease| {
+                    assert_eq!(crease.sharpness, 2.75);
+                    crease.edge.map(|id| edited.points[id])
+                })
+                .collect::<Vec<_>>();
+            let original = edge.map(|id| cage.points[id]);
+            for expected in [original, original.map(|point| point + shift)] {
+                assert!(locations.iter().any(|points| *points == expected || *points == [expected[1], expected[0]]));
+            }
+            assert!(edited.vertex_creases.iter().all(|crease| crease.sharpness == 2.75));
+        }
+    }
+
+    #[test]
+    fn welding_coalesces_surviving_creases_with_maximum_sharpness() {
+        let cage = Parameters { kind: "face".into(), segments: [1; 3], ..Default::default() }.build().unwrap();
+        let [a, b, c, d] = <[usize; 4]>::try_from(cage.faces[0].as_slice()).unwrap();
+        let marked =
+            cage.with_creases(&[[c, d]], &[b], 1.0).unwrap().with_creases(&[[b, c]], &[c], 3.0).unwrap().with_creases(&[[d, a]], &[], 2.0).unwrap();
+        let welded = marked.weld(&[b, c]).unwrap();
+        assert_eq!(welded.faces[0].len(), 3);
+        assert_eq!(welded.edge_creases.len(), 2);
+        let center = (cage.points[b] + cage.points[c]) / 2.0;
+        let at = welded.points.iter().position(|&point| point == center).unwrap();
+        assert!(welded.vertex_creases.iter().any(|crease| crease.vertex == at && crease.sharpness == 3.0));
+        assert!(welded.edge_creases.iter().any(|crease| crease.edge.contains(&at) && crease.sharpness == 1.0));
+        assert!(welded.edge_creases.iter().any(|crease| crease.sharpness == 2.0));
+    }
+
+    #[test]
+    fn erase_and_fill_refuses_faces_along_the_existing_opening() {
+        let cage = Parameters { kind: "face".into(), segments: [3, 3, 1], ..Default::default() }.build().unwrap();
+        let failure = cage.erase_and_fill(&[0]).unwrap_err();
+        assert!(failure.to_string().contains("existing openings"));
+        assert!(cage.erase_and_fill(&[4]).is_ok());
+    }
+
+    #[test]
     fn stable_extrusion_of_free_edges_preserves_source_points_and_creases() {
         use super::super::{fitting::RootBasis, stable_extrusion};
         use solidcore_record::Vec3;
@@ -1100,6 +1157,16 @@ mod tests {
         assert!(cage.split_seam(&seam[..1]).is_err());
         assert!(a.split_seam(&seam).is_err());
         assert!(a.weld_openings(&b, [usize::MAX, 0], edge(&b)).is_err());
+    }
+    #[test]
+    fn boundary_weld_refuses_to_drop_an_operand_with_the_same_face_controls() {
+        let cage = Parameters { kind: "plane".into(), segments: [1; 3], ..Default::default() }.build().unwrap();
+        assert_eq!(cage.faces.len(), 1);
+        let mut opposite = cage.clone();
+        opposite.faces[0].reverse();
+        let edge = [cage.faces[0][0], cage.faces[0][1]];
+        let error = cage.weld_openings(&opposite, edge, edge).unwrap_err();
+        assert!(error.to_string().contains("identical controls"));
     }
     #[test]
     fn ring_insertion_keeps_quads_and_transfers_sharpness_to_split_edges() {

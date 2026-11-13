@@ -400,6 +400,7 @@ pub(super) struct State {
     exact: Option<((u64, u64), Arc<ExactSelection>)>,
     pub(super) error: Option<String>,
 }
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn compute_context_body(
     definition: solidcraft_engine::doc::forms::Definition,
     tolerance: f64,

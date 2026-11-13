@@ -2,6 +2,7 @@
 //! recorded by DNA, so their offsets are sums of the file's own type lengths.
 use super::{Result, bad};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[derive(Clone, Copy)]
 pub(super) struct Numbers {
@@ -33,7 +34,7 @@ impl Numbers {
 }
 
 pub(super) struct Field {
-    pub ty: String,
+    pub ty: Arc<str>,
     pub offset: usize,
     pub size: usize,
 }
@@ -109,7 +110,7 @@ fn structures(bytes: &[u8], numbers: Numbers) -> Result<Vec<Structure>> {
     c.tag(b"NAME")?;
     let names = c.strings()?;
     c.tag(b"TYPE")?;
-    let types = c.strings()?;
+    let types: Vec<Arc<str>> = c.strings()?.into_iter().map(Arc::from).collect();
     c.tag(b"TLEN")?;
     let lengths = (0..types.len()).map(|_| c.uint(2)).collect::<Result<Vec<_>>>()?;
     c.align()?;
@@ -122,7 +123,7 @@ fn structures(bytes: &[u8], numbers: Numbers) -> Result<Vec<Structure>> {
     let mut total_fields = 0usize;
     for _ in 0..n {
         let ti = c.uint(2)?;
-        let name = types.get(ti).ok_or_else(|| bad("invalid DNA type"))?.clone();
+        let name = types.get(ti).ok_or_else(|| bad("invalid DNA type"))?.to_string();
         let size = *lengths.get(ti).ok_or_else(|| bad("invalid DNA size"))?;
         let count = c.uint(2)?;
         total_fields += count;

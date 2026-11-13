@@ -122,58 +122,8 @@ impl Rows<'_> {
         if self.rhs.is_empty() || !self.columns.is_multiple_of(3) || self.columns > 768 {
             return Err(bad("Match has no usable constraints"));
         }
-        // A Aᵀ + λI is positive definite even when position/tangent/curvature
-        // constraints overlap. Solving in row space gives the minimum control change.
-        let column_space = self.columns < self.rhs.len();
-        let gram = if column_space {
-            (0..self.columns).map(|i| self.coefficients.iter().map(|r| r.get(i).copied().unwrap_or(0.0)).collect()).collect::<Vec<Vec<f64>>>()
-        } else {
-            self.coefficients.clone()
-        };
-        let n = gram.len();
-        let mut lower = vec![vec![0.0; n]; n];
-        for i in 0..n {
-            for j in 0..=i {
-                let mut value = gram[i].iter().zip(&gram[j]).map(|(a, b)| a * b).sum::<f64>();
-                if i == j {
-                    value += 1e-10;
-                }
-                value -= lower[i].iter().zip(&lower[j]).take(j).map(|(a, b)| a * b).sum::<f64>();
-                if i == j {
-                    if !value.is_finite() || value <= 1e-18 {
-                        return Err(bad("Match constraints are numerically ill-conditioned"));
-                    }
-                    lower[i][j] = value.sqrt();
-                } else {
-                    lower[i][j] = value / lower[j][j];
-                }
-            }
-        }
-        let mut solution =
-            if column_space { gram.iter().map(|column| column.iter().zip(&self.rhs).map(|(a, b)| a * b).sum()).collect() } else { self.rhs };
-        for i in 0..n {
-            for j in 0..i {
-                solution[i] -= lower[i][j] * solution[j];
-            }
-            solution[i] /= lower[i][i];
-        }
-        for i in (0..n).rev() {
-            for j in i + 1..n {
-                solution[i] -= lower[j][i] * solution[j];
-            }
-            solution[i] /= lower[i][i];
-        }
-        let mut delta = if column_space {
-            solution
-        } else {
-            let mut delta = vec![0.0; self.columns];
-            for (row, value) in self.coefficients.iter().zip(solution) {
-                for (out, a) in delta.iter_mut().zip(row) {
-                    *out += a * value;
-                }
-            }
-            delta
-        };
+        let mut delta = solidcore_ops::form_cage::fit_displacements(&self.coefficients, &self.rhs, self.columns, 1e-10)
+            .map_err(|error| bad(&format!("Match {error}")))?;
         if let Some(mirror) = self.mirror {
             mirror.project(&mut delta)?;
         }

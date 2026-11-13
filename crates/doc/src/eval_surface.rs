@@ -99,12 +99,11 @@ pub(super) fn eval_refined_weld(
         return Err(invalid("refined Weld qualified records do not match the evaluated Form bodies"));
     }
     let name = a.name.clone();
-    let source_feature = a.feature;
     let traced = Traced::step(prepared.body, &[&a.traced(), &b.traced()]);
     if traced.lineage.is_none() {
         return Err(invalid("refined Weld could not retain both source body lineages"));
     }
-    let result = ModelBody::traced_new(name.clone(), traced, source_feature);
+    let result = a.remade(traced);
     let slot = state.bodies.iter_mut().find(|body| body.name == name).ok_or_else(|| invalid("missing first refined Weld body"))?;
     *slot = result;
     state.bodies.retain(|body| body.name != second_name.0);

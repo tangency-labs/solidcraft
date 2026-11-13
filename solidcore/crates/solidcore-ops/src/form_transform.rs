@@ -60,6 +60,11 @@ pub fn uniform_factors(delta: Vec3, length: f64, right: Vec3, up: Vec3) -> [f64;
     kernel::uniform_factors(vec3(delta), length, vec3(right), vec3(up))
 }
 
+/// Length and axis components of a Form translation request.
+pub fn translation_measure(delta: Vec3, basis: [Vec3; 3]) -> (f64, [f64; 3]) {
+    kernel::translation_measure(vec3(delta), basis.map(vec3))
+}
+
 /// The axes of a plane facing a viewport ray.
 pub fn view_plane_basis(direction: Vec3, right: Vec3) -> Option<[Vec3; 2]> {
     kernel::view_plane_basis(vec3(direction), vec3(right)).map(|axes| axes.map(record_vec3))

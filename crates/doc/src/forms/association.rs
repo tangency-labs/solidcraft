@@ -3,17 +3,15 @@ use super::{
     Definition,
     support::{BoundaryBinding, BoundaryCoordinate, BoundarySupport},
 };
+use crate::kernel::form_curves::{continued_control, continued_control_within_roundoff, fitted_station, stations_agree};
 use crate::{BodyName, DocError, ModelBody, ModelState, Result};
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use solidcraft_geom::{
-    Vec3Geom,
-    subdivision::{
-        Cage, EdgeCrease, VertexCrease,
-        fitting::{Fit, RootBasis},
-        hierarchy::{Hierarchy, Layout, LevelSharpness},
-        matching::{self, Config, Domain, Report, Tolerances},
-    },
+use solidcraft_geom::subdivision::{
+    Cage, EdgeCrease, VertexCrease,
+    fitting::{Fit, RootBasis},
+    hierarchy::{Hierarchy, Layout, LevelSharpness},
+    matching::{self, Config, Domain, Report, Tolerances},
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -313,10 +311,7 @@ impl Matching {
             || expected.edge_creases != cage.edge_creases
             || expected.vertex_creases != cage.vertex_creases
             || expected.points.len() != cage.points.len()
-            || expected.points.iter().zip(&cage.points).any(|(a, b)| {
-                let scale = a.x.abs().max(a.y.abs()).max(a.z.abs()).max(b.x.abs()).max(b.y.abs()).max(b.z.abs()).max(1.0);
-                !a.is_finite() || !b.is_finite() || a.dist(*b) > 128.0 * f64::EPSILON * scale * (levels + 1).pow(2) as f64
-            })
+            || expected.points.iter().zip(&cage.points).any(|(&a, &b)| !continued_control_within_roundoff(a, b, levels))
         {
             // A later sculpt may add a real fine coefficient. Its new shape
             // must be recomputed with the ordinary current evaluator fit.
@@ -328,7 +323,7 @@ impl Matching {
     fn continued_fit(&self, definition: &Definition, tolerance: f64) -> Result<Option<Fit>> {
         let Some((surface, prefix)) = self.continued_prefix(definition)? else { return Ok(None) };
         let depth = definition.hierarchy.as_ref().ok_or_else(|| invalid("retained Match has no hierarchy"))?.depth;
-        let fit = fit_match_core(&prefix, surface.order, &surface.basis, tolerance)?;
+        let fit = matching::fit_material(&prefix, surface.order, &surface.basis, tolerance).map_err(|e| invalid(e.to_string()))?;
         fit.continued_quad_patches(prefix.faces.len(), depth - surface.depth).map(Some).map_err(|e| invalid(e.to_string()))
     }
 
@@ -337,7 +332,7 @@ impl Matching {
             return Ok(fit);
         }
         let order = self.evaluation_order(&definition.cage, definition.hierarchy.as_ref())?;
-        fit_match_core(&definition.cage, order, &self.basis, tolerance)
+        matching::fit_material(&definition.cage, order, &self.basis, tolerance).map_err(|e| invalid(e.to_string()))
     }
 
     fn source_surface(&self, definition: &Definition) -> Result<(ContinuedSurface, Cage)> {
@@ -411,6 +406,34 @@ impl Matching {
             })
             .collect();
         (vertices, edges)
+    }
+
+    fn same_depth_history(previous: (&[VertexBackup], &[EdgeBackup]), before: &Cage, after: &Cage) -> Result<(Vec<VertexBackup>, Vec<EdgeBackup>)> {
+        let (mut vertices, mut edges) = Self::history(before, after);
+        // At fixed depth, leaf splits change ownership only. Same-level
+        // extrusions retain the existing vertex indices and append new controls.
+        // Never carry a backup for an evaluator edge that the operation removed.
+        let key = |[a, b]: [usize; 2]| [a.min(b), a.max(b)];
+        let current_edges = before.edges().map_err(|e| invalid(e.to_string()))?.into_iter().map(key).collect::<BTreeSet<_>>();
+        let known_vertices = vertices.iter().map(|backup| backup.vertex).collect::<BTreeSet<_>>();
+        let known_edges = edges.iter().map(|backup| key(backup.edge)).collect::<BTreeSet<_>>();
+        vertices.extend(previous.0.iter().filter(|backup| backup.vertex < before.points.len() && !known_vertices.contains(&backup.vertex)).cloned());
+        edges.extend(
+            previous
+                .1
+                .iter()
+                .filter(|backup| {
+                    let edge = key(backup.edge);
+                    current_edges.contains(&edge) && !known_edges.contains(&edge)
+                })
+                .cloned(),
+        );
+        if vertices.len() > 256 || edges.len() > 256 {
+            return Err(invalid("Match crease backups exceed their metadata budget"));
+        }
+        vertices.sort_by_key(|backup| backup.vertex);
+        edges.sort_by_key(|backup| key(backup.edge));
+        Ok((vertices, edges))
     }
     pub fn attach(definition: &Definition, state: &ModelState, request: MatchRequest, tolerance: f64) -> Result<(Definition, Report)> {
         if definition.profile.is_some() {
@@ -595,7 +618,7 @@ impl Matching {
             // Keep details authored by the refinement tool. Only transfer the
             // difference between the full continuation and open-cage stencils.
             for ((p, continued), ordinary) in cage.points.iter_mut().zip(continued.points).zip(ordinary.points) {
-                *p += continued - ordinary;
+                *p = continued_control(*p, ordinary, continued);
             }
             install_evaluator(&mut refined, cage)?;
         }
@@ -620,7 +643,7 @@ impl Matching {
         let retained = if retain_surface {
             let (surface, prefix) = self.source_surface(original)?;
             let levels = depth.checked_sub(surface.depth).ok_or_else(|| invalid("aligned Match lost the original fit depth"))?;
-            let fit = fit_match_core(&prefix, surface.order, &surface.basis, tolerance)?;
+            let fit = matching::fit_material(&prefix, surface.order, &surface.basis, tolerance).map_err(|e| invalid(e.to_string()))?;
             let fit = if levels == 0 { fit } else { fit.continued_quad_patches(prefix.faces.len(), levels).map_err(|e| invalid(e.to_string()))? };
             Some((surface, fit, levels))
         } else {
@@ -662,7 +685,11 @@ impl Matching {
             return Ok((refined, report));
         }
         let solution = support.solve(&refined, &config, tolerance)?;
-        let (vertices, edges) = Self::history(&refined.cage, &solution.cage);
+        let (vertices, edges) = if depth == old_depth {
+            Self::same_depth_history((&self.vertices, &self.edges), &refined.cage, &solution.cage)?
+        } else {
+            Self::history(&refined.cage, &solution.cage)
+        };
         install_evaluator(&mut refined, solution.cage)?;
         refined.matching = Some(Box::new(Self {
             adjacent_faces: self.adjacent_faces,
@@ -679,19 +706,6 @@ impl Matching {
         Ok((refined, solution.report))
     }
 }
-fn fit_match_core(cage: &Cage, order: usize, basis: &RootBasis, tolerance: f64) -> Result<Fit> {
-    let evaluator = if order == 2 {
-        std::borrow::Cow::Owned(matching::quadratic_extension(cage).map_err(|e| invalid(e.to_string()))?)
-    } else {
-        std::borrow::Cow::Borrowed(cage)
-    };
-    let mut fit = basis.fit_checked(&evaluator, tolerance).map_err(|e| invalid(e.to_string()))?;
-    fit.patches.truncate(cage.faces.len());
-    fit.patch_roots.truncate(cage.faces.len());
-    fit.charts.truncate(cage.faces.len());
-    Ok(fit)
-}
-
 fn fitted_rim_targets(
     definition: &Definition,
     fit: &Fit,
@@ -702,17 +716,18 @@ fn fitted_rim_targets(
     let needed: BTreeSet<_> = ring.iter().copied().filter(|&id| id >= old_vertices).collect();
     let mut exact = BTreeMap::<usize, Vec3>::new();
     let layout = domain_layout(definition.hierarchy.as_ref())?;
+    let placement = definition.placement.matrix();
     let uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     for (face, vertices) in definition.cage.faces.iter().enumerate() {
         if layout.as_ref().is_some_and(|layout| !layout.owners.get(face).is_some_and(Option::is_some)) {
             continue;
         }
-        for (&id, [u, v]) in vertices.iter().zip(uv).filter(|(id, _)| needed.contains(*id)) {
+        for (&id, uv) in vertices.iter().zip(uv).filter(|(id, _)| needed.contains(*id)) {
             let patch = fit.patches.get(face).ok_or_else(|| invalid("retained Match rim has no fitted chart"))?;
-            let point = definition.placement.point(patch.eval(u, v).map_err(|e| invalid(e.to_string()))?);
-            if !point.is_finite()
-                || requested.get(&id).is_some_and(|old| old.dist(point) > 1e-7)
-                || exact.insert(id, point).is_some_and(|old| old.dist(point) > 1e-7)
+            let point = fitted_station(patch.degree(), patch.knots(), patch.count(), patch.homogeneous(), uv, &placement, |p| [p.x, p.y, p.z, p.w])
+                .ok_or_else(|| invalid("retained Match rim chart station cannot be evaluated"))?;
+            if requested.get(&id).is_some_and(|&old| !stations_agree(old, point, 1e-7))
+                || exact.insert(id, point).is_some_and(|old| !stations_agree(old, point, 1e-7))
             {
                 return Err(invalid("retained Match rim charts disagree at a new control"));
             }
@@ -744,5 +759,31 @@ impl crate::walk::Walk for Matching {
         if let Some(binding) = &mut self.binding {
             binding.walk_geometry_mut(f);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcraft_geom::subdivision::primitives::Parameters;
+
+    #[test]
+    fn same_depth_match_preserves_old_backups_on_surviving_evaluator_stations() {
+        let cage = Parameters { kind: "face".into(), segments: [2, 2, 1], ..Default::default() }.build().unwrap();
+        let hierarchy = Hierarchy::new(cage).unwrap().subdivide(&[0], [2, 2]).unwrap();
+        let before = hierarchy.evaluate().unwrap();
+        let next = hierarchy.subdivide(&[1], [2, 2]).unwrap();
+        assert_eq!(next.depth, hierarchy.depth);
+        assert_eq!(next.evaluate().unwrap(), before);
+        let [a, b] = before.edges().unwrap()[0];
+        let old_vertices = [VertexBackup { vertex: a, previous: Some(0.5) }, VertexBackup { vertex: usize::MAX, previous: None }];
+        let old_edges = [EdgeBackup { edge: [b, a], previous: Some(0.25) }, EdgeBackup { edge: [a, a], previous: None }];
+        let (vertices, edges) = Matching::same_depth_history((&old_vertices, &old_edges), &before, &before).unwrap();
+        assert_eq!(vertices, old_vertices[..1]);
+        assert_eq!(edges, old_edges[..1]);
+        let after = before.with_creases(&[[a, b]], &[a], 10.0).unwrap();
+        let (vertices, edges) = Matching::same_depth_history((&old_vertices, &old_edges), &before, &after).unwrap();
+        assert_eq!(vertices, [VertexBackup { vertex: a, previous: None }]);
+        assert_eq!(edges, [EdgeBackup { edge: [a.min(b), a.max(b)], previous: None }]);
     }
 }

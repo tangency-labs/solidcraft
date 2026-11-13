@@ -121,9 +121,10 @@ impl Cage {
         let mut existing: BTreeSet<_> = self.faces.iter().map(|f| f.iter().copied().collect::<BTreeSet<_>>()).collect();
         for face in &other.faces {
             let face: Vec<_> = face.iter().map(|id| remap.get(id).copied().ok_or_else(|| bad("missing Weld remap"))).collect::<Result<_>>()?;
-            if existing.insert(face.iter().copied().collect()) {
-                out.faces.push(face);
+            if !existing.insert(face.iter().copied().collect()) {
+                return Err(bad("Weld would create faces with identical controls"));
             }
+            out.faces.push(face);
         }
         let mut edge_weights: BTreeMap<_, f64> = out.edge_creases.iter().map(|c| (key(c.edge[0], c.edge[1]), c.sharpness)).collect();
         for crease in &other.edge_creases {
@@ -203,6 +204,9 @@ impl Cage {
         let removed = self.selected_faces(selected)?;
         if removed.len() == self.faces.len() {
             return Err(bad("erasing every face would leave an empty Form"));
+        }
+        if topology.edges.iter().any(|edge| matches!(edge.faces.as_slice(), [face] if removed.contains(face))) {
+            return Err(bad("the erased region must stay clear of existing openings"));
         }
         let interface: Vec<_> = topology
             .edges

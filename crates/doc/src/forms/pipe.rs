@@ -9,8 +9,6 @@ use solidcraft_geom::subdivision::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-mod sampling;
-
 fn invalid(message: impl Into<String>) -> DocError {
     DocError::Invalid(message.into())
 }
@@ -143,7 +141,7 @@ impl PipeSource {
                         .into_iter()
                         .next()
                         .ok_or_else(|| invalid("the pipe edge has no exact curve"))?;
-                    let points = sampling::curve(&curve, 32_768 - points_used)?;
+                    let points = curve.path_samples(0.001, 32_768 - points_used)?;
                     points_used += points.len();
                     source.push(PathEdge { key: named.name.clone(), points });
                 }

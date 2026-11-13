@@ -146,7 +146,7 @@ fn frames(points: &[Vec3], closed: bool) -> Result<Vec<(Vec3, Vec3, Vec3)>> {
     if closed {
         let arrived = transport(up, tangents[n - 1], tangents[0])?;
         let correction = tangents[0].dot(arrived.cross(out[0].0)).atan2(arrived.dot(out[0].0));
-        let total = length(points) + points[n - 1].dist(points[0]);
+        let total = solidcore_ops::form_pipe::length(points).map_err(|error| bad(&error.to_string()))? + points[n - 1].dist(points[0]);
         let mut walked = 0.0;
         for i in 0..n {
             if i > 0 {

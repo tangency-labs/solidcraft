@@ -6,6 +6,51 @@ use std::{collections::BTreeMap, sync::Arc};
 mod browser;
 pub use browser::BrowserCheck;
 
+/// The current world frame of the exact authoring occurrence, with the
+/// compatible first-occurrence fallback for older or missing saved paths.
+pub(crate) fn authoring_frame(document: &doc::Document, moves: &BTreeMap<u64, doc::Mat>, component: u64, path: Option<&[u64]>) -> doc::Mat {
+    let frame = |path: &[u64]| -> Option<(u64, doc::Mat)> {
+        if path.is_empty() || path.len() > 64 {
+            return None;
+        }
+        let mut component = 0;
+        let mut world = doc::IDENTITY;
+        let mut seen = std::collections::BTreeSet::new();
+        for id in path {
+            if !seen.insert(*id) {
+                return None;
+            }
+            let occurrence = document.occurrences.iter().find(|o| o.id == *id && o.parent == component)?;
+            if !document.components.iter().any(|c| c.id == occurrence.component) {
+                return None;
+            }
+            world = crate::kernel::affine::then(moves.get(id).unwrap_or(&occurrence.transform), &world).ok()?;
+            component = occurrence.component;
+        }
+        Some((component, world))
+    };
+    if let Some(path) = path
+        && let Some((owner, world)) = frame(path)
+        && owner == component
+    {
+        return world;
+    }
+    frame(&document.first_path(component)).map_or(doc::IDENTITY, |(_, world)| world)
+}
+
+/// Pipe follows the saved source, including occurrence placement. The
+/// temporary authoring frame maps world picks into that saved source state.
+/// Applying pending moves to external bodies here would make Check and Finish
+/// depend on placements absent from the saved Form's timeline replay.
+pub(crate) fn pipe_source_state<'a>(
+    document: &doc::Document,
+    before: &'a doc::ModelState,
+    component: u64,
+    frame: doc::Mat,
+) -> Result<std::borrow::Cow<'a, doc::ModelState>> {
+    Ok(doc::state_in_frame_at(document, before, component, frame)?)
+}
+
 /// Source identity for read-query preparation, independent of display settings.
 /// Computing it inspects bounded editor metadata and pending occurrence moves,
 /// never preview buffers, source geometry or editor history.
@@ -111,37 +156,7 @@ impl Context {
         Input { context: self, source }
     }
     pub(crate) fn frame(&self) -> doc::Mat {
-        let frame = |path: &[u64]| -> Option<(u64, doc::Mat)> {
-            if path.is_empty() || path.len() > 64 {
-                return None;
-            }
-            let mut component = 0;
-            let mut world = doc::IDENTITY;
-            let mut seen = std::collections::BTreeSet::new();
-            for id in path {
-                if !seen.insert(*id) {
-                    return None;
-                }
-                let occurrence = self.document.occurrences.iter().find(|o| o.id == *id && o.parent == component)?;
-                if !self.document.components.iter().any(|c| c.id == occurrence.component) {
-                    return None;
-                }
-                world = doc::mat_mul(&world, self.moves.get(id).unwrap_or(&occurrence.transform));
-                if world.iter().flatten().any(|x| !x.is_finite()) {
-                    return None;
-                }
-                component = occurrence.component;
-            }
-            Some((component, world))
-        };
-        if let Some(path) = &self.path
-            && let Some((component, world)) = frame(path)
-            && component == self.component
-        {
-            return world;
-        }
-        // Match Session::active_component_frame's compatible first-path fallback.
-        frame(&self.document.first_path(self.component)).map_or(doc::IDENTITY, |(_, world)| world)
+        authoring_frame(&self.document, &self.moves, self.component, self.path.as_deref())
     }
     fn world(&self) -> Result<doc::ModelState> {
         let mut document = std::borrow::Cow::Borrowed(self.document.as_ref());
@@ -157,10 +172,8 @@ impl Context {
     fn pipe(&self, definition: &mut doc::forms::Definition) -> Result<()> {
         let Some(pipe) = &definition.pipe else { return Ok(()) };
         let frame = self.frame();
-        let inverse = doc::mat_inverse(&frame).ok_or_else(|| error("the pipe author frame is not invertible"))?;
-        // Pipe's source state uses the original document and the resolved author
-        // frame, while Match/Profile use the moved world document above.
-        let state = doc::state_in_frame_at(&self.document, &self.before, self.component, frame)?.into_owned();
+        let inverse = crate::kernel::affine::inverse(&frame).map_err(|_| error("the pipe author frame is not invertible"))?;
+        let state = pipe_source_state(&self.document, &self.before, self.component, frame)?;
         let mut local = pipe.as_ref().clone();
         local.source.transform_picks(&inverse);
         definition.cage = local.recompute(&definition.cage, &state)?;

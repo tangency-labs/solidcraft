@@ -12,6 +12,11 @@ pub fn then(first: &Matrix, second: &Matrix) -> Result<Matrix> {
     ops::then(first, second).map_err(|_| KernelError::Invalid("non-finite transform composition".into()))
 }
 
+/// The checked inverse of a regular affine map.
+pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
+    ops::inverse(matrix).map_err(|_| KernelError::Invalid("singular or ill-conditioned affine transform".into()))
+}
+
 /// Rotate about the line through `origin`, then translate.
 pub fn rigid(translation: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Matrix> {
     if !(translation.is_finite() && origin.is_finite() && angle.is_finite()) {

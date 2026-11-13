@@ -5,6 +5,10 @@ type Curves = Vec<Vec<Vec3>>;
 type Command = Result<solidcraft_engine::ComputedCommands, String>;
 type Geometry = Result<Curves, String>;
 
+pub(super) fn unavailable(app: &SolveApp) -> Option<&'static str> {
+    app.session.forms_prototype.as_ref()?.hierarchy.as_ref()?.has_trim_wall().then_some("forms.insert.whole_loop_trim_wall")
+}
+
 #[derive(Clone, PartialEq)]
 struct Source {
     document: u64,
@@ -18,7 +22,7 @@ struct Source {
 }
 fn source(app: &SolveApp) -> Option<Source> {
     let form = app.session.forms_prototype.as_ref()?;
-    if form.repair.is_some() || form.profile.is_some() || form.hierarchy.as_ref().is_some_and(|h| h.has_trim_wall()) {
+    if form.repair.is_some() || form.profile.is_some() || unavailable(app).is_some() {
         return None;
     }
     Some(Source {
@@ -38,10 +42,15 @@ struct Key {
     revision: u64,
     face: usize,
     axis: usize,
+    edge: Option<[usize; 2]>,
 }
 impl Key {
     fn parameters(&self) -> serde_json::Value {
-        json!({"face":self.face,"axis":self.axis,"tolerance":f64::from_bits(self.source.tolerance)})
+        if let Some(edge) = self.edge {
+            json!({"edge":edge})
+        } else {
+            json!({"face":self.face,"axis":self.axis,"tolerance":f64::from_bits(self.source.tolerance)})
+        }
     }
 }
 struct Pending {
@@ -68,13 +77,21 @@ fn worker_gate() -> Arc<std::sync::atomic::AtomicBool> {
 
 fn key(app: &SolveApp, face: usize, axis: usize) -> Option<Key> {
     let form = app.session.forms_prototype.as_ref()?;
-    form.hierarchy.as_ref()?;
-    if axis > 1 || form.logical.faces.get(face)?.is_empty() {
+    let polygon = form.logical.faces.get(face)?;
+    if axis > 1 || polygon.is_empty() {
         return None;
     }
-    // Exact leaf sides are resolved by the command worker. A logical face
-    // polygon may contain extra T-controls before its second parameter side.
-    Some(Key { source: source(app)?, revision: form.revision, face, axis })
+    // A refined face's polygon may contain T-controls. Its parameter side is
+    // resolved by the command, while a base quad names the seed edge directly.
+    let edge = if form.hierarchy.is_none() {
+        if polygon.len() != 4 {
+            return None;
+        }
+        Some([*polygon.get(axis)?, *polygon.get(axis + 1)?])
+    } else {
+        None
+    };
+    Some(Key { source: source(app)?, revision: form.revision, face, axis, edge })
 }
 fn current(app: &SolveApp, key: &Key) -> bool {
     source(app).as_ref() == Some(&key.source)
@@ -240,10 +257,15 @@ fn start(app: &mut SolveApp, ctx: &egui::Context, key: Key) {
 pub(super) fn occupy_worker_for_test(app: &SolveApp) -> Option<finish::WorkerPermit> {
     finish::WorkerPermit::acquire(app.forms_prototype.tools.loop_preview.worker_gate.clone())
 }
-pub(super) fn commit(app: &mut SolveApp, ctx: &egui::Context, face: usize, axis: usize) {
-    let Some(desired) = key(app, face, axis) else { return };
+pub(super) fn commit(app: &mut SolveApp, ctx: &egui::Context, face: usize, axis: usize) -> bool {
+    if let Some(reason) = unavailable(app) {
+        cancel(app);
+        app.set_status(app.tr(reason).to_owned(), true);
+        return true;
+    }
+    let Some(desired) = key(app, face, axis) else { return false };
     if app.forms_prototype.pending.is_some() {
-        return;
+        return true;
     }
     if app.forms_prototype.tools.loop_preview.pending.as_ref().is_some_and(|pending| pending.key == desired) {
         if let Some(pending) = app.forms_prototype.tools.loop_preview.pending.take() {
@@ -255,6 +277,7 @@ pub(super) fn commit(app: &mut SolveApp, ctx: &egui::Context, face: usize, axis:
         finish::command(app, ctx, "form.prototype.insert_loop", desired.parameters());
     }
     cancel(app);
+    true
 }
 
 #[cfg(test)]

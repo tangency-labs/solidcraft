@@ -385,68 +385,6 @@ pub(crate) fn tensor_sheet(n: &NurbsSurface) -> Result<Body> {
     surface_body(&parts.canonical()?.brep)
 }
 
-/// A planar tensor patch can have parallel boundary tangents at a corner even
-/// though the bounded sheet is regular. Use a regular analytic support for that
-/// sheet, retaining every original 3D boundary and its parameterization. The
-/// entire positive-weight control hull, rather than surface samples, certifies
-/// planarity. The allowance is floating-point roundoff, not the fit tolerance.
-pub(crate) fn planar_tensor_face(n: &NurbsSurface, edges: &[b::Edge], face: &mut b::Face) -> Result<()> {
-    let [[u0, u1], [v0, v1]] = n.domain();
-    let Some((origin, du, dv)) = n.derivs([(u0 + u1) * 0.5, (v0 + v1) * 0.5]) else { return Ok(()) };
-    let Some(u) = du.normalized() else { return Ok(()) };
-    let Some(tangent) = dv.normalized() else { return Ok(()) };
-    let Some(normal) = u.cross(tangent).normalized() else { return Ok(()) };
-    let v = normal.cross(u);
-    let controls = n.homogeneous();
-    if controls.iter().any(|h| !h.w.is_finite() || h.w <= 0.0) {
-        return Ok(());
-    }
-    let Some(anchor) = controls.first().and_then(|h| h.project()) else { return Ok(()) };
-    let scale = controls.iter().filter_map(|h| h.project()).map(|p| (p - anchor).len()).fold(0.0, f64::max);
-    if !scale.is_finite() {
-        return Ok(());
-    }
-    let roundoff = 64.0 * f64::EPSILON * scale;
-    if controls.iter().any(|h| h.project().is_none_or(|p| (p - anchor).dot(normal).abs() > roundoff))
-        || (origin - anchor).dot(normal).abs() > roundoff
-    {
-        return Ok(());
-    }
-    let projected = |p: Vec3| [(p - origin).dot(u), (p - origin).dot(v)];
-    let project = |curve: &b::Curve| -> Result<Curve2> {
-        match curve {
-            b::Curve::Spline { knots, points } => {
-                Ok(Curve2::Spline { knots: knots.clone(), points: points.iter().map(|p| projected(v3(*p))).collect() })
-            }
-            b::Curve::RationalSpline { knots, homogeneous } => Ok(Curve2::RationalSpline {
-                knots: knots.clone(),
-                homogeneous: homogeneous
-                    .iter()
-                    .map(|h| {
-                        let xyz = Vec3::new(h[0], h[1], h[2]) - origin * h[3];
-                        [xyz.dot(u), xyz.dot(v), h[3]]
-                    })
-                    .collect(),
-            }),
-            _ => Err(invalid("a tensor boundary is not a spline")),
-        }
-    };
-    let mut loops = face.loops.clone();
-    for boundary in &mut loops {
-        let b::Loop::Edges { edges: uses } = boundary else { return Err(invalid("a tensor boundary has no edges")) };
-        for edge_use in uses {
-            let edge = edges.get(edge_use.edge as usize).ok_or_else(|| invalid("a tensor boundary edge reference"))?;
-            edge_use.pcurve = project(&edge.curve)?;
-        }
-    }
-    let domain = uv_box(&loops).ok_or_else(|| invalid("a planar tensor face has no area"))?;
-    face.nurbs = None;
-    face.surface = b::Surface::Plane { origin: a3(origin), u_axis: a3(u), v_axis: a3(v) };
-    face.domain = domain;
-    face.loops = loops;
-    Ok(())
-}
-
 // ---- Patches ----------------------------------------------------------------------------
 
 /// A planar surface filling a sketch region. Its history has no operands: the face is new.

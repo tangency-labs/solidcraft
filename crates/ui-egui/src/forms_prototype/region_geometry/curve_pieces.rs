@@ -2,9 +2,6 @@
 //! No fitting, knot insertion, screen sampling, or private geom APIs.
 use solidcraft_engine::geom::bspline::{CurveN, HPoint};
 
-const MAX_DEGREE: usize = 32;
-const MAX_SOURCE_CONTROLS: usize = 16_384;
-
 pub(super) struct BezierPiece {
     /// Original B-spline parameter span. The controls use a local 0..1 parameter.
     #[cfg(test)]
@@ -19,52 +16,16 @@ pub(super) struct BezierPiece {
 /// general B-spline span's controls as a Bezier polygon.
 /// The budget is shared with projection and region classification by the caller.
 pub(super) fn bezier_pieces(curve: &CurveN<4>, remaining: &mut usize) -> Result<Vec<BezierPiece>, &'static str> {
-    let degree = curve.degree;
-    let count = curve.ctrl.len();
-    let expected_knots = count.checked_add(degree).and_then(|n| n.checked_add(1)).ok_or("invalid exact Form curve size")?;
-    if degree == 0 || degree > MAX_DEGREE || count <= degree || count > MAX_SOURCE_CONTROLS || curve.knots.len() != expected_knots {
-        return Err("invalid exact Form Bezier source structure");
-    }
-    let cost = count.checked_add(curve.knots.len()).ok_or("exact Form curve extraction exceeded its work budget")?;
-    *remaining = remaining.checked_sub(cost).ok_or("exact Form curve extraction exceeded its work budget")?;
-    if curve.knots.iter().any(|value| !value.is_finite())
-        || curve.knots.windows(2).any(|pair| pair[0] > pair[1])
-        || curve.ctrl.iter().any(|control| control.iter().any(|value| !value.is_finite()) || control[3] <= 0.0)
-    {
-        return Err("exact Form curve requires finite knots and positive rational weights");
-    }
-    let low = *curve.knots.get(degree).ok_or("missing exact Form curve start")?;
-    let high = *curve.knots.get(count).ok_or("missing exact Form curve end")?;
-    if low >= high
-        || curve.knots.get(..=degree).is_none_or(|knots| knots.iter().any(|value| *value != low))
-        || curve.knots.get(count..).is_none_or(|knots| knots.iter().any(|value| *value != high))
-    {
-        return Err("exact Form Bezier source must have a bounded clamped domain");
-    }
-    // Interior multiplicity >= degree is the extraction certificate. Degree+1
-    // also permits a discontinuous exact source; its two sides stay separate.
-    let interior = curve.knots.get(degree + 1..count).ok_or("invalid exact Form curve interior")?;
-    if interior.chunk_by(|a, b| a == b).any(|run| run.len() < degree || run.len() > degree + 1 || run[0] <= low || run[0] >= high) {
-        return Err("exact Form curve is not already split into Bezier spans");
-    }
-    let mut pieces = Vec::new();
-    for (span, interval) in curve.knots.windows(2).enumerate().skip(degree).take(count - degree) {
-        let parameter = [interval[0], interval[1]];
-        if parameter[0] == parameter[1] {
-            continue;
-        }
-        *remaining = remaining.checked_sub(degree + 1).ok_or("exact Form curve extraction exceeded its work budget")?;
-        let controls = curve.ctrl.get(span - degree..=span).ok_or("missing exact Form Bezier span controls")?;
-        pieces.push(BezierPiece {
-            #[cfg(test)]
-            parameter,
-            controls: controls.iter().map(|point| HPoint { x: point[0], y: point[1], z: point[2], w: point[3] }).collect(),
-        });
-    }
-    if pieces.is_empty() {
-        return Err("exact Form curve has no Bezier spans");
-    }
-    Ok(pieces)
+    solidcore_ops::form_guide_curves::bezier_pieces(curve.degree, &curve.knots, &curve.ctrl, remaining).map(|pieces| {
+        pieces
+            .into_iter()
+            .map(|piece| BezierPiece {
+                #[cfg(test)]
+                parameter: piece.parameter,
+                controls: piece.controls.into_iter().map(|[x, y, z, w]| HPoint { x, y, z, w }).collect(),
+            })
+            .collect()
+    })
 }
 
 #[cfg(test)]

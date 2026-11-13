@@ -105,6 +105,11 @@ pub(super) fn prepare(s: &Session, consumed: &BTreeMap<u64, Arc<crate::doc::Feat
         if consumed.contains_key(&feature.id) {
             continue;
         }
+        if let crate::doc::FeatureKind::Thicken { bodies, .. } = &feature.kind
+            && bodies.iter().filter(|body| transfer.bodies.contains(&body.0)).take(2).count() == 2
+        {
+            return Err(invalid(format!("Weld would merge separate Thicken sources in `{}`", feature.name)));
+        }
         let mut body_only = feature.clone();
         body_only.kind.remap_bodies(&bodies);
         mapped(&mut body_only.body_names, &bodies);

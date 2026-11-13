@@ -973,10 +973,10 @@ fn check_design_name(cmd: &str, path: &str) -> Result<()> {
 #[allow(clippy::too_many_arguments)]
 fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
     // A path outside the agent's folders says so first, whatever its name.
-    if s.forms_prototype.is_some() {
-        return Err(bad("file.save", "finish or cancel the active Form before saving the design"));
-    }
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    if s.forms_prototype.is_some() {
+        return Err(bad(cmd, "finish or cancel the active Form before saving the design"));
+    }
     check_design_name(cmd, path)?;
     // A move not captured yet isn't in the document a file holds: refuse, rather than write the
     // file without it and say nothing (#9736). The app asks the Capture Position question first.
@@ -2670,6 +2670,20 @@ mod tests {
         assert!(editing.active_sketch.is_some());
         assert!(saved_preview(&editing).is_none());
         assert!(saved_geometry(&editing, &editing.doc).is_none());
+    }
+
+    #[test]
+    fn ordinary_save_refusals_name_the_requested_command_while_a_form_is_active() {
+        let mut session = Session::default();
+        session.execute("form.prototype.create", &json!({"size":8,"levels":0})).unwrap();
+        let path = std::env::temp_dir().join(format!("solidcraft-active-form-save-{}.solidcraft", std::process::id()));
+        let form = session.forms_prototype.as_ref().unwrap().definition();
+        for command in ["file.save", "file.save_as"] {
+            let error = session.execute(command, &json!({"path":path})).unwrap_err();
+            assert!(matches!(error, EngineError::BadParams { cmd, msg } if cmd == command && msg.contains("active Form")));
+        }
+        assert!(!path.exists());
+        assert_eq!(session.forms_prototype.as_ref().unwrap().definition(), form);
     }
 
     #[test]

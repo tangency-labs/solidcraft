@@ -436,6 +436,7 @@ impl Writer {
             modifier.set("modifier", &base.bytes)?;
             modifier.short("levels", levels.min(4) as u16)?;
             modifier.short("renderLevels", levels.min(4) as u16)?;
+            modifier.short("flags", super::SUBSURF_USE_CREASE as u16)?;
             modifier.short("quality", 3)?;
             self.record(b"DATA", "SubsurfModifierData", address, 1, modifier.bytes)?;
             address

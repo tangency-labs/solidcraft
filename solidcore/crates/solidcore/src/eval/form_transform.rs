@@ -68,6 +68,11 @@ pub fn uniform_factors(delta: Vec3, length: f64, right: Vec3, up: Vec3) -> [f64;
     [factor(delta, length, right + up); 3]
 }
 
+/// Length and components of a translation in the supplied frame.
+pub fn translation_measure(delta: Vec3, basis: [Vec3; 3]) -> (f64, [f64; 3]) {
+    (delta.len(), basis.map(|axis| delta.dot(axis)))
+}
+
 fn factor(delta: Vec3, length: f64, direction: Vec3) -> f64 {
     (1.0 + delta.dot(direction) / length).max(0.001)
 }

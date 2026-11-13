@@ -151,6 +151,7 @@ impl EvalSurface {
                 transform,
                 swap,
             } => {
+                let [u, v] = self.wrap([u, v]);
                 let (s, a) = if *swap { (v, u) } else { (u, v) };
                 let c = profile.jet(s)?;
                 let (sin, cos) = a.sin_cos();

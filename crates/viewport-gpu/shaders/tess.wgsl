@@ -334,16 +334,19 @@ fn stable_normal(a: vec3<f32>, b: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(n / size, sine);
 }
 
-fn inside_domain(s: Surface, u: f32, v: f32) -> bool {
+fn available_step(s: Surface, uv: vec2<f32>, positive: vec2<bool>, nominal: f32) -> f32 {
     if (s.kind == NURBS) {
-        return u >= data[s.knots_u + s.pu] && u <= data[s.knots_u + s.nu]
-            && v >= data[s.knots_v + s.pv] && v <= data[s.knots_v + s.nv];
+        let lo = vec2<f32>(data[s.knots_u + s.pu], data[s.knots_v + s.pv]);
+        let hi = vec2<f32>(data[s.knots_u + s.nu], data[s.knots_v + s.nv]);
+        let room = select(uv - lo, hi - uv, positive);
+        return min(room.x, room.y);
     }
     if (s.kind == REVOLVED) {
-        let t = select(u, v, s.swap != 0u);
-        return t >= data[s.knots_u + s.pu] && t <= data[s.knots_u + s.nu];
+        let t = select(uv.x, uv.y, s.swap != 0u);
+        let forward = select(positive.x, positive.y, s.swap != 0u);
+        return select(t - data[s.knots_u + s.pu], data[s.knots_u + s.nu] - t, forward);
     }
-    return true;
+    return nominal * 64.0;
 }
 
 // A geometric pole may have different homogeneous weights along its clamped
@@ -424,14 +427,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         var found = false;
         var k = 0u;
         while (k < 4u) {
-            var step = h;
+            let positive = vec2<bool>((k & 1u) == 0u, (k & 2u) == 0u);
+            let room = available_step(s, vec2<f32>(vert.u, vert.v), positive, h);
+            k = k + 1u;
+            if (!(room > 0.0)) { continue; }
+            var step = min(h, room / 64.0);
             var previous = vec3<f32>(0.0);
             var attempt = 0u;
             while (attempt < 6u) {
-                let du = select(step, -step, (k & 1u) != 0u);
-                let dv = select(step, -step, (k & 2u) != 0u);
-                if (!inside_domain(s, vert.u + du, vert.v + dv)) { break; }
-                let e = derivs(s, vert.u + du, vert.v + dv);
+                let delta = select(vec2<f32>(-step), vec2<f32>(step), positive);
+                let e = derivs(s, vert.u + delta.x, vert.v + delta.y);
                 let m = stable_normal(e.du, e.dv);
                 if (e.ok && dot(m.xyz, m.xyz) > 0.0) {
                     if (m.w > 1e-2 || (dot(previous, previous) > 0.0 && distance(previous, m.xyz) < 1e-3)) {
@@ -445,7 +450,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 attempt = attempt + 1u;
             }
             if (found) { break; }
-            k = k + 1u;
         }
     }
     var nn = vec3<f32>(0.0, 0.0, 1.0);

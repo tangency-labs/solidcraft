@@ -12,8 +12,8 @@ use solidcraft_engine::{
         kernel::{Body, DisplayGuidePoint},
     },
     geom::{
-        brep::{eval::SurfaceEval, form, pcurve},
-        bspline::{CurveN, HPoint, NurbsSurface, insert_knot},
+        brep::{eval::SurfaceEval, pcurve},
+        bspline::{CurveN, HPoint, NurbsSurface},
         tess::{EvalSurface, from_kernel},
     },
 };
@@ -281,92 +281,8 @@ fn intrinsic_edge_pieces(body: &Body, edge: usize, range: [f64; 2], remaining: &
     Ok(pieces)
 }
 fn source_curve(source: &Curve, range: [f64; 2], remaining: &mut usize) -> Result<Vec<Vec<HPoint>>> {
-    match source {
-        source @ (Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. }) => {
-            spend(remaining, 128)?;
-            let (form, form_interval) = form::curve(source, range).ok_or("native Form conic has no bounded exact rational form")?;
-            // form_interval is essential: angle != form parameter on conics.
-            spline_record(&form, form_interval, remaining)
-        }
-        source @ (Curve::Spline { .. } | Curve::RationalSpline { .. }) => spline_record(source, range, remaining),
-        Curve::Polyline { points } => {
-            if points.len() < 2 || points.len() > MAX_CONTROLS {
-                return Err("native Form polyline exceeds its exact source budget".into());
-            }
-            spend(remaining, points.len() * 4)?;
-            let mut knots = vec![0.0, 0.0];
-            knots.extend((1..points.len() - 1).map(|index| index as f64));
-            knots.extend([points.len() as f64 - 1.0; 2]);
-            let controls = points.iter().map(|point| HPoint::weighted(Vec3::new(point[0], point[1], point[2]), 1.0)).collect();
-            restrict_spline(knots, controls, range, remaining)
-        }
-        Curve::SurfaceIntersection { .. } => {
-            Err("procedural native Form intersection guides need a certified curve restriction; their leader is not an exact replacement".into())
-        }
-    }
-}
-fn spline_record(source: &Curve, range: [f64; 2], remaining: &mut usize) -> Result<Vec<Vec<HPoint>>> {
-    let (knots, count) = match source {
-        Curve::Spline { knots, points } => (knots.as_slice(), points.len()),
-        Curve::RationalSpline { knots, homogeneous } => (knots.as_slice(), homogeneous.len()),
-        _ => return Err("invalid native rational Form curve form".into()),
-    };
-    if count > MAX_CONTROLS || knots.len() > MAX_CONTROLS {
-        return Err("native Form spline exceeds its borrowed-size budget".into());
-    }
-    spend(remaining, count.checked_mul(4).and_then(|work| work.checked_add(knots.len())).ok_or("native Form spline work overflowed")?)?;
-    let controls = match source {
-        Curve::Spline { points, .. } => points.iter().map(|point| HPoint::weighted(Vec3::new(point[0], point[1], point[2]), 1.0)).collect(),
-        Curve::RationalSpline { homogeneous, .. } => {
-            homogeneous.iter().map(|point| HPoint { x: point[0], y: point[1], z: point[2], w: point[3] }).collect()
-        }
-        _ => return Err("invalid native Form spline coefficients".into()),
-    };
-    restrict_spline(knots.to_vec(), controls, range, remaining)
-}
-fn restrict_spline(mut knots: Vec<f64>, mut controls: Vec<HPoint>, range: [f64; 2], remaining: &mut usize) -> Result<Vec<Vec<HPoint>>> {
-    let degree = knots.len().checked_sub(controls.len() + 1).ok_or("invalid native Form spline degree")?;
-    if range.iter().any(|value| !value.is_finite())
-        || range[0] >= range[1]
-        || degree == 0
-        || degree > MAX_DEGREE
-        || controls.len() <= degree
-        || controls.len() > MAX_CONTROLS
-        || controls.iter().any(|point| !point.is_finite() || point.w <= f64::MIN_POSITIVE)
-        || knots.iter().any(|value| !value.is_finite())
-        || knots.windows(2).any(|pair| pair[0] > pair[1])
-        || knots.get(degree).is_none_or(|value| range[0] < *value)
-        || knots.get(controls.len()).is_none_or(|value| range[1] > *value)
-    {
-        return Err("native Form spline restriction leaves its finite positive-weight domain".into());
-    }
-    for endpoint in range {
-        for _ in knots.iter().filter(|value| **value == endpoint).count()..=degree {
-            spend(remaining, controls.len() * (degree + 1))?;
-            (knots, controls) = insert_knot(degree, &knots, &controls, endpoint).map_err(|error| error.to_string())?;
-        }
-    }
-    let first = knots.iter().position(|value| *value == range[0]).ok_or("missing native Form curve restriction start")?;
-    let last = knots.iter().rposition(|value| *value == range[1]).ok_or("missing native Form curve restriction end")? + 1;
-    let count = (last - first).checked_sub(degree + 1).ok_or("invalid native Form curve restriction count")?;
-    controls = controls.get(first..first + count).ok_or("missing native Form restricted controls")?.to_vec();
-    knots = knots.get(first..last).ok_or("missing native Form restricted knots")?.to_vec();
-    let original = knots.clone();
-    for run in original.chunk_by(|a, b| a == b) {
-        let value = *run.first().ok_or("empty native Form knot run")?;
-        if value <= range[0] || value >= range[1] {
-            continue;
-        }
-        for _ in run.len()..degree {
-            spend(remaining, controls.len() * (degree + 1))?;
-            (knots, controls) = insert_knot(degree, &knots, &controls, value).map_err(|error| error.to_string())?;
-            if controls.len() > MAX_CONTROLS {
-                return Err("native Form curve Bezier extraction exceeds its coefficient budget".into());
-            }
-        }
-    }
-    let curve = CurveN { degree, knots, ctrl: controls.into_iter().map(|point| [point.x, point.y, point.z, point.w]).collect() };
-    Ok(curve_pieces::bezier_pieces(&curve, remaining).map_err(str::to_owned)?.into_iter().map(|piece| piece.controls).collect())
+    solidcore_ops::form_guide_curves::source_curve(source, range, remaining)
+        .map(|pieces| pieces.into_iter().map(|piece| piece.into_iter().map(|[x, y, z, w]| HPoint { x, y, z, w }).collect()).collect())
 }
 
 #[cfg(test)]

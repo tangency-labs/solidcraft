@@ -8,6 +8,11 @@ pub struct Part {
     pub name: String,
     pub definition: Arc<crate::doc::forms::Definition>,
 }
+impl Part {
+    pub(super) fn valid_name(name: &str) -> bool {
+        !name.is_empty() && name.len() <= 256 && !name.contains('\0')
+    }
+}
 impl Form {
     pub fn from_import(definitions: Vec<(String, crate::doc::forms::Definition, usize)>) -> Result<Self> {
         if definitions.is_empty() || definitions.len() > 16 {
@@ -18,6 +23,9 @@ impl Form {
         let levels = definition.cage.preview_level(levels).map_err(error)?;
         let mut form = Self::from_definition(definition, levels, None)?;
         for (name, definition, _) in definitions {
+            if !Part::valid_name(&name) {
+                return Err(error("invalid imported Form object name"));
+            }
             let id = form.next_part;
             form.next_part += 1;
             form.parts.insert(id, Part { name, definition: Arc::new(definition) });
@@ -73,7 +81,7 @@ impl Form {
         Ok(())
     }
     pub fn unweld_parts(&mut self, edges: &[[usize; 2]], separate: bool, name: &str, tolerance: f64) -> Result<Option<u64>> {
-        if self.parts.len() >= 16 || name.is_empty() || name.len() > 256 || name.contains('\0') {
+        if self.parts.len() >= 16 || !Part::valid_name(name) {
             return Err(error("Unweld requires a bounded part count and name"));
         }
         let mut definition = self.definition();

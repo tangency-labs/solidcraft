@@ -24,10 +24,10 @@ and segments, or **CAD diagnostics** to run a CAD check. Turn off
    Primitive settings lock after sculpting; the transform tools remain available.
 2. Use the All, Points, Edges or Faces selection filter. Ctrl-click toggles
    an element; Shift-click extends a range through connected elements.
-   Changing a filter keeps the current selection and custom pivot. The selection
-   summary counts the selected points, edges, faces or whole surfaces. Disable
-   **Keep selection when changing Form filters** in Design preferences to restore
-   clearing the selection and pivot when a filter button is clicked.
+   Clicking a filter button clears the selection and custom pivot. Enable
+   **Keep selection when changing Form filters** in Design preferences to keep
+   both. The selection summary counts selected points, edges, faces and whole
+   surfaces independently of the filter.
    Double-click an edge to select its continuous loop. Connected and edge-loop
    selection are also available in the panel.
    On desktop, drag from empty space for a selection window, or enable Lasso

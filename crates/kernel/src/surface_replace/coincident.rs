@@ -6,9 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore_record::brep::{self as b};
-use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::brep::pcurve::{EdgeUse, exact_pcurves};
-use solidcraft_geom::prelude::*;
 
 use crate::history::{Change, EdgeOrigin};
 use crate::surfaces::Parts;
@@ -67,12 +65,7 @@ pub(super) fn cut(base: &Body, opening: usize, skin: &Body, contacts: &BTreeMap<
 fn contact_on_wall(skin: &Body, face: usize, base: &Body, wall: usize, tolerance: f64) -> Result<Body> {
     let original = skin.record().faces.get(face).ok_or_else(|| invalid("missing coincident skin face"))?;
     let support = base.record().faces.get(wall).ok_or_else(|| invalid("missing coincident support wall"))?;
-    let normal = |face: &b::Face| -> Result<_> {
-        let surface = SurfaceEval::new(&face.surface).map_err(|e| invalid(e.to_string()))?;
-        let uv = face.domain.map(|[a, b]| a + (b - a) * 0.37);
-        surface.derivs(uv[0], uv[1]).and_then(|(_, u, v)| u.cross(v).normalized()).ok_or_else(|| invalid("a coincident face has no regular normal"))
-    };
-    let turn = normal(original)?.dot(normal(support)?) < 0.0;
+    let turn = solidcore_ops::face_surface::opposed(original, support).map_err(|_| invalid("a coincident face has no regular normal"))?;
     let mut parts = Parts::of(skin.record(), &[(face, false)])?;
     let (flat, forward) = parts.faces.first_mut().ok_or_else(|| invalid("missing coincident face parts"))?;
     if turn {

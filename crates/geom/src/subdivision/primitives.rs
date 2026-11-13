@@ -1,10 +1,11 @@
 //! Parametric all-quad layouts for the Forms primitive families.
 use super::{Cage, Result, bad};
+#[cfg(test)]
 use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use std::collections::BTreeMap;
-use std::f64::consts::{PI, TAU};
+#[cfg(test)]
+use std::f64::consts::TAU;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -22,243 +23,33 @@ impl Default for Parameters {
     }
 }
 impl Parameters {
+    fn family(&self) -> Result<solidcore_ops::form_cage::Primitive> {
+        use solidcore_ops::form_cage::Primitive;
+        Ok(match self.kind.as_str() {
+            "box" => Primitive::Box,
+            "plane" | "face" => Primitive::Plane,
+            "quadball" => Primitive::Quadball,
+            "cylinder" => Primitive::Cylinder,
+            "sphere" => Primitive::Sphere,
+            "torus" => Primitive::Torus,
+            "tube" => Primitive::Tube,
+            "pipe" => Primitive::Pipe,
+            _ => return Err(bad("unknown Forms primitive")),
+        })
+    }
     pub fn validate(&self) -> Result<()> {
-        if self.dimensions.iter().any(|v| !v.is_finite() || !(0.1..=10_000.0).contains(v)) || self.segments.iter().any(|n| !(1..=16).contains(n)) {
-            return Err(bad("primitive dimensions must be 0.1..10000 mm and segments 1..16"));
-        }
-        if self.radii.iter().any(|r| !r.is_finite() || !(0.0..=10_000.0).contains(r))
-            || self.path.len() > 128
-            || self.path.iter().any(|p| !p.is_finite() || p.len() > 100_000.0)
-        {
-            return Err(bad("primitive metadata must contain finite bounded radii and path points"));
-        }
-        if !matches!(self.kind.as_str(), "box" | "plane" | "face" | "quadball" | "cylinder" | "sphere" | "torus" | "tube" | "pipe") {
-            return Err(bad("unknown Forms primitive"));
-        }
+        solidcore_ops::form_cage::validate(self.dimensions, self.segments, self.radii, &self.path).map_err(|error| bad(&error.to_string()))?;
+        self.family()?;
         Ok(())
     }
     pub fn build(&self) -> Result<Cage> {
-        self.validate()?;
-        let radius = self.dimensions[0] / 2.0;
-        let cage = match self.kind.as_str() {
-            "box" => box_grid(self.dimensions, self.segments, false)?,
-            "plane" | "face" => box_grid(self.dimensions, self.segments, true)?,
-            "quadball" => {
-                let mut c = box_grid([2.0; 3], [self.segments[0]; 3], false)?;
-                for p in &mut c.points {
-                    let (x, y, z) = (p.x, p.y, p.z);
-                    let (xx, yy, zz) = (x * x, y * y, z * z);
-                    *p = Vec3::new(
-                        x * (1.0 - yy / 2.0 - zz / 2.0 + yy * zz / 3.0).max(0.0).sqrt(),
-                        y * (1.0 - zz / 2.0 - xx / 2.0 + zz * xx / 3.0).max(0.0).sqrt(),
-                        z * (1.0 - xx / 2.0 - yy / 2.0 + xx * yy / 3.0).max(0.0).sqrt(),
-                    ) * radius;
-                }
-                c
-            }
-            "cylinder" => cylinder(radius, self.dimensions[2], self.segments[0], self.segments[1])?,
-            "sphere" => sphere(radius, self.segments[0], self.segments[1])?,
-            "torus" => torus(self.radii[0], self.radii[1], self.segments[0], self.segments[1])?,
-            "tube" => tube(self.radii[0], self.radii[1], self.dimensions[2], self.segments[0], self.segments[1])?,
-            "pipe" => pipe(radius, &self.path, self.segments[0], self.segments[1], self.dimensions[2])?,
-            _ => return Err(bad("unknown Forms primitive")),
-        };
+        let solidcore_ops::form_cage::CageGeometry { points, faces } =
+            solidcore_ops::form_cage::build(self.family()?, self.dimensions, self.segments, self.radii, &self.path)
+                .map_err(|error| bad(&error.to_string()))?;
+        let cage = Cage { points, faces, ..Default::default() };
         cage.validate()?;
         Ok(cage)
     }
-}
-
-fn box_grid(d: [f64; 3], n: [usize; 3], plane: bool) -> Result<Cage> {
-    let [nx, ny, nz] = n.map(|v| v as i32);
-    let frames = if plane {
-        vec![([0, 0, 0], [1, 0, 0], [0, 1, 0], nx, ny)]
-    } else {
-        vec![
-            ([0, 0, nz], [1, 0, 0], [0, 1, 0], nx, ny),
-            ([0, ny, nz], [1, 0, 0], [0, 0, -1], nx, nz),
-            ([nx, 0, 0], [0, 1, 0], [0, 0, 1], ny, nz),
-            ([0, 0, 0], [0, 1, 0], [1, 0, 0], ny, nx),
-            ([0, 0, 0], [1, 0, 0], [0, 0, 1], nx, nz),
-            ([0, 0, 0], [0, 0, 1], [0, 1, 0], nz, ny),
-        ]
-    };
-    let mut points = Vec::new();
-    let mut faces = Vec::new();
-    let mut ids = BTreeMap::new();
-    for (o, u, v, ns, nt) in frames {
-        for t in 0..nt {
-            for s in 0..ns {
-                let mut face = [0; 4];
-                for (slot, (a, b)) in [(s, t), (s + 1, t), (s + 1, t + 1), (s, t + 1)].into_iter().enumerate() {
-                    let k = [o[0] + a * u[0] + b * v[0], o[1] + a * u[1] + b * v[1], o[2] + a * u[2] + b * v[2]];
-                    let id = *ids.entry(k).or_insert_with(|| {
-                        let id = points.len();
-                        points.push(Vec3::new(
-                            (k[0] as f64 / nx as f64 - 0.5) * d[0],
-                            (k[1] as f64 / ny as f64 - 0.5) * d[1],
-                            if plane { 0.0 } else { (k[2] as f64 / nz as f64 - 0.5) * d[2] },
-                        ));
-                        id
-                    });
-                    face[slot] = id;
-                }
-                faces.push(face.to_vec());
-            }
-        }
-    }
-    Ok(Cage { points, faces, ..Default::default() })
-}
-fn cylinder(radius: f64, height: f64, sides: usize, layers: usize) -> Result<Cage> {
-    let mut c = box_grid([2.0 * radius, 2.0 * radius, height], [2 * sides, 2 * sides, layers], false)?;
-    for p in &mut c.points {
-        let distance = p.x.abs().max(p.y.abs());
-        if distance > radius * 1e-12 {
-            let (u, v) = (p.x / distance, p.y / distance);
-            let angle = if u.abs() >= v.abs() {
-                if u >= 0.0 { PI / 4.0 * v } else { PI - PI / 4.0 * v }
-            } else if v >= 0.0 {
-                PI / 2.0 - PI / 4.0 * u
-            } else {
-                -PI / 2.0 + PI / 4.0 * u
-            };
-            p.x = distance * angle.cos();
-            p.y = distance * angle.sin();
-        }
-    }
-    Ok(c)
-}
-fn sphere(radius: f64, longitude: usize, latitude: usize) -> Result<Cage> {
-    let n = 8 * longitude;
-    let rings = 4 * latitude - 1;
-    let mut points = vec![Vec3::Z * radius];
-    for j in 1..=rings {
-        let a = PI * j as f64 / (rings + 1) as f64;
-        for i in 0..n {
-            let b = TAU * i as f64 / n as f64;
-            points.push(Vec3::new(a.sin() * b.cos(), a.sin() * b.sin(), a.cos()) * radius);
-        }
-    }
-    let south = points.len();
-    points.push(-Vec3::Z * radius);
-    let at = |r: usize, i: usize| 1 + r * n + i % n;
-    let mut faces = Vec::new();
-    for i in (0..n).step_by(2) {
-        faces.push([0, at(0, i), at(0, i + 1), at(0, i + 2)].to_vec());
-    }
-    for j in 0..rings - 1 {
-        for i in 0..n {
-            faces.push([at(j, i), at(j + 1, i), at(j + 1, i + 1), at(j, i + 1)].to_vec());
-        }
-    }
-    for i in (0..n).step_by(2) {
-        faces.push([south, at(rings - 1, i + 2), at(rings - 1, i + 1), at(rings - 1, i)].to_vec());
-    }
-    Ok(Cage { points, faces, ..Default::default() })
-}
-fn torus(major: f64, minor: f64, u: usize, v: usize) -> Result<Cage> {
-    if !major.is_finite() || !minor.is_finite() || minor <= 0.0 || major <= minor || major + minor > 10_000.0 {
-        return Err(bad("torus requires 0 < minor radius < major radius"));
-    }
-    let (n, m) = (4 * u, 4 * v);
-    let mut points = Vec::with_capacity(n * m);
-    for i in 0..n {
-        let a = TAU * i as f64 / n as f64;
-        for j in 0..m {
-            let b = TAU * j as f64 / m as f64;
-            let r = major + minor * b.cos();
-            points.push(Vec3::new(r * a.cos(), r * a.sin(), minor * b.sin()));
-        }
-    }
-    let at = |i: usize, j: usize| (i % n) * m + j % m;
-    let mut faces = Vec::with_capacity(n * m);
-    for i in 0..n {
-        for j in 0..m {
-            faces.push([at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)].to_vec());
-        }
-    }
-    Ok(Cage { points, faces, ..Default::default() })
-}
-fn tube(outer: f64, inner: f64, height: f64, sides: usize, layers: usize) -> Result<Cage> {
-    if !outer.is_finite() || !inner.is_finite() || inner <= 0.0 || outer <= inner || outer > 10_000.0 {
-        return Err(bad("tube requires 0 < inner radius < outer radius"));
-    }
-    let n = 4 * sides;
-    let wall = (layers + 1) * n;
-    let mut points = Vec::with_capacity(2 * wall);
-    for radius in [outer, inner] {
-        for j in 0..=layers {
-            for i in 0..n {
-                let a = TAU * i as f64 / n as f64;
-                points.push(Vec3::new(radius * a.cos(), radius * a.sin(), height * (j as f64 / layers as f64 - 0.5)));
-            }
-        }
-    }
-    let at = |inside: bool, j: usize, i: usize| usize::from(inside) * wall + j * n + i % n;
-    let mut faces = Vec::new();
-    for j in 0..layers {
-        for i in 0..n {
-            faces.push([at(false, j, i), at(false, j, i + 1), at(false, j + 1, i + 1), at(false, j + 1, i)].to_vec());
-            faces.push([at(true, j, i), at(true, j + 1, i), at(true, j + 1, i + 1), at(true, j, i + 1)].to_vec());
-        }
-    }
-    for i in 0..n {
-        faces.push([at(false, layers, i), at(false, layers, i + 1), at(true, layers, i + 1), at(true, layers, i)].to_vec());
-        faces.push([at(false, 0, i + 1), at(false, 0, i), at(true, 0, i), at(true, 0, i + 1)].to_vec());
-    }
-    Ok(Cage { points, faces, ..Default::default() })
-}
-fn pipe(radius: f64, input: &[Vec3], sides: usize, samples: usize, height: f64) -> Result<Cage> {
-    let default = [Vec3::new(0., 0., -height / 2.), Vec3::ZERO, Vec3::new(height / 3., 0., height / 2.)];
-    let path = if input.is_empty() { &default[..] } else { input };
-    if !(2..=128).contains(&path.len()) || path.iter().any(|p| !p.is_finite() || p.len() > 100_000.0) {
-        return Err(bad("pipe requires 2..128 finite path points"));
-    }
-    let mut directions = Vec::new();
-    let mut lengths = Vec::new();
-    let mut total = 0.0;
-    for edge in path.windows(2) {
-        let delta = edge[1] - edge[0];
-        let len = delta.len();
-        let direction = delta.normalized().ok_or_else(|| bad("pipe path has coincident points"))?;
-        directions.push(direction);
-        lengths.push(len);
-        total += len;
-    }
-    let layers = samples * (path.len() - 1);
-    if layers > 256 {
-        return Err(bad("pipe path sample budget exceeded"));
-    }
-    let mut frames = Vec::new();
-    let mut u = directions.first().copied().ok_or_else(|| bad("empty pipe path"))?.any_perp().normalized().ok_or_else(|| bad("pipe frame"))?;
-    for i in 0..path.len() {
-        let tangent = match (i.checked_sub(1).and_then(|j| directions.get(j)), directions.get(i)) {
-            (Some(a), Some(b)) => (*a + *b).normalized().ok_or_else(|| bad("pipe path reverses direction"))?,
-            (Some(a), None) => *a,
-            (None, Some(b)) => *b,
-            _ => return Err(bad("pipe frame")),
-        };
-        u = (u - tangent * u.dot(tangent)).normalized().unwrap_or_else(|| tangent.any_perp().normalized().unwrap_or(Vec3::X));
-        frames.push((u, tangent.cross(u)));
-    }
-    let mut cage = cylinder(radius, total, sides, layers)?;
-    for p in &mut cage.points {
-        let mut distance = p.z + total / 2.0;
-        let mut segment = 0;
-        while segment + 1 < lengths.len() && distance > lengths.get(segment).copied().unwrap_or(0.0) {
-            distance -= lengths.get(segment).copied().unwrap_or(0.0);
-            segment += 1;
-        }
-        let length = lengths.get(segment).copied().ok_or_else(|| bad("pipe segment"))?;
-        let t = (distance / length).clamp(0.0, 1.0);
-        let a = *path.get(segment).ok_or_else(|| bad("pipe segment"))?;
-        let b = *path.get(segment + 1).ok_or_else(|| bad("pipe segment"))?;
-        let (u0, v0) = *frames.get(segment).ok_or_else(|| bad("pipe frame"))?;
-        let (u1, v1) = *frames.get(segment + 1).ok_or_else(|| bad("pipe frame"))?;
-        let up = (u0 * (1.0 - t) + u1 * t).normalized().ok_or_else(|| bad("pipe frame flips"))?;
-        let vp = (v0 * (1.0 - t) + v1 * t).normalized().ok_or_else(|| bad("pipe frame flips"))?;
-        *p = a * (1.0 - t) + b * t + up * p.x + vp * p.y;
-    }
-    Ok(cage)
 }
 
 #[cfg(test)]

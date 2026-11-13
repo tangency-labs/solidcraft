@@ -66,39 +66,34 @@ impl Network {
             })
             .collect();
         let paths = effective.iter().enumerate().map(|(i, &(_, samples))| self.sample(i, samples)).collect::<Result<Vec<_>>>()?;
-        let mut clearance = vec![0.0f64; self.nodes.len()];
-        let mut directions = vec![Vec::<Vec3>::new(); self.nodes.len()];
+        let mut chords = vec![Vec::new(); self.nodes.len()];
         for ((chain, path), &(diameter, _)) in self.chains.iter().zip(&paths).zip(&effective) {
             if chain.closed {
                 continue;
             }
-            for (end, &node) in chain.nodes.iter().enumerate() {
+            let start = path.first_chunk::<2>().copied().ok_or_else(|| bad("pipe path needs two stations"))?;
+            let &[last_two, last] = path.last_chunk::<2>().ok_or_else(|| bad("pipe path needs two stations"))?;
+            for (node, branch) in chain.nodes.into_iter().zip([start, [last, last_two]]) {
                 if self.degree[node] > 2 {
-                    clearance[node] = clearance[node].max(diameter * 1.1);
-                    let direction = if end == 0 { path[1] - path[0] } else { path[path.len() - 2] - path[path.len() - 1] };
-                    directions[node].push(direction.normalized().ok_or_else(|| bad("pipe junction has no branch direction"))?);
+                    chords[node].push((branch, diameter));
                 }
             }
         }
-        for (node, directions) in directions.iter().enumerate() {
-            let mut sine = 1.0f64;
-            for (i, a) in directions.iter().enumerate() {
-                for b in directions.iter().skip(i + 1) {
-                    let dot = a.dot(*b).clamp(-1.0, 1.0);
-                    if dot > (10.0f64).to_radians().cos() {
-                        return Err(bad("pipe branches meet at an angle too small for a junction"));
-                    }
-                    sine = sine.min(((1.0 - dot) * 0.5).sqrt());
-                }
-            }
-            clearance[node] *= (0.75 / sine).max(1.0);
-        }
+        let clearance = chords
+            .iter()
+            .map(|branches| solidcore_ops::form_pipe::clearance(branches).map_err(|error| bad(&error.to_string())))
+            .collect::<Result<Vec<_>>>()?;
         let mut cage = Cage::default();
         let mut ports = BTreeMap::<usize, Vec<junction::Port>>::new();
         let mut segments = Vec::with_capacity(self.chains.len());
         for ((chain, source_path), &(diameter, samples)) in self.chains.iter().zip(&paths).zip(&effective) {
             let radius = diameter * 0.5;
-            let path = if chain.closed { source_path.clone() } else { trim(source_path, clearance[chain.nodes[0]], clearance[chain.nodes[1]])? };
+            let path = if chain.closed {
+                source_path.clone()
+            } else {
+                solidcore_ops::form_pipe::trim(source_path, clearance[chain.nodes[0]], clearance[chain.nodes[1]])
+                    .map_err(|error| bad(&error.to_string()))?
+            };
             let caps = chain.nodes.map(|node| self.degree[node] == 1);
             let sweep = sweep::tube(&path, radius, settings.section_density, chain.closed, caps)?;
             let offset = cage.points.len();
@@ -134,20 +129,4 @@ impl Network {
         }
         Ok(BuiltPipe { cage, segments })
     }
-}
-fn trim(points: &[Vec3], start: f64, end: f64) -> Result<Vec<Vec3>> {
-    let total = length(points);
-    if start + end >= total * 0.9 {
-        return Err(bad("pipe branches are too short for this diameter; reduce the diameter or lengthen the path"));
-    }
-    let mut out = vec![at_length(points, start)?];
-    let mut walked = 0.0;
-    for pair in points.windows(2) {
-        walked += pair[0].dist(pair[1]);
-        if walked > start + 1e-9 && walked < total - end - 1e-9 {
-            out.push(pair[1]);
-        }
-    }
-    out.push(at_length(points, total - end)?);
-    Ok(out)
 }

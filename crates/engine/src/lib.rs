@@ -456,12 +456,14 @@ impl ComputedCommands {
         self.computed.forms_prototype.as_ref()
     }
 
-    /// Exact logical seam IDs from this still-unaccepted hierarchical loop.
-    /// The original and computed leaf slots are both owned by the transaction.
+    /// Exact logical seam IDs from this still-unaccepted Form Insert Loop.
     pub fn form_loop_seams(&self) -> Result<Vec<[usize; 2]>> {
         let [step] = self.steps.as_slice() else { return Err(EngineError::Other("expected one Form Insert Loop transaction".into())) };
         if step.id != "form.prototype.insert_loop" {
             return Err(EngineError::Other("expected a Form Insert Loop transaction".into()));
+        }
+        if let Some(seams) = step.reply.get("loop_seams") {
+            return serde_json::from_value(seams.clone()).map_err(|error| EngineError::Other(error.to_string()));
         }
         let before = self.source.forms_prototype.as_ref().and_then(|form| form.hierarchy.as_ref());
         let after = self.computed.forms_prototype.as_ref().and_then(|form| form.hierarchy.as_ref());
@@ -1051,6 +1053,12 @@ impl Session {
     /// component moved and not captured yet (#9736).
     pub fn is_dirty(&self) -> bool {
         self.forms_prototype.is_some() || self.document_differs() || self.visibility != self.saved_visibility || self.moved_uncaptured()
+    }
+
+    /// A replay also needs pending Form tool commands. Autosave describes
+    /// the accepted draft, while the current editor includes the tool preview.
+    fn form_replay_revision(&self) -> Option<((u64, u64), [u64; 3], bool)> {
+        self.forms_prototype.as_ref().map(|form| (form.source_revision(), forms_prototype::draft::revision(form), form.has_tool_preview()))
     }
 
     /// A component was moved and its position not captured yet (#9736). The placements of an
@@ -1806,6 +1814,8 @@ impl Session {
             None
         };
         let params = mapped.as_ref().unwrap_or(params);
+        let journal_form = outermost && self.crash_journal && crash::enabled();
+        let form_replay_before = journal_form.then(|| self.form_replay_revision()).flatten();
         if outermost {
             crash::command_begin(self, spec.id, given);
         }
@@ -1869,6 +1879,7 @@ impl Session {
                 || self.pending_moves != before.pending_moves
                 || self.active_component != active_before.0
                 || self.active_occurrence_path != active_before.1
+                || journal_form && self.form_replay_revision() != form_replay_before
                 || spec.id.starts_with("select.");
             Some((before.doc.clone(), changed, failed))
         } else {
@@ -2259,10 +2270,12 @@ impl Session {
             let before = computed.doc.clone();
             let active_sketch = computed.active_sketch;
             let pending_moves = computed.pending_moves.clone();
+            let form_replay_before = computed.form_replay_revision();
             let reply = computed.execute(id, params)?;
             let changed = !Arc::ptr_eq(&before, &computed.doc)
                 || active_sketch != computed.active_sketch
                 || pending_moves != computed.pending_moves
+                || computed.form_replay_revision() != form_replay_before
                 || id.starts_with("select.");
             steps.push(ComputedCommand { id: id.clone(), params: params.clone(), before, after: computed.doc.clone(), changed, reply });
         }

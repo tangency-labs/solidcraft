@@ -348,6 +348,24 @@ pub fn collapsed(speed: [f64; 2], dom: &Domain, reach: f64) -> [bool; 2] {
     out
 }
 
+/// Resolve a point on a qualified chart, retaining the unwrapped branch near a hint.
+pub fn qualified_parameters(
+    surface: &EvalSurface,
+    point: Vec3,
+    near: Option<[f64; 2]>,
+    tolerance: f64,
+) -> Option<[f64; 2]> {
+    let domain = domain(surface);
+    let mut parameters = project(surface, &domain, point, near, tolerance)?;
+    if let Some(near) = near {
+        for (axis, parameter) in parameters.iter_mut().enumerate() {
+            *parameter = unwrap(*parameter, near[axis], domain.period[axis]);
+        }
+    }
+    let (on, _, _) = surface.derivs(parameters[0], parameters[1])?;
+    (on.dist(point) <= tolerance).then_some(parameters)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,6 +486,20 @@ mod tests {
                 panic!("evaluates")
             };
             assert!(p.0.dist(q.0) < 1e-12, "swap {swap}: {p:?} {q:?}");
+            let [u, v] = at(1.3, 0.4);
+            let outside = s.jet(u, v).expect("periodic jet");
+            let [u, v] = at(0.3, 0.4);
+            let inside = s.jet(u, v).expect("interior jet");
+            for (a, b) in [
+                (outside.point, inside.point),
+                (outside.du, inside.du),
+                (outside.dv, inside.dv),
+                (outside.duu, inside.duu),
+                (outside.duv, inside.duv),
+                (outside.dvv, inside.dvv),
+            ] {
+                assert!(a.dist(b) < 1e-12, "swap {swap}: {a:?} {b:?}");
+            }
         }
         assert_eq!(domain(&cylinder()).period, [None, Some(std::f64::consts::TAU)]);
     }

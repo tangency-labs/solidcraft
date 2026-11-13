@@ -2302,7 +2302,11 @@ impl SolveApp {
             return;
         }
         if matches!(id, "document.metadata" | "document.metadata.set") {
-            design_properties::open(self);
+            if self.session.forms_prototype.is_some() {
+                self.set_status(self.tr("forms.context.finish_before_properties").to_owned(), true);
+            } else {
+                design_properties::open(self);
+            }
             return;
         }
         if id == "sketch.inspect" {

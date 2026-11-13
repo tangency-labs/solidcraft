@@ -4305,6 +4305,7 @@ impl Document {
         if self.features.len() >= MAX_FEATURES {
             return Err(DocError::Invalid("too many features".into()));
         }
+        self.check_form_pattern_order(&kind)?;
         let component = if let FeatureKind::BodyTransfer { bodies, from, to, transform } = &kind {
             crate::validate_body_transfer(self, &crate::plain(bodies), *from, *to, transform)?;
             *to
@@ -4356,6 +4357,7 @@ impl Document {
         if self.features.len() >= MAX_FEATURES {
             return Err(DocError::Invalid("too many features".into()));
         }
+        self.check_form_pattern_order(&f.kind)?;
         if f.id == 0 {
             f.id = self.next_id.max(1);
         } else if f.id > MAX_FEATURE_ID {
@@ -4407,6 +4409,19 @@ impl Document {
         self.params.extend(params.into_iter().map(|p| Param { model: true, ..p }));
         self.place_feature(f);
         Ok(id)
+    }
+
+    fn check_form_pattern_order(&self, kind: &FeatureKind) -> Result<()> {
+        if let (Some(marker), FeatureKind::Pattern { features, .. }) = (self.marker, kind)
+            && self
+                .features
+                .iter()
+                .skip(marker)
+                .any(|source| matches!(source.kind, FeatureKind::Form { .. }) && features.iter().any(|id| id.0 == source.id))
+        {
+            return Err(DocError::Invalid("put the Form before its pattern in the timeline".into()));
+        }
+        Ok(())
     }
 
     /// Put a feature at the marker (or the end), in the timeline folder that spans that slot,

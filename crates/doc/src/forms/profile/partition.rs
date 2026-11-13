@@ -153,18 +153,8 @@ pub(super) fn build(patch: &kernel::Body, profile: &Profile, cage: &Cage, placem
     let epsilon = span.map(|r| ((r[1] - r[0]) * 1e-6).max(1e-9));
     // Only a rectangular outer trim can be covered by the complete regular grid.
     // Oblique edges INSIDE it are exact parameter-line restrictions.
-    for edge in face.loops.iter().flatten() {
-        let mut near = None;
-        for i in 0..=16 {
-            let Some((point, _)) = edge.at(i as f64 / 16.0) else {
-                return Ok(None);
-            };
-            let uv = face.parameters(point, near, tolerance)?;
-            near = Some(uv);
-            if !(0..2).any(|d| (uv[d] - span[d][0]).abs().min((uv[d] - span[d][1]).abs()) <= epsilon[d]) {
-                return Ok(None);
-            }
-        }
+    if !kernel::has_rectangular_trim(patch, 0, span)? {
+        return Ok(None);
     }
     let mut uv = cage.points.iter().map(|&p| face.parameters(placement.point(p), None, tolerance)).collect::<kernel::Result<Vec<_>>>()?;
     // Inverse projection can put an exactly isoparametric guide a few ulps off

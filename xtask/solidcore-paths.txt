@@ -6,5 +6,5 @@
 # same pull request, and a crate down to none drops its line. Never raise a count: call
 # solidcore-ops or solidcore-tess (solidcore docs/layers.md). `cargo xtask layers --paths [crate]`
 # lists the paths counted.
-crates/geom 20
+crates/geom 18
 crates/smlib 722

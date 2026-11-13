@@ -2,59 +2,24 @@
 //! switches come from the file's self-described record, not evaluated triangles.
 use super::*;
 
-fn coordinate(p: Vec3, axis: usize) -> f64 {
-    match axis {
-        0 => p.x,
-        1 => p.y,
-        _ => p.z,
-    }
-}
-fn point(m: Matrix, p: Vec3) -> Result<Vec3> {
-    let v = [p.x, p.y, p.z, 1.];
-    let mut out = [0.; 3];
-    for (i, n) in out.iter_mut().enumerate() {
-        *n = m[i].iter().zip(v).map(|(a, b)| a * b).sum();
-    }
-    let p = Vec3::new(out[0], out[1], out[2]);
-    if !p.is_finite() {
+use solidcore_ops::{affine, mesh_edit};
+
+fn point(matrix: &Matrix, point: Vec3) -> Result<Vec3> {
+    let point = affine::point(matrix, point);
+    if !point.is_finite() {
         return Err(bad("non-finite Mirror transform"));
     }
-    Ok(p)
+    Ok(point)
 }
-fn inverse(m: Matrix) -> Result<Matrix> {
-    let mut a = [[0.; 8]; 4];
-    for i in 0..4 {
-        for j in 0..4 {
-            a[i][j] = m[i][j];
-        }
-        a[i][i + 4] = 1.;
-    }
-    for column in 0..4 {
-        let pivot = (column..4).max_by(|&a0, &b| a[a0][column].abs().total_cmp(&a[b][column].abs())).ok_or_else(|| bad("Mirror matrix pivot"))?;
-        if !a[pivot][column].is_finite() || a[pivot][column].abs() < 1e-15 {
-            return Err(bad("singular Mirror frame"));
-        }
-        a.swap(pivot, column);
-        let n = a[column][column];
-        for v in &mut a[column] {
-            *v /= n;
-        }
-        let row = a[column];
-        for (i, r) in a.iter_mut().enumerate() {
-            if i != column {
-                let factor = r[column];
-                for j in 0..8 {
-                    r[j] -= factor * row[j];
-                }
-            }
-        }
-    }
-    let mut out = identity();
-    for i in 0..4 {
-        out[i].copy_from_slice(&a[i][4..8]);
-    }
-    Ok(out)
+
+fn components(p: Vec3) -> [f64; 3] {
+    [p.x, p.y, p.z]
 }
+
+fn vector([x, y, z]: [f64; 3]) -> Vec3 {
+    Vec3::new(x, y, z)
+}
+
 fn compact(mut cage: Cage) -> Result<Cage> {
     let used: BTreeSet<_> = cage.faces.iter().flatten().copied().collect();
     let mut ids = BTreeMap::new();
@@ -79,9 +44,13 @@ fn compact(mut cage: Cage) -> Result<Cage> {
     Ok(cage)
 }
 fn clip(cage: Cage, axis: usize, flip: bool, threshold: f64) -> Result<Cage> {
+    let mut cage = cage;
+    for point in &mut cage.points {
+        *point = vector(mesh_edit::snap_to_plane(components(*point), axis, threshold));
+    }
     let mut out = Cage { points: cage.points.clone(), ..Default::default() };
     let mut cuts = BTreeMap::new();
-    let distance = |p: Vec3| coordinate(p, axis) * if flip { -1. } else { 1. };
+    let distance = |p: Vec3| if flip { -components(p)[axis] } else { components(p)[axis] };
     for face in &cage.faces {
         let mut polygon = Vec::new();
         for (&a, &b) in face.iter().zip(face.iter().cycle().skip(1)).take(face.len()) {
@@ -89,16 +58,16 @@ fn clip(cage: Cage, axis: usize, flip: bool, threshold: f64) -> Result<Cage> {
             let pb = cage.point(b).map_err(|e| bad(e.to_string()))?;
             let da = distance(pa);
             let db = distance(pb);
-            let inside = da >= -threshold;
-            let next_inside = db >= -threshold;
+            let inside = da >= 0.0;
+            let next_inside = db >= 0.0;
             if inside {
                 polygon.push(a);
             }
             if inside != next_inside {
                 let key = (a.min(b), a.max(b));
-                let id = if da.abs() <= 1e-12 {
+                let id = if da == 0.0 {
                     a
-                } else if db.abs() <= 1e-12 {
+                } else if db == 0.0 {
                     b
                 } else if let Some(&i) = cuts.get(&key) {
                     i
@@ -106,8 +75,8 @@ fn clip(cage: Cage, axis: usize, flip: bool, threshold: f64) -> Result<Cage> {
                     if out.points.len() >= MAX_POINTS {
                         return Err(bad("Mirror bisect point budget exceeded"));
                     }
-                    let t = (da / (da - db)).clamp(0., 1.);
-                    let p = pa + (pb - pa) * t;
+                    let p =
+                        mesh_edit::crossing(components(pa), components(pb), axis).map(vector).ok_or_else(|| bad("invalid Mirror bisect crossing"))?;
                     let id = out.points.len();
                     out.points.push(p);
                     cuts.insert(key, id);
@@ -129,10 +98,10 @@ fn clip(cage: Cage, axis: usize, flip: bool, threshold: f64) -> Result<Cage> {
         let [a, b] = c.edge;
         let da = distance(cage.point(a).map_err(|e| bad(e.to_string()))?);
         let db = distance(cage.point(b).map_err(|e| bad(e.to_string()))?);
-        let edge = if da >= -threshold && db >= -threshold {
+        let edge = if da >= 0.0 && db >= 0.0 {
             Some([a, b])
         } else if let Some(&i) = cuts.get(&(a.min(b), a.max(b))) {
-            Some([if da >= -threshold { a } else { b }, i])
+            Some([if da >= 0.0 { a } else { b }, i])
         } else {
             None
         };
@@ -152,14 +121,10 @@ fn reflect(cage: Cage, axis: usize, seam_limit: f64) -> Result<Cage> {
     let mut out = cage.clone();
     let mut ids = Vec::with_capacity(cage.points.len());
     for (i, &p) in cage.points.iter().enumerate() {
-        let q = match axis {
-            0 => Vec3::new(-p.x, p.y, p.z),
-            1 => Vec3::new(p.x, -p.y, p.z),
-            _ => Vec3::new(p.x, p.y, -p.z),
-        };
-        if coordinate(p, axis).abs() < seam_limit {
-            let center = (p + q) * 0.5;
-            *out.points.get_mut(i).ok_or_else(|| bad("Mirror seam index"))? = center;
+        let (point, merge) = mesh_edit::mirror(components(p), axis, seam_limit);
+        let q = vector(point);
+        if merge {
+            *out.points.get_mut(i).ok_or_else(|| bad("Mirror seam index"))? = q;
             ids.push(i);
         } else {
             ids.push(out.points.len());
@@ -206,11 +171,12 @@ pub(super) fn apply(object: View<'_, '_>, modifier: View<'_, '_>, mut cage: Cage
         let own = world(object.file, object, &mut BTreeSet::new(), 0)?;
         let target = object.file.view(object.file.block(mirror)?, "Object")?;
         let other = world(object.file, target, &mut BTreeSet::from([mirror]), 0)?;
-        mul(inverse(other)?, own)
+        let inverse = affine::inverse(&to_affine(other)).map_err(|_| bad("singular Mirror object frame"))?;
+        affine::then(&to_affine(own), &inverse).map_err(|_| bad("invalid Mirror object frame"))?
     };
-    let back = inverse(frame)?;
+    let back = affine::inverse(&frame).map_err(|_| bad("singular Mirror frame"))?;
     for p in &mut cage.points {
-        *p = point(frame, *p)?;
+        *p = point(&frame, *p)?;
     }
     for axis in [0, 1, 2] {
         if flags & (8 << axis) == 0 {
@@ -221,15 +187,15 @@ pub(super) fn apply(object: View<'_, '_>, modifier: View<'_, '_>, mut cage: Cage
         }
         // A reflected pair differs by twice its signed plane coordinate. Map
         // that axis into object space, where the merge threshold is measured.
-        let axis_length = Vec3::new(back[0][axis], back[1][axis], back[2][axis]).len();
-        if !axis_length.is_finite() || axis_length == 0.0 {
-            return Err(bad("invalid Mirror frame scale"));
-        }
-        let seam_limit = if flags & 128 == 0 { tolerance / (2.0 * axis_length) } else { 0.0 };
+        let seam_limit = if flags & 128 == 0 {
+            mesh_edit::mirror_seam_limit(&back, axis, tolerance).ok_or_else(|| bad("invalid Mirror frame scale"))?
+        } else {
+            0.0
+        };
         cage = reflect(cage, axis, seam_limit)?;
     }
     for p in &mut cage.points {
-        *p = point(back, *p)?;
+        *p = point(&back, *p)?;
     }
     if cage.faces.iter().any(|f| f.len() != 4) {
         return Err(bad("Mirror bisect produced non-quad faces"));
@@ -298,5 +264,18 @@ mod tests {
             assert_eq!(mirrored.points[0].x, if points == 6 { 0.0 } else { distance });
             mirrored.validate().unwrap();
         }
+    }
+
+    #[test]
+    fn bisect_snaps_both_sides_even_with_a_smaller_merge_tolerance() {
+        let mut cage = half_quad();
+        cage.points[0].x = -0.0008;
+        cage.points[3].x = 0.0008;
+        let clipped = clip(cage, 0, false, 0.001).unwrap();
+        assert_eq!(clipped.points[0].x, 0.0);
+        assert_eq!(clipped.points[3].x, 0.0);
+        let reflected = reflect(clipped, 0, 0.0001).unwrap();
+        assert_eq!(reflected.points.len(), 6);
+        reflected.validate().unwrap();
     }
 }

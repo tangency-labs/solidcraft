@@ -148,7 +148,7 @@ impl Session {
                 self.store_form_at_checkpoints(before);
             }
         }
-        crate::crash::accepted_command(self, &self.doc, &self.doc, prepared.space.command(), &prepared.params, false);
+        crate::crash::accepted_command(self, &self.doc, &self.doc, prepared.space.command(), &prepared.params, changed);
         Ok((changed, prepared.reply))
     }
 }

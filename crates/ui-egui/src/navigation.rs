@@ -933,10 +933,10 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             || hover.is_some_and(|p| crate::forms_prototype::owns_pointer(app, &projection(app, rect), p)));
     let primary_nav = if zoom_drag {
         zoom_held.then_some(NavMode::Zoom)
-    } else if forms_shift {
-        None
     } else if space_pan {
         Some(NavMode::Pan)
+    } else if forms_shift {
+        None
     } else {
         app.viewport.nav.or(app.viewport.primary_nav)
     };
@@ -2837,6 +2837,35 @@ mod tests {
             }];
             assert_eq!(super::pinch_factor(&input, egui::InputOptions::default(), 600.0, None), 1.0, "{phase:?} is a gesture boundary, not movement");
         }
+    }
+
+    #[test]
+    fn space_pan_wins_over_shift_drag_on_a_form() {
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.run("form.prototype.create", serde_json::json!({"primitive":"box","segments":[1,1,1],"levels":0})).unwrap();
+        app.preferences.forms_exact_face_picking = true;
+        let ctx = crate::fonts::test_context();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let modifiers = egui::Modifiers::SHIFT;
+        let raw = egui::RawInput {
+            screen_rect: Some(rect),
+            focused: true,
+            modifiers,
+            events: vec![
+                egui::Event::PointerMoved(rect.center()),
+                egui::Event::Key { key: egui::Key::Space, physical_key: None, pressed: true, repeat: false, modifiers },
+            ],
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(raw, |ui| {
+            let rect = ui.max_rect();
+            app.viewport.rect = Some(rect);
+            assert!(crate::forms_prototype::owns_pointer(&app, &super::projection(&app, rect), rect.center()));
+            let response = ui.interact(rect, ui.scope_id().with("forms_space_pan"), egui::Sense::click_and_drag());
+            let input = super::handle(&mut app, ui, rect, &response, super::NavCaps::MODEL);
+            assert_eq!(input.primary_nav, Some(super::NavMode::Pan));
+        });
+        out.textures_delta.clear();
     }
 
     /// The pinch factor reads native Ctrl+wheel pinches in every wheel unit, scaled the way egui

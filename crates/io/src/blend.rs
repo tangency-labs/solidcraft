@@ -10,6 +10,7 @@ mod mesh;
 mod write;
 
 pub const MAX_BLEND_BYTES: usize = 256 << 20;
+const SUBSURF_USE_CREASE: u64 = 1 << 4;
 
 #[derive(Clone, Debug)]
 pub struct Object {

@@ -2,10 +2,7 @@
 use crate::kernel::history::{BodyHistory, Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History};
 use crate::{DocError, Result, kernel};
 use solidcore_record::Vec3;
-use solidcore_record::brep::{Curve, Edge, Shell};
-use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::bspline::{HPoint, NurbsSurface, segment};
-use solidcraft_geom::{PlaneGeom, Vec3Geom};
+use solidcore_record::brep::{Curve, Shell};
 use std::collections::BTreeSet;
 
 const MAX_EDGES: usize = 4096;
@@ -24,15 +21,6 @@ fn planar_normal(body: &kernel::Body) -> Option<Vec3> {
     {
         return None;
     }
-    let plane = body.planar_face(0)?;
-    let normal = plane.normal();
-    for index in 1..body.face_count() {
-        let next = body.planar_face(index)?;
-        let height_tolerance = (64.0 * f64::EPSILON * (1.0 + plane.origin.len().max(next.origin.len()))).min(1e-7);
-        if normal.dist(next.normal()) > 64.0 * f64::EPSILON || plane.height(next.origin).abs() > height_tolerance {
-            return None;
-        }
-    }
     let mut spline_boundary = false;
     let mut free = 0;
     for edge in &record.edges {
@@ -49,7 +37,11 @@ fn planar_normal(body: &kernel::Body) -> Option<Vec3> {
             _ => return None,
         }
     }
-    (spline_boundary && free >= 3).then_some(normal)
+    if !spline_boundary || free < 3 {
+        return None;
+    }
+    let planes = (0..body.face_count()).map(|index| body.planar_face(index)).collect::<Option<Vec<_>>>()?;
+    kernel::form_curves::coplanar_normal(planes.into_iter())
 }
 
 /// A direct wall for coplanar fitted Forms with spline boundaries. Ordinary
@@ -62,22 +54,21 @@ pub fn can_build_planar_wall(body: &kernel::Body) -> bool {
 /// Keeping them distinct in the history gives both offsets stable names.
 pub(crate) fn build(body: &kernel::Body, thickness: f64, symmetric: bool) -> Result<(kernel::Body, History)> {
     let normal = planar_normal(body).ok_or_else(|| invalid("Thicken requires the saved Form's coplanar spline boundary"))?;
-    if !(thickness.is_finite() && thickness.abs() > 1e-9) {
-        return Err(invalid("Thicken requires a finite nonzero thickness"));
-    }
-    let delta = normal * if symmetric { thickness.abs() } else { thickness };
-    let start = if symmetric { -delta / 2.0 } else { Vec3::ZERO };
+    let (offsets, tolerance) =
+        kernel::form_curves::wall_offsets(normal, thickness, symmetric).ok_or_else(|| invalid("Thicken requires a finite nonzero thickness"))?;
+    let [start, end] = offsets;
     let first = kernel::transform(body, start, Vec3::ZERO, Vec3::Z, 0.0)?;
-    let second = kernel::transform(body, start + delta, Vec3::ZERO, Vec3::Z, 0.0)?;
+    let second = kernel::transform(body, end, Vec3::ZERO, Vec3::Z, 0.0)?;
     let mut remaining = MAX_CONTROLS;
     let mut side_edges = Vec::new();
     let mut sides = Vec::new();
-    for (index, edge) in body.record().edges.iter().enumerate().filter(|(_, edge)| edge.uses.len() == 1) {
-        sides.push(strip(edge, start, delta, &mut remaining)?);
+    for (index, _) in body.record().edges.iter().enumerate().filter(|(_, edge)| edge.uses.len() == 1) {
+        let edge = kernel::edge_geometry(body, &[index])?.into_iter().next().ok_or_else(|| invalid("missing planar Form boundary"))?;
+        sides.push(edge.planar_wall_strip(offsets, &mut remaining)?);
         side_edges.push(index);
     }
     let parts: Vec<_> = [&first, &second].into_iter().chain(&sides).collect();
-    let wall = kernel::stitch(&parts, (thickness.abs() * 0.01).min(1e-7))?;
+    let wall = kernel::stitch(&parts, tolerance)?;
     if wall.is_surface()
         || wall.shell_count() != 1
         || wall.record().material_regions().len() != 1
@@ -88,44 +79,6 @@ pub(crate) fn build(body: &kernel::Body, thickness: f64, symmetric: bool) -> Res
     }
     let history = lineage(&wall, body, &parts, &side_edges, symmetric)?;
     Ok((wall, history))
-}
-
-fn strip(edge: &Edge, start: Vec3, delta: Vec3, remaining: &mut usize) -> Result<kernel::Body> {
-    let [a, b] = edge.interval;
-    let (degree, knots, controls) = match edge.parameters() {
-        Curve::Line { .. } => {
-            let eval = CurveEval::new(edge.parameters()).map_err(|error| invalid(error.to_string()))?;
-            let point = |t| eval.point(t).map(|point| HPoint::weighted(point, 1.0)).ok_or_else(|| invalid("invalid planar Form line station"));
-            (1, vec![a, a, b, b], vec![point(a)?, point(b)?])
-        }
-        Curve::Spline { knots, points } => {
-            spend(remaining, points.len())?;
-            let points = points.iter().map(|&[x, y, z]| HPoint::weighted(Vec3::new(x, y, z), 1.0)).collect();
-            trimmed(knots, points, a, b)?
-        }
-        Curve::RationalSpline { knots, homogeneous } => {
-            spend(remaining, homogeneous.len())?;
-            let points = homogeneous.iter().map(|&[x, y, z, w]| HPoint { x, y, z, w }).collect();
-            trimmed(knots, points, a, b)?
-        }
-        _ => return Err(invalid("unsupported exact planar Form boundary")),
-    };
-    spend(remaining, controls.len().saturating_mul(2))?;
-    let row = |at: Vec3| controls.iter().map(move |p| HPoint { x: p.x + p.w * at.x, y: p.y + p.w * at.y, z: p.z + p.w * at.z, w: p.w });
-    let surface = NurbsSurface::from_homogeneous([degree, 1], [knots, vec![0.0, 0.0, 1.0, 1.0]], row(start).chain(row(start + delta)).collect())
-        .map_err(|error| invalid(error.to_string()))?;
-    Ok(kernel::nurbs_sheet(&surface)?)
-}
-
-fn trimmed(knots: &[f64], controls: Vec<HPoint>, a: f64, b: f64) -> Result<(usize, Vec<f64>, Vec<HPoint>)> {
-    let degree = knots.len().checked_sub(controls.len() + 1).ok_or_else(|| invalid("invalid planar Form spline degree"))?;
-    let (knots, controls) = segment(degree, knots, &controls, a, b).map_err(|error| invalid(error.to_string()))?;
-    Ok((degree, knots, controls))
-}
-
-fn spend(remaining: &mut usize, amount: usize) -> Result<()> {
-    *remaining = remaining.checked_sub(amount).ok_or_else(|| invalid("Thicken exceeded its planar wall control budget"))?;
-    Ok(())
 }
 
 fn lineage(wall: &kernel::Body, source: &kernel::Body, parts: &[&kernel::Body], side_edges: &[usize], symmetric: bool) -> Result<History> {

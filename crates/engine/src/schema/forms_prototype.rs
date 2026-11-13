@@ -370,6 +370,9 @@ pub struct ExtrudeDrag {
 }
 #[derive(Serialize, JsonSchema)]
 pub struct Reply {
+    /// Logical seam edges created by base cage Insert Loop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loop_seams: Option<Vec<[usize; 2]>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_options: Option<FinishOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -71,20 +71,72 @@ pub(super) fn busy(app: &SolveApp) -> bool {
 fn source(session: &Session) -> Arc<doc::ModelState> {
     session.forms_prototype.as_ref().and_then(|f| f.editing_feature).map_or_else(|| session.model.state(), |id| session.model.state_before(id))
 }
+
+#[cfg(target_arch = "wasm32")]
+const BROWSER_LIMIT: &str = "forms.context.browser_limit";
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn browser_simple_body(body: &doc::kernel::Body) -> bool {
+    use solidcore_record::brep::{Curve, Curve2, Loop, Surface};
+
+    let record = body.record();
+    !body.is_mesh()
+        && record.faces.len() <= 12
+        && record.edges.len() <= 32
+        && record.vertices.len() <= 32
+        && record.shells.len() <= 2
+        && record.regions.len() <= 2
+        && record.faces.iter().all(|face| {
+            face.nurbs.is_none()
+                && matches!(face.surface, Surface::Plane { .. } | Surface::PlaneThrough { .. })
+                && matches!(face.loops.as_slice(), [Loop::Edges { edges }] if edges.len() <= 8 && edges.iter().all(|edge| {
+                    matches!(&edge.pcurve, Curve2::Spline { knots, points } if knots.len() == 4 && points.len() == 2)
+                }))
+        })
+        && record.edges.iter().all(|edge| edge.nurbs.is_none() && matches!(edge.curve, Curve::Line { .. }))
+}
+
 fn build(session: Session, other: Option<u64>, tolerance: f64, matching: bool) -> Result<Vec<Entry>, String> {
     let Some(form) = &session.forms_prototype else { return Ok(Vec::new()) };
-    let mut document = session.doc.as_ref().clone();
-    for occurrence in &mut document.occurrences {
-        if let Some(transform) = session.pending_moves.get(&occurrence.id) {
-            occurrence.transform = *transform;
+    let base = source(&session);
+    let current = session.model.state();
+    #[cfg(not(target_arch = "wasm32"))]
+    let (document, state, final_state) = {
+        let mut document = session.doc.as_ref().clone();
+        for occurrence in &mut document.occurrences {
+            if let Some(transform) = session.pending_moves.get(&occurrence.id) {
+                occurrence.transform = *transform;
+            }
         }
-    }
-    let state = doc::world_state(&document, &source(&session)).map_err(|e| e.to_string())?;
+        let state = Arc::new(doc::world_state(&document, &base).map_err(|e| e.to_string())?);
+        let final_state = Arc::new(doc::world_state(&document, &current).map_err(|e| e.to_string())?);
+        (document, state, final_state)
+    };
+    #[cfg(target_arch = "wasm32")]
+    let (document, state, final_state) = {
+        // The browser worker handles Check and combined previews. Form context
+        // can reuse a prepared world or a small definition state on this thread.
+        if !form.parts.is_empty()
+            || (!session.doc.occurrences.is_empty() && (!Arc::ptr_eq(&base, &current) || form.consumed_features().next().is_some()))
+        {
+            return Err(BROWSER_LIMIT.into());
+        }
+        let world = session.cached_world_state().ok_or(BROWSER_LIMIT)?;
+        let state = if session.doc.occurrences.is_empty() { base } else { world.clone() };
+        if state.bodies.len().saturating_add(world.bodies.len()) > 32 {
+            return Err(BROWSER_LIMIT.into());
+        }
+        (session.doc.as_ref(), state, world)
+    };
     let mut entries = Vec::new();
     let mut triangles = 0usize;
     let mut edge_points = 0usize;
     let mut push =
         |mesh: Arc<Mesh>, body: doc::kernel::Body, color: Option<[f32; 3]>, name: Option<String>, detached_companion: bool| -> Result<(), String> {
+            #[cfg(target_arch = "wasm32")]
+            if !browser_mesh_fits(&mesh, triangles, edge_points) {
+                return Err(BROWSER_LIMIT.into());
+            }
             if entries.len() >= 256 {
                 return Err("context preview source budget exceeded".into());
             }
@@ -109,7 +161,10 @@ fn build(session: Session, other: Option<u64>, tolerance: f64, matching: bool) -
     let mut hidden_names = std::collections::BTreeSet::new();
     for id in form.editing_feature.into_iter().chain(form.consumed_features()) {
         if let Some(result) = session.model.result(id) {
+            #[cfg(not(target_arch = "wasm32"))]
             let placed = doc::world_state(&document, &result.state).map_err(|e| e.to_string())?;
+            #[cfg(target_arch = "wasm32")]
+            let placed = &result.state;
             hidden_names.extend(placed.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()));
         }
     }
@@ -123,16 +178,19 @@ fn build(session: Session, other: Option<u64>, tolerance: f64, matching: bool) -
             && let Some(profile) = &form.profile
             && profile.source.body().as_ref() == body.name
         {
+            #[cfg(target_arch = "wasm32")]
+            if !browser_simple_body(&body.body) {
+                return Err(BROWSER_LIMIT.into());
+            }
             let (_, face) = profile.resolve(&state).map_err(|e| e.to_string())?;
             let open = doc::kernel::remove_faces(&body.body, &[face]).map_err(|e| e.to_string())?;
             let mesh = Arc::new(open.mesh(&doc::kernel::MeshTolerance::chord(tolerance.min(0.05))).map_err(|e| e.to_string())?);
             (mesh, open)
         } else {
-            (body.mesh(), body.body.clone())
+            (context_mesh(body)?, body.body.clone())
         };
         push(mesh, exact, body.body.color(), Some(body.name.clone()), false)?;
     }
-    let final_state = doc::world_state(&document, &session.model.state()).map_err(|e| e.to_string())?;
     for body in &final_state.bodies {
         if visible_names.contains(&body.name) || hidden_names.contains(&body.name) || form.consumes(body.feature) || !session.body_visible(&body.name)
         {
@@ -140,25 +198,55 @@ fn build(session: Session, other: Option<u64>, tolerance: f64, matching: bool) -
         }
         visible.insert(body.feature);
         visible_names.insert(body.name.clone());
-        push(body.mesh(), body.body.clone(), body.body.color(), Some(body.name.clone()), false)?;
+        push(context_mesh(body)?, body.body.clone(), body.body.color(), Some(body.name.clone()), false)?;
     }
+    #[cfg(not(target_arch = "wasm32"))]
     for part in form.parts.values() {
         let (mesh, body) = live_cad::compute_context_body(part.definition.as_ref().clone(), tolerance).map_err(|e| format!("{}: {e}", part.name))?;
         let detached_companion = part.definition.hierarchy.as_ref().is_some_and(|hierarchy| hierarchy.has_detached_material());
         push(mesh, body, None, None, detached_companion)?;
     }
-    if let Some(id) = other.filter(|id| !visible.contains(id) && !form.consumes(*id))
-        && let Some(feature) = document.feature(id)
-        && let doc::FeatureKind::Form { definition, .. } = &feature.kind
-    {
-        let mut definition = definition.as_ref().clone();
-        definition.placement =
-            doc::forms::Placement::from_matrix(&doc::mat_mul(&document.component_transform(feature.component), &definition.placement.matrix()))
-                .map_err(|e| e.to_string())?;
-        let (mesh, body) = live_cad::compute_context_body(definition, tolerance)?;
-        push(mesh, body, None, None, false)?;
+    let peer = other.filter(|id| !visible.contains(id) && !form.consumes(*id)).and_then(|id| document.feature(id));
+    if let Some(doc::Feature { kind: doc::FeatureKind::Form { definition, .. }, component, .. }) = peer {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (definition, component);
+            return Err(BROWSER_LIMIT.into());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut definition = definition.as_ref().clone();
+            definition.placement =
+                doc::forms::Placement::from_matrix(&doc::mat_mul(&document.component_transform(*component), &definition.placement.matrix()))
+                    .map_err(|e| e.to_string())?;
+            let (mesh, body) = live_cad::compute_context_body(definition, tolerance)?;
+            push(mesh, body, None, None, false)?;
+        }
     }
     Ok(entries)
+}
+
+fn context_mesh(body: &doc::ModelBody) -> Result<Arc<Mesh>, String> {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(mesh) = body.cached_mesh() {
+        return Ok(mesh);
+    } else if !browser_simple_body(&body.body) {
+        return Err(BROWSER_LIMIT.into());
+    }
+    Ok(body.mesh())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn browser_mesh_fits(mesh: &Mesh, triangles: usize, edge_points: usize) -> bool {
+    const TRIANGLES: usize = 16_384;
+    const EDGE_POINTS: usize = 32_768;
+    triangles.saturating_add(mesh.triangles.len()) <= TRIANGLES
+        && mesh.positions.len() <= 3 * TRIANGLES
+        && mesh.normals.len() <= 3 * TRIANGLES
+        && mesh.edges.len() <= EDGE_POINTS
+        && mesh.edge_faces.len() <= EDGE_POINTS
+        && mesh.edges.iter().try_fold(edge_points, |n, edge| n.checked_add(edge.len()).filter(|n| *n <= EDGE_POINTS)).is_some()
+        && mesh.edge_faces.iter().try_fold(0usize, |n, faces| n.checked_add(faces.len()).filter(|n| *n <= EDGE_POINTS)).is_some()
 }
 
 pub(super) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
@@ -233,6 +321,7 @@ pub(super) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 state.entries = entries;
                 state.ready = Some(requested);
             }
+            Err(e) if e == BROWSER_LIMIT => state.error = Some(solidcraft_ui_text::tr(BROWSER_LIMIT).to_owned()),
             Err(e) => state.error = Some(e),
         }
         state.version = state.version.wrapping_add(1);
@@ -257,8 +346,7 @@ pub(super) fn occludes(app: &SolveApp, origin: Vec3, direction: Vec3, depth: f64
         let Some((hit, _)) = entry.index.as_ref().and_then(|index| index.raycast(&entry.mesh, origin, direction)) else { return false };
         // Only arithmetic roundoff at a coincident hit is allowed, independent of fit
         // tolerance, camera pixel size or a world-space geometry/display lift.
-        let scale = origin.x.abs().max(origin.y.abs()).max(origin.z.abs()).max(depth.abs()).max(hit.abs()).max(1.0);
-        hit < depth - 64.0 * f64::EPSILON * scale
+        solidcore_ops::forms_view_queries::occludes(origin, depth, hit)
     })
 }
 
@@ -291,6 +379,22 @@ pub(super) fn inspect(app: &SolveApp) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_context_admits_small_planar_sources_and_bounds_index_inputs() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.session.execute("solid.box", &json!({"length":10,"width":10,"height":2,"body_name":"Support","operation":"new"})).unwrap();
+        app.session.execute("solid.sphere", &json!({"radius":4,"body_name":"Curved","operation":"new"})).unwrap();
+        let state = app.session.model.state();
+        let body = state.body("Support").unwrap();
+        assert!(browser_simple_body(&body.body));
+        assert!(!browser_simple_body(&state.body("Curved").unwrap().body));
+        let mesh = body.mesh();
+        assert!(browser_mesh_fits(&mesh, 0, 0));
+        assert!(!browser_mesh_fits(&mesh, 16_384, 0));
+        assert!(!browser_mesh_fits(&mesh, 0, 32_768));
+    }
+
     #[test]
     fn surface_context_omits_its_source_face_but_keeps_it_pickable_in_source_settings() {
         let mut app = SolveApp::new(Default::default(), Default::default());

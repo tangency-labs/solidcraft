@@ -86,10 +86,11 @@ pub(super) fn text(app: &SolveApp, snapshot: Snapshot) -> String {
     let length = |v: f64| crate::prefs::format_length(if v.abs() < 1e-12 { 0.0 } else { v }, &app.session.doc.units, app.preferences.length_decimals);
     let value = match snapshot.value {
         Value::Move(delta) => {
-            let components = snapshot.basis.map(|axis| length(delta.dot(axis)));
+            let (magnitude, components) = solidcore_ops::form_transform::translation_measure(delta, snapshot.basis);
+            let components = components.map(length);
             locale.format(
                 "forms.feedback.move",
-                &[("distance", &length(delta.len())), ("x", &components[0]), ("y", &components[1]), ("z", &components[2])],
+                &[("distance", &length(magnitude)), ("x", &components[0]), ("y", &components[1]), ("z", &components[2])],
             )
         }
         Value::Rotate { axis, angle } => {

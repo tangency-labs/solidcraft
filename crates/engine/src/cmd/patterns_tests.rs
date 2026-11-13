@@ -209,6 +209,25 @@ fn a_pattern_before_the_feature_it_copies_follows_that_features_parameter() {
     assert!(got.len() == 2 && got.iter().all(|(_, l)| (l - 25.0).abs() < 1e-9), "the box and its copy, 25 mm: {got:?}");
 }
 
+#[test]
+fn a_form_pattern_requires_its_source_before_the_insertion_marker() {
+    let mut s = Session::default();
+    run(&mut s, "form.prototype.create", json!({"primitive":"face","segments":[1,1,1],"levels":0}));
+    run(&mut s, "form.prototype.commit", json!({"name":"Seed","tolerance":0.05}));
+    let pattern = json!({"features":["Seed"],"dir1":[1,0,0],"count1":2,"spacing1":60});
+    run(&mut s, "timeline.rollback", json!({"position":0}));
+    let before = s.doc.to_json();
+    let error = s.execute("solid.pattern.rectangular", &pattern).unwrap_err();
+    assert!(error.to_string().contains("put the Form before its pattern"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "timeline.rollback", json!({}));
+    let reply = s.execute("solid.pattern.rectangular", &pattern).unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    let result = s.model.result(id).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert_eq!(result.state.bodies.len(), 2);
+}
+
 /// A pattern whose source was deleted copies nothing. A feature made later under the freed name
 /// is found by that name, after the pattern in the timeline: the model is what a fresh evaluation
 /// makes of the design, where the pattern's empty result had been kept.

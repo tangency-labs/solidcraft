@@ -281,6 +281,7 @@ impl Form {
         let symmetry =
             self.symmetry.as_ref().map(|s| solidcraft_geom::subdivision::symmetry::Symmetry::new(&cage, s.axis)).transpose().map_err(error)?;
         if let Some(symmetry) = &symmetry {
+            symmetry.validate_reflection(&cage).map_err(error)?;
             symmetry::validate_layout(&cage, None, symmetry)?;
         }
         let levels = cage.preview_level(self.levels).map_err(error)?;
@@ -947,6 +948,7 @@ impl Form {
         let levels = cage.preview_level(self.levels).map_err(error)?;
         let (surface, logical) = Self::preview(&cage, Some(&h), self.matching.as_deref(), self.profile.as_deref(), levels)?;
         if let Some(symmetry) = &symmetry {
+            symmetry.validate_reflection(&cage).map_err(error)?;
             symmetry::validate_layout(&logical, Some(&h), symmetry)?;
         }
         if checkpoint {
@@ -1307,9 +1309,7 @@ impl Form {
         let symmetry = axis.map(|axis| solidcraft_geom::subdivision::symmetry::Symmetry::new(&self.cage, axis)).transpose().map_err(error)?;
         if let Some(symmetry) = &symmetry {
             self.validate_logical_symmetry(symmetry)?;
-            if self.matching.is_some() {
-                symmetry.validate_reflection(&self.cage).map_err(error)?;
-            }
+            symmetry.validate_reflection(&self.cage).map_err(error)?;
         }
         if symmetry != self.symmetry {
             self.checkpoint();

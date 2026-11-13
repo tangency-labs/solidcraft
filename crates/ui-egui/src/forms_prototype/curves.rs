@@ -1,10 +1,9 @@
 //! Shared source-curve preparation and picking for Forms and Insert Point.
 use super::*;
-use solidcraft_engine::geom::Aabb3;
+use solidcore_ops::forms_view_queries::{self, BoundsIndex, MAX_CURVES, Projection};
 
 type Curve = solidcraft_engine::doc::forms::EdgeCurve;
 const HIT_PIXELS: f32 = 9.0;
-const MAX_CURVES: usize = 65_536;
 const MAX_CANDIDATES: usize = 256;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -33,60 +32,10 @@ pub(super) fn source(app: &SolveApp) -> Option<Key> {
     })
 }
 
-struct Node {
-    bounds: Aabb3,
-    children: Option<Box<[Node; 2]>>,
-    indices: Vec<usize>,
-}
-impl Node {
-    fn build(curves: &[Curve], indices: &mut [usize]) -> Self {
-        let mut bounds = Aabb3 {
-            min: Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
-            max: Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
-        };
-        for &index in indices.iter() {
-            let next = curves[index].bounds();
-            bounds.min = Vec3::new(bounds.min.x.min(next.min.x), bounds.min.y.min(next.min.y), bounds.min.z.min(next.min.z));
-            bounds.max = Vec3::new(bounds.max.x.max(next.max.x), bounds.max.y.max(next.max.y), bounds.max.z.max(next.max.z));
-        }
-        if indices.len() <= 8 {
-            return Self { bounds, children: None, indices: indices.to_vec() };
-        }
-        let extents = [bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z];
-        let mut axis = 0;
-        for next in 1..3 {
-            if extents[next] > extents[axis] {
-                axis = next;
-            }
-        }
-        let centre = |index: usize| {
-            let bounds = curves[index].bounds();
-            [bounds.min.x * 0.5 + bounds.max.x * 0.5, bounds.min.y * 0.5 + bounds.max.y * 0.5, bounds.min.z * 0.5 + bounds.max.z * 0.5][axis]
-        };
-        indices.sort_unstable_by(|&a, &b| centre(a).total_cmp(&centre(b)).then(a.cmp(&b)));
-        let middle = indices.len() / 2;
-        let (left, right) = indices.split_at_mut(middle);
-        Self { bounds, children: Some(Box::new([Self::build(curves, left), Self::build(curves, right)])), indices: Vec::new() }
-    }
-    fn candidates(&self, curves: &[Curve], proj: &Proj, position: Pos2, output: &mut Vec<usize>) {
-        if output.len() > MAX_CANDIDATES || !bounds_hit(&self.bounds, proj, position) {
-            return;
-        }
-        if let Some(children) = &self.children {
-            for child in children.iter() {
-                child.candidates(curves, proj, position, output);
-            }
-        } else {
-            output.extend(
-                self.indices.iter().copied().filter(|&index| curves.get(index).is_some_and(|curve| bounds_hit(&curve.bounds(), proj, position))),
-            );
-        }
-    }
-}
 struct Prepared {
     curves: Vec<Curve>,
     edges: std::collections::BTreeMap<[usize; 2], usize>,
-    index: Option<Node>,
+    index: BoundsIndex,
 }
 impl Prepared {
     fn new(curves: Vec<Curve>) -> Result<Self, String> {
@@ -95,13 +44,15 @@ impl Prepared {
         }
         let mut edges = std::collections::BTreeMap::new();
         for (index, curve) in curves.iter().enumerate() {
-            let bounds = curve.bounds();
-            if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() || edges.insert(curve.edge, index).is_some() {
+            if edges.insert(curve.edge, index).is_some() {
                 return Err("Form curve bounds or identities are invalid".into());
             }
         }
-        let mut indices: Vec<_> = (0..curves.len()).collect();
-        let index = (!indices.is_empty()).then(|| Node::build(&curves, &mut indices));
+        let index = BoundsIndex::new(curves.iter().map(|curve| {
+            let bounds = curve.bounds();
+            [bounds.min, bounds.max]
+        }))
+        .ok_or("Form curve bounds or identities are invalid")?;
         Ok(Self { curves, edges, index })
     }
 }
@@ -237,87 +188,21 @@ pub(super) fn prepare_explicit(app: &mut SolveApp, ctx: &egui::Context) {
 pub(super) fn exact_picking(app: &SolveApp) -> bool {
     source(app).is_some() && (cfg!(not(target_arch = "wasm32")) || current(app)) && live_cad::mesh(app).is_some()
 }
-fn bounds_hit(bounds: &Aabb3, proj: &Proj, position: Pos2) -> bool {
-    let mut screen = egui::Rect::NOTHING;
-    for x in [bounds.min.x, bounds.max.x] {
-        for y in [bounds.min.y, bounds.max.y] {
-            for z in [bounds.min.z, bounds.max.z] {
-                let Some(point) = proj.to_screen(Vec3::new(x, y, z)) else { return true };
-                // A box crossing the eye plane or overflowing projection cannot
-                // be rejected safely. Keep it as a candidate instead.
-                if !point.x.is_finite() || !point.y.is_finite() {
-                    return true;
-                }
-                screen.extend_with(point);
-            }
-        }
-    }
-    screen.expand(HIT_PIXELS).contains(position)
+fn projection(proj: &Proj) -> Projection {
+    Projection { matrix: proj.vp.0, origin: [proj.rect.left(), proj.rect.top()], size: [proj.rect.width(), proj.rect.height()] }
 }
-fn projections(curve: &Curve, proj: &Proj, position: Pos2) -> Vec<(f32, f64, Vec3)> {
-    const SAMPLES: usize = 64;
-    let evaluate = |t| {
-        let point = curve.at(t).ok()?;
-        let screen = proj.to_screen(point)?;
-        let distance = screen.distance_sq(position);
-        distance.is_finite().then_some((distance, t, point))
-    };
-    let sampled: Vec<_> = (0..=SAMPLES).map(|i| evaluate(i as f64 / SAMPLES as f64)).collect();
-    let mut candidates = Vec::new();
-    for (i, value) in sampled.iter().enumerate() {
-        let Some(value) = value else { continue };
-        if i == 0 || i == SAMPLES {
-            candidates.push(*value);
-        }
-        let distance = value.0;
-        if i > 0 && sampled[i - 1].is_some_and(|other| other.0 <= distance) || i < SAMPLES && sampled[i + 1].is_some_and(|other| other.0 < distance) {
-            continue;
-        }
-        candidates.push(*value);
-        let mut low = i.saturating_sub(1) as f64 / SAMPLES as f64;
-        let mut high = (i + 1).min(SAMPLES) as f64 / SAMPLES as f64;
-        for _ in 0..24 {
-            let a = low + (high - low) / 3.0;
-            let b = high - (high - low) / 3.0;
-            let (Some(va), Some(vb)) = (evaluate(a), evaluate(b)) else { break };
-            if va.0 <= vb.0 {
-                high = b;
-            } else {
-                low = a;
-            }
-        }
-        if let Some(value) = evaluate((low + high) * 0.5) {
-            candidates.push(value);
-        }
-    }
-    candidates.retain(|value| value.0 <= HIT_PIXELS * HIT_PIXELS);
-    candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
-    candidates
-}
-pub(super) fn project(curve: &Curve, proj: &Proj, position: Pos2) -> Option<(f64, Vec3)> {
-    projections(curve, proj, position).first().map(|value| (value.1, value.2))
+fn projections(curve: &Curve, projection: Projection, position: Pos2) -> impl Iterator<Item = (f32, f64, Vec3)> {
+    forms_view_queries::curve_hits(projection, [position.x, position.y], HIT_PIXELS, |fraction| curve.at(fraction).ok())
 }
 pub(super) fn nearest(app: &SolveApp, proj: &Proj, position: Pos2) -> Option<([usize; 2], f64, Vec3)> {
     let prepared = prepared(app)?.ok()?;
-    let mut candidates = Vec::new();
-    prepared.index.as_ref()?.candidates(&prepared.curves, proj, position, &mut candidates);
-    // Never pick from a truncated prefix: in exceptionally crowded geometry
-    // the closest visible edge has not been qualified within this query budget.
-    if candidates.len() > MAX_CANDIDATES {
-        return None;
-    }
+    let projected_view = projection(proj);
+    // A crowded viewport refuses the pick if it exceeds the candidate budget.
+    let candidates = prepared.index.candidates(projected_view, [position.x, position.y], HIT_PIXELS, MAX_CANDIDATES)?;
     let mut best: Option<(f32, [usize; 2], f64, Vec3)> = None;
     for index in candidates {
         let curve = prepared.curves.get(index)?;
-        if !bounds_hit(&curve.bounds(), proj, position) {
-            continue;
-        }
-        let Some((fraction, point)) = project(curve, proj, position) else { continue };
-        let hit = if surface::visible(app, proj, point) {
-            proj.to_screen(point).map(|screen| (screen.distance_sq(position), fraction, point))
-        } else {
-            projections(curve, proj, position).into_iter().find(|(_, _, point)| surface::visible(app, proj, *point))
-        };
+        let hit = projections(curve, projected_view, position).find(|(_, _, point)| surface::visible(app, proj, *point));
         if let Some((distance, fraction, point)) = hit
             && best.as_ref().is_none_or(|old| distance < old.0 || distance == old.0 && curve.edge < old.1)
         {

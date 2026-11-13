@@ -54,9 +54,10 @@ pub(super) fn commit_face(app: &mut SolveApp, ctx: &egui::Context, face: usize, 
     if edge_pick(app) != Some(key) {
         return;
     }
-    if key.whole_loop && app.session.forms_prototype.as_ref().is_some_and(|form| form.hierarchy.is_some()) {
-        loop_preview::commit(app, ctx, face, key.axis);
-    } else if key.whole_loop {
+    if key.whole_loop && loop_preview::commit(app, ctx, face, key.axis) {
+        return;
+    }
+    if key.whole_loop && app.session.forms_prototype.as_ref().is_some_and(|form| form.hierarchy.is_none()) {
         let edge = app
             .session
             .forms_prototype
@@ -66,7 +67,7 @@ pub(super) fn commit_face(app: &mut SolveApp, ctx: &egui::Context, face: usize, 
         if let Some(edge) = edge {
             apply_edit(app, ctx, "form.prototype.insert_loop", json!({"edge":edge}));
         }
-    } else {
+    } else if !key.whole_loop {
         apply_edit(app, ctx, "form.prototype.insert_edge", json!({"face":face,"axis":key.axis}));
     }
 }
@@ -107,11 +108,16 @@ pub(super) fn show_options(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool)
         app.forms_prototype.tools.axis = 1 - app.forms_prototype.tools.axis;
     }
     if app.forms_prototype.tools.mode == Mode::Edge {
+        let unavailable = loop_preview::unavailable(app);
         let label = app.tr("forms.prototype.whole_loop").to_owned();
-        let r = crate::ui_kit::checkbox(ui, &label, &mut app.forms_prototype.tools.whole_loop);
+        let can_change = unavailable.is_none() || app.forms_prototype.tools.whole_loop;
+        let r = ui.add_enabled_ui(can_change, |ui| crate::ui_kit::checkbox(ui, &label, &mut app.forms_prototype.tools.whole_loop)).inner;
         crate::scenario::publish_handle("forms_insert_whole_loop", r.rect.center());
         if r.changed() {
             loop_preview::cancel(app);
+        }
+        if let Some(reason) = unavailable {
+            ui.add(egui::Label::new(app.tr(reason)).wrap());
         }
         loop_preview::show_status(app, ui);
     }
@@ -244,26 +250,10 @@ pub(super) fn pointer(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj, input: &cr
     let Some(Element::Face(face)) = surface::nearest_with(app, proj, pos, Pick::Face) else { return };
     let Some(form) = &app.session.forms_prototype else { return };
     let key = (form.revision, face, app.forms_prototype.tools.axis, app.forms_prototype.tools.whole_loop);
-    if key.3 && form.hierarchy.is_some() {
+    if key.3 {
         loop_preview::hover(app, ui.ctx(), face, key.2);
     } else if app.forms_prototype.tools.preview.as_ref().is_none_or(|p| (p.0, p.1, p.2, p.3) != key) {
         let preview = (|| {
-            if key.3 {
-                let f = form.cage.faces.get(face).filter(|f| f.len() == 4)?;
-                let seed = [*f.get(key.2)?, *f.get(key.2 + 1)?];
-                let (cage, edges) = form.cage.insert_edge_ring(seed, 0.5).ok()?;
-                let surface = cage.surface(cage.preview_level(form.levels).ok()?).ok()?;
-                let keys: BTreeSet<_> = edges.into_iter().map(|e| [e[0].min(e[1]), e[0].max(e[1])]).collect();
-                return Some(
-                    surface
-                        .boundaries
-                        .into_iter()
-                        .filter_map(|(e, p)| {
-                            keys.contains(&[e[0].min(e[1]), e[0].max(e[1])]).then(|| p.into_iter().map(|p| form.world_point(p)).collect())
-                        })
-                        .collect(),
-                );
-            }
             let mut candidate = form.clone();
             candidate.refine(&[face], if key.2 == 0 { [2, 1] } else { [1, 2] }).ok()?;
             let h = candidate.hierarchy.as_ref()?;
@@ -323,6 +313,54 @@ pub(super) fn point_count_for_test(app: &SolveApp) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whole_loop_reports_its_trim_wall_restriction_without_editing_the_form() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.run("form.prototype.create", json!({"primitive":"face","dimensions":[20,20,1],"segments":[4,4,1],"levels":1})).unwrap();
+        app.run("form.prototype.refine", json!({"faces":[5],"counts":[2,2]})).unwrap();
+        let old = app.session.forms_prototype.as_ref().unwrap().logical.faces[16].clone();
+        app.run("form.prototype.topology", json!({"tool":"delete_faces","faces":[16]})).unwrap();
+        let hierarchy = app.session.forms_prototype.as_ref().unwrap().hierarchy.as_ref().unwrap();
+        let edge = old
+            .iter()
+            .copied()
+            .zip(old.iter().copied().cycle().skip(1))
+            .take(old.len())
+            .find_map(|(a, b)| hierarchy.trim_attachments(&[[a, b]]).ok()?.into_iter().find(|t| t.root == 5).map(|t| t.edge))
+            .unwrap();
+        app.run("form.prototype.extrude_drag", json!({"edges":[edge],"displacement":[0,0,2]})).unwrap();
+        let form = app.session.forms_prototype.as_ref().unwrap();
+        assert!(form.hierarchy.as_ref().unwrap().has_trim_wall());
+        let before = form.definition();
+        app.forms_prototype.tools.mode = Mode::Edge;
+        app.forms_prototype.tools.whole_loop = true;
+        let key = edge_pick(&app).unwrap();
+        commit_face(&mut app, &egui::Context::default(), 0, key);
+        let (message, _, error) = app.status.as_ref().unwrap();
+        assert!(*error);
+        assert_eq!(message, app.tr("forms.insert.whole_loop_trim_wall"));
+        assert!(app.forms_prototype.pending.is_none());
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), before);
+    }
+
+    #[test]
+    fn base_loop_hover_reuses_the_prepared_insert_transaction() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.run("form.prototype.create", json!({"primitive":"face","segments":[1,1,1],"size":10,"levels":0})).unwrap();
+        app.forms_prototype.tools.mode = Mode::Edge;
+        app.forms_prototype.tools.whole_loop = true;
+        let original = app.session.forms_prototype.as_ref().unwrap().definition();
+        let (geometry, expected) = loop_preview::install_for_test(&mut app, 0, 0);
+        assert_eq!(geometry.unwrap().len(), 1);
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), original);
+
+        let ctx = egui::Context::default();
+        assert!(loop_preview::commit(&mut app, &ctx, 0, 0));
+        finish::flush_for_test(&mut app).unwrap();
+        assert_eq!(app.session.forms_prototype.as_ref().unwrap().definition(), expected);
+    }
+
     fn hierarchical_hover_fixture() -> (SolveApp, usize) {
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.session.execute("form.prototype.create", &json!({"primitive":"face","segments":[1,1,1],"size":10,"levels":0})).unwrap();

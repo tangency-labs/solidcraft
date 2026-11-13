@@ -1,7 +1,7 @@
 //! Tensor B-spline fitting of original logical subdivision patches.
 //! Reported deviation is a sampled check on the next refinement level, not a bound.
 use super::{Cage, Result, bad};
-use crate::bspline::{CurveN, NurbsSurface};
+use crate::bspline::NurbsSurface;
 use crate::prelude::*;
 use solidcore_record::Vec3;
 use std::collections::{BTreeMap, BTreeSet};
@@ -414,46 +414,9 @@ fn fit_grid(samples: &[Vec3], n: usize) -> Result<NurbsSurface> {
     fit_grid_parameters(samples, &parameters)
 }
 fn fit_grid_parameters(samples: &[Vec3], parameters: &[f64]) -> Result<NurbsSurface> {
-    let n = parameters.len();
-    if n < 4 || samples.len() != n.saturating_mul(n) {
-        return Err(bad("a cubic tensor fit requires a complete grid"));
-    }
-    let mut first = vec![Vec3::ZERO; n * n];
-    let mut knots = Vec::new();
-    for v in 0..n {
-        let row: Vec<_> = (0..n)
-            .map(|u| {
-                let p = *samples.get(u * n + v).unwrap_or(&Vec3::ZERO);
-                [p.x, p.y, p.z]
-            })
-            .collect();
-        let curve = CurveN::<3>::interpolate(parameters, &row, 3).map_err(|e| bad(&e.to_string()))?;
-        knots = curve.knots;
-        for (u, p) in curve.ctrl.into_iter().enumerate() {
-            *first.get_mut(u * n + v).ok_or_else(|| bad("invalid fitted row"))? = Vec3::new(p[0], p[1], p[2]);
-        }
-    }
-    let mut controls = vec![Vec3::ZERO; n * n];
-    for u in 0..n {
-        let row: Vec<_> = (0..n)
-            .map(|v| {
-                let p = *first.get(u * n + v).unwrap_or(&Vec3::ZERO);
-                [p.x, p.y, p.z]
-            })
-            .collect();
-        let curve = CurveN::<3>::interpolate(parameters, &row, 3).map_err(|e| bad(&e.to_string()))?;
-        for (v, p) in curve.ctrl.into_iter().enumerate() {
-            *controls.get_mut(u * n + v).ok_or_else(|| bad("invalid fitted column"))? = Vec3::new(p[0], p[1], p[2]);
-        }
-    }
-    // NurbsSurface stores u fastest, while the interpolation scratch grid uses v fastest.
-    let mut points = Vec::with_capacity(n * n);
-    for v in 0..n {
-        for u in 0..n {
-            points.push(*controls.get(u * n + v).ok_or_else(|| bad("invalid control grid"))?);
-        }
-    }
-    NurbsSurface::new([3, 3], [knots.clone(), knots], &points, &vec![1.0; n * n]).map_err(|e| bad(&e.to_string()))
+    let fit = solidcore_ops::form_cage::fit_cubic_tensor(samples, parameters).map_err(|error| bad(&error.to_string()))?;
+    let points = fit.controls.into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect::<Vec<_>>();
+    NurbsSurface::new([3, 3], [fit.knots.clone(), fit.knots], &points, &vec![1.0; points.len()]).map_err(|e| bad(&e.to_string()))
 }
 
 impl Cage {

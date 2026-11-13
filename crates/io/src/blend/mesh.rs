@@ -211,14 +211,13 @@ type Matrix = [[f64; 4]; 4];
 fn identity() -> Matrix {
     [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]]
 }
-fn mul(a: Matrix, b: Matrix) -> Matrix {
-    let mut out = [[0.; 4]; 4];
-    for (i, row) in out.iter_mut().enumerate() {
-        for (j, v) in row.iter_mut().enumerate() {
-            *v = (0..4).map(|k| a[i][k] * b[k][j]).sum();
-        }
-    }
-    out
+// Convert Blender's column-vector map to SolidCore's row-vector convention.
+fn to_affine(matrix: Matrix) -> Matrix {
+    std::array::from_fn(|i| std::array::from_fn(|j| matrix[j][i]))
+}
+
+fn mul(a: Matrix, b: Matrix) -> Result<Matrix> {
+    solidcore_ops::affine::then(&to_affine(b), &to_affine(a)).map(to_affine).map_err(|_| bad("invalid object transform composition"))
 }
 fn rotation(axis: usize, angle: f64) -> Matrix {
     let mut m = identity();
@@ -265,8 +264,8 @@ fn axis_angle(axis: &[f64], angle: f64) -> Result<Matrix> {
     quaternion(&[cos, axis.x * sin, axis.y * sin, axis.z * sin])
 }
 
-fn euler(angles: &[f64], order: [usize; 3]) -> Matrix {
-    order.into_iter().fold(identity(), |m, axis| mul(rotation(axis, angles[axis]), m))
+fn euler(angles: &[f64], order: [usize; 3]) -> Result<Matrix> {
+    order.into_iter().try_fold(identity(), |m, axis| mul(rotation(axis, angles[axis]), m))
 }
 
 fn local(object: View<'_, '_>) -> Result<Matrix> {
@@ -279,10 +278,10 @@ fn local(object: View<'_, '_>) -> Result<Matrix> {
     // deltas rotate the primary result in the parent frame.
     let mut r = match mode {
         -1 => axis_angle(&object.floats("rotAxis", 3)?, object.file.numbers.float(object.field("rotAngle")?, 0)?)?,
-        0 => mul(quaternion(&object.floats("dquat", 4)?)?, quaternion(&object.floats("quat", 4)?)?),
+        0 => mul(quaternion(&object.floats("dquat", 4)?)?, quaternion(&object.floats("quat", 4)?)?)?,
         1..=6 => {
             let order = ORDERS[(mode - 1) as usize];
-            mul(euler(&object.floats("drot", 3)?, order), euler(&object.floats("rot", 3)?, order))
+            mul(euler(&object.floats("drot", 3)?, order)?, euler(&object.floats("rot", 3)?, order)?)?
         }
         _ => return Err(bad("unknown object rotation mode")),
     };
@@ -330,7 +329,7 @@ fn world(f: &File<'_>, object: View<'_, '_>, seen: &mut BTreeSet<u64>, depth: us
         }
     }
     seen.remove(&parent);
-    Ok(mul(mul(p, inverse), local))
+    mul(mul(p, inverse)?, local)
 }
 
 fn modifiers(object: View<'_, '_>, mut cage: Cage) -> Result<(Cage, usize)> {
@@ -357,6 +356,10 @@ fn modifiers(object: View<'_, '_>, mut cage: Cage) -> Result<(Cage, usize)> {
             let s = f.view(block, "SubsurfModifierData")?;
             if s.uint("subdivType", 2)? != 0 {
                 return Err(bad("subdivision must be Catmull-Clark"));
+            }
+            if s.has("flags") && s.uint("flags", 2)? & super::SUBSURF_USE_CREASE == 0 {
+                cage.edge_creases.clear();
+                cage.vertex_creases.clear();
             }
             level = Some((s.uint("levels", 2)? as usize).min(4));
         }
@@ -391,21 +394,16 @@ pub(super) fn read(f: &File<'_>) -> Result<Import> {
             continue;
         }
         let name = object.nested("id")?.string("name")?.strip_prefix("OB").unwrap_or("Form").to_owned();
-        let result = (|| {
+        let result: Result<Object> = (|| {
             let m = world(f, object, &mut BTreeSet::from([block.address]), 0)?;
             let source_cage = cage(object, f.view(f.block(object.ptr("data")?)?, "Mesh")?, &mut shape_budget)?;
             let (mut cage, levels) = modifiers(object, source_cage)?;
-            let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
-                + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-            if !det.is_finite() || det.abs() < 1e-18 {
-                return Err(bad("singular object transform"));
+            let matrix = to_affine(m);
+            let reverse = solidcore_ops::mesh_edit::reverses_winding(&matrix, 1e-18).ok_or_else(|| bad("singular object transform"))?;
+            for point in &mut cage.points {
+                *point = solidcore_ops::mesh_edit::placed_point(&matrix, *point, unit).ok_or_else(|| bad("non-finite object transform"))?;
             }
-            for p in &mut cage.points {
-                let v = [p.x, p.y, p.z, 1.];
-                let xyz: Vec<_> = m.iter().take(3).map(|row| row.iter().zip(v).map(|(a, b)| a * b).sum::<f64>() * unit).collect();
-                *p = Vec3::new(xyz[0], xyz[1], xyz[2]);
-            }
-            if det < 0. {
+            if reverse {
                 for face in &mut cage.faces {
                     face.reverse();
                 }

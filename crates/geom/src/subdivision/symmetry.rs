@@ -103,18 +103,15 @@ impl Symmetry {
                 return Err(bad("control positions must be mirrored"));
             }
         }
-        let faces = cage
-            .faces
-            .iter()
-            .map(|face| {
-                let mut ids = face.clone();
-                ids.sort_unstable();
-                ids
-            })
-            .collect::<BTreeSet<_>>();
+        let faces = cage.faces.iter().cloned().map(canonical_cycle).collect::<Result<BTreeSet<_>>>()?;
         for face in &cage.faces {
             let mut reflected = face.iter().map(|&v| partner(v)).collect::<Result<Vec<_>>>()?;
-            reflected.sort_unstable();
+            if reflected == *face {
+                // A sheet face lying in the mirror plane is fixed pointwise.
+                continue;
+            }
+            reflected.reverse();
+            let reflected = canonical_cycle(reflected)?;
             if !faces.contains(&reflected) {
                 return Err(bad("cage topology must be mirrored"));
             }
@@ -145,6 +142,13 @@ impl Symmetry {
         Ok(())
     }
 }
+
+fn canonical_cycle(mut face: Vec<usize>) -> Result<Vec<usize>> {
+    let first = face.iter().enumerate().min_by_key(|(_, vertex)| *vertex).map(|(index, _)| index).ok_or_else(|| bad("empty mirror face"))?;
+    face.rotate_left(first);
+    Ok(face)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +165,25 @@ mod tests {
         let mut values = BTreeMap::from([(i, Vec3::new(9.0, 2.0, 3.0))]);
         s.constrain(&c, &mut values).unwrap();
         assert_eq!(values[&i].x, 0.0);
+    }
+    #[test]
+    fn reflected_face_cycles_require_reversed_winding_and_matching_edges() {
+        let mut cage = Cage {
+            points: [-1.0, 1.0]
+                .into_iter()
+                .flat_map(|x| [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]].map(|[y, z]| Vec3::new(x, y, z)))
+                .collect(),
+            faces: vec![vec![0, 1, 2, 3], vec![6, 5, 4, 7]],
+            ..Default::default()
+        };
+        let symmetry = Symmetry::new(&cage, 0).unwrap();
+        symmetry.validate_reflection(&cage).unwrap();
+        for incorrect in [vec![4, 5, 6, 7], vec![4, 7, 5, 6]] {
+            cage.faces[1] = incorrect;
+            assert!(symmetry.validate_reflection(&cage).is_err());
+        }
+        cage.faces.truncate(1);
+        cage.points.truncate(4);
+        Symmetry::at(&cage, 0, -1.0).unwrap().validate_reflection(&cage).unwrap();
     }
 }

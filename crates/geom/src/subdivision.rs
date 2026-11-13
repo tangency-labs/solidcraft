@@ -17,8 +17,7 @@ pub mod stable_extrusion;
 pub mod symmetry;
 pub mod topology_tools;
 
-pub const MAX_FACES: usize = 30_000;
-pub const MAX_POINTS: usize = 40_000;
+pub use solidcore_ops::form_cage::{MAX_FACES, MAX_POINTS};
 pub const MAX_LEVELS: usize = 4;
 // CAD fitting evaluates a denser grid without exposing it as an editable cage or GPU preview.
 const MAX_EVAL_FACES: usize = 500_000;
@@ -974,6 +973,21 @@ mod tests {
         assert!(removed.delete_faces(&all).is_err());
         assert!(removed.delete_faces(&[usize::MAX]).is_err());
     }
+
+    #[test]
+    fn dissolved_leaf_corners_can_remain_evaluator_only() {
+        use hierarchy::Hierarchy;
+        let parameters = primitives::Parameters { kind: "face".into(), segments: [2, 2, 1], ..Default::default() };
+        let base = parameters.build().unwrap();
+        let center = base.points.iter().position(|point| *point == Vec3::ZERO).unwrap();
+        let seams = base.edges().unwrap().into_iter().filter(|edge| edge.contains(&center)).collect::<Vec<_>>();
+        let hierarchy = Hierarchy::new(base.clone()).unwrap().dissolve_edges(&seams).unwrap();
+        assert!(!hierarchy.controls.contains_key(&center));
+        let layout = hierarchy.layout().unwrap();
+        assert_eq!(layout.faces.iter().filter(|face| !face.is_empty()).count(), 1);
+        assert!(!layout.faces.iter().flatten().any(|&vertex| vertex == center));
+        assert_eq!(hierarchy.evaluate().unwrap(), base);
+    }
     #[test]
     fn ordinary_box_and_quadball_face_extrusions_fit_the_default_cad_tolerance() {
         for kind in ["box", "quadball"] {
@@ -1325,4 +1339,19 @@ mod tests {
         bow.faces.push(vec![0, 4, 5, 6]);
         assert!(bow.validate().is_err());
     }
+}
+#[test]
+fn hierarchical_delta_batch_is_atomic_on_invalid_controls_and_overflow() {
+    use hierarchy::Hierarchy;
+    let mut hierarchy = Hierarchy::new(primitive("box", 10.0, 1).unwrap()).unwrap();
+    let before = hierarchy.clone();
+    assert!(hierarchy.add_deltas(&[0, usize::MAX], &[Vec3::Z, Vec3::X]).is_err());
+    assert_eq!(hierarchy, before);
+    assert!(hierarchy.add_deltas(&[0, 1], &[Vec3::Z, Vec3::new(f64::NAN, 0.0, 0.0)]).is_err());
+    assert_eq!(hierarchy, before);
+    let large = Vec3::new(f64::MAX, 0.0, 0.0);
+    assert!(hierarchy.add_deltas(&[0, 0], &[large, large]).is_err());
+    assert_eq!(hierarchy, before);
+    hierarchy.add_deltas(&[0, 0], &[Vec3::X, Vec3::Y]).unwrap();
+    assert_eq!(hierarchy.evaluate().unwrap().points[0], before.base.points[0] + Vec3::X + Vec3::Y);
 }

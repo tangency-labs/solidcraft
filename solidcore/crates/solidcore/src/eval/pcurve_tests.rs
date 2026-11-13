@@ -1129,6 +1129,15 @@ fn intersection_curves_lie_on_both_surfaces() {
         tolerance: 0.2,
     };
     let eval = CurveEval::new(&curve).unwrap();
+    for t in [0.25, 3.5, 7.75, 11.25] {
+        let (_, tangent) = eval.parameter_derivs(t).unwrap();
+        let h = 1e-5;
+        let difference = (eval.point(t + h).unwrap() - eval.point(t - h).unwrap()) * (0.5 / h);
+        assert!(
+            tangent.dist(difference) < 1e-8,
+            "{t}: {tangent:?} {difference:?}"
+        );
+    }
     for i in 0..=48 {
         let p = eval.point(12. * i as f64 / 48.).unwrap();
         assert!(

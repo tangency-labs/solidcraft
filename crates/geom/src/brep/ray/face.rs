@@ -1,12 +1,10 @@
 //! Raw, clamped native tensor charts and closed raw pcurve trims.
 use super::tensor::{self as ray, Control, Interval as I, MAX_DEGREE, ProofError, RayProof};
+use solidcore_ops::ray_spline::{Axis, Grid, MAX_CONTROLS, MAX_SPANS, Span, SplineError, reserved, trim_parity};
+use solidcore_record::brep::blend::BlendDefinition;
 use solidcore_record::brep::{Brep, Curve2, Face, Loop, Surface, Vertex};
 
-const MAX_CONTROLS: usize = 16_384;
-const MAX_KNOTS: usize = MAX_CONTROLS + MAX_DEGREE + 1;
-const MAX_SPANS: usize = 4_096;
 const MAX_TRIM_EDGES: usize = 4_096;
-const MAX_TRIM_DEPTH: usize = 24;
 
 type Result<T> = std::result::Result<T, FaceError>;
 type Rect = [[f64; 2]; 2];
@@ -24,6 +22,16 @@ pub enum FaceError {
 impl From<ProofError> for FaceError {
     fn from(error: ProofError) -> Self {
         Self::Proof(error)
+    }
+}
+
+impl From<SplineError> for FaceError {
+    fn from(error: SplineError) -> Self {
+        match error {
+            SplineError::InvalidSpline => Self::UnsupportedSpline,
+            SplineError::Budget => Self::GeometryBudget,
+            SplineError::Proof(error) => Self::Proof(error),
+        }
     }
 }
 
@@ -131,176 +139,6 @@ fn valid_rect(domain: Rect) -> bool {
     domain.iter().all(|&[a, b]| a.is_finite() && b.is_finite() && a < b)
 }
 
-fn reserved<T>(count: usize) -> Result<Vec<T>> {
-    let mut output = Vec::new();
-    output.try_reserve_exact(count).map_err(|_| ProofError::Allocation)?;
-    Ok(output)
-}
-
-struct Span {
-    start: usize,
-    range: [f64; 2],
-}
-
-struct Axis {
-    degree: usize,
-    knots: Vec<f64>,
-}
-
-impl Axis {
-    fn new(knots: &[f64], count: usize, work: &mut usize) -> Result<Self> {
-        let (degree, _) = Self::validate(knots, count, work)?;
-        let mut owned = reserved(knots.len())?;
-        owned.extend_from_slice(knots);
-        Ok(Self { degree, knots: owned })
-    }
-
-    fn validate(knots: &[f64], count: usize, work: &mut usize) -> Result<(usize, [f64; 2])> {
-        if count > MAX_CONTROLS || knots.len() > MAX_KNOTS {
-            return Err(FaceError::GeometryBudget);
-        }
-        ray::spend(work, knots.len())?;
-        let degree = knots.len().checked_sub(count + 1).filter(|n| (1..=MAX_DEGREE).contains(n)).ok_or(FaceError::UnsupportedSpline)?;
-        if count <= degree || knots.iter().any(|k| !k.is_finite()) || knots.windows(2).any(|k| k[0] > k[1]) {
-            return Err(FaceError::UnsupportedSpline);
-        }
-        let lo = knots[degree];
-        let hi = knots[count];
-        if lo >= hi || knots[..=degree].iter().any(|&k| k != lo) || knots[count..].iter().any(|&k| k != hi) {
-            return Err(FaceError::UnsupportedSpline);
-        }
-        for run in knots.chunk_by(|a, b| a == b) {
-            let limit = degree + usize::from(run[0] == lo || run[0] == hi);
-            if run.len() > limit {
-                return Err(FaceError::UnsupportedSpline);
-            }
-        }
-        Ok((degree, [lo, hi]))
-    }
-
-    fn domain(&self) -> Result<[f64; 2]> {
-        Ok([*self.knots.first().ok_or(FaceError::UnsupportedSpline)?, *self.knots.last().ok_or(FaceError::UnsupportedSpline)?])
-    }
-
-    fn spans(&mut self, grid: &mut Grid, axis: usize, domain: [f64; 2], work: &mut usize) -> Result<Vec<Span>> {
-        let [lo, hi] = self.domain()?;
-        if !(lo <= domain[0] && domain[0] < domain[1] && domain[1] <= hi) {
-            return Err(FaceError::UnsupportedSpline);
-        }
-        ray::spend(work, self.knots.len())?;
-        let mut values = reserved(self.knots.len() + 2)?;
-        values.push(domain[0]);
-        values.extend(self.knots.iter().copied().filter(|&t| domain[0] < t && t < domain[1]));
-        values.push(domain[1]);
-        values.dedup();
-        // Insertion at each retained span boundary extracts exactly the piece
-        // inside the raw domain. It does not round the requested domain endpoint.
-        for value in values.into_iter().filter(|&t| lo < t && t < hi) {
-            let mut multiplicity = self.knots.partition_point(|&k| k <= value) - self.knots.partition_point(|&k| k < value);
-            while multiplicity < self.degree {
-                grid.insert(self, axis, value, work)?;
-                multiplicity += 1;
-            }
-        }
-        ray::spend(work, self.knots.len())?;
-        let mut spans = reserved(self.knots.len().min(MAX_SPANS))?;
-        for (i, w) in self.knots.windows(2).enumerate().skip(self.degree).take(grid.size[axis] - self.degree) {
-            if domain[0] <= w[0] && w[0] < w[1] && w[1] <= domain[1] {
-                if spans.len() >= MAX_SPANS {
-                    return Err(FaceError::GeometryBudget);
-                }
-                spans.push(Span { start: i - self.degree, range: [w[0], w[1]] });
-            }
-        }
-        if spans.first().is_none_or(|span| span.range[0] != domain[0])
-            || spans.last().is_none_or(|span| span.range[1] != domain[1])
-            || spans.windows(2).any(|p| p[0].range[1] != p[1].range[0])
-        {
-            return Err(FaceError::UnsupportedSpline);
-        }
-        Ok(spans)
-    }
-}
-
-struct Grid {
-    size: [usize; 2],
-    controls: Vec<Control>,
-}
-
-impl Grid {
-    fn get(&self, at: [usize; 2]) -> Result<Control> {
-        if at.iter().zip(self.size).any(|(&i, count)| i >= count) {
-            return Err(FaceError::UnsupportedSpline);
-        }
-        self.controls.get(at[1] * self.size[0] + at[0]).copied().ok_or(FaceError::UnsupportedSpline)
-    }
-
-    fn copy_span(&self, start: [usize; 2], size: [usize; 2], target: &mut [Control]) -> Result<()> {
-        for (i, out) in target.iter_mut().enumerate() {
-            *out = self.get([start[0] + i % size[0], start[1] + i / size[0]])?;
-        }
-        Ok(())
-    }
-
-    fn insert(&mut self, axis: &mut Axis, direction: usize, knot: f64, work: &mut usize) -> Result<()> {
-        let mut size = self.size;
-        size[direction] += 1;
-        let count = size[0] * size[1];
-        if count > MAX_CONTROLS || axis.knots.len() >= MAX_KNOTS {
-            return Err(FaceError::GeometryBudget);
-        }
-        ray::spend(work, 12 * count + axis.knots.len())?;
-        let mut controls = ray::allocate(count)?;
-        let span = axis.knots.partition_point(|&k| k <= knot).checked_sub(1).ok_or(FaceError::UnsupportedSpline)?;
-        let degree = axis.degree;
-        let mut alphas = [I::ZERO; MAX_DEGREE];
-        let first = span + 1 - degree;
-        for (i, a) in (first..=span).zip(&mut alphas) {
-            let lo = *axis.knots.get(i).ok_or(FaceError::UnsupportedSpline)?;
-            let hi = *axis.knots.get(i + degree).ok_or(FaceError::UnsupportedSpline)?;
-            if !(lo <= knot && knot <= hi && lo < hi) {
-                return Err(FaceError::UnsupportedSpline);
-            }
-            *a = if knot == lo || knot == hi {
-                I::point(f64::from(knot == hi))
-            } else {
-                let num = I::point(knot).sub(I::point(lo));
-                let den = I::point(hi).sub(I::point(lo));
-                num.div(den).intersect(I::UNIT).ok_or(FaceError::UnsupportedSpline)?
-            };
-        }
-        for (index, target) in controls.iter_mut().enumerate() {
-            let at = [index % size[0], index / size[0]];
-            let i = at[direction];
-            if i + degree <= span {
-                *target = self.get(at)?;
-                continue;
-            }
-            let mut previous = at;
-            previous[direction] = i - 1;
-            let before = self.get(previous)?;
-            *target = if i > span {
-                before
-            } else {
-                let after = self.get(at)?;
-                let alpha = *alphas.get(i - first).ok_or(FaceError::UnsupportedSpline)?;
-                let beta = I::point(1.0).sub(alpha);
-                std::array::from_fn(|j| {
-                    // Unit weights and equal coordinates are fixed by this
-                    // convex blend, even if the knot ratio is unrepresentable.
-                    let hull = before[j].hull(after[j]);
-                    before[j].mul(beta).add(after[j].mul(alpha)).intersect(hull).unwrap_or(hull)
-                })
-            };
-        }
-        axis.knots.try_reserve(1).map_err(|_| ProofError::Allocation)?;
-        axis.knots.insert(span + 1, knot);
-        self.size = size;
-        self.controls = controls;
-        Ok(())
-    }
-}
-
 struct Sheet {
     grid: Grid,
     degree: [usize; 2],
@@ -310,7 +148,7 @@ struct Sheet {
 impl Sheet {
     fn prepare(face: &Face, work: &mut usize) -> Result<Self> {
         let domain = face.domain;
-        match face.parameters() {
+        match exact_parameters(face)? {
             Surface::Plane { origin, u_axis, v_axis } => Self::plane(*origin, u_axis.map(I::point), v_axis.map(I::point), domain, work),
             Surface::PlaneThrough { origin, u_point, v_point } => {
                 let [du, dv] = through_axes(*origin, *u_point, *v_point);
@@ -325,7 +163,7 @@ impl Sheet {
     fn plane(origin: [f64; 3], du: [I; 3], dv: [I; 3], domain: Rect, work: &mut usize) -> Result<Self> {
         let mut controls = ray::allocate(4)?;
         controls.copy_from_slice(&plane_controls(origin, du, dv, domain, work)?);
-        Ok(Self { grid: Grid { size: [2, 2], controls }, degree: [1, 1], spans: domain.map(|range| vec![Span { start: 0, range }]) })
+        Ok(Self { grid: Grid::new([2, 2], controls)?, degree: [1, 1], spans: domain.map(|range| vec![Span { start: 0, range }]) })
     }
 
     /// Enclose the connector when both pcurve endpoints lie on one retained
@@ -434,14 +272,14 @@ impl Sheet {
                 controls[v * size[0] + u] = positive(point(p))?;
             }
         }
-        let mut grid = Grid { size, controls };
+        let mut grid = Grid::new(size, controls)?;
         let mut u = Axis::new(knots[0], size[0], work)?;
         let mut v = Axis::new(knots[1], size[1], work)?;
         let spans = [u.spans(&mut grid, 0, domain[0], work)?, v.spans(&mut grid, 1, domain[1], work)?];
         if spans[0].len() * spans[1].len() > MAX_SPANS {
             return Err(FaceError::GeometryBudget);
         }
-        Ok(Self { grid, degree: [u.degree, v.degree], spans })
+        Ok(Self { grid, degree: [u.degree(), v.degree()], spans })
     }
 }
 
@@ -479,7 +317,7 @@ pub(super) fn world_bounds(face: &Face, work: &mut usize) -> Result<[I; 3]> {
     if !valid_rect(domain) {
         return Err(FaceError::InvalidFace);
     }
-    match face.parameters() {
+    match exact_parameters(face)? {
         Surface::Plane { origin, u_axis, v_axis } => {
             let controls = plane_controls(*origin, u_axis.map(I::point), v_axis.map(I::point), domain, work)?;
             control_bounds(controls.into_iter().map(Ok))
@@ -506,6 +344,13 @@ pub(super) fn world_bounds(face: &Face, work: &mut usize) -> Result<[I; 3]> {
         }
         _ => Err(FaceError::UnsupportedSurface),
     }
+}
+
+fn exact_parameters(face: &Face) -> Result<&Surface> {
+    if matches!(&face.surface, Surface::Blend { definition } if matches!(definition.as_ref(), BlendDefinition::Procedural(_))) {
+        return Err(FaceError::UnsupportedSurface);
+    }
+    Ok(face.parameters())
 }
 
 fn sphere_bounds(center: [f64; 3], radius: I) -> Result<[I; 3]> {
@@ -725,53 +570,14 @@ fn trim_spline(curve: &Curve2, range: [f64; 2], work: &mut usize) -> Result<Vec<
         .ok_or(FaceError::UnqualifiedTrim)
         .and_then(positive)?;
     }
-    let mut grid = Grid { size: [count, 1], controls };
+    let mut grid = Grid::new([count, 1], controls)?;
     let spans = axis.spans(&mut grid, 0, range, work)?;
     let mut pieces = reserved(spans.len())?;
     for span in spans {
-        ray::spend(work, axis.degree + 1)?;
-        let mut controls = ray::allocate(axis.degree + 1)?;
-        grid.copy_span([span.start, 0], [axis.degree + 1, 1], &mut controls)?;
+        ray::spend(work, axis.degree() + 1)?;
+        let mut controls = ray::allocate(axis.degree() + 1)?;
+        grid.copy_span([span.start, 0], [axis.degree() + 1, 1], &mut controls)?;
         pieces.push(controls);
     }
     Ok(pieces)
-}
-
-fn trim_parity(controls: &[Control], query: [I; 2], at: [f64; 2], x: usize, depth: usize, work: &mut usize) -> Result<Option<bool>> {
-    ray::spend(work, 8 * controls.len())?;
-    let (Some(first), Some(last)) = (controls.first(), controls.last()) else { return Err(FaceError::UnqualifiedTrim) };
-    let bounds = [0, 1].map(|i| controls.iter().map(|p| p[i].div(p[3])).fold(first[i].div(first[3]), I::hull));
-    if bounds.iter().any(|b| !b.is_finite()) {
-        return Ok(None);
-    }
-    if bounds.iter().zip(query).any(|(a, b)| a.intersect(b).is_none()) {
-        let y = 1 - x;
-        if bounds[x].hi < at[x] || bounds[y].hi <= at[y] || bounds[y].lo > at[y] {
-            return Ok(Some(false));
-        }
-        if bounds[x].lo > at[x] {
-            // The complete positive-weight path is in the right half-plane.
-            // There it can be deformed into its endpoint chord without crossing
-            // the probe, so its parity is the chord's half-open crossing parity.
-            let above = |p: &Control| {
-                let t = p[y].div(p[3]);
-                if t.lo > at[y] {
-                    Some(true)
-                } else if t.hi <= at[y] {
-                    Some(false)
-                } else {
-                    None
-                }
-            };
-            if let (Some(a), Some(b)) = (above(first), above(last)) {
-                return Ok(Some(a != b));
-            }
-        }
-    }
-    if depth >= MAX_TRIM_DEPTH {
-        return Ok(None);
-    }
-    let [a, b] = ray::halve_curve(controls, work)?;
-    let Some(left) = trim_parity(&a, query, at, x, depth + 1, work)? else { return Ok(None) };
-    Ok(trim_parity(&b, query, at, x, depth + 1, work)?.map(|right| left ^ right))
 }

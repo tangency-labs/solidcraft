@@ -217,6 +217,146 @@ impl Interval {
 pub type Control = [Interval; 4];
 type Matrix = [[Interval; 2]; 2];
 
+type I = Interval;
+
+/// Outward ray bounds for the viewport depth planes and a strictly visible
+/// interval for qualifying a returned hit. The matrix is column-major.
+pub struct ClipDepth {
+    outer: [f64; 2],
+    inner: [f64; 2],
+}
+
+impl ClipDepth {
+    /// Enclose the clipped viewport ray.
+    pub fn from_projection(
+        matrix: [[f64; 4]; 4],
+        origin: [f64; 3],
+        direction: [f64; 3],
+    ) -> Option<Self> {
+        if matrix
+            .iter()
+            .flatten()
+            .copied()
+            .chain(origin)
+            .chain(direction)
+            .any(|v| !v.is_finite())
+        {
+            return None;
+        }
+        let project = |row: usize| {
+            let c = origin
+                .into_iter()
+                .enumerate()
+                .fold(I::point(matrix[3][row]), |sum, (i, p)| {
+                    sum.add(I::point(matrix[i][row]).scale(p))
+                });
+            let d = direction
+                .into_iter()
+                .enumerate()
+                .fold(I::ZERO, |sum, (i, d)| {
+                    sum.add(I::point(matrix[i][row]).scale(d))
+                });
+            [c, d]
+        };
+        let [z, dz] = project(2);
+        let [w, dw] = project(3);
+        let mut outer = [0.0_f64, f64::MAX];
+        let mut inner = outer;
+        // The renderer uses 0 <= z <= w. Also keep the positive homogeneous
+        // denominator required by the viewport's screen projection.
+        for [c, d] in [[z, dz], [w.sub(z), dw.sub(dz)], [w.sub(I::point(1e-9)), dw]] {
+            if !c.is_finite() || !d.is_finite() {
+                return None;
+            }
+            if d.lo == 0.0 && d.hi == 0.0 && c.lo > 0.0 {
+                continue;
+            }
+            let t = I::ZERO.sub(c).div(d);
+            if !t.is_finite() {
+                return None;
+            }
+            if d.lo > 0.0 {
+                outer[0] = outer[0].max(t.lo);
+                inner[0] = inner[0].max(t.hi);
+            } else if d.hi < 0.0 {
+                outer[1] = outer[1].min(t.hi);
+                inner[1] = inner[1].min(t.lo);
+            } else {
+                return None;
+            }
+        }
+        if outer[1] == f64::MAX || inner[0] >= inner[1] {
+            return None;
+        }
+        // The requested screen ray should remain strictly inside the side
+        // planes. At a rounded viewport edge, leave the press unresolved.
+        let t = I {
+            lo: inner[0],
+            hi: inner[1],
+        };
+        for [side, slope] in [project(0), project(1)] {
+            if w.sub(side).add(dw.sub(slope).mul(t)).lo <= 0.0
+                || w.add(side).add(dw.add(slope).mul(t)).lo <= 0.0
+            {
+                return None;
+            }
+        }
+        Some(Self { outer, inner })
+    }
+
+    /// The outer depth range for candidate discovery.
+    pub fn range(&self) -> [f64; 2] {
+        self.outer
+    }
+
+    /// Whether the hit depth is strictly inside the clip planes.
+    pub fn contains(&self, depth: [f64; 2]) -> bool {
+        self.inner[0] < depth[0] && depth[0] <= depth[1] && depth[1] < self.inner[1]
+    }
+}
+
+/// Intersect an enclosed box with a ray's parameter range using outward intervals.
+pub fn ray_bounds(
+    bounds: [I; 3],
+    origin: [f64; 3],
+    direction: [f64; 3],
+    mut depth: I,
+) -> Option<I> {
+    for ((bound, origin), direction) in bounds.into_iter().zip(origin).zip(direction) {
+        if direction == 0.0 {
+            if origin < bound.lo || bound.hi < origin {
+                return None;
+            }
+        } else {
+            let slab = bound.sub(I::point(origin)).div(I::point(direction));
+            depth = depth.intersect(slab)?;
+        }
+    }
+    Some(depth)
+}
+
+/// Whether the forward ray can meet the coordinate bounds of a triangle.
+pub fn ray_meets_triangle_bounds(
+    [a, b, c]: [[f64; 3]; 3],
+    origin: [f64; 3],
+    direction: [f64; 3],
+) -> bool {
+    let bounds = std::array::from_fn(|i| I {
+        lo: a[i].min(b[i]).min(c[i]),
+        hi: a[i].max(b[i]).max(c[i]),
+    });
+    ray_bounds(
+        bounds,
+        origin,
+        direction,
+        I {
+            lo: 0.0,
+            hi: f64::INFINITY,
+        },
+    )
+    .is_some()
+}
+
 /// Charge work to the remaining shared budget.
 pub fn spend(work: &mut usize, cost: usize) -> Result<()> {
     *work = work.checked_sub(cost).ok_or(ProofError::WorkExhausted)?;
@@ -723,6 +863,26 @@ pub fn curve_value(controls: &[Control], t: Interval, work: &mut usize) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn triangle_bounds_keep_tiny_crossings_and_reject_parallel_misses() {
+        let vertices = [[0.0, 0.0, 1.0], [1e-12, 0.0, 1.0], [0.0, 1e-12, 1.0]];
+        assert!(ray_meets_triangle_bounds(
+            vertices,
+            [1e-13, 1e-13, 0.0],
+            [0.0, 0.0, 1.0]
+        ));
+        assert!(!ray_meets_triangle_bounds(
+            vertices,
+            [1e-11, 1e-13, 0.0],
+            [0.0, 0.0, 1.0]
+        ));
+        assert!(!ray_meets_triangle_bounds(
+            vertices,
+            [1e-13, 1e-13, 2.0],
+            [0.0, 0.0, 1.0]
+        ));
+    }
 
     fn plane(f: impl Fn(f64, f64) -> [f64; 3]) -> [[f64; 4]; 4] {
         [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]].map(|[u, v]| {

@@ -5,6 +5,7 @@ use crate::blend::dna::Numbers;
 
 const MAX_KEYS: usize = 256;
 const MAX_GROUPS: usize = 4096;
+const MAX_MASK_VALUES: usize = 8_000_000;
 
 struct Key<'a> {
     data: &'a [u8],
@@ -132,6 +133,7 @@ fn masks(
     let mut address = list.ptr("first")?;
     let mut seen = BTreeSet::new();
     let mut selected = BTreeMap::new();
+    let mut names = BTreeSet::new();
     while address != 0 {
         let index = seen.len();
         if index == MAX_GROUPS || !seen.insert(address) {
@@ -140,7 +142,10 @@ fn masks(
         let group = list.view(list.data(address)?, "bDeformGroup")?;
         let name = group.string("name")?;
         if wanted.contains(name.as_str()) {
-            selected.insert(index, (name, vec![0.0; vertices]));
+            if !names.insert(name.clone()) {
+                return Err(bad("duplicate shape-key vertex-group name"));
+            }
+            selected.insert(index, (name, Vec::new()));
         }
         address = group.ptr("next")?;
     }
@@ -152,6 +157,14 @@ fn masks(
     let deform = deform_address(mesh)?;
     if deform == 0 {
         return Ok(BTreeMap::new());
+    }
+    if selected.len() > MAX_MASK_VALUES.checked_div(vertices).unwrap_or(usize::MAX) {
+        return Err(bad("shape-key masks exceed the allocation budget"));
+    }
+    spend(budget, selected.len() * vertices)?;
+    for (_, values) in selected.values_mut() {
+        values.try_reserve_exact(vertices).map_err(|_| bad("shape-key mask allocation failed"))?;
+        values.resize(vertices, 0.0);
     }
     for (index, vertex) in legacy_array_at(mesh, deform, "MDeformVert", vertices)?.into_iter().enumerate() {
         let count = vertex.uint("totweight", 4)? as usize;
@@ -241,7 +254,8 @@ pub(super) fn apply(object: View<'_, '_>, mesh: View<'_, '_>, points: &mut [Vec3
                 continue;
             }
             for (i, p) in points.iter_mut().enumerate() {
-                *p += point(numbers, &keys[key], i)? * weight;
+                *p = solidcore_ops::mesh_edit::deform(*p, point(numbers, &keys[key], i)?, Vec3::ZERO, weight)
+                    .ok_or_else(|| bad("non-finite absolute shape-key result"))?;
             }
         }
         return Ok(());
@@ -277,7 +291,8 @@ pub(super) fn apply(object: View<'_, '_>, mesh: View<'_, '_>, points: &mut [Vec3
         for (i, p) in points.iter_mut().enumerate() {
             let weight = influence * mask.map_or(1.0, |weights| weights[i]);
             if weight != 0.0 {
-                *p += (point(numbers, key, i)? - point(numbers, reference, i)?) * weight;
+                *p = solidcore_ops::mesh_edit::deform(*p, point(numbers, key, i)?, point(numbers, reference, i)?, weight)
+                    .ok_or_else(|| bad("non-finite relative shape-key result"))?;
             }
         }
     }

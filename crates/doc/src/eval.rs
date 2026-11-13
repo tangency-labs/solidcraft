@@ -6996,6 +6996,7 @@ fn form_tool(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &M
         Ok(None) => {
             Ok(PreparedForm { tool, note: Some("Open Form kept separately; match a face or thicken it before combining".into()), replacement: None })
         }
+        Err(error @ DocError::Kernel(kernel::KernelError::Internal(_))) => Err(error),
         Err(error) => Ok(PreparedForm { tool, note: Some(format!("Form kept separately: {error}")), replacement: None }),
     }
 }
@@ -9504,7 +9505,12 @@ fn eval_feature(
                     && let Some(base) = st.body(&source)
                 {
                     let skin = tool_in(&skin, tool_frame(&source))?;
-                    if let Ok(Some(body)) = kernel::replace_matched_face(&base.body, index, &skin.body, *operation == Operation::Cut, tolerance) {
+                    let replacement = match kernel::replace_matched_face(&base.body, index, &skin.body, *operation == Operation::Cut, tolerance) {
+                        Err(error @ kernel::KernelError::Internal(_)) => return Err(error.into()),
+                        Err(_) => None,
+                        Ok(replacement) => replacement,
+                    };
+                    if let Some(body) = replacement {
                         let result = Traced::step(body, &[&base.traced(), &skin]);
                         let mut changed = base.remade(result);
                         changed.transferred = base.transferred;
@@ -9521,11 +9527,19 @@ fn eval_feature(
             let result = apply_traced(doc, &mut candidate, f, tools.clone(), *operation, &targets).and_then(|()| {
                 let made: Vec<_> = candidate.bodies.iter().filter(|b| st.body(&b.name).is_none_or(|old| !old.body.same_shape(&b.body))).collect();
                 let removed = st.bodies.iter().any(|b| candidate.body(&b.name).is_none());
-                if made.is_empty() && !removed {
-                    return Err(DocError::Invalid("the Form does not change its target".into()));
+                if made.is_empty() {
+                    return if removed && *operation == Operation::Cut {
+                        Ok(())
+                    } else if removed {
+                        Err(DocError::Invalid("combining the Form did not produce one solid".into()))
+                    } else {
+                        Err(DocError::Invalid("the Form does not change its target".into()))
+                    };
                 }
-                if made.is_empty() || made.len() > 1 || made.iter().any(|b| b.is_surface() || b.body.lumps().map_or(true, |l| l.len() != 1)) {
-                    return Err(DocError::Invalid("combining the Form did not produce one solid".into()));
+                for body in made {
+                    if body.is_surface() || body.body.lumps()?.len() != 1 {
+                        return Err(DocError::Invalid("combining the Form must produce a single solid per changed body".into()));
+                    }
                 }
                 Ok(())
             });
@@ -9534,6 +9548,7 @@ fn eval_feature(
                     *st = candidate;
                     Ok(())
                 }
+                Err(error @ DocError::Kernel(kernel::KernelError::Internal(_))) => Err(error),
                 Err(error) => {
                     *warning = Some(format!("Form kept separately: {error}"));
                     apply_traced(doc, st, f, tools, Operation::NewBody, &[])

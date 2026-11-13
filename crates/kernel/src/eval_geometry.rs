@@ -2,12 +2,13 @@
 use crate::{Body, KernelError, Result};
 
 mod trim_orientation;
+use solidcore_ops::eval_curve::ExactCurve;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Curve, Loop};
 use solidcraft_geom::{
-    brep::eval::{CurveEval, SurfaceEval},
+    brep::eval::CurveEval,
     prelude::*,
-    tess::{EvalCurve, EvalSurface, from_kernel, to_kernel, uv},
+    tess::{EvalCurve, EvalSurface},
 };
 
 /// An exact edge and its oriented original parameter interval.
@@ -17,62 +18,47 @@ pub struct CurveGeometry {
     /// from an analytic record's angle. Use at() for positions and derivatives.
     pub curve: EvalCurve,
     pub range: [f64; 2],
-    exact: CurveEval,
-    intersection: Option<Box<IntersectionDerivative>>,
+    shape_range: [f64; 2],
+    exact: ExactCurve,
+    intersection: bool,
     breaks: Vec<f64>,
-}
-#[derive(Clone, Debug)]
-struct IntersectionDerivative {
-    leader: CurveEval,
-    surfaces: [SurfaceEval; 2],
 }
 impl CurveGeometry {
     pub fn control_points(&self) -> Option<&[[f64; 4]]> {
-        self.intersection.is_none().then_some(self.curve.ctrl.as_slice())
+        (!self.intersection).then_some(self.curve.ctrl.as_slice())
     }
     pub fn is_linear(&self) -> bool {
-        matches!(self.exact, CurveEval::Line { .. }) || matches!(&self.exact, CurveEval::Spline(c) if c.degree == 1 && c.ctrl.len() == 2)
+        self.exact.is_linear()
     }
     pub fn parameter_breaks(&self) -> &[f64] {
         &self.breaks
     }
     /// Position and derivative with respect to normalized interval 0..1.
     pub fn at(&self, fraction: f64) -> Option<(Vec3, Vec3)> {
-        if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
-            return None;
+        self.exact.at(self.range, fraction)
+    }
+
+    /// A bounded polygon of this exact edge, with certified chord deviation.
+    pub fn path_samples(&self, tolerance: f64, limit: usize) -> Result<Vec<Vec3>> {
+        if self.intersection {
+            return Err(invalid("cannot certify path sampling on a traced surface intersection"));
         }
-        let [a, b] = self.range;
-        let span = b - a;
-        if !a.is_finite() || !b.is_finite() || span == 0.0 {
-            return None;
+        crate::form_curves::chord_samples(self.curve.degree, &self.curve.knots, &self.curve.ctrl, self.shape_range, tolerance, limit)
+            .ok_or_else(|| invalid("could not bound pipe path sampling within the tolerance and work budget"))
+    }
+
+    /// Construct the exact tensor between two translated copies of this spline edge.
+    pub fn planar_wall_strip(&self, offsets: [Vec3; 2], work: &mut usize) -> Result<Body> {
+        use solidcraft_geom::bspline::{HPoint, NurbsSurface};
+        if self.intersection {
+            return Err(invalid("unsupported exact planar Form boundary"));
         }
-        let t = a * (1.0 - fraction) + b * fraction;
-        let (point, tangent) = if let Some(source) = &self.intersection {
-            let point = self.exact.point(t)?;
-            let (lead, first) = source.leader.derivs(t)?;
-            let second = match &source.leader {
-                CurveEval::Spline(c) => from_kernel(*c.derivatives(t, 2)?.get(2)?),
-                CurveEval::Polyline(_) | CurveEval::Line { .. } => Vec3::ZERO,
-                _ => return None,
-            };
-            let mut normals = [Vec3::ZERO; 2];
-            for (normal, surface) in normals.iter_mut().zip(&source.surfaces) {
-                let uv = surface.project(point, None, f64::INFINITY)?;
-                let (_, u, v) = surface.derivs(uv[0], uv[1])?;
-                *normal = u.cross(v).normalized()?;
-            }
-            let along = normals[0].cross(normals[1]);
-            let denominator = first.dot(along);
-            if denominator.abs() <= 1e-12 * first.len() * along.len() {
-                return None;
-            }
-            // Differentiate L'(t)·(X(t)-L(t))=0 together with both surface constraints.
-            (point, along * ((first.len2() - second.dot(point - lead)) / denominator))
-        } else {
-            self.exact.derivs(t)?
-        };
-        let tangent = tangent * span;
-        (point.is_finite() && tangent.is_finite()).then_some((point, tangent))
+        let (knots, controls) =
+            crate::form_curves::swept_controls(self.curve.degree, &self.curve.knots, &self.curve.ctrl, self.shape_range, offsets, work)
+                .ok_or_else(|| invalid("could not construct the exact planar Form boundary within its control budget"))?;
+        let controls = controls.into_iter().map(|[x, y, z, w]| HPoint { x, y, z, w }).collect();
+        let surface = NurbsSurface::from_homogeneous([self.curve.degree, 1], [knots, vec![0., 0., 1., 1.]], controls).map_err(invalid)?;
+        crate::nurbs_sheet(&surface)
     }
 }
 /// A face's exact evaluator, trim loops in natural surface order, and shell sense.
@@ -92,22 +78,31 @@ impl FaceGeometry {
         {
             return Err(invalid("surface parameters require finite points and a tolerance in 1e-9..1 mm"));
         }
-        let domain = uv::domain(&self.surface);
-        let mut parameters = uv::project(&self.surface, &domain, to_kernel(point), near, tolerance)
-            .ok_or_else(|| invalid("point cannot be resolved on the exact face surface"))?;
-        if let Some(near) = near {
-            for d in 0..2 {
-                parameters[d] = uv::unwrap(parameters[d], near[d], domain.period[d]);
-            }
-        }
-        let (on, _, _) =
-            self.surface.derivs(parameters[0], parameters[1]).ok_or_else(|| invalid("resolved surface parameters cannot be evaluated"))?;
-        if from_kernel(on).dist(point) > tolerance {
-            return Err(invalid("point is outside the face surface tolerance"));
-        }
-        Ok(parameters)
+        solidcore_ops::face_surface::chart_parameters(&self.surface, point, near, tolerance)
+            .ok_or_else(|| invalid("point cannot be resolved within the exact face surface tolerance"))
     }
 }
+/// Report which guide points come within tolerance of the actual trimmed
+/// material of this body. The kernel prepares the trimmed faces in one batch.
+pub fn trimmed_guides(body: &Body, points: &[Vec3], tolerance: f64) -> Result<Vec<bool>> {
+    if points.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (body, order) = body.ops_body().ok_or_else(|| invalid("could not read the native trimmed face geometry"))?;
+    let xyz: Vec<_> = points.iter().map(|p| [p.x, p.y, p.z]).collect();
+    let distances = body.face_distances_within(order, &xyz, tolerance).map_err(invalid)?;
+    let mut covered = vec![false; points.len()];
+    for face in distances {
+        if face.len() != covered.len() {
+            return Err(invalid("incomplete trimmed face distances"));
+        }
+        for (seen, distance) in covered.iter_mut().zip(face) {
+            *seen |= distance.is_some_and(|d| d.is_finite() && d <= tolerance);
+        }
+    }
+    Ok(covered)
+}
+
 #[derive(Clone, Debug)]
 pub struct BoundaryEdge {
     pub edge: usize,
@@ -157,9 +152,9 @@ pub fn face_boundaries(body: &Body, face: usize) -> Result<Vec<Vec<BoundaryEdge>
         })
         .collect()
 }
-fn shape(source: &Curve, interval: [f64; 2]) -> Result<EvalCurve> {
+fn shape(source: &Curve, interval: [f64; 2]) -> Result<(EvalCurve, [f64; 2])> {
     match CurveEval::new(source).map_err(invalid)? {
-        CurveEval::Spline(curve) => Ok(curve),
+        CurveEval::Spline(curve) => Ok((curve, interval)),
         CurveEval::Polyline(points) => {
             if points.len() < 2 {
                 return Err(invalid("polyline needs two points"));
@@ -168,18 +163,18 @@ fn shape(source: &Curve, interval: [f64; 2]) -> Result<EvalCurve> {
             let mut knots = vec![0.0, 0.0];
             knots.extend((1..last).map(|i| i as f64));
             knots.extend([last as f64; 2]);
-            Ok(EvalCurve { degree: 1, knots, ctrl: points.iter().map(|p| [p.x, p.y, p.z, 1.0]).collect() })
+            Ok((EvalCurve { degree: 1, knots, ctrl: points.iter().map(|p| [p.x, p.y, p.z, 1.0]).collect() }, interval))
         }
         _ => {
             if let Curve::SurfaceIntersection { leader, .. } = source {
                 return shape(leader, interval);
             }
-            let (form, _) =
+            let (form, shape_range) =
                 solidcraft_geom::brep::form::curve(source, interval).ok_or_else(|| invalid("edge has no exact rational shape representation"))?;
             let CurveEval::Spline(curve) = CurveEval::new(&form).map_err(invalid)? else {
                 return Err(invalid("invalid rational edge form"));
             };
-            Ok(curve)
+            Ok((curve, shape_range))
         }
     }
 }
@@ -205,21 +200,21 @@ fn curve_geometry(source: &Curve, interval: [f64; 2], forward: bool) -> Result<C
     {
         return Err(invalid("intersection derivatives require a spline or polyline leader in its original parameters"));
     }
-    let exact = CurveEval::new(source).map_err(invalid)?;
-    let curve = shape(source, interval)?;
+    let exact = ExactCurve::new(source).map_err(invalid)?;
+    let (curve, [sa, sb]) = shape(source, interval)?;
     let breaks = original_parameter_breaks(source, interval);
-    let intersection = if let Curve::SurfaceIntersection { leader, surfaces, .. } = source {
-        Some(Box::new(IntersectionDerivative {
-            leader: CurveEval::new(leader).map_err(invalid)?,
-            surfaces: [SurfaceEval::new(&surfaces[0]).map_err(invalid)?, SurfaceEval::new(&surfaces[1]).map_err(invalid)?],
-        }))
-    } else {
-        None
-    };
-    Ok(CurveGeometry { curve, range: if forward { interval } else { [b, a] }, exact, intersection, breaks })
+    let intersection = matches!(source, Curve::SurfaceIntersection { .. });
+    Ok(CurveGeometry {
+        curve,
+        range: if forward { interval } else { [b, a] },
+        shape_range: if forward { [sa, sb] } else { [sb, sa] },
+        exact,
+        intersection,
+        breaks,
+    })
 }
 pub fn face_geometry(body: &Body, face: usize) -> Result<FaceGeometry> {
-    let source = selected(body, face)?;
+    let source = exact_chart(body, face)?;
     let (surface, _) = solidcore_ops::face_surface::eval_surface(source.parameters(), source.domain).map_err(invalid)?;
     let loops = source
         .loops
@@ -240,7 +235,7 @@ pub fn face_geometry(body: &Body, face: usize) -> Result<FaceGeometry> {
     Ok(FaceGeometry { surface, loops, outer, outward })
 }
 pub fn face_parameter_span(body: &Body, face: usize) -> Result<[[f64; 2]; 2]> {
-    let source = selected(body, face)?;
+    let source = exact_chart(body, face)?;
     let outer = trim_orientation::positive_loop(source, body)?;
     let Loop::Edges { edges } = source.loops.get(outer).ok_or_else(|| invalid("missing outer boundary"))? else {
         return Err(invalid("outer boundary is a point"));
@@ -265,6 +260,21 @@ pub fn face_parameter_span(body: &Body, face: usize) -> Result<[[f64; 2]; 2]> {
         return Err(invalid("face has no finite nondegenerate parameter span"));
     }
     Ok(out)
+}
+
+/// Check a raw tensor chart's complete trim against its parameter rectangle.
+pub fn has_rectangular_trim(body: &Body, face: usize, span: [[f64; 2]; 2]) -> Result<bool> {
+    let source = exact_chart(body, face)?;
+    Ok(matches!(source.parameters(), b::Surface::Spline { .. } | b::Surface::RationalSpline { .. })
+        && solidcore_ops::face_surface::rectangular_trim(source, span))
+}
+
+fn exact_chart(body: &Body, face: usize) -> Result<&b::Face> {
+    let source = selected(body, face)?;
+    if matches!(&source.surface, b::Surface::Blend { definition } if matches!(definition.as_ref(), b::blend::BlendDefinition::Procedural(_))) {
+        return Err(invalid("the procedural blend has no exact rational chart"));
+    }
+    Ok(source)
 }
 /// A plane certified for the complete curves of these edges. Traced
 /// intersections and other unproved wires return no planar support.
@@ -306,6 +316,28 @@ pub fn edge_geometry(body: &Body, edges: &[usize]) -> Result<Vec<CurveGeometry>>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_point_on_the_support_outside_the_trim_is_not_covered() {
+        let region = solidcore_record::Region2 {
+            outer: solidcore_record::Loop2 {
+                segs: [[0.0, 0.0], [3.0, 0.0], [3.0, 2.0], [0.0, 2.0]]
+                    .into_iter()
+                    .zip([[3.0, 0.0], [3.0, 2.0], [0.0, 2.0], [0.0, 0.0]])
+                    .map(|([ax, ay], [bx, by])| solidcore_record::Seg2::Line {
+                        a: solidcore_record::Vec2::new(ax, ay),
+                        b: solidcore_record::Vec2::new(bx, by),
+                    })
+                    .collect(),
+            },
+            holes: Vec::new(),
+        };
+        let plane = solidcore_record::Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
+        let body = crate::patch_region(&plane, &region).unwrap();
+        let outside = Vec3::new(4.0, 1.0, 0.0);
+        assert!(face_geometry(&body, 0).unwrap().parameters(outside, None, 1e-6).is_ok());
+        assert_eq!(trimmed_guides(&body, &[outside, Vec3::new(1.0, 1.0, 0.0)], 1e-6).unwrap(), vec![false, true]);
+    }
 
     #[test]
     fn intersection_adapter_retains_leader_parameters_and_rejects_analytic_leaders() {

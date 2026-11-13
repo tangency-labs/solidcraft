@@ -798,7 +798,9 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
         Surf::RefinedWeld => {
             let names = items(inputs, 0).body_names();
             let [a, b] = names.as_slice() else { return Err(app.tr("forms.weld.select_two").to_owned()) };
-            let model = app.session.model.state();
+            // World picks identify the source features. The authored seam lives
+            // in their shared component definition and applies to each instance.
+            let model = app.session.world_state().map_err(|error| error.to_string())?;
             let source = |name: &str| {
                 model
                     .body(name)
@@ -1283,6 +1285,9 @@ mod tests {
     #[test]
     fn refined_weld_dialog_uses_two_saved_refined_forms_in_pick_order() {
         let mut app = SolveApp::new(Default::default(), Default::default());
+        let created = app.session.execute("component.create", &json!({"name":"Form skins"})).unwrap();
+        let component = created["component"].as_u64().unwrap();
+        let first = created["occurrence"].as_u64().unwrap();
         let mut sources = Vec::new();
         for name in ["First skin", "Second skin"] {
             app.session.execute("form.prototype.create", &json!({"primitive":"face","dimensions":[12,12,1],"segments":[2,2,1],"levels":0})).unwrap();
@@ -1292,6 +1297,10 @@ mod tests {
             let body = committed["created_bodies"][0].as_str().unwrap().to_owned();
             sources.push((feature, Sel::Body { name: body }));
         }
+        app.session.execute("component.activate", &json!({"component":0})).unwrap();
+        app.session.execute("occurrence.copy", &json!({"occurrence":first,"translate":[0,0,30]})).unwrap();
+        app.session.execute("component.activate", &json!({"component":component})).unwrap();
+        assert!(app.session.active_occurrence_path.is_none());
         let dialog = crate::dialogs::Dialog::for_command(&app, "form.refined_weld").unwrap();
         assert_eq!(dialog.command(), Some("form.refined_weld"));
         let (kind, mut picks) = start(&app, "form.refined_weld").unwrap();
@@ -1299,7 +1308,14 @@ mod tests {
         assert_eq!(k, Surf::RefinedWeld);
         picks[0].items.push(sources[1].1.clone());
         assert!(commands(&app, &k, &picks, &Map::new()).is_err());
-        picks[0].items.push(sources[0].1.clone());
+        let world = app.session.world_state().unwrap();
+        let placed = |feature| {
+            let name = world.bodies.iter().find(|body| body.feature == feature && body.definition_name() != body.name).unwrap().name.clone();
+            Sel::Body { name }
+        };
+        picks[0].items.push(placed(sources[1].0));
+        assert!(commands(&app, &k, &picks, &Map::new()).is_err(), "two instances of the same feature do not create two sources");
+        picks[0].items[1] = placed(sources[0].0);
         let before = app.session.doc.to_json();
         assert_eq!(
             commands(&app, &k, &picks, &Map::new()).unwrap(),

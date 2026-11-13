@@ -294,12 +294,26 @@ pub(super) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 /// releasing the pointer gesture. Production always polls without blocking.
 #[cfg(test)]
 pub(super) fn flush_for_test(app: &mut SolveApp, ctx: &egui::Context) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     for _ in 0..8 {
-        tick(app, ctx);
-        let Some(mut pending) = app.forms_prototype.extrusion.gesture.as_mut().and_then(|gesture| gesture.pending.take()) else {
-            return Ok(());
+        let mut pending = loop {
+            tick(app, ctx);
+            let Some(gesture) = app.forms_prototype.extrusion.gesture.as_mut() else { return Ok(()) };
+            if gesture.settled == Some(gesture.sequence) {
+                return Ok(());
+            }
+            if let Some(pending) = gesture.pending.take() {
+                break pending;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("extrusion test worker remained busy".into());
+            }
+            std::thread::yield_now();
         };
-        let result = pending.done.recv().map_err(|_| "extrusion test worker disconnected".to_owned())?;
+        let result = pending
+            .done
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+            .map_err(|error| format!("extrusion test worker did not deliver a result: {error}"))?;
         let (tx, rx) = std::sync::mpsc::channel();
         tx.send(result).map_err(|_| "extrusion test result receiver disconnected".to_owned())?;
         pending.done = rx;
@@ -413,7 +427,6 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context) {
         if let Err(error) = std::thread::Builder::new().name("form-extrusion".into()).spawn(move || {
             // Closing or replacing an editor may drop its receiver, but it
             // cannot permit another expensive native solve until this exits.
-            let _permit = permit;
             if prepare_preview {
                 let preview = (|| {
                     let args: solidcraft_engine::schema::forms_prototype::ExtrudeDrag =
@@ -434,6 +447,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context) {
                 wake.request_repaint();
             }
             let result = copy.compute_commands(&[("form.prototype.extrude_drag".into(), parameters)], None).map_err(|e| e.to_string());
+            drop(permit);
             let _ = tx.send(result);
             wake.request_repaint();
         }) {

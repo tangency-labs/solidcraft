@@ -2,7 +2,6 @@
 use crate::{DocError, Document, FeatureId, FeatureKind, Operation, Result};
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use solidcraft_geom::Vec3Geom;
 use solidcraft_geom::subdivision::hierarchy::{FreeRimSide, Hierarchy};
 
 const MAX_RIM_SIDES: usize = 256;
@@ -60,17 +59,12 @@ impl RefinedWeldSeam {
         }
         let a_ends = fitted_ends(document, first, &a, tolerances[0])?;
         let b_ends = fitted_ends(document, second, &b, tolerances[1])?;
-        let limit = super::weld_native::SEW_TOLERANCE;
-        let mut phases = (0..count).filter(|&phase| {
-            a_ends.iter().enumerate().all(|(index, &[from, to])| {
-                let [other_from, other_to] = b_ends[(phase + count - index) % count];
-                from.dist(other_to) <= limit && to.dist(other_from) <= limit
-            })
-        });
-        let phase = phases.next().ok_or_else(|| invalid("the two refined Form rims are not aligned"))?;
-        if phases.next().is_some() {
-            return Err(invalid("the two refined Form rims do not have a unique alignment"));
-        }
+        use crate::kernel::form_curves::{RimPhase, reversed_rim_phase};
+        let phase = match reversed_rim_phase(&a_ends, &b_ends, super::weld_native::SEW_TOLERANCE) {
+            RimPhase::Unique(phase) => phase,
+            RimPhase::Missing => return Err(invalid("the two refined Form rims are not aligned")),
+            RimPhase::Ambiguous => return Err(invalid("the two refined Form rims do not have a unique alignment")),
+        };
         Self::capture(document, sources, [a[0].edge, b[phase].edge])
     }
 

@@ -4,7 +4,6 @@ use crate::kernel::history::{BodyHistory, EdgeOrigin, FaceOrigin};
 use crate::{DocError, Document, FeatureId, FeatureKind, Result, kernel};
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve, Shell};
-use solidcraft_geom::Vec3Geom;
 use solidcraft_geom::bspline::{CurveN, rational_rim_gap, rational_rim_to_native_gap};
 use solidcraft_geom::subdivision::hierarchy::FreeRimSide;
 use std::collections::{BTreeMap, BTreeSet};
@@ -187,9 +186,7 @@ impl<'a> Rim<'a> {
             }
             let [a, b] = edge.vertices;
             let ends = [point(a)?, point(b)?];
-            let near = |[start, end]: [Vec3; 2]| start.dist(targets[0]) <= MAP_TOLERANCE && end.dist(targets[1]) <= MAP_TOLERANCE;
-            let forward = near(ends);
-            let backward = near([ends[1], ends[0]]);
+            let [forward, backward] = kernel::form_curves::endpoint_directions(ends, targets, MAP_TOLERANCE);
             if !forward && !backward {
                 continue;
             }

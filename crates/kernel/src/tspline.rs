@@ -56,7 +56,7 @@ fn recharted(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>], tolerance: f6
         return Err(KernelError::Invalid("the subdivision chart error budget must be finite and 0..1 mm".into()));
     }
     // Only this fitted subdivision API may use a different nonplanar atlas.
-    let body = planar_supported(surface, body)?;
+    let body = planar_supported(body)?;
     if body.record().faces.iter().all(|face| matches!(face.surface, b::Surface::Plane { .. })) {
         return Ok((body, 0.0));
     }
@@ -74,13 +74,13 @@ fn recharted(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>], tolerance: f6
 /// positive-weight control hull certifies a plane. Nonplanar charts and their
 /// UV map are unchanged: this never fits, composes a pole chart or adds faces.
 pub fn nurbs_region_sheet_with_planar_support(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>]) -> Result<Body> {
-    planar_supported(surface, nurbs_region_sheet(surface, boundaries)?)
+    planar_supported(nurbs_region_sheet(surface, boundaries)?)
 }
 
-fn planar_supported(surface: &NurbsSurface, body: Body) -> Result<Body> {
+fn planar_supported(body: Body) -> Result<Body> {
     let mut planar = body.record().clone();
     for face in &mut planar.faces {
-        crate::surfaces::planar_tensor_face(surface, &planar.edges, face)?;
+        solidcore_ops::face_surface::planar_tensor(face, &planar.edges).map_err(|error| fail(error.to_string()))?;
     }
     if planar.faces.iter().all(|face| matches!(face.surface, b::Surface::Plane { .. })) { surface_body(&planar) } else { Ok(body) }
 }
@@ -103,6 +103,7 @@ fn nurbs_region_sheet_with_budget(surface: &NurbsSurface, boundaries: &[Vec<[f64
     let mut loops = Vec::with_capacity(boundaries.len());
     let mut domain = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
     let mut bounds = solidcraft_geom::Aabb3::EMPTY;
+    let mut trim_coefficients = 1_000_000usize;
     for wire in boundaries {
         let mut uses = Vec::with_capacity(wire.len());
         for (&a, &z) in wire.iter().zip(wire.iter().cycle().skip(1)).take(wire.len()) {
@@ -125,6 +126,9 @@ fn nurbs_region_sheet_with_budget(surface: &NurbsSurface, boundaries: &[Vec<[f64
                 let (knots, controls) = surface.parameter_line_bounded(a, z, &mut oblique_work).map_err(spline_err)?;
                 (knots, controls, a, z, true)
             };
+            trim_coefficients = trim_coefficients
+                .checked_sub(knots.len() + controls.len())
+                .ok_or_else(|| KernelError::TooLarge("trimmed tensor boundary coefficient budget exceeded".into()))?;
             let mut corner = |uv: [f64; 2]| -> Result<u32> {
                 let k = key(uv[0], uv[1]);
                 if let Some(&v) = vertices.get(&k) {

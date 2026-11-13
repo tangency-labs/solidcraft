@@ -1,5 +1,10 @@
 //! Bounded matching of an opening, with analytic CAD jets and independent seam checks.
-use super::{Cage, Result, bad, fitting::RootBasis, key, symmetry::Symmetry};
+use super::{
+    Cage, Result, bad,
+    fitting::{Fit, RootBasis},
+    key,
+    symmetry::Symmetry,
+};
 use crate::prelude::*;
 use crate::tess::SurfaceJet;
 use serde::{Deserialize, Serialize};
@@ -240,6 +245,17 @@ pub fn quadratic_extension(cage: &Cage) -> Result<Cage> {
 }
 fn evaluator(cage: &Cage, order: usize) -> Result<Cage> {
     if order == 2 { quadratic_extension(cage) } else { Ok(cage.clone()) }
+}
+
+/// Fit the editable faces at the saved basis. The G2 evaluator ring supplies
+/// continuation constraints and never becomes fitted output material.
+pub fn fit_material(cage: &Cage, order: usize, basis: &RootBasis, tolerance: f64) -> Result<Fit> {
+    let evaluator = if order == 2 { std::borrow::Cow::Owned(quadratic_extension(cage)?) } else { std::borrow::Cow::Borrowed(cage) };
+    let mut fit = basis.fit_checked(&evaluator, tolerance)?;
+    fit.patches.truncate(cage.faces.len());
+    fit.patch_roots.truncate(cage.faces.len());
+    fit.charts.truncate(cage.faces.len());
+    Ok(fit)
 }
 #[derive(Clone)]
 struct Station {

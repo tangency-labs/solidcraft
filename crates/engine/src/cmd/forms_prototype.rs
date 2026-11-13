@@ -564,8 +564,10 @@ fn insert_loop(s: &mut Session, p: &Value) -> Result<Value> {
         active_tolerance(s, args.tolerance)?;
     }
     let f = form(s)?;
-    f.insert_loop(args.edge, args.fraction)?;
-    Ok(f.inspect())
+    let seams = f.insert_loop(args.edge, args.fraction)?;
+    let mut reply = f.inspect();
+    reply["loop_seams"] = json!(seams.into_iter().map(|[a, b]| [a.min(b), a.max(b)]).collect::<Vec<_>>());
+    Ok(reply)
 }
 fn extrude_drag(s: &mut Session, p: &Value) -> Result<Value> {
     let args: params::ExtrudeDrag = parse(p)?;
@@ -2615,6 +2617,54 @@ mod tests {
     }
 
     #[test]
+    fn a_closed_form_cut_can_remove_its_complete_target() {
+        let mut session = Session::default();
+        session.execute("solid.box", &json!({"corner":[-0.5,-0.5,-0.5],"length":1,"width":1,"height":1,"body_name":"Stock"})).unwrap();
+        session.execute("form.prototype.create", &json!({"primitive":"box","size":20,"segments":[1,1,1]})).unwrap();
+        let finish = session.execute("form.prototype.commit", &json!({"operation":"cut","targets":["Stock"],"tolerance":0.05})).unwrap();
+        let id = finish["feature"].as_u64().unwrap();
+        let result = session.model.result(id).unwrap();
+        assert!(result.error.is_none() && result.warning.is_none(), "{:?}", result.warning);
+        assert!(result.state.bodies.is_empty());
+        session.execute("edit.undo", &json!({})).unwrap();
+        assert!(session.model.state().body("Stock").is_some());
+        session.execute("edit.redo", &json!({})).unwrap();
+        assert!(session.model.state().bodies.is_empty());
+    }
+
+    #[test]
+    fn a_closed_form_can_cut_multiple_solid_targets() {
+        let mut session = Session::default();
+        for (name, x) in [("Left", -6.0), ("Right", 4.0)] {
+            session.execute("solid.box", &json!({"corner":[x,-2,-8],"length":2,"width":4,"height":8,"body_name":name})).unwrap();
+        }
+        session.execute("form.prototype.create", &json!({"primitive":"box","size":12,"segments":[2,2,2]})).unwrap();
+        let reply = session.execute("form.prototype.commit", &json!({"operation":"cut","targets":["Left","Right"],"tolerance":0.05})).unwrap();
+        let result = session.model.result(reply["feature"].as_u64().unwrap()).unwrap();
+        assert!(result.error.is_none() && result.warning.is_none(), "{:?}", result.warning);
+        assert_eq!(result.state.bodies.len(), 2);
+        for name in ["Left", "Right"] {
+            let body = result.state.body(name).unwrap();
+            let volume = crate::kernel::measure(&body.body).unwrap().volume;
+            assert!(body.is_closed() && (0.0..64.0).contains(&volume), "{name}: {volume}");
+        }
+    }
+
+    #[test]
+    fn an_import_refuses_only_invalid_names_it_would_store_for_staged_parts() {
+        let mut session = Session::default();
+        session.execute("form.prototype.create", &json!({"primitive":"face","segments":[1,1,1],"levels":0})).unwrap();
+        let definition = session.forms_prototype.as_ref().unwrap().definition();
+        for bad in [String::new(), "x".repeat(257), "bad\0name".into()] {
+            assert!(crate::forms_prototype::Form::from_import(vec![(bad.clone(), definition.clone(), 0)]).is_ok());
+            let error = crate::forms_prototype::Form::from_import(vec![("Active".into(), definition.clone(), 0), (bad, definition.clone(), 0)])
+                .err()
+                .unwrap();
+            assert!(error.to_string().contains("invalid imported Form object name"));
+        }
+    }
+
+    #[test]
     fn a_matched_cut_trims_coincident_form_walls_and_conserves_volume() {
         use crate::kernel::history::BodyHistory;
         use solidcore_record::Vec3;
@@ -4077,6 +4127,19 @@ mod tests {
         s.execute("form.prototype.undo", &json!({})).unwrap();
         assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), definition);
     }
+    #[test]
+    fn enabling_symmetry_refuses_unpaired_creases_without_changing_history() {
+        let mut s = Session::default();
+        s.execute("form.prototype.create", &json!({"primitive":"box","segments":[1,1,1],"levels":0})).unwrap();
+        let form = s.forms_prototype.as_ref().unwrap();
+        let edge = form.cage.edges().unwrap().into_iter().find(|edge| edge.iter().all(|&id| form.cage.points[id].x > 0.0)).unwrap();
+        s.execute("form.prototype.topology", &json!({"tool":"crease","edges":[edge],"distance":2.0})).unwrap();
+        let before = s.forms_prototype.as_ref().unwrap().inspect();
+        let error = s.execute("form.prototype.symmetry", &json!({"axis":0})).unwrap_err();
+        assert!(error.to_string().contains("creases must be mirrored"));
+        assert_eq!(s.forms_prototype.as_ref().unwrap().inspect(), before);
+    }
+
     #[test]
     fn mirrored_local_refinement_pulls_deletion_and_base_creases_preserve_symmetry() {
         let mut s = Session::default();

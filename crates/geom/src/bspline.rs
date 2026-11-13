@@ -1316,63 +1316,8 @@ impl<const N: usize> CurveN<N> {
     /// (global interpolation, The NURBS Book A9.1: clamped, interior knots by averaging the
     /// parameters).
     pub fn interpolate(params: &[f64], points: &[[f64; N]], degree: usize) -> SplineResult<CurveN<N>> {
-        let m = points.len();
-        if params.len() != m || degree == 0 || degree > MAX_SPLINE_DEGREE || m <= degree {
-            return invalid(format!("{m} points, {} parameters, degree {degree}", params.len()));
-        }
-        if m > MAX_KNOTS || params.windows(2).any(|w| !(w[1] > w[0])) || params.iter().any(|t| !t.is_finite()) {
-            return invalid("the parameters must be finite and increasing");
-        }
-        let (first, last) = (params[0], params[m - 1]);
-        let mut knots = vec![first; degree + 1];
-        for j in 1..m - degree {
-            knots.push(params[j..j + degree].iter().sum::<f64>() / degree as f64);
-        }
-        knots.extend(std::iter::repeat_n(last, degree + 1));
-        // N · P = Q, dense with partial pivoting (the matrix is banded; m is small here).
-        let mut a = vec![vec![0.0f64; m]; m];
-        for (row, &t) in a.iter_mut().zip(params) {
-            let span = solidcore::eval::plan::span_of(&knots, degree, m, t);
-            let Some(b) = solidcore::eval::plan::basis_ders(&knots, span, degree, t) else { return invalid("basis") };
-            for (x, n) in row.iter_mut().skip(span - degree).zip(&b[0][..=degree]) {
-                *x = *n;
-            }
-        }
-        let mut q: Vec<[f64; N]> = points.to_vec();
-        for col in 0..m {
-            let Some(piv) = (col..m).max_by(|&x, &y| a[x][col].abs().total_cmp(&a[y][col].abs())) else { return invalid("empty") };
-            if !(a[piv][col].abs() > 1e-14) {
-                return invalid("singular interpolation system");
-            }
-            a.swap(col, piv);
-            q.swap(col, piv);
-            let (pr, pq) = (a[col].clone(), q[col]);
-            for r in col + 1..m {
-                let f = a[r][col] / pr[col];
-                if f != 0.0 {
-                    for (x, p) in a[r].iter_mut().zip(&pr).skip(col) {
-                        *x -= f * p;
-                    }
-                    for (x, p) in q[r].iter_mut().zip(pq) {
-                        *x -= f * p;
-                    }
-                }
-            }
-        }
-        let mut ctrl = vec![[0.0; N]; m];
-        for r in (0..m).rev() {
-            let mut v = q[r];
-            for (c, x) in ctrl.iter().enumerate().skip(r + 1) {
-                for (vi, xi) in v.iter_mut().zip(x) {
-                    *vi -= a[r][c] * xi;
-                }
-            }
-            ctrl[r] = v.map(|x| x / a[r][r]);
-        }
-        if ctrl.iter().flatten().any(|x| !x.is_finite()) {
-            return invalid("interpolation did not give finite control points");
-        }
-        Ok(CurveN { degree, knots, ctrl })
+        let fit = solidcore_ops::form_cage::interpolate_curve(params, points, degree).map_err(|error| SplineError::Invalid(error.to_string()))?;
+        Ok(CurveN { degree, knots: fit.knots, ctrl: fit.controls })
     }
 
     /// The point and first derivative at `t` (clamped to the curve's range).

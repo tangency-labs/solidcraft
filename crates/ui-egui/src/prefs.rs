@@ -1041,7 +1041,7 @@ preference_settings! {
     /// Toggle Form elements without holding a selection modifier.
     forms_greedy_selection: bool = false, PAGE_DESIGN => check_tr("prefs.forms_greedy_selection");
     /// Keep selected Form entities and the custom pivot when changing pick filters.
-    forms_preserve_selection: bool = true, PAGE_DESIGN => check_tr("prefs.forms_preserve_selection");
+    forms_preserve_selection: bool = false, PAGE_DESIGN => check_tr("prefs.forms_preserve_selection");
     /// Drag empty viewport space to select logical Form elements. False keeps click-only selection.
     forms_region_selection: bool = true, PAGE_DESIGN => check_tr("prefs.forms_region_selection");
     forms_match_adjacent:bool = false, PAGE_DESIGN => check_tr("prefs.forms_match_adjacent");
@@ -4820,13 +4820,13 @@ mod tests {
         assert!(prefs.forms_drag_feedback);
     }
     #[test]
-    fn form_filter_selection_preference_defaults_on_round_trips_and_resets_with_design() {
-        assert!(super::Prefs::default().forms_preserve_selection);
-        let mut prefs = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_preserve_selection":false})).unwrap();
-        assert!(!prefs.forms_preserve_selection);
-        assert_eq!(serde_json::to_value(&prefs).unwrap()["forms_preserve_selection"], false);
-        super::reset_preferences(&mut prefs, super::PAGE_DESIGN);
+    fn form_filter_selection_preference_is_opt_in_and_resets_with_design() {
+        assert!(!super::Prefs::default().forms_preserve_selection);
+        let mut prefs = serde_json::from_value::<super::Prefs>(serde_json::json!({"forms_preserve_selection":true})).unwrap();
         assert!(prefs.forms_preserve_selection);
+        assert_eq!(serde_json::to_value(&prefs).unwrap()["forms_preserve_selection"], true);
+        super::reset_preferences(&mut prefs, super::PAGE_DESIGN);
+        assert!(!prefs.forms_preserve_selection);
     }
     #[test]
     fn form_region_selection_defaults_on_preserves_legacy_and_resets_on_design_page() {

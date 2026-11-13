@@ -1001,22 +1001,6 @@ fn ray_crosses(a: Vec3, b: Vec3, c: Vec3, o: Vec3, dir: Vec3) -> bool {
 /// that cannot reach its box. No triangle-size tolerance discards genuine small triangles;
 /// the half-open edge ownership above still decides shared-edge and shared-vertex crossings.
 fn ray_meets_triangle_bounds(a: Vec3, b: Vec3, c: Vec3, o: Vec3, dir: Vec3) -> bool {
-    let (mut near, mut far) = (0.0_f64, f64::INFINITY);
-    for (a, b, c, o, d) in [(a.x, b.x, c.x, o.x, dir.x), (a.y, b.y, c.y, o.y, dir.y), (a.z, b.z, c.z, o.z, dir.z)] {
-        let (lo, hi) = (a.min(b).min(c), a.max(b).max(c));
-        if d == 0.0 {
-            if o < lo || o > hi {
-                return false;
-            }
-            continue;
-        }
-        let (lo, hi) = ((lo - o).next_down(), (hi - o).next_up());
-        let (lo, hi) = if d > 0.0 { (lo / d, hi / d) } else { (hi / d, lo / d) };
-        near = near.max(lo.next_down());
-        far = far.min(hi.next_up());
-        if near > far {
-            return false;
-        }
-    }
-    true
+    let coordinates = |p: Vec3| [p.x, p.y, p.z];
+    solidcore_ops::ray_tensor::ray_meets_triangle_bounds([a, b, c].map(coordinates), coordinates(o), coordinates(dir))
 }

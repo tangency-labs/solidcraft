@@ -182,10 +182,7 @@ impl State {
             || self.consumed.len() > MAX_PARTS
             || self.next_part == 0
             || self.next_part == u64::MAX
-            || self
-                .parts
-                .iter()
-                .any(|(&id, part)| id == 0 || id >= self.next_part || part.name.is_empty() || part.name.len() > 256 || part.name.contains('\0'))
+            || self.parts.iter().any(|(&id, part)| id == 0 || id >= self.next_part || !Part::valid_name(&part.name))
             || self.consumed.iter().any(|(&id, feature)| {
                 id == 0 || id != feature.id || editing == Some(id) || !matches!(feature.kind, FeatureKind::Form { operation: Operation::NewBody, .. })
             })

@@ -379,17 +379,38 @@ impl Hierarchy {
         if vertices.iter().any(|&id| self.is_retired_collapse_control(id)) {
             return Err(bad("a collapsed endpoint no longer has a selectable control"));
         }
+        // Stage only the affected sparse rows. The base cage and unrelated
+        // details can be large, and an invalid later control must not keep
+        // any changes from earlier controls in the same drag update.
+        let mut staged = BTreeMap::new();
         for (&vertex, &delta) in vertices.iter().zip(deltas) {
             let birth = *self.controls.get(&vertex).ok_or_else(|| bad("invalid hierarchical selection"))?;
-            let details = if let Some(operation) = self.extrusions.iter_mut().rev().find(|op| op.level == birth && op.first_vertex <= vertex) {
-                &mut operation.details
-            } else {
-                self.details.get_mut(birth).ok_or_else(|| bad("invalid detail level"))?
-            };
+            let extrusion = self.extrusions.iter().rposition(|op| op.level == birth && op.first_vertex <= vertex);
+            let original = match extrusion {
+                Some(index) => self.extrusions.get(index).map(|op| &op.details),
+                None => self.details.get(birth),
+            }
+            .ok_or_else(|| bad("invalid detail level"))?;
+            let details = staged.entry((extrusion, birth)).or_insert_with(|| original.clone());
             if let Some(detail) = details.iter_mut().find(|d| d.vertex == vertex) {
-                detail.delta += delta;
+                let next = detail.delta + delta;
+                if !next.is_finite() {
+                    return Err(bad("hierarchical detail delta must be finite"));
+                }
+                detail.delta = next;
             } else {
+                if !delta.is_finite() {
+                    return Err(bad("hierarchical detail delta must be finite"));
+                }
                 details.push(Detail { vertex, delta });
+            }
+        }
+        for ((extrusion, birth), details) in staged {
+            // Every slot was read above. This method never changes row counts.
+            if let Some(index) = extrusion {
+                self.extrusions[index].details = details;
+            } else {
+                self.details[birth] = details;
             }
         }
         Ok(())
@@ -574,6 +595,9 @@ impl Hierarchy {
             layout.paths.retain(|(edge, _)| !edge.iter().any(|id| retired.contains(id)));
             layout.collapse = Some(site);
         }
+        if layout.faces.iter().flatten().any(|vertex| !self.controls.contains_key(vertex)) {
+            return Err(bad("logical boundary lost a selectable corner"));
+        }
         Ok(layout)
     }
     fn skin_layout(&self) -> Result<Layout> {
@@ -657,8 +681,8 @@ impl Hierarchy {
                     paths.insert(key(first, last), path);
                 }
             }
-            if face.len() < 4 || face.iter().any(|v| !self.controls.contains_key(v)) {
-                return Err(bad("logical leaf lost a selectable corner"));
+            if face.len() < 4 {
+                return Err(bad("logical leaf lost an evaluator corner"));
             }
             faces.push(face);
         }

@@ -51,72 +51,7 @@ impl From<ProofError> for FrontError {
 
 type Result<T> = std::result::Result<T, FrontError>;
 
-/// Outward ray bounds for the viewport depth planes and a strictly visible
-/// interval for qualifying a returned hit. The matrix is column-major.
-pub struct ClipDepth {
-    outer: [f64; 2],
-    inner: [f64; 2],
-}
-
-impl ClipDepth {
-    pub fn from_projection(matrix: [[f64; 4]; 4], origin: [f64; 3], direction: [f64; 3]) -> Option<Self> {
-        if matrix.iter().flatten().copied().chain(origin).chain(direction).any(|v| !v.is_finite()) {
-            return None;
-        }
-        let project = |row: usize| {
-            let c = origin.into_iter().enumerate().fold(I::point(matrix[3][row]), |sum, (i, p)| sum.add(I::point(matrix[i][row]).scale(p)));
-            let d = direction.into_iter().enumerate().fold(I::ZERO, |sum, (i, d)| sum.add(I::point(matrix[i][row]).scale(d)));
-            [c, d]
-        };
-        let [z, dz] = project(2);
-        let [w, dw] = project(3);
-        let mut outer = [0.0_f64, f64::MAX];
-        let mut inner = outer;
-        // The renderer uses 0 <= z <= w. Also keep the positive homogeneous
-        // denominator required by the viewport's screen projection.
-        for [c, d] in [[z, dz], [w.sub(z), dw.sub(dz)], [w.sub(I::point(1e-9)), dw]] {
-            if !c.is_finite() || !d.is_finite() {
-                return None;
-            }
-            if d.lo == 0.0 && d.hi == 0.0 && c.lo > 0.0 {
-                continue;
-            }
-            let t = I::ZERO.sub(c).div(d);
-            if !t.is_finite() {
-                return None;
-            }
-            if d.lo > 0.0 {
-                outer[0] = outer[0].max(t.lo);
-                inner[0] = inner[0].max(t.hi);
-            } else if d.hi < 0.0 {
-                outer[1] = outer[1].min(t.hi);
-                inner[1] = inner[1].min(t.lo);
-            } else {
-                return None;
-            }
-        }
-        if outer[1] == f64::MAX || inner[0] >= inner[1] {
-            return None;
-        }
-        // The requested screen ray should remain strictly inside the side
-        // planes. At a rounded viewport edge, leave the press unresolved.
-        let t = I { lo: inner[0], hi: inner[1] };
-        for [side, slope] in [project(0), project(1)] {
-            if w.sub(side).add(dw.sub(slope).mul(t)).lo <= 0.0 || w.add(side).add(dw.add(slope).mul(t)).lo <= 0.0 {
-                return None;
-            }
-        }
-        Some(Self { outer, inner })
-    }
-
-    pub fn range(&self) -> [f64; 2] {
-        self.outer
-    }
-
-    pub fn contains(&self, depth: [f64; 2]) -> bool {
-        self.inner[0] < depth[0] && depth[0] <= depth[1] && depth[1] < self.inner[1]
-    }
-}
+pub use tensor::ClipDepth;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Target<Owner> {
@@ -157,18 +92,7 @@ impl Ray {
     }
 
     fn band(&self, bounds: [I; 3]) -> Option<I> {
-        let mut depth = self.depth;
-        for ((bound, origin), direction) in bounds.into_iter().zip(self.origin).zip(self.direction) {
-            if direction == 0.0 {
-                if origin < bound.lo || bound.hi < origin {
-                    return None;
-                }
-            } else {
-                let slab = bound.sub(I::point(origin)).div(I::point(direction));
-                depth = depth.intersect(slab)?;
-            }
-        }
-        Some(depth)
+        tensor::ray_bounds(bounds, self.origin, self.direction, self.depth)
     }
 }
 

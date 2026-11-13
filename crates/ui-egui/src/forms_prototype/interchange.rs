@@ -11,6 +11,21 @@ enum Outcome {
 pub(super) struct Pending {
     done: std::sync::mpsc::Receiver<Outcome>,
 }
+#[cfg(not(target_arch = "wasm32"))]
+fn export_permit() -> Option<finish::WorkerPermit> {
+    #[cfg(test)]
+    thread_local! {
+        static ACTIVE: Arc<std::sync::atomic::AtomicBool> = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    }
+    #[cfg(not(test))]
+    static ACTIVE: std::sync::OnceLock<Arc<std::sync::atomic::AtomicBool>> = std::sync::OnceLock::new();
+    #[cfg(test)]
+    let active = ACTIVE.with(Clone::clone);
+    #[cfg(not(test))]
+    let active = ACTIVE.get_or_init(Default::default).clone();
+    finish::WorkerPermit::acquire(active)
+}
+
 fn surface(app: &SolveApp) -> bool {
     app.forms_prototype
         .blend_surface
@@ -62,15 +77,26 @@ fn start_command(app: &mut SolveApp, import: bool, params: serde_json::Value) {
     let id = if import { "form.blend.import" } else { "form.blend.export" };
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let export_permit = if import {
+            None
+        } else {
+            // An export can still publish its file after the editor is gone.
+            // Retain the slot in the worker so a later export cannot overtake it.
+            let Some(permit) = export_permit() else {
+                app.set_status(app.tr("forms.prototype.command_worker_busy").to_owned(), true);
+                return;
+            };
+            Some(permit)
+        };
         let mut copy = app.session.scratch();
-        let given = params.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         let spawned = std::thread::Builder::new().name("forms-interchange".into()).spawn(move || {
             let result = if import {
-                Outcome::Imported(copy.compute_commands(&[(id.into(), given)], None).map(Box::new).map_err(|e| e.to_string()))
+                Outcome::Imported(copy.compute_commands(&[(id.into(), params)], None).map(Box::new).map_err(|e| e.to_string()))
             } else {
-                Outcome::Exported(copy.execute(id, &given).map_err(|e| e.to_string()))
+                Outcome::Exported(copy.execute(id, &params).map_err(|e| e.to_string()))
             };
+            drop(export_permit);
             let _ = tx.send(result);
         });
         match spawned {
@@ -152,6 +178,19 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_export_capacity_survives_a_form_reset() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        let permit = export_permit().unwrap();
+        app.forms_prototype = Default::default();
+        start_command(&mut app, false, json!({"path":"unused.blend"}));
+        assert!(app.forms_prototype.interchange.is_none());
+        assert_eq!(app.status.as_ref().unwrap().0, app.tr("forms.prototype.command_worker_busy"));
+        drop(permit);
+        assert!(export_permit().is_some());
+    }
     #[test]
     fn blender_pickers_cancel_without_changing_the_editor_and_prepared_imports_keep_stale_edits() {
         let mut app = SolveApp::new(Default::default(), Default::default());

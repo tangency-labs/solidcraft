@@ -444,11 +444,10 @@ impl Profile {
             if report.gap > tolerance || report.point_gap > tolerance {
                 return Err(invalid("the Form Surface fit exceeds its requested tolerance"));
             }
-            let fitted = (0..patch.face_count()).map(|face| kernel::face_geometry(&patch, face)).collect::<kernel::Result<Vec<_>>>()?;
-            let missing: Vec<_> = guides
-                .iter()
+            let missing: Vec<_> = kernel::trimmed_guides(&patch, &guides, tolerance)?
+                .into_iter()
                 .enumerate()
-                .filter_map(|(i, p)| (!fitted.iter().any(|face| face.parameters(*p, None, tolerance).is_ok())).then_some(i))
+                .filter_map(|(i, covered)| (!covered).then_some(i))
                 .collect();
             if missing.is_empty() {
                 if let Ok(Some(partition)) = partition::build(&patch, self, cage, placement, tolerance)

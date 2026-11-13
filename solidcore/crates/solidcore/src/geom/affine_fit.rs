@@ -136,11 +136,15 @@ pub fn between(pairs: impl Iterator<Item = (Vec3, Vec3)> + Clone) -> Option<Fit>
     let [g1, g2, g3] = [e2.cross(e3), e3.cross(e1), e1.cross(e2)].map(|v| v / determinant);
     let vector = |v: Vec3| d1 * v.dot(g1) + d2 * v.dot(g2) + d3 * v.dot(g3);
     let [x, y, z] = [Vec3::X, Vec3::Y, Vec3::Z].map(vector);
-    let handedness = x.dot(y.cross(z));
-    if !handedness.is_finite() || handedness <= 1e-12 {
+    let map = Transform::from_axes(x, y, z, b - vector(a));
+    let determinant = super::expansion::det3(x, y, z)?;
+    let minimum = super::expansion::sub(&determinant, &[1e-12]);
+    if super::expansion::sign(&minimum) <= 0
+        || map.is_regular(1e-12) != super::certified::Verdict::Yes
+    {
         return None;
     }
-    fit_pairs(pairs, Transform::from_axes(x, y, z, b - vector(a))).map(Fit::Affine)
+    fit_pairs(pairs, map).map(Fit::Affine)
 }
 
 fn farthest(
@@ -197,6 +201,14 @@ mod tests {
 
     fn fit(from: &[Vec3], to: &[Vec3]) -> Option<Fit> {
         between(from.iter().copied().zip(to.iter().copied()))
+    }
+
+    #[test]
+    fn a_rounding_positive_determinant_does_not_make_a_collapsing_map_regular() {
+        let source = [Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z];
+        let x = Vec3::new(100000003.0, 100000004.0, 100000006.0) / 4096.0;
+        let y = Vec3::new(100000000.0, 100000001.0, 100000002.0) / 4096.0;
+        assert!(fit(&source, &[Vec3::ZERO, x, y, x + y]).is_none());
     }
 
     #[test]

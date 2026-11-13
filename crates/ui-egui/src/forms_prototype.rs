@@ -3158,7 +3158,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.preferences.language = "en".into();
-        assert!(h.app.preferences.forms_preserve_selection);
+        h.app.preferences.forms_preserve_selection = true;
         h.app.run("form.prototype.create", json!({"primitive":"face","dimensions":[8,8,1],"segments":[2,2,1],"levels":0})).unwrap();
         h.app.cam.target = Vec3::ZERO;
         h.app.cam.distance = 18.0;

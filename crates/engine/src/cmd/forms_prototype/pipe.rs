@@ -1,6 +1,7 @@
 //! Pipe source evaluation uses the Form author's frame; stored edit picks are world-space.
 use super::*;
 use crate::doc::forms::{Definition, Pipe, PipeSource, Placement};
+use crate::forms_prototype::validation::{authoring_frame, pipe_source_state};
 use crate::geom::subdivision::{
     pipe_network::{PipeSettings, SegmentOverride},
     primitives::Parameters,
@@ -12,10 +13,14 @@ fn error(message: impl ToString) -> EngineError {
 }
 
 pub(super) fn state(s: &Session, component: u64, editing: Option<u64>) -> Result<(crate::doc::ModelState, crate::doc::Mat)> {
-    let frame = if component == s.active_component { s.active_component_frame() } else { s.doc.component_transform(component) };
-    crate::doc::mat_inverse(&frame).ok_or_else(|| error("the pipe author frame is not invertible"))?;
+    let path = s.forms_prototype.as_ref().filter(|form| form.authoring_component == component).map_or_else(
+        || (component == s.active_component).then_some(s.active_occurrence_path.as_deref()).flatten(),
+        |form| form.authoring_path.as_deref(),
+    );
+    let frame = authoring_frame(&s.doc, &s.pending_moves, component, path);
+    crate::kernel::affine::inverse(&frame).map_err(|_| error("the pipe author frame is not invertible"))?;
     let before = editing.map_or_else(|| s.model.state(), |id| s.model.state_before(id));
-    let state = crate::doc::state_in_frame_at(&s.doc, &before, component, frame)?.into_owned();
+    let state = pipe_source_state(&s.doc, &before, component, frame)?.into_owned();
     Ok((state, frame))
 }
 pub(super) fn recompute(s: &Session, definition: &mut Definition, component: u64, editing: Option<u64>) -> Result<()> {
@@ -23,7 +28,7 @@ pub(super) fn recompute(s: &Session, definition: &mut Definition, component: u64
         return Ok(());
     };
     let (state, frame) = state(s, component, editing)?;
-    let inverse = crate::doc::mat_inverse(&frame).ok_or_else(|| error("the pipe author frame is not invertible"))?;
+    let inverse = crate::kernel::affine::inverse(&frame).map_err(|_| error("the pipe author frame is not invertible"))?;
     let mut local = pipe.as_ref().clone();
     local.source.transform_picks(&inverse);
     definition.cage = local.recompute(&definition.cage, &state)?;
@@ -44,7 +49,7 @@ pub(super) fn create(s: &mut Session, p: &Value) -> Result<Value> {
     let component = current.map_or(s.active_component, |f| f.authoring_component);
     let editing = current.and_then(|f| f.editing_feature);
     let (state, frame) = state(s, component, editing)?;
-    let inverse = crate::doc::mat_inverse(&frame).ok_or_else(|| error("the pipe author frame is not invertible"))?;
+    let inverse = crate::kernel::affine::inverse(&frame).map_err(|_| error("the pipe author frame is not invertible"))?;
     let existing = current.and_then(|f| f.pipe.as_deref());
     let mut old_source = existing.map(|p| p.source.clone());
     if let Some(source) = &mut old_source {

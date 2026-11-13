@@ -906,6 +906,52 @@ mod native_ray {
     }
 
     #[test]
+    fn a_procedural_blend_net_cannot_clear_a_rear_owner() {
+        use solidcore_record::brep::blend::{
+            BlendDefinition, BlendDefinitionRecord, NurbsCurveRecord, NurbsSurfaceRecord, ParameterMapRecord, RadiusRecord, SupportKindRecord,
+            SupportRecord,
+        };
+        let rear = sheets(&[(2.0, square(-2.0, 2.0), None)]);
+        let mut context = sheets(&[(1.0, square(0.0, 1.0), None)]);
+        let knots = vec![0.0, 0.0, 1.0, 1.0];
+        let support = |vertical| SupportRecord::Nurbs {
+            kind: SupportKindRecord::Plane,
+            form: NurbsSurfaceRecord {
+                u_degree: 1,
+                v_degree: 1,
+                u_count: 2,
+                v_count: 2,
+                u_knots: knots.clone(),
+                v_knots: knots.clone(),
+                points: [0.0, 1.0].into_iter().flat_map(|x| [0.0, 1.0].map(|v| if vertical { [x, 0.0, 1.0 + v] } else { [x, v, 1.0] })).collect(),
+                weights: None,
+            },
+        };
+        let line = |points, dim| NurbsCurveRecord { dim, points_3d: dim == 3, degree: 1, knots: knots.clone(), points, weights: None };
+        context.faces[0].surface = Surface::Blend {
+            definition: Box::new(BlendDefinition::Procedural(Box::new(BlendDefinitionRecord {
+                supports: [support(false), support(true)],
+                sides: [1.0, -1.0],
+                radius: RadiusRecord::Constant { offsets: [0.2, 0.2] },
+                order: 1,
+                thumbweight: 0.0,
+                leader: line(vec![[0.0, 0.2, 1.2], [1.0, 0.2, 1.2]], 3),
+                seeds: [line(vec![[0.0, 0.2, 0.0], [1.0, 0.2, 0.0]], 2), line(vec![[0.0, 0.2, 0.0], [1.0, 0.2, 0.0]], 2)],
+                bound: 0.2,
+                map: ParameterMapRecord { a: [0.0; 2], b: [1.0; 2], swapped: false },
+                chamfer: None,
+            }))),
+        };
+        context.faces[0].nurbs = Some(Surface::Spline {
+            u_knots: knots.clone(),
+            v_knots: knots,
+            points: vec![vec![[0.0, 0.0, 1.0], [0.0, 1.0, 1.0]], vec![[1.0, 0.0, 1.0], [1.0, 1.0, 1.0]]],
+        });
+        let scene = Scene::prepare(&rear, &[Some(7)], &[&context], &mut 2_000_000).unwrap();
+        assert_eq!(scene.front([-0.1, 0.4, 0.0], [0.0, 0.0, 1.0], [0.0, 10.0], &mut 2_000_000).unwrap(), Front::Unresolved);
+    }
+
+    #[test]
     fn planar_trim_joins_block_only_with_qualified_native_vertex_closure() {
         let rear = sheets(&[(2.0, square(-2.0, 2.0), None)]);
         let exact = sheets(&[(1.0, square(-1.0, 1.0), None)]);
