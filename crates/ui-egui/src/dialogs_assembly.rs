@@ -2531,7 +2531,11 @@ pub fn component_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::R
     }
     let key = format!("{key}/joints");
     let open = is_open(app, &key, false);
-    let r = node_row(rows, Spec { key: &key, ..Default::default() }, Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
+    let r = node_row(
+        rows,
+        Spec { key: &key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, &key, false);
     }
