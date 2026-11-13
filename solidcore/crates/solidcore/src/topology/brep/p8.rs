@@ -76,7 +76,7 @@ use crate::geom::solution_array::{SolutionArray, SolutionType, SortKey};
 use crate::geom::tol::{self, SmallTopoType};
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
+use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -100,6 +100,9 @@ use crate::topology::vertex;
 use crate::topology::{Brep, EdgeId, FaceId, LoopId, RegionId, ShellId, VertexId};
 
 const OP: &str = "topology::brep::p8";
+
+/// The same tolerance p7 uses for "this surface is a curve or a point".
+const DEGENERATE_TOL_3D: f64 = tol::ZONE_TOL_3D / 10.0;
 
 /// The state the Euler operators of the face builders take: the caller's notification
 /// environment, the topology marks of [`p3::delete_face`] and the identity the new
@@ -223,6 +226,20 @@ pub fn create_face_in_region_from_surface(
             OP,
             "the UV domain is not inside the surface's natural domain",
         ));
+    }
+
+    // A face over a surface that degenerates to a curve or a point over this domain would be
+    // refused by AssertValid (zero-area face). Ask the same two questions p7 asks before any
+    // edit, so the B-rep is never left with one. p7 asks over the natural domain; here the
+    // caller's domain is the face, so use it.
+    if ignored(surface.is_degenerate_curve(k, EFF_ZERO_DEG, Some(uv_domain), DEGENERATE_TOL_3D))?
+        .unwrap_or(false)
+    {
+        return Err(invalid("surface degenerates to a curve"));
+    }
+    if ignored(surface.is_degenerate_point(k, DEGENERATE_TOL_3D, Some(uv_domain)))?.unwrap_or(false)
+    {
+        return Err(invalid("surface degenerates to a point"));
     }
 
     with_editing(b, |b| {
@@ -1485,6 +1502,23 @@ mod tests {
             create_face_in_region_from_surface(k, b, None, Some(Surface::from(bs)), &dom, fenv)
         });
         assert_eq!(code(&r.unwrap_err()), Some(SM_ERR));
+        assert!(!b.editing_enabled());
+    }
+
+    #[test]
+    fn a_face_thinner_than_the_degeneracy_tolerance_is_refused() {
+        // 1e-11 wide in model units on a plane: non-zero |Su|, but no area at
+        // DEGENERATE_TOL_3D (1e-6). AssertValid test 28 calls this a zero-area face.
+        let dom = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1e-11, 1.0));
+        let (r, b) = with_brep(|k, b, fenv| {
+            create_face_in_region_from_surface(k, b, None, Some(plane()), &dom, fenv)
+        });
+        let err = r.unwrap_err();
+        assert!(matches!(err, SolidError::InvalidInput { .. }), "{err}");
+        assert!(
+            err.to_string().contains("surface degenerates to a curve"),
+            "{err}"
+        );
         assert!(!b.editing_enabled());
     }
 

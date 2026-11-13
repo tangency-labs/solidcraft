@@ -135,8 +135,8 @@
 {"case":"empty_to_face_1000000.0_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[305176,13260870]],"n":94}},"topology":null,"values":{}}
 {"case":"empty_to_face_1_0","deferred":null,"error":null,"ints":{"records":{"blocks":[[305176,13260870]],"n":94}},"topology":null,"values":{}}
 {"case":"empty_to_face_1_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[305176,13260870]],"n":94}},"topology":null,"values":{}}
-{"case":"empty_to_face_1e-07_0","deferred":null,"error":null,"ints":{"records":{"blocks":[[49056,967098]],"n":62}},"topology":null,"values":{}}
-{"case":"empty_to_face_1e-07_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[49056,967098]],"n":62}},"topology":null,"values":{}}
+{"case":"empty_to_face_1e-07_0","deferred":null,"error":null,"ints":{},"rejected":"native fixture construction failed: topology::brep::p8: invalid input: surface degenerates to a curve","topology":null,"values":{}}
+{"case":"empty_to_face_1e-07_1","deferred":null,"error":null,"ints":{},"rejected":"native fixture construction failed: topology::brep::p8: invalid input: surface degenerates to a curve","topology":null,"values":{}}
 {"case":"empty_to_vertex_1000000.0_0","deferred":null,"error":null,"ints":{"records":{"blocks":[[113067,2860832]],"n":78}},"topology":null,"values":{}}
 {"case":"empty_to_vertex_1000000.0_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[113067,2860832]],"n":78}},"topology":null,"values":{}}
 {"case":"empty_to_vertex_1000000.0_2","deferred":null,"error":null,"ints":{"records":{"blocks":[[113067,2860832]],"n":78}},"topology":null,"values":{}}
@@ -180,8 +180,8 @@
 {"case":"face_to_empty_1000000.0_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[305178,13336167]],"n":94}},"topology":null,"values":{}}
 {"case":"face_to_empty_1_0","deferred":null,"error":null,"ints":{"records":{"blocks":[[305178,13336167]],"n":94}},"topology":null,"values":{}}
 {"case":"face_to_empty_1_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[305178,13336167]],"n":94}},"topology":null,"values":{}}
-{"case":"face_to_empty_1e-07_0","deferred":null,"error":null,"ints":{"records":{"blocks":[[49058,1042395]],"n":62}},"topology":null,"values":{}}
-{"case":"face_to_empty_1e-07_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[49058,1042395]],"n":62}},"topology":null,"values":{}}
+{"case":"face_to_empty_1e-07_0","deferred":null,"error":null,"ints":{},"rejected":"native fixture construction failed: topology::brep::p8: invalid input: surface degenerates to a curve","topology":null,"values":{}}
+{"case":"face_to_empty_1e-07_1","deferred":null,"error":null,"ints":{},"rejected":"native fixture construction failed: topology::brep::p8: invalid input: surface degenerates to a curve","topology":null,"values":{}}
 {"case":"gen0000","deferred":null,"error":null,"ints":{"records":[1,1,0]},"topology":null,"values":{}}
 {"case":"gen0001","deferred":null,"error":null,"ints":{"records":{"blocks":[[71616,6143123]],"n":201}},"topology":null,"values":{}}
 {"case":"gen0002","deferred":null,"error":null,"ints":{"records":[16006,1,0,0,0,-1,-1,-1,0,-1,0]},"topology":null,"values":{}}
@@ -750,8 +750,8 @@
 {"case":"self_face_1000000.0_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[290128,12956982]],"n":94}},"topology":null,"values":{}}
 {"case":"self_face_1_0","deferred":null,"error":null,"ints":{"records":{"blocks":[[290128,12956982]],"n":94}},"topology":null,"values":{}}
 {"case":"self_face_1_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[290128,12956982]],"n":94}},"topology":null,"values":{}}
-{"case":"self_face_1e-07_0","deferred":null,"error":null,"ints":{"records":{"blocks":[[34008,663210]],"n":62}},"topology":null,"values":{}}
-{"case":"self_face_1e-07_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[34008,663210]],"n":62}},"topology":null,"values":{}}
+{"case":"self_face_1e-07_0","deferred":null,"error":null,"ints":{},"rejected":"native fixture construction failed: topology::brep::p8: invalid input: surface degenerates to a curve","topology":null,"values":{}}
+{"case":"self_face_1e-07_1","deferred":null,"error":null,"ints":{},"rejected":"native fixture construction failed: topology::brep::p8: invalid input: surface degenerates to a curve","topology":null,"values":{}}
 {"case":"self_vertex_1000000.0_0","deferred":null,"error":null,"ints":{"records":{"blocks":[[97065,2242563]],"n":60}},"topology":null,"values":{}}
 {"case":"self_vertex_1000000.0_1","deferred":null,"error":null,"ints":{"records":{"blocks":[[97065,2242563]],"n":60}},"topology":null,"values":{}}
 {"case":"self_vertex_1000000.0_2","deferred":null,"error":null,"ints":{"records":{"blocks":[[97065,2242563]],"n":60}},"topology":null,"values":{}}

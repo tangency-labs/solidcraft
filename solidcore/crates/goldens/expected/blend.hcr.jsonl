@@ -143,7 +143,7 @@
 {"case":"gen0107","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[3e+20,3e+20,3.6e+21]],"n":18},"status":[0.0]}}
 {"case":"gen0108","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[1e+20,1e+20,1.2e+21]],"n":18},"status":[0.0]}}
 {"case":"gen0109","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[4e+20,4e+20,8.2e+21]],"n":35},"status":[0.0]}}
-{"case":"gen0110","deferred":null,"error":"brep_build_status_1001","ints":{},"topology":null,"values":{}}
+{"case":"gen0110","deferred":null,"error":"brep_build_status_1007","ints":{},"topology":null,"values":{}}
 {"case":"gen0111","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[210002.0,240002.0,2900004.0]],"n":24},"status":[0.0]}}
 {"case":"gen0112","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[40.92960699595611,40.92960699595611,561.4758874596944]],"n":24},"status":[0.0]}}
 {"case":"gen0113","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[3e+20,3e+20,3.6e+21]],"n":18},"status":[0.0]}}

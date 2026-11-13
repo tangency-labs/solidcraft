@@ -1087,7 +1087,7 @@
 {"case":"torus_guard_major_2x_eff_zero","deferred":null,"error":null,"ints":{"record":[],"status":[1007]},"topology":null,"values":{}}
 {"case":"torus_guard_major_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
 {"case":"torus_guard_major_negative","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
-{"case":"torus_guard_minor_2x_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
+{"case":"torus_guard_minor_2x_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1007]},"topology":null,"values":{}}
 {"case":"torus_guard_minor_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
 {"case":"torus_guard_minor_half_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
 {"case":"torus_guard_minor_negative","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}

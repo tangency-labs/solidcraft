@@ -29,7 +29,7 @@
   },
   {
    "name": "plane_face_1e_13_wide",
-   "note": "Constructor status (both sides refuse; compared as a status): CreateFaceFromSurface on a plane over [0, 1e-13] x [0, 1] (1e-12 builds). It was the setup of topology.assert_valid l2_thin_face_* (now l2_thinnest_buildable_face_*), which now runs just inside the limit.",
+   "note": "Constructor status (both sides refuse; compared as a status): CreateFaceFromSurface on a plane over [0, 1e-13] x [0, 1]. The 1e-6 geometric degeneracy limit refuses every width below it, including the 1e-12 width this case was pinned against. It was the setup of topology.assert_valid l2_thin_face_* (now l2_thinnest_buildable_face_*), which now runs just inside the limit.",
    "inputs": {
     "op": "from_surface",
     "surface": {
@@ -56,7 +56,7 @@
   },
   {
    "name": "tilted_plane_face_5e_13_wide",
-   "note": "Constructor status (both sides refuse; compared as a status): CreateFaceFromSurface on the plane through (1, 2, 3) with normal (0, 1, 1) over [-1, -1 + 5e-13] x [-1, 1] (1e-11 builds). It was the setup of topology.assert_valid l2_thin_face2_* (now l2_thinnest_buildable_face2_*), which now runs just inside the limit.",
+   "note": "Constructor status (both sides refuse; compared as a status): CreateFaceFromSurface on the plane through (1, 2, 3) with normal (0, 1, 1) over [-1, -1 + 5e-13] x [-1, 1]. The 1e-6 geometric degeneracy limit refuses this and the 1e-11 width that used to build. It was the setup of topology.assert_valid l2_thin_face2_* (now l2_thinnest_buildable_face2_*), which now runs just inside the limit.",
    "inputs": {
     "op": "from_surface",
     "surface": {
@@ -77,6 +77,33 @@
      -1,
      -1,
      -0.9999999999995,
+     1
+    ]
+   }
+  },
+  {
+   "name": "tilted_plane_face_1e_11_wide",
+   "note": "Constructor status (both sides refuse; compared as a status): CreateFaceFromSurface on the plane through (1, 2, 3) with normal (0, 1, 1) over [-1, -1 + 1e-11] x [-1, 1]. This is the face topology.assert_valid calls l2_thinnest_buildable_face2_*; the 1e-6 geometric degeneracy limit now refuses it (|Su| * u span = 1e-11).",
+   "inputs": {
+    "op": "from_surface",
+    "surface": {
+     "plane": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "n": [
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "dom": [
+     -1,
+     -1,
+     -0.99999999999,
      1
     ]
    }
