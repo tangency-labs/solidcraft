@@ -1,0 +1,12 @@
+id = "topology.brep_constructor"
+upstream = ["source/SMLib/inc/SmBrepData.h", "source/SMLib/src/SmBrepData.cpp"]
+rust_module = "topology::brep_constructor"
+depends_on = ["curve.curve_p2", "curve.curve_p4", "curve.curve_p6", "geom.extent1d", "geom.tol", "heal.stitch_p1", "heal.stitch_p2", "surface.surface_p11", "topology.brep_p1", "topology.brep_p3", "topology.edge", "topology.edgeuse_p1", "topology.face_p4", "topology.loopuse", "topology.shell", "topology.vertex"]
+soft_depends_on = []
+est_lines = 850
+layer = 51
+tests = ["prog_test:my_test_seam_uv_redistribution_at_poles", "prog_test:my_test_single_periodic_vertexuse", "prog_test:my_test_doubly_periodic_vertexuse_corners", "prog_test:my_test_heal_single_vertex_sphere"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN: revived 2026-10-30 on main; EndShell(TRUE) wired to ported validate_pointers; 185/185, 0 deferred. Revived on main (2026-10-30): SmBrep::ValidatePointers in EndShell(TRUE) is wired to topology::brep::validation::validate_pointers (unit topology.brep_validation, green on main; defaults: no list, SM_LEVEL_0, SM_NO_WALK; status ignored, Unported propagates), so the topology.brep_validate_pointers deferrals and that placeholder unit are gone. Counts: see the PR difftest summary. PARTIAL (PR #1000): difftest cases=185 passed=125 failed=0 deferred=60 (topology.brep_validate_pointers 60: EndShell(TRUE) -> SmBrep::ValidatePointers, WR-446) max_rel_err=0; --seeds 400: 522 cases, 410 pass, 0 fail; --perturb SENSITIVE 87/87; --fuzz 600 FUZZ-PASS. Built-in cases: prisms, holes, cylinders/cones (seams), vertex-loop sphere, void, open shells, non-manifold fans, ellipse/B-spline edges and patch, step-import TETRA file, UV-lifted edges, malformed call sequences; variants by point/parameter limits and separate+stitched edges. Corpus: plan/findings/topology.brep_constructor--port-difftest-and-step-corpus-constructor-path.md. SmBrepConstructor (SmBrepData.cpp lines 78-1189, SmBrepData.h SmVertexNode/SmBrepConstructor): top-down B-rep construction from shells, faces, loops and shared edges with orientations; the faithful build path for B-rep file importers (STEP, PR #985). Not in the original plan (its functions were in harness/callgraph/unused_functions.txt)."

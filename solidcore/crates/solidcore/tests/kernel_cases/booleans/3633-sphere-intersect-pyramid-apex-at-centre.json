@@ -1,0 +1,159 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "intersect"
+      }
+    }
+  ],
+  "case": "3633-sphere-intersect-pyramid-apex-at-centre",
+  "expected": {
+    "body_count": 1,
+    "edges": 8,
+    "faces": 5,
+    "method": "the pyramid has apex (0,0,0) and base 20x20 at x=-10 (corners (-10,+-10,+-10)): a cone over a cube face, a sixth of all directions, and the base is tangent to the sphere at (-10,0,0). The intersection is a sixth of the ball: V = (4/3) pi 10^3 / 6 = 698.132. Faces: 4 planar sides + 1 spherical = 5; edges 4 radial + 4 arcs = 8; vertices: apex + 4 corners on the sphere = 5",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3633",
+      "tangency-labs/solidcraft#3682"
+    ],
+    "vertices": 5,
+    "volume_mm3": 698.1317,
+    "what": "a sphere r=10 intersected with a square pyramid whose apex is the sphere's centre and whose sides lie in the planes of the sphere primitive's patch edges"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6
+    }
+  },
+  "records": "3633-sphere-intersect-pyramid-apex-at-centre.bodies.json.gz",
+  "result": [
+    {
+      "body": "Ball",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 455.6313452288172,
+      "body_count": 1,
+      "edges": 8,
+      "faces": 5,
+      "vertices": 5,
+      "volume_mm3": 698.1314820081441
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3633",
+    "tangency-labs/solidcraft#3682"
+  ],
+  "traced_ops": [
+    "make_sphere",
+    "loft_to_point",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [
+    "edges: graded merged across analytic surfaces (8), the records have 9",
+    "vertices: graded merged across analytic surfaces (5), the records have 6"
+  ],
+  "what": "a sphere r=10 intersected with a square pyramid whose apex is the sphere's centre and whose sides lie in the planes of the sphere primitive's patch edges",
+  "why_not": []
+}

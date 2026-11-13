@@ -4,13 +4,11 @@
 
 use std::collections::HashMap;
 
-use egui::vec2;
 use solidcraft_engine::Session;
-use solidcraft_engine::render::{Camera, StandardView};
+use solidcraft_viewport::{Camera, StandardView};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
-use crate::ui_kit::{self, FileView, RecoveryMessage};
+use crate::start_page;
 
 /// Recent designs kept.
 pub const MAX_RECENT: usize = 12;
@@ -137,7 +135,7 @@ pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     if b.is_empty() {
         return None;
     }
-    cam.fit(&b);
+    cam.fit(&solidcraft_engine::render::view_bounds(&b));
     // Fill the card: the fit leaves room for a whole window's margins.
     cam.distance *= 0.7;
     let scene = solidcraft_engine::view::scene(s, &cam).ok()?;
@@ -155,11 +153,44 @@ fn cache_path(key: &str) -> Option<std::path::PathBuf> {
     key.hash(&mut h);
     meta.len().hash(&mut h);
     meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.hash(&mut h);
-    let root = std::env::var_os("LOCALAPPDATA")
-        .or_else(|| std::env::var_os("XDG_CACHE_HOME"))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    Some(root.join("SolidCraft").join("thumbnails").join(format!("{:016x}.png", h.finish())))
+    Some(pictures_dir()?.join(format!("{:016x}.png", h.finish())))
+}
+
+/// How long a picture no recent design has asked for is kept.
+#[cfg(not(target_arch = "wasm32"))]
+const KEEP_PICTURES: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
+
+#[cfg(test)]
+thread_local! {
+    /// A test that ages pictures on purpose keeps them in its own folder, so the once-a-run sweep
+    /// another test starts cannot delete them between the aging and the read.
+    static TEST_PICTURES: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Where Home keeps its pictures: the per-user cache folder, which is still there after a restart,
+/// so a design that has not changed is not rebuilt for its picture at every launch.
+#[cfg(not(target_arch = "wasm32"))]
+fn pictures_dir() -> Option<std::path::PathBuf> {
+    // Tests never touch the user's real folder.
+    #[cfg(test)]
+    let own = TEST_PICTURES.with(|d| d.borrow().clone()).unwrap_or_else(|| std::env::temp_dir().join("SolidCraft").join("thumbnails"));
+    #[cfg(test)]
+    let dir = Some(own);
+    #[cfg(not(test))]
+    let dir = Some(solidcraft_engine::recovery::cache_dir()?.join("thumbnails"));
+    dir
+}
+
+/// Delete the pictures not read for [`KEEP_PICTURES`], once a run, off the window thread: saving a
+/// design leaves its earlier picture behind (the file's identity changed), and nothing else removes it.
+#[cfg(not(target_arch = "wasm32"))]
+fn clean_old_pictures() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if let Some(dir) = pictures_dir() {
+            solidcraft_engine::slicer_files::sweep(&dir, std::time::SystemTime::now(), KEEP_PICTURES);
+        }
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -168,8 +199,11 @@ fn cached(key: &str) -> Option<egui::ColorImage> {
     if std::fs::metadata(&path).ok()?.len() > 512 * 1024 {
         return None;
     }
-    let bytes = std::fs::read(path).ok()?;
-    decode_thumbnail(bytes)
+    let bytes = std::fs::read(&path).ok()?;
+    let img = decode_thumbnail(bytes)?;
+    // A picture still in use is not old: [`clean_old_pictures`] goes by this time.
+    let _ = std::fs::File::options().write(true).open(&path).and_then(|f| f.set_modified(std::time::SystemTime::now()));
+    Some(img)
 }
 
 fn decode_thumbnail(bytes: Vec<u8>) -> Option<egui::ColorImage> {
@@ -207,7 +241,7 @@ fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] ident
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = identity.filter(|p| cache_path(key).as_ref() == Some(p)) {
         let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-        if let Some(bytes) = solidcraft_engine::render::png(THUMB[0], THUMB[1], rgba)
+        if let Some(bytes) = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba)
             && let Some(dir) = path.parent()
             && std::fs::create_dir_all(dir).is_ok()
         {
@@ -385,6 +419,7 @@ fn start_jobs(h: &mut HomeState) {
     let (tx, rx) = std::sync::mpsc::channel();
     let stop = h.stop.clone();
     let spawned = std::thread::Builder::new().name("thumbnails".into()).spawn(move || {
+        clean_old_pictures();
         // Prefer local PNGs; even the metadata checks belong off the window thread.
         keys.sort_by_key(|k| !cache_path(k).is_some_and(|p| p.exists()));
         let Some(cold) = read_pictures(keys, &tx) else { return };
@@ -622,14 +657,20 @@ enum FileAction {
     Shortcuts,
     Crashes,
     About,
-    Recovery(solidcraft_engine::recovery::Entry, bool),
+    /// Recover (true) or discard the recoverable design at this index.
+    Recovery(usize, bool),
+    /// The recent design at this index in `HomeState::recent`.
+    OpenRecent(usize),
+    ForgetRecent(usize),
+    ShowInFolder(usize),
+    Sample(usize),
 }
 
 /// File view replaces the workspace while keeping the open design and its history intact.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     poll(app, ui.ctx());
     let file_menu_open = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::unique("sc_file_menu"))).unwrap_or(false);
-    let interactive = !app.file_picker_busy() && !app.file_load.busy() && !file_menu_open;
+    let interactive = !app.file_picker_busy() && !app.file_load_holds() && !file_menu_open;
     // Help windows draw before Home; remember their prior visibility so one Escape closes only the window.
     let had_help_window = ui.ctx().memory(|memory| {
         ["sc_about", "sc_crash_reports"]
@@ -639,7 +680,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
     if interactive
         && !had_help_window
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !app.help.about
         && !app.crashes.open
         && !app.help.menu
@@ -652,7 +693,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if interactive
         && !had_help_window
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !app.help.about
         && !app.crashes.open
         && !egui::Popup::is_any_open(ui.ctx())
@@ -672,7 +713,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             return;
         }
     }
-    let t = Tokens::get();
     let samples = solidcraft_engine::sample::samples();
     for i in 0..samples.len() {
         let key = format!("sample:{i}");
@@ -695,246 +735,181 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             want(&mut app.home, path);
         }
     }
-    let mut action = None;
-    FileView::page(ui, |ui| {
-        ui.add_enabled_ui(interactive, |ui| {
-            let full = ui.available_rect_before_wrap();
-            crate::scenario::publish_rect("home:page", full);
-            let narrow = full.width() < t.file_nav_width + FileView::tile_min_width() + t.file_content_inset_x * 2.0;
-            if narrow {
-                FileView::navigation(ui, |ui| {
-                    ui_kit::dropdown_menu(ui, "home_navigation", app.tr("ui.start_page"), |ui| {
-                        ui.set_min_width(t.file_nav_width);
-                        FileView::navigation(ui, |ui| {
-                            navigation(app, ui, &mut action);
-                            if action.is_some() {
-                                ui.close();
-                            }
-                        });
-                    });
-                });
-                content(app, ui, &mut action, true);
-            } else {
-                let rail = egui::Rect::from_min_size(full.min, vec2(t.file_nav_width, full.height()));
-                FileView::rail(ui, rail, |ui| {
-                    egui::ScrollArea::vertical().id_salt("home_navigation").auto_shrink([false, false]).show(ui, |ui| {
-                        navigation(app, ui, &mut action);
-                    });
-                });
-                let body = egui::Rect::from_min_max(egui::pos2(rail.right(), full.top()), full.max);
-                ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| content(app, ui, &mut action, false));
-            }
-        });
-    });
-    if let Some(action) = action {
+    let page = start_page::Page {
+        id: "home",
+        name: app.tr("ui.start_page").into(),
+        interactive,
+        back: start_page::Back {
+            template: app.tr("home.back").into(),
+            document: app.session.doc.name.as_str().into(),
+            shortcut: "Esc".into(),
+            chosen: FileAction::Back,
+        },
+        rail: rail(app),
+        title: match app.home.section {
+            Section::Start => app.tr_label("Start").into(),
+            Section::Recovery => app.tr_label("Recover").into(),
+            Section::Export => app.tr("home.export").into(),
+        },
+        hint: app
+            .tr(match app.home.section {
+                Section::Start => "home.start_hint",
+                Section::Recovery => "home.recovery_hint",
+                Section::Export => "home.export_hint",
+            })
+            .into(),
+        error: app.status.as_ref().filter(|(_, _, error)| *error).map(|(message, _, _)| message.as_str().into()),
+        body: match app.home.section {
+            Section::Start => start_page::Body::Start(Box::new(start_body(app))),
+            Section::Recovery => start_page::Body::Reviews(recovery_body(app)),
+            Section::Export => start_page::Body::Tiles(export_tiles(app)),
+        },
+    };
+    if let Some(action) = start_page::show(ui, page) {
         dispatch(app, ui.ctx(), action);
     }
 }
 
-fn navigation(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>) {
+/// SolidCraft's rail: Start, New, Open, Recover; the design's own entries; the app's.
+fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
     let busy = app.file_picker_busy();
     let design = !crate::documents::active_is_blank(app);
-    let response = FileView::back_to(ui, "home:back", app.tr("home.back"), &app.session.doc.name, "Esc");
-    publish("home:back", &response);
-    if response.clicked() {
-        *action = Some(FileAction::Back);
-    }
     let primary = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl+" };
     let shift = if cfg!(target_os = "macos") { "⇧" } else { "Shift+" };
-    let recover = if app.recoverable.is_empty() {
-        app.tr_label("Recover").to_string()
+    let recover: start_page::Label<'_> = if app.recoverable.is_empty() {
+        app.tr_label("Recover").into()
     } else {
-        format!("{} ({})", app.tr_label("Recover"), app.recoverable.len())
+        format!("{} ({})", app.tr_label("Recover"), app.recoverable.len()).into()
     };
-    let nav = [
-        ("home:start", app.tr_label("Start"), String::new(), Some(Section::Start), true, FileAction::Section(Section::Start)),
-        ("home:new", app.tr_label("New"), format!("{primary}N"), None, true, FileAction::New("preferred")),
-        ("home:open", app.tr("ui.open"), format!("{primary}O"), None, true, FileAction::Open),
-        ("home:recover", recover.as_str(), String::new(), Some(Section::Recovery), true, FileAction::Section(Section::Recovery)),
-        ("home:save", app.tr("ui.save"), format!("{primary}S"), None, design, FileAction::Save),
-        ("home:save_as", app.tr("ui.save_as"), format!("{primary}{shift}S"), None, design, FileAction::SaveAs),
-        ("home:export", app.tr("home.export"), String::new(), Some(Section::Export), design, FileAction::Section(Section::Export)),
-        ("home:properties", app.tr("home.properties"), String::new(), None, design, FileAction::Properties),
-        ("home:settings", app.tr("home.settings"), format!("{primary},"), None, true, FileAction::Settings),
-        ("home:shortcuts", app.tr("home.shortcuts"), String::new(), None, true, FileAction::Shortcuts),
-        ("home:crashes", app.tr("home.crashes"), String::new(), None, true, FileAction::Crashes),
-        ("home:about", app.tr_label("About SolidCraft"), String::new(), None, true, FileAction::About),
+    let nav: [(&str, start_page::Label<'_>, String, Option<Section>, bool, FileAction); 12] = [
+        ("home:start", app.tr_label("Start").into(), String::new(), Some(Section::Start), true, FileAction::Section(Section::Start)),
+        ("home:new", app.tr_label("New").into(), format!("{primary}N"), None, true, FileAction::New("preferred")),
+        ("home:open", app.tr("ui.open").into(), format!("{primary}O"), None, true, FileAction::Open),
+        ("home:recover", recover, String::new(), Some(Section::Recovery), true, FileAction::Section(Section::Recovery)),
+        ("home:save", app.tr("ui.save").into(), format!("{primary}S"), None, design, FileAction::Save),
+        ("home:save_as", app.tr("ui.save_as").into(), format!("{primary}{shift}S"), None, design, FileAction::SaveAs),
+        ("home:export", app.tr("home.export").into(), String::new(), Some(Section::Export), design, FileAction::Section(Section::Export)),
+        ("home:properties", app.tr("home.properties").into(), String::new(), None, design, FileAction::Properties),
+        ("home:settings", app.tr("home.settings").into(), format!("{primary},"), None, true, FileAction::Settings),
+        ("home:shortcuts", app.tr("home.shortcuts").into(), String::new(), None, true, FileAction::Shortcuts),
+        ("home:crashes", app.tr("home.crashes").into(), String::new(), None, true, FileAction::Crashes),
+        ("home:about", app.tr_label("About SolidCraft").into(), String::new(), None, true, FileAction::About),
     ];
-    for (index, (id, label, key, section, enabled, picked)) in nav.into_iter().enumerate() {
+    let mut rail = Vec::with_capacity(nav.len() + 2);
+    for (index, (id, label, shortcut, section, enabled, chosen)) in nav.into_iter().enumerate() {
         if index == 4 || index == 8 {
-            FileView::separator(ui);
+            rail.push(start_page::RailItem::Separator);
         }
-        let response = FileView::nav_row(ui, id, label, &key, section == Some(app.home.section), enabled && !busy);
-        publish(id, &response);
-        if response.clicked() {
-            *action = Some(picked);
-        }
+        rail.push(start_page::RailItem::Entry(start_page::RailEntry {
+            id: id.into(),
+            label,
+            shortcut: shortcut.into(),
+            selected: section == Some(app.home.section),
+            enabled: enabled && !busy,
+            chosen,
+        }));
     }
+    rail
 }
 
-fn publish(id: &str, response: &egui::Response) {
-    crate::scenario::publish_handle(id, response.rect.center());
-    crate::scenario::publish_rect(id, response.rect);
-}
-
-fn content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>, narrow: bool) {
-    let t = Tokens::get();
-    FileView::content(ui, narrow, |ui| {
-        egui::ScrollArea::vertical().id_salt("home_content").auto_shrink([false, false]).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            let (title, hint) = match app.home.section {
-                Section::Start => (app.tr_label("Start"), app.tr("home.start_hint")),
-                Section::Recovery => (app.tr_label("Recover"), app.tr("home.recovery_hint")),
-                Section::Export => (app.tr("home.export"), app.tr("home.export_hint")),
-            };
-            FileView::title(ui, title);
-            ui.add_space(t.space_6);
-            FileView::subtitle(ui, hint);
-            ui.add_space(t.file_section_gap);
-            if let Some((message, _, true)) = &app.status {
-                ui_kit::text(ui, message, ui_kit::Text::Error("home_status"));
-            }
-            match app.home.section {
-                Section::Start => start_content(app, ui, action),
-                Section::Recovery => recovery_content(app, ui, action),
-                Section::Export => export_content(app, ui, action),
-            }
-        });
-    });
-}
-
-fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>) {
-    let t = Tokens::get();
-    if let Some(entry) = app.recoverable.first().cloned() {
-        let title = solidcraft_ui_text::format("home.recovery_count", &[("count", &app.recoverable.len().to_string())]);
+fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
+    let banner = app.recoverable.first().map(|entry| {
         let filename = entry
             .path
             .as_deref()
             .and_then(|path| std::path::Path::new(path).file_name())
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| entry.name.clone());
-        let metadata = format!(" · {}", crate::recovery_ui::ago(entry.saved_at));
-        let (recover, discard) = FileView::recovery_banner(
-            ui,
-            "home:recovery",
-            RecoveryMessage { title: &title, before_filename: " · ", filename: &filename, after_filename: &metadata },
-            app.tr_label("Recover"),
-            (app.recoverable.len() == 1).then(|| app.tr_label("Discard")),
-        );
-        publish("home:recovery:recover", &recover);
-        if recover.clicked() {
-            *action =
-                Some(if app.recoverable.len() == 1 { FileAction::Recovery(entry.clone(), true) } else { FileAction::Section(Section::Recovery) });
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_else(|| entry.name.as_str().into());
+        let single = app.recoverable.len() == 1;
+        start_page::Banner {
+            title: solidcraft_ui_text::format("home.recovery_count", &[("count", &app.recoverable.len().to_string())]).into(),
+            before_filename: " · ".into(),
+            filename,
+            after_filename: format!(" · {}", crate::recovery_ui::ago(entry.saved_at)).into(),
+            recover: (app.tr_label("Recover").into(), if single { FileAction::Recovery(0, true) } else { FileAction::Section(Section::Recovery) }),
+            discard: single.then(|| (app.tr_label("Discard").into(), FileAction::Recovery(0, false))),
         }
-        if let Some(discard) = discard {
-            publish("home:recovery:discard", &discard);
-            if discard.clicked() {
-                *action = Some(FileAction::Recovery(entry, false));
-            }
-        }
-        ui.add_space(t.file_section_gap);
-    }
+    });
     let shortcut = if cfg!(target_os = "macos") { "⌘O" } else { "Ctrl+O" };
     let open_hint = solidcraft_ui_text::format("home.open_hint", &[("shortcut", shortcut)]);
     let tiles = [
-        ("home:new_mm", "new", app.tr("home.new_mm"), app.tr("home.new_mm_hint"), true),
-        ("home:new_inches", "new", app.tr("home.new_inches"), app.tr("home.new_inches_hint"), false),
-        ("home:open_tile", "open", app.tr("home.open"), open_hint.as_str(), false),
-        ("home:import", "import", app.tr("home.import"), app.tr("home.import_hint"), false),
-    ];
-    FileView::section(ui, app.tr_label("New"), t.space_12, |ui| {
-        FileView::grid(ui, "home_new", FileView::tile_min_width(), tiles.len(), |ui, index, width| {
-            let Some((id, icon, title, hint, primary)) = tiles.get(index) else { return };
-            let response = FileView::action_tile(ui, id, width, icon, title, hint, *primary);
-            publish(id, &response);
-            if response.clicked() {
-                *action = Some(match index {
-                    0 => FileAction::New("mm"),
-                    1 => FileAction::New("in"),
-                    2 => FileAction::Open,
-                    _ => FileAction::Import,
-                });
-            }
+        ("home:new_mm", "new", app.tr("home.new_mm"), start_page::Label::from(app.tr("home.new_mm_hint")), true, FileAction::New("mm")),
+        ("home:new_inches", "new", app.tr("home.new_inches"), app.tr("home.new_inches_hint").into(), false, FileAction::New("in")),
+        ("home:open_tile", "open", app.tr("home.open"), open_hint.into(), false, FileAction::Open),
+        ("home:import", "import", app.tr("home.import"), app.tr("home.import_hint").into(), false, FileAction::Import),
+    ]
+    .into_iter()
+    .map(|(id, icon, title, hint, primary, chosen)| start_page::Tile {
+        id: id.into(),
+        icon: start_page::Icon::Kit(icon),
+        title: title.into(),
+        hint,
+        primary,
+        chosen,
+    })
+    .collect();
+    let recent = app.home.recent.iter().enumerate().map(|(index, path)| recent_entry(app, index, path)).collect();
+    let samples = solidcraft_engine::sample::samples()
+        .iter()
+        .enumerate()
+        .map(|(index, sample)| start_page::Sample {
+            title: app.tr_label(sample.name).into(),
+            description: (if app.home.wanted == Some(index) { app.tr("home.opening") } else { app.tr_label(sample.about) }).into(),
+            icon: start_page::Icon::Kit("box"),
+            thumbnail: texture(app.home.thumbs.get(&format!("sample:{index}")).and_then(Option::as_ref)),
+            chosen: FileAction::Sample(index),
+        })
+        .collect();
+    start_page::Start {
+        banner,
+        actions_title: app.tr_label("New").into(),
+        actions: start_page::Tiles { grid: "home_new", tiles },
+        recent_title: app.tr("home.recent").into(),
+        recent_empty: app.tr("home.recent_empty").into(),
+        recent,
+        samples_title: app.tr("home.samples").into(),
+        samples,
+    }
+}
+
+fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_page::Recent<'a, FileAction> {
+    // Keep the extension so plate.step and plate.stl are not both "plate" (#9081).
+    let title = std::path::Path::new(path).file_name().map_or_else(|| path.into(), |name| name.to_string_lossy());
+    let missing = !available(app, path);
+    let when = if app.session.path.as_deref() == Some(path) { app.tr("home.open_now").to_string() } else { recent_time(app, path) };
+    let shown_path: start_page::Label<'a> = if missing {
+        format!("{} · {}", app.tr("home.missing"), friendly_path(path)).into()
+    } else if path.starts_with("/disk/") {
+        app.tr_label("On your computer").into()
+    } else if path.starts_with("/opfs/") {
+        app.tr("home.in_this_browser").into()
+    } else {
+        friendly_path(path).into()
+    };
+    let mut menu = vec![start_page::MenuEntry {
+        label: app.tr_label("Remove from list").into(),
+        icon: "delete".into(),
+        chosen: FileAction::ForgetRecent(index),
+    }];
+    if !cfg!(target_arch = "wasm32") {
+        menu.push(start_page::MenuEntry {
+            label: app.tr_label("Show in folder").into(),
+            icon: "folder".into(),
+            chosen: FileAction::ShowInFolder(index),
         });
-    });
-    ui.add_space(t.file_section_gap);
-    FileView::section(ui, app.tr("home.recent"), t.space_10, |ui| {
-        if app.home.recent.is_empty() {
-            FileView::detail(ui, app.tr("home.recent_empty"));
-        }
-        if !app.home.recent.is_empty() {
-            FileView::recent_list(ui, |ui| {
-                for (index, path) in app.home.recent.clone().iter().enumerate() {
-                    // Keep the extension so plate.step and plate.stl are not both "plate" (#9081).
-                    let name = std::path::Path::new(path).file_name().map(|name| name.to_string_lossy()).unwrap_or_else(|| path.as_str().into());
-                    let missing = !available(app, path);
-                    let when = if app.session.path.as_ref() == Some(path) { app.tr("home.open_now").to_string() } else { recent_time(app, path) };
-                    let shown_path = if missing {
-                        format!("{} · {}", app.tr("home.missing"), friendly_path(path))
-                    } else if path.starts_with("/disk/") {
-                        app.tr_label("On your computer").to_string()
-                    } else if path.starts_with("/opfs/") {
-                        app.tr("home.in_this_browser").to_string()
-                    } else {
-                        friendly_path(path)
-                    };
-                    let kind = recent_kind(app, path);
-                    let response = FileView::recent_row(
-                        ui,
-                        &format!("home:recent:{index}"),
-                        ui_kit::RecentRow {
-                            title: &name,
-                            path: &shown_path,
-                            when: &when,
-                            workspace: &kind,
-                            thumbnail: texture(app.home.thumbs.get(path).and_then(Option::as_ref)),
-                            // A design whose picture could not be made shows a dimmed placeholder,
-                            // distinct from the one shown while a picture is still loading (#4655).
-                            thumbnail_failed: app.home.thumb_failed(path),
-                        },
-                    );
-                    publish(&format!("home:recent:{index}"), &response);
-                    ui_kit::Menu::context(&response, |ui| {
-                        if crate::context_menu::button(ui, app.tr_label("Remove from list"), "delete").clicked() {
-                            app.home.forget(path);
-                            ui.close();
-                        }
-                        if !cfg!(target_arch = "wasm32") && crate::context_menu::button(ui, app.tr_label("Show in folder"), "folder").clicked() {
-                            if let Some(show) = &app.services.show_in_folder {
-                                show(path);
-                            }
-                            ui.close();
-                        }
-                    });
-                    if response.clicked() {
-                        open_recent(app, path);
-                    }
-                }
-            });
-        }
-    });
-    ui.add_space(t.file_section_gap);
-    FileView::section(ui, app.tr("home.samples"), t.space_10, |ui| {
-        let samples: Vec<_> = solidcraft_engine::sample::samples()
-            .iter()
-            .enumerate()
-            .map(|(index, sample)| {
-                let hint = if app.home.wanted == Some(index) { app.tr("home.opening") } else { app.tr_label(sample.about) };
-                ui_kit::SampleCard {
-                    title: app.tr_label(sample.name),
-                    description: hint,
-                    icon: "box",
-                    thumbnail: texture(app.home.thumbs.get(&format!("sample:{index}")).and_then(Option::as_ref)),
-                }
-            })
-            .collect();
-        for (index, response) in FileView::sample_grid(ui, "home:sample", &samples).into_iter().enumerate() {
-            publish(&format!("home:sample:{index}"), &response);
-            if response.clicked() {
-                open_sample(app, index);
-            }
-        }
-    });
+    }
+    start_page::Recent {
+        title,
+        path: shown_path,
+        when: when.into(),
+        kind: recent_kind(app, path).into(),
+        thumbnail: texture(app.home.thumbs.get(path).and_then(Option::as_ref)),
+        // A design whose picture could not be made shows a dimmed placeholder, distinct from the
+        // one shown while a picture is still loading (#4655).
+        thumbnail_failed: app.home.thumb_failed(path),
+        chosen: FileAction::OpenRecent(index),
+        menu,
+    }
 }
 
 fn texture(texture: Option<&egui::TextureHandle>) -> Option<(egui::TextureId, egui::Vec2)> {
@@ -1007,62 +982,56 @@ fn recent_time_at(app: &SolveApp, time: u64, now: u64) -> String {
     solidcraft_ui_text::format(key, &[("count", &count.to_string())])
 }
 
-fn recovery_content(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>) {
-    if app.recoverable.is_empty() {
-        ui_kit::text(ui, app.tr("home.recovery_empty"), ui_kit::Text::Inline);
-    }
-    for (index, entry) in app.recoverable.iter().take(20).enumerate() {
-        let detail = solidcraft_ui_text::format(
-            "recovery.detail",
-            &[
-                ("file", entry.path.as_deref().unwrap_or(app.tr("recovery.never_saved"))),
-                ("features", &entry.features.to_string()),
-                ("when", &crate::recovery_ui::ago(entry.saved_at)),
-            ],
-        );
-        let (recover, discard) =
-            FileView::recovery_review(ui, &format!("home:recovery:{index}"), &entry.name, &detail, app.tr_label("Recover"), app.tr_label("Discard"));
-        for (id, response, recover) in [("recover", Some(recover), true), ("discard", discard, false)] {
-            let Some(response) = response else { continue };
-            publish(&format!("home:recovery:{index}:{id}"), &response);
-            if response.clicked() {
-                *action = Some(FileAction::Recovery(entry.clone(), recover));
-            }
-        }
-        ui.add_space(Tokens::get().space_12);
-    }
+fn recovery_body(app: &SolveApp) -> start_page::Reviews<'_, FileAction> {
+    let items = app
+        .recoverable
+        .iter()
+        .take(20)
+        .enumerate()
+        .map(|(index, entry)| start_page::Review {
+            title: entry.name.as_str().into(),
+            detail: solidcraft_ui_text::format(
+                "recovery.detail",
+                &[
+                    ("file", entry.path.as_deref().unwrap_or(app.tr("recovery.never_saved"))),
+                    ("features", &entry.features.to_string()),
+                    ("when", &crate::recovery_ui::ago(entry.saved_at)),
+                ],
+            )
+            .into(),
+            recover: (app.tr_label("Recover").into(), FileAction::Recovery(index, true)),
+            discard: (app.tr_label("Discard").into(), FileAction::Recovery(index, false)),
+        })
+        .collect();
+    start_page::Reviews { empty: app.tr("home.recovery_empty").into(), items }
 }
 
-fn export_content(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>) {
+fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
     let formats = [
-        ("step", "STEP", Some("home.export_step_hint")),
-        ("mesh", "Mesh", Some("home.export_mesh_hint")),
-        ("view_dxf", "DXF", None),
-        ("obj", "OBJ", None),
-        ("urdf", "URDF", None),
-        ("json", "JSON", Some("home.export_json_hint")),
+        ("step", "STEP", Some("home.export_step_hint"), FileAction::Export("step")),
+        ("mesh", "Mesh", Some("home.export_mesh_hint"), FileAction::Mesh),
+        ("view_dxf", "DXF", None, FileAction::ViewDxf),
+        ("obj", "OBJ", None, FileAction::Export("obj")),
+        ("glb", "GLB", None, FileAction::Export("glb")),
+        ("urdf", "URDF", None, FileAction::Export("urdf")),
+        ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
-    FileView::grid(ui, "home_exports", FileView::tile_min_width(), formats.len(), |ui, index, width| {
-        let Some((id, format, hint)) = formats.get(index) else { return };
-        let label = if *id == "view_dxf" {
-            app.tr_label("Export Current View as DXF…").to_string()
-        } else {
-            format!("{} {}…", app.tr("home.export"), app.tr_label(format))
-        };
-        let subtitle = hint.map(|key| app.tr(key)).unwrap_or(format);
-        let response = FileView::action_tile(ui, &format!("home:export:{id}"), width, "export", &label, subtitle, false);
-        publish(&format!("home:export:{id}"), &response);
-        if response.clicked() {
-            *action = Some(match *id {
-                "step" => FileAction::Export("step"),
-                "mesh" => FileAction::Mesh,
-                "view_dxf" => FileAction::ViewDxf,
-                "obj" => FileAction::Export("obj"),
-                "urdf" => FileAction::Export("urdf"),
-                _ => FileAction::Export("json"),
-            });
-        }
-    });
+    let tiles = formats
+        .into_iter()
+        .map(|(id, format, hint, chosen)| start_page::Tile {
+            id: format!("home:export:{id}").into(),
+            icon: start_page::Icon::Kit("export"),
+            title: if id == "view_dxf" {
+                app.tr_label("Export Current View as DXF…").into()
+            } else {
+                format!("{} {}…", app.tr("home.export"), app.tr_label(format)).into()
+            },
+            hint: hint.map_or(format, |key| app.tr(key)).into(),
+            primary: false,
+            chosen,
+        })
+        .collect();
+    start_page::Tiles { grid: "home_exports", tiles }
 }
 
 fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
@@ -1126,7 +1095,27 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
         }
         FileAction::Crashes => crate::help::run(app, ctx, "crashes"),
         FileAction::About => crate::help::run(app, ctx, "about"),
-        FileAction::Recovery(entry, recover) => crate::recovery_ui::apply(app, entry, recover),
+        FileAction::Recovery(index, recover) => {
+            if let Some(entry) = app.recoverable.get(index).cloned() {
+                crate::recovery_ui::apply(app, entry, recover);
+            }
+        }
+        FileAction::OpenRecent(index) => {
+            if let Some(path) = app.home.recent.get(index).cloned() {
+                open_recent(app, &path);
+            }
+        }
+        FileAction::ForgetRecent(index) => {
+            if let Some(path) = app.home.recent.get(index).cloned() {
+                app.home.forget(&path);
+            }
+        }
+        FileAction::ShowInFolder(index) => {
+            if let (Some(show), Some(path)) = (&app.services.show_in_folder, app.home.recent.get(index)) {
+                show(path);
+            }
+        }
+        FileAction::Sample(index) => open_sample(app, index),
     }
 }
 
@@ -1234,7 +1223,7 @@ mod tests {
             session.run_script(&script).unwrap();
             let image = thumbnail(&session).unwrap();
             let rgba = image.pixels.iter().flat_map(|p| p.to_srgba_unmultiplied()).collect();
-            let png = solidcraft_engine::render::png(THUMB[0], THUMB[1], rgba).unwrap();
+            let png = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap();
             std::fs::write(dir.join(format!("{i}.png")), png).unwrap();
             hashes.push(format!("{:x}", Sha256::digest(serde_json::to_vec(&script).unwrap())));
             eprintln!("{}: {:.3} s", sample.name, began.elapsed().as_secs_f64());
@@ -1296,6 +1285,41 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         assert!(decode_thumbnail(vec![0; 600_000]).is_none());
         assert!(decode_thumbnail(vec![0; 24]).is_none());
+    }
+
+    /// A picture Home still reads is kept by the sweep of old pictures; one no design reads any
+    /// more (the design was saved again, so its identity changed) goes once it is old.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn reading_a_picture_keeps_it_from_the_sweep_of_old_ones() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let own = std::env::temp_dir().join(format!("solidcraft-kept-pictures-{}-{nonce}", std::process::id()));
+        TEST_PICTURES.with(|d| *d.borrow_mut() = Some(own.clone()));
+        let design = std::env::temp_dir().join(format!("solidcraft-kept-thumb-{}-{nonce}.sc", std::process::id()));
+        std::fs::write(&design, b"design").unwrap();
+        let key = design.to_string_lossy().into_owned();
+        let png = cache_path(&key).unwrap();
+        assert!(png.starts_with(pictures_dir().unwrap()));
+        std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+        let rgba = vec![128u8; THUMB[0] * THUMB[1] * 4];
+        std::fs::write(&png, solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap()).unwrap();
+        let age = |png: &std::path::Path| std::fs::metadata(png).unwrap().modified().unwrap().elapsed().unwrap_or_default();
+        let make_old = |png: &std::path::Path| {
+            let then = std::time::SystemTime::now() - 2 * KEEP_PICTURES;
+            std::fs::File::options().write(true).open(png).unwrap().set_modified(then).unwrap();
+        };
+        let sweep = || solidcraft_engine::slicer_files::sweep(png.parent().unwrap(), std::time::SystemTime::now(), KEEP_PICTURES);
+        make_old(&png);
+        assert!(cached(&key).is_some());
+        assert!(age(&png) < KEEP_PICTURES, "reading the picture marks it as in use");
+        sweep();
+        assert!(png.exists(), "a picture in use is kept");
+        make_old(&png);
+        sweep();
+        assert!(!png.exists(), "a picture nothing read for a month goes");
+        std::fs::remove_file(design).unwrap();
+        std::fs::remove_dir_all(own).unwrap();
+        TEST_PICTURES.with(|d| *d.borrow_mut() = None);
     }
 
     /// STEP opens deliberately have no save path, but their source still gets a cache entry.
@@ -1505,7 +1529,7 @@ mod tests {
         assert!(h.app.home.open);
         let gear = crate::scenario::handle_at("titlebar:preferences").unwrap();
         h.call("ui.click", serde_json::json!({"x": gear.x, "y": gear.y}));
-        assert!(h.app.prefs_window.open && h.app.home.open);
+        assert!(h.app.prefs_window.shell.open && h.app.home.open);
         let shown = |h: &crate::scenario::Harness| {
             h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::unique("sc_prefs"))))
         };
@@ -1516,7 +1540,7 @@ mod tests {
         // Home › Keyboard Shortcuts opens the same window at its page.
         h.app.keymap.open = true;
         h.frames(2);
-        assert!(shown(&h) && h.app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS && h.app.home.open);
+        assert!(shown(&h) && h.app.prefs_window.shell.section == crate::prefs::PAGE_SHORTCUTS && h.app.home.open);
     }
 
     fn click_file(h: &mut crate::scenario::Harness, id: &str) {
@@ -1581,6 +1605,14 @@ mod tests {
         assert!(!h.app.home.open);
         assert!(h.dir.join(format!("{}.json", h.app.session.doc.name)).is_file());
         assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
+        // The GLB tile (#1553) writes a binary glTF file of the bodies.
+        h.app.home.show(0);
+        click_file(&mut h, "home:export");
+        click_file(&mut h, "home:export:glb");
+        h.settle();
+        let glb = std::fs::read(h.dir.join(format!("{}.glb", h.app.session.doc.name))).unwrap_or_default();
+        assert!(glb.starts_with(b"glTF"), "{} bytes", glb.len());
+        assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
     }
 
     #[test]
@@ -1628,7 +1660,7 @@ mod tests {
         h.app.home.show(0);
         assert_eq!(solidcraft_ui_text::tr("home.settings"), solidcraft_ui_text::tr("ui.preferences"), "one name for the window");
         click_file(&mut h, "home:settings");
-        assert!(h.app.prefs_window.open, "the entry opens Preferences");
+        assert!(h.app.prefs_window.shell.open, "the entry opens Preferences");
     }
 
     #[test]

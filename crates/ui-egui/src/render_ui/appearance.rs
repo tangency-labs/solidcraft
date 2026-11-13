@@ -266,21 +266,50 @@ pub(in crate::render_workspace) fn remove(app: &mut SolveApp) {
     }
 }
 
-pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        let enabled = !app.session.selection.is_empty();
-        if ui_kit::icon_label_action(ui, app.tr("render.inspector_save_library"), Some("plus"), enabled, false)
-            .backing_on_hover_text(app.tr_label("Export design library..."))
-            .clicked()
-        {
+pub(in crate::render_workspace) fn remove_is_current(app: &SolveApp) -> bool {
+    let view = &app.render_workspace.view.inspector.selection_appearance;
+    view.draft.is_some()
+        && view.selection == app.session.selection
+        && view.revision == Some(app.session.revision)
+        && view.document.as_ref().is_some_and(|doc| Weak::ptr_eq(doc, &Arc::downgrade(&app.session.doc)))
+}
+
+pub(in crate::render_workspace) fn footer_stacked(app: &SolveApp, ui: &egui::Ui) -> bool {
+    ui_kit::icon_label_width(ui, app.tr("render.inspector_save_library"), Some("plus"), false)
+        + ui.spacing().item_spacing.x
+        + ui_kit::icon_label_width(ui, app.tr("render.inspector_reset"), None, false)
+        > ui.available_width()
+}
+
+pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui, stacked: bool) {
+    let enabled = !app.session.selection.is_empty();
+    let draw_save = |app: &mut SolveApp, ui: &mut egui::Ui| {
+        let label = app.tr("render.inspector_save_library");
+        let response = if ui_kit::icon_label_width(ui, label, Some("plus"), false) > ui.available_width() {
+            ui_kit::icon_action(ui, label, "plus", enabled, false)
+        } else {
+            ui_kit::icon_label_action(ui, label, Some("plus"), enabled, false)
+        };
+        if response.backing_on_hover_text(app.tr_label("Export design library...")).clicked() {
             app.start("library.export");
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui_kit::text_button(ui, app.tr("render.inspector_reset"), enabled).clicked() {
-                reset(app);
-            }
+    };
+    let draw_reset = |app: &mut SolveApp, ui: &mut egui::Ui| {
+        if ui_kit::text_button(ui, app.tr("render.inspector_reset"), enabled).clicked() {
+            reset(app);
+        }
+    };
+    if stacked {
+        ui.vertical(|ui| {
+            draw_save(app, ui);
+            draw_reset(app, ui);
         });
-    });
+    } else {
+        ui.horizontal(|ui| {
+            draw_save(app, ui);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| draw_reset(app, ui));
+        });
+    }
 }
 
 /// Returns false only when the explicit-target fallback should be shown.
@@ -347,7 +376,7 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
         view.pick_mode = view.mode;
     }
     let selected_targets = targets(app, mode_step(view.mode));
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let result = ui_kit::settings_form(ui, t.form_label_width + t.space_8, |ui| draw(app, ui, &mut view, &selected_targets));
     if let Err(error) = result {
         ui_kit::text(ui, &error, ui_kit::Text::Error("render:appearance:error"));
@@ -380,7 +409,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
         ui_kit::text(ui, app.tr("render.inspector_pick_target"), ui_kit::Text::Note("render.inspector_pick_target"));
         return Ok(());
     };
-    let default_color = crate::theme::Tokens::get().body;
+    let default_color = solidcraft_theme::Tokens::get().body;
     let default = Look::custom([default_color.r(), default_color.g(), default_color.b()], 1.0);
     let looks: Vec<_> = chains
         .iter()
@@ -447,7 +476,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
         &used,
         |ui| {
             let response = ui_kit::compact_dropdown_menu(ui, "render_appearance_chain", &source, |ui| {
-                ui.set_min_width(crate::theme::Tokens::get().form_label_width * 3.0);
+                ui.set_min_width(solidcraft_theme::Tokens::get().form_label_width * 3.0);
                 if let Some(step) =
                     ui_kit::look_chain(ui, "render:appearance:chain", chain_labels, chain.each_ref().map(|l| l.as_ref().map(sphere)), selected_step)
                 {

@@ -50,7 +50,7 @@ fn screenshot_actions(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> boo
             if ui_kit::button(ui, tr_label("Save screenshot…"), ui_kit::Button::Enabled(app.services.pick_save.is_some())).clicked()
                 && let Some(image) = draft.image.clone()
             {
-                app.pick_save(&format!("solidcraft-issue-{}.png", app.shot_token), &["png"], move |app, path| {
+                app.pick_save(&format!("solidcraft-issue-{}.png", app.shots.token), &["png"], move |app, path| {
                     let Some(path) = path else { return };
                     let result = crate::control::write_screenshot(&image, &path);
                     if let Some(draft) = app.issue_report.draft.as_mut() {
@@ -93,7 +93,7 @@ fn screenshot(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> bool {
 /// Returns whether to retake the screenshot and whether the user closed the form.
 pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -> (bool, bool) {
     let mut retake = false;
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let screen = ctx.content_rect();
     let cards = ((screen.width() - 2.0 * t.space_16) / t.form_card_width).clamp(0.5, 2.6);
     // Ctrl+Enter (⌘Enter on a Mac) in any field continues on GitHub. Read before the fields see
@@ -114,7 +114,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     // the header's close button remains available when the redundant closing action is omitted.
     let actions_width = ctx.fonts_mut(|fonts| {
         [
-            ("Open GitHub issue form", crate::fonts::bold(t.font_label), t.space_16),
+            ("Open GitHub issue form", crate::ui_kit::type_face::bold(t.font_label), t.space_16),
             ("Copy report", egui::FontId::proportional(t.font_label), t.space_12),
             ("Close draft", egui::FontId::proportional(t.font_label), t.space_12),
         ]

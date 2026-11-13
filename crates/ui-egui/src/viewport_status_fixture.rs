@@ -15,7 +15,7 @@ fn item(id: &str, kind: StatusKind, label: &str, setting: String, has_key: bool)
 
 fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
     use crate::ui_kit::{DetailFinding, DetailKey, DetailSetting, DetailValue, Details};
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let tr = |id| solidcraft_ui_text::tr(id).to_owned();
     let mut description = Details { caption: Some(tr("ui.details_fixture_caption")), ..Default::default() };
     description.key = t
@@ -27,7 +27,7 @@ fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
         .map(|(index, (colour, label))| DetailKey {
             numeric: true,
             pattern_colour: None,
-            colour: crate::theme::srgb(colour),
+            colour: solidcraft_theme::srgb(colour),
             pattern: index == 2,
             label: label.into(),
             value: String::new(),

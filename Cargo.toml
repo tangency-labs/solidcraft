@@ -1,11 +1,12 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
-# Third-party code kept with local fixes (see vendor/README.md); not linted as ours.
-exclude = ["vendor"]
+# Third-party code kept with local fixes (vendor/), and the vendored SolidCore kernel (solidcore/);
+# neither is linted as ours. See CONTRIBUTING.md, "How the code is laid out".
+exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.40.0-rc.3"
+version = "0.41.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -15,35 +16,54 @@ repository = "https://github.com/bherbruck/solidcraft"
 [workspace.dependencies]
 robust = "1.2"
 # internal
+craft-plugin = { path = "crates/craft-plugin" }
+craft-plugin-wasm = { path = "crates/craft-plugin-wasm" }
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-profile = { path = "crates/profile" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
 solidcraft-smlib = { path = "crates/smlib" }
-solidcraft-step = { path = "crates/step" }
 solidcraft-render = { path = "crates/render" }
 solidcraft-dynamics = { path = "crates/dynamics" }
 solidcraft-gpu = { path = "crates/gpu" }
 solidcraft-doc = { path = "crates/doc" }
+# Versioned file formats: the format tag, the version registry and its upgrade, a newer file told
+solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
 solidcraft-engine = { path = "crates/engine" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
+solidcraft-ui-kit = { path = "crates/ui-kit" }
+solidcraft-look = { path = "crates/look" }
 solidcraft-ui-registry = { path = "crates/ui-registry" }
 solidcraft-color = { path = "crates/color" }
 solidcraft-ui-text = { path = "crates/ui-text" }
+solidcraft-theme = { path = "crates/theme" }
+solidcraft-viewport = { path = "crates/viewport" }
+solidcraft-viewport-egui = { path = "crates/viewport-egui" }
+solidcraft-viewport-gpu = { path = "crates/viewport-gpu" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-mcp-server = { path = "crates/mcp-server" }
+solidcraft-control = { path = "crates/control" }
+solidcraft-control-egui = { path = "crates/control-egui" }
 solidcraft-derive = { path = "crates/derive" }
 solidcraft-3dx-client = { path = "crates/threedx-client" }
-# The Rust port of NVIDIA's SMLib (Apache-2.0), the B-rep kernel behind crates/smlib. Pinned;
-# move the rev on its own commit. For a
-# local checkout, add `[patch."https://github.com/tangency-labs/solidcore"] solidcore = { path =
-# "../solidcore/crates/solidcore" }` to a `.cargo/config.toml` outside the repository.
-solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "a445bdaac60a980b0e9d1dba3ee28eb7ada44f50" }
+# The Rust port of NVIDIA's SMLib (Apache-2.0), the B-rep kernel behind crates/smlib. Vendored with
+# `git subtree` at solidcore: that tree is the source of truth, and
+# .github/workflows/solidcore-mirror.yml pushes changes in it back to its own repository (#13153).
+solidcore = { path = "solidcore/crates/solidcore" }
 # Geometry as data (solidcore's layers §1, "Record"): the B-rep record, its structural validation
-# and the native body file. Pinned like solidcore; for a local checkout, patch it as above.
-solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "a445bdaac60a980b0e9d1dba3ee28eb7ada44f50" }
+# and the native body file. Vendored with solidcore, in the same subtree.
+solidcore-record = { path = "solidcore/crates/solidcore-record" }
+# The modelling layer (solidcore's layers §1, "Ops"): the record-level calls SolidCraft makes into the
+# kernel, converting through solidcore-convert.
+solidcore-ops = { path = "solidcore/crates/solidcore-ops" }
+# STEP import and export (vendored with solidcore): the Part 21 parser is solidcore-record's.
+solidcore-step = { path = "solidcore/crates/solidcore-step" }
+# Geometry made drawable (solidcore's layers §3): the one mesher, SolidCraft's, moved into the
+# subtree (RFC 0003, item 1.1), with the display mesh and its levels of detail, the types
+# SolidCraft's meshes are. Vendored with solidcore, in the same subtree.
+solidcore-tess = { path = "solidcore/crates/solidcore-tess" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
 
@@ -66,6 +86,8 @@ semver = "1"
 # constrained Delaunay + Ruppert refinement for trimmed faces (MIT OR Apache-2.0).
 spade = { version = "2.15", default-features = false, features = ["std"] }
 rayon = "1.12"
+# Native render-memory admission; RAM-only queries through a safe MIT-licensed API.
+sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 
 # packages (3MF)
 zip = { version = "9", default-features = false, features = ["deflate"] }

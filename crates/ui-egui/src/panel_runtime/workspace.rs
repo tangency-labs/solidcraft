@@ -4,9 +4,10 @@ use std::collections::BTreeMap;
 
 use solidcraft_engine::panels::*;
 
+use super::drag_paint::{CardPaint, DragPaint, shape_count};
 use super::runtime::{RuntimeHostProposal, standalone_header_action};
 use super::*;
-use crate::ui_kit::{self, HostChrome};
+use crate::ui_kit::{self, BackingTooltipExt as _, HostChrome};
 
 // Raw input plus per-control focus, gesture and command outcomes, with room for
 // pass diagnostics. Repeated passes replace a snapshot rather than growing it.
@@ -90,9 +91,9 @@ pub struct HostOptions {
 impl Default for HostOptions {
     fn default() -> Self {
         Self {
-            metrics: HostMetrics { inline_max_height: crate::theme::PANEL_INLINE_MAX_HEIGHT, ..HostMetrics::default() },
+            metrics: HostMetrics { inline_max_height: solidcraft_theme::PANEL_INLINE_MAX_HEIGHT, ..HostMetrics::default() },
             geometry: HostGeometryPolicy::default(),
-            content_header_height: crate::theme::Tokens::get().control_height,
+            content_header_height: solidcraft_theme::Tokens::get().control_height,
         }
     }
 }
@@ -207,6 +208,7 @@ struct PendingHostCommands {
     commands: Vec<HostCommand>,
     pointer_events: Vec<(egui::Id, HostPointerEvent)>,
     mount: PanelResult<()>,
+    drag_cards: Vec<CardPaint>,
 }
 
 #[derive(Clone)]
@@ -226,6 +228,17 @@ struct ContentFocus {
     selection: Option<egui::text::CCursorRange>,
 }
 impl ContentFocus {
+    fn logically_presented(&self, runtime: &PanelRuntime) -> bool {
+        let service = runtime.layout();
+        self.scope == runtime_scope(runtime)
+            && runtime.instance_owner(&self.key.instance).is_ok_and(|owner| owner == self.key.owner)
+            && service.availability(&self.key.instance) == Availability::Available
+            && service.layout().instance(&self.key.instance).is_ok_and(|instance| instance.requested_open)
+            && service.layout().containing(&self.key.instance).is_ok_and(|section| {
+                let availability: AvailabilityMap = section.tabs.iter().map(|instance| (instance.clone(), service.availability(instance))).collect();
+                !section.collapsed && presented_tab(section, &availability) == Some(&self.key.instance)
+            })
+    }
     fn restore_selection(&self, ctx: &egui::Context) {
         if let Some(selection) = self.selection
             && let Some(mut state) = egui::TextEdit::load_state(ctx, self.id)
@@ -253,6 +266,8 @@ pub struct WorkspacePanelHost {
     last_mount_frame: Option<u64>,
     last_mount_revision: Option<u64>,
     preview_started: Option<f64>,
+    live_drag: bool,
+    drag_paint: DragPaint,
     pending_escape: bool,
     last_rejection: Option<PanelError>,
     overlays: BTreeMap<InstanceId, Vec<RegisteredOverlay>>,
@@ -295,6 +310,27 @@ impl WorkspacePanelHost {
         Ok(())
     }
 
+    pub(crate) fn set_header_action_visible(&mut self, instance: InstanceId, action: ControlId, visible: bool) {
+        let hidden = &mut self.options.geometry.hidden_header_actions;
+        let changed = if visible {
+            hidden.get_mut(&instance).is_some_and(|actions| actions.remove(&action))
+        } else {
+            hidden.entry(instance).or_default().insert(action)
+        };
+        hidden.retain(|_, actions| !actions.is_empty());
+        if changed {
+            self.invalidate_geometry();
+        }
+    }
+
+    pub(crate) fn set_live_drag(&mut self, enabled: bool) {
+        self.live_drag = enabled;
+        self.interaction.set_live_drag(enabled);
+        if !enabled {
+            self.drag_paint.clear();
+        }
+    }
+
     pub(crate) fn set_gap(&mut self, gap: f32) -> PanelResult<()> {
         let metrics = HostMetrics { gap, ..self.options.metrics };
         metrics.validate()?;
@@ -331,6 +367,8 @@ impl WorkspacePanelHost {
             last_mount_frame: None,
             last_mount_revision: None,
             preview_started: None,
+            live_drag: false,
+            drag_paint: DragPaint::default(),
             pending_escape: false,
             last_rejection: None,
             overlays: BTreeMap::new(),
@@ -578,6 +616,7 @@ impl WorkspacePanelHost {
     }
     /// Owner/scope loss and application hiding also release owned keyboard input.
     pub(crate) fn invalidate_context(&mut self) {
+        self.drag_paint.clear();
         self.invalidate_geometry();
         self.content_focus = None;
         self.content_bookmarks.clear();
@@ -599,6 +638,16 @@ impl WorkspacePanelHost {
                 self.observed_focus = runtime.layout().interaction().focused.clone();
             }
             self.scope = Some(identity);
+        }
+        if let Some(bookmark) = &self.content_focus
+            && self.owned_focus == Some(bookmark.id)
+            && !bookmark.logically_presented(runtime)
+        {
+            self.restore_content_focus = false;
+            self.owned_focus = None;
+            if let Some(ctx) = &self.egui_context {
+                ctx.memory_mut(|memory| memory.surrender_focus(bookmark.id));
+            }
         }
     }
     pub(crate) fn note_reply(&mut self, reply: &LayoutReply) {
@@ -895,11 +944,27 @@ impl WorkspacePanelHost {
         let mut pointer_events = Vec::new();
         let mut unpainted = Vec::new();
         self.content_reports.clear();
+        let mut drag_cards = Vec::new();
+        let capture_drag =
+            self.live_drag && (self.interaction.is_captured() || self.drag_paint.active() || ui.input(|input| input.pointer.primary_down()));
+        let drag_layout = self
+            .live_drag
+            .then(|| {
+                frame
+                    .preview
+                    .as_ref()
+                    .filter(|preview| preview.rejection.is_none())
+                    .and_then(|preview| preview.projected.as_ref())
+                    .or(self.interaction.detached_layout())
+            })
+            .flatten();
         let mut renderer = WorkspaceContentHost {
             ui,
             frame_content,
             layout: &frame.layout,
-            move_source: self.interaction.move_source(),
+            move_source: (!self.live_drag).then_some(self.interaction.move_source()).flatten(),
+            drag_cards: capture_drag.then_some(&mut drag_cards),
+            drag_layout,
             open_menu: self.menu.as_ref(),
             controls: &mut frame.controls,
             metadata: &metadata,
@@ -935,7 +1000,7 @@ impl WorkspacePanelHost {
         // the intended resolved geometry, but never publish it as actual paint
         // or an input/occlusion shield, even if no further egui pass is allowed.
         let mut unpainted_instances = Vec::new();
-        for (layer, bounds) in &unpainted {
+        for (layer, bounds, sizing) in &unpainted {
             let hidden_sections: Vec<_> = frame
                 .layout
                 .sections
@@ -946,6 +1011,16 @@ impl WorkspacePanelHost {
                 .iter()
                 .flat_map(|section| std::iter::once(section.instance.clone()).chain(section.tabs.iter().map(|tab| tab.instance.clone())))
                 .collect();
+            // A new Area measures before it paints. Preserve only the editor
+            // that still owns focus; restore it after a fresh response returns.
+            if *sizing && ui.is_enabled() && ui.is_visible() && ui.input(|input| input.focused) && !ui_kit::Container::modal_input_blocked(ui.ctx()) {
+                self.restore_content_focus |= self.content_focus.as_ref().is_some_and(|bookmark| {
+                    self.owned_focus == Some(bookmark.id)
+                        && ui.memory(|memory| memory.focused()) == Some(bookmark.id)
+                        && bookmark.logically_presented(runtime)
+                        && hidden_sections.iter().any(|section| section.instance == bookmark.key.instance && !section.collapsed)
+                });
+            }
             unpainted_instances.extend(hidden_instances.iter().cloned());
             let clipped = logical_rect(egui_rect(*bounds).intersect(egui_rect(frame.layout.capacity)));
             // Remove one occurrence: a visible card can occupy the same rect.
@@ -1032,6 +1107,12 @@ impl WorkspacePanelHost {
                 }
             }
         }
+        let logical_focus_eligible = self.restore_content_focus
+            && ui.input(|input| input.focused)
+            && self.content_focus.as_ref().is_some_and(|bookmark| bookmark.logically_presented(runtime));
+        // A passive return cannot outlive deliberate hiding or owner/focus loss.
+        // A modal may still wait while that logical presentation remains valid.
+        self.restore_content_focus &= logical_focus_eligible;
         if self.restore_content_focus && !ui_kit::Container::modal_input_blocked(ui.ctx()) {
             let current = ui.memory(|memory| memory.focused());
             let deliberate = current.is_some_and(|id| ui.ctx().read_response(id).is_some_and(|response| response.gained_focus()));
@@ -1040,11 +1121,8 @@ impl WorkspacePanelHost {
             } else if current.is_none()
                 && let Some(bookmark) = &self.content_focus
             {
-                let eligible = bookmark.scope == scope
-                    && runtime.instance_owner(&bookmark.key.instance).is_ok_and(|owner| owner == bookmark.key.owner)
-                    && runtime.layout().availability(&bookmark.key.instance) == Availability::Available
-                    && frame.layout.sections.iter().any(|section| section.instance == bookmark.key.instance && !section.collapsed)
-                    && self.content_reports.get(&bookmark.id).is_some_and(|report| report.key == bookmark.key && report.scope == bookmark.scope);
+                let eligible =
+                    self.content_reports.get(&bookmark.id).is_some_and(|report| report.key == bookmark.key && report.scope == bookmark.scope);
                 if eligible {
                     bookmark.restore_selection(ui.ctx());
                     ui.memory_mut(|memory| memory.request_focus(bookmark.id));
@@ -1054,7 +1132,8 @@ impl WorkspacePanelHost {
             }
         }
         self.paint_menu(ui, runtime, native.capabilities(), &metadata, &owners, &mut frame, &mut commands, allow_actions, locale);
-        self.pending = Some(PendingHostCommands { scope, window, frame_number, allow_actions, commands, pointer_events, mount: mount.clone() });
+        self.pending =
+            Some(PendingHostCommands { scope, window, frame_number, allow_actions, commands, pointer_events, mount: mount.clone(), drag_cards });
         self.overlays = overlays;
         self.frame = Some(frame);
         mount
@@ -1085,11 +1164,12 @@ impl WorkspacePanelHost {
         }
         self.capture_metrics(runtime, services.models)?;
         self.capture_reservations(runtime, catalogue)?;
-        let PendingHostCommands { scope, frame_number, allow_actions, mut commands, mut pointer_events, mount, .. } = pending;
+        let PendingHostCommands { scope, frame_number, allow_actions, mut commands, mut pointer_events, mount, drag_cards, .. } = pending;
         let Some(mut frame) = self.frame.take() else {
             ui.ctx().request_repaint();
             return Ok(());
         };
+        let painted_landing = frame.preview.as_ref().and_then(|preview| preview.target.clone());
         frame.reply.capabilities = runtime.layout().inspect().capabilities;
         frame.reply = super::runtime::normalize_native_reply(frame.reply, &self.native_capabilities);
         let stale = frame.layout.revision != runtime.layout().inspect().revision;
@@ -1210,14 +1290,15 @@ impl WorkspacePanelHost {
             frame.preview = None;
         }
         if let Some(preview) = &frame.preview
+            && !(self.live_drag && self.interaction.move_source().is_some())
             && preview.rejection.is_none()
             && preview.projected.is_some()
         {
             let now = ui.input(|input| input.time);
             let started = *self.preview_started.get_or_insert(now);
-            let duration = crate::theme::panel_motion_duration(ui.ctx(), runtime.environment().motion == Motion::Reduced);
+            let duration = solidcraft_theme::panel_motion_duration(ui.ctx(), runtime.environment().motion == Motion::Reduced);
             let progress = if duration <= 0.0 { 1.0 } else { ((now - started) as f32 / duration).clamp(0.0, 1.0) };
-            let opacity = crate::theme::panel_motion_ease(progress);
+            let opacity = solidcraft_theme::panel_motion_ease(progress);
             if let Some(projected) = &preview.projected {
                 for section in &projected.sections {
                     if section.outer != preview.bounds
@@ -1446,7 +1527,41 @@ impl WorkspacePanelHost {
         if painted_move_source.as_ref() != self.interaction.move_source() {
             ui.ctx().request_repaint();
         }
-        if let (Some(instance), Some(at)) = (self.interaction.move_source(), self.interaction.move_position())
+        let source = self.interaction.move_source();
+        if self.live_drag && painted_landing.as_ref() != frame.preview.as_ref().and_then(|preview| preview.target.as_ref()) {
+            ui.ctx().request_repaint();
+        }
+        let landing = frame.preview.as_ref().filter(|preview| preview.rejection.is_none()).and_then(|preview| preview.projected.as_ref());
+        if source.is_none() && drag_cards.is_empty() {
+            self.drag_paint.clear();
+        }
+        if self.live_drag && !drag_cards.is_empty() && (source.is_some() || self.drag_paint.active()) {
+            let visual = landing.or(self.interaction.detached_layout()).or(frame.next_layout.as_ref()).unwrap_or(&frame.layout);
+            let landing_preview = frame.preview.as_ref().filter(|_| landing.is_some() && source.is_some());
+            let preview_bounds =
+                self.drag_paint.show(ui, &drag_cards, visual, source, landing_preview, runtime.environment().motion == Motion::Reduced);
+            if source.is_some() {
+                for section in &visual.sections {
+                    if !drag_cards.iter().any(|card| card.instance == section.instance)
+                        && let Ok(presentation) = runtime.instance_presentation(&section.instance)
+                    {
+                        // A tab activated only by a proposal has no body paint
+                        // in this pass. Keep its projected card and title visible.
+                        super::drag_paint::paint_unmounted(ui, visual, section, &presentation.title, source == Some(&section.instance));
+                    }
+                }
+            }
+            if let Some(preview) = landing_preview {
+                let destination = egui_rect(preview.bounds);
+                let bounds = preview_bounds.unwrap_or(destination);
+                ui_kit::panel_host_preview(ui, bounds, true, None, 1.0);
+                if let Some(marker) = preview.tab_marker {
+                    ui_kit::panel_host_tab_insertion(ui, egui_rect(marker).translate(bounds.min - destination.min), 1.0);
+                }
+            }
+        }
+        if (!self.live_drag || landing.is_none())
+            && let (Some(instance), Some(at)) = (source, self.interaction.move_position())
             && let Ok(presentation) = runtime.instance_presentation(instance)
         {
             ui_kit::panel_host_drag_title(
@@ -2183,6 +2298,8 @@ struct WorkspaceContentHost<'a> {
     frame_content: &'a mut dyn FramePanelContent,
     layout: &'a HostLayout,
     move_source: Option<&'a InstanceId>,
+    drag_cards: Option<&'a mut Vec<CardPaint>>,
+    drag_layout: Option<&'a HostLayout>,
     open_menu: Option<&'a HostMenu>,
     controls: &'a mut Vec<HostFrameControl>,
     metadata: &'a BTreeMap<InstanceId, PanelPresentation>,
@@ -2196,7 +2313,7 @@ struct WorkspaceContentHost<'a> {
     motion: Motion,
     commands: &'a mut Vec<HostCommand>,
     allow_actions: bool,
-    unpainted: &'a mut Vec<(egui::LayerId, LogicalRect)>,
+    unpainted: &'a mut Vec<(egui::LayerId, LogicalRect, bool)>,
 }
 
 impl PanelHost for WorkspaceContentHost<'_> {
@@ -2238,28 +2355,57 @@ impl PanelHost for WorkspaceContentHost<'_> {
             &fallback
         };
         let appearance = style.appearance(section.surface, section.peek || section.zone == Zone::Floating);
+        let panel_id = section_surface_id(self.scope, self.window, &section.section);
+        let layer = if section.peek || section.zone == Zone::Floating {
+            egui::LayerId::new(egui::Order::Background, panel_id.with("area"))
+        } else {
+            self.ui.layer_id()
+        };
+        // Lay out the real body once at its landing size. Capture the resulting
+        // paint and animate from the committed position without stretching widgets.
+        let committed_bounds = egui_rect(section.outer);
+        let projected = self.drag_layout.and_then(|layout| {
+            layout.sections.iter().find(|target| {
+                target.instance == section.instance
+                    && target.inline == section.inline
+                    && target.collapsed == section.collapsed
+                    && target.outer.size.width == section.outer.size.width
+                    && (target.zone == Zone::Floating) == (section.zone == Zone::Floating)
+            })
+        });
+        let paint_section = projected.unwrap_or(section);
+        let paint_bounds = egui_rect(paint_section.outer);
+        let chrome_offset = paint_bounds.min - committed_bounds.min;
+        let paint_context = projected.filter(|target| target.outer != section.outer || target.body != section.body).map(|target| PanelContext {
+            outer: target.outer,
+            usable_body: target.body.or(target.inline_content),
+            preview_geometry: true,
+            ..context.clone()
+        });
+        let content_context = paint_context.as_ref().unwrap_or(context);
+        let start = self.drag_cards.as_ref().map(|_| shape_count(self.ui.ctx(), layer));
         ui_kit::panel_host_surface(
             self.ui,
-            section_surface_id(self.scope, self.window, &section.section),
-            egui_rect(section.outer),
+            panel_id,
+            paint_bounds,
             section.peek || section.zone == Zone::Floating,
             appearance.fill,
             matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. }).then(|| style.palette(appearance)),
             |ui, content_clip| {
                 if (section.peek || section.zone == Zone::Floating) && (!ui.is_visible() || ui.is_sizing_pass()) {
-                    self.unpainted.push((ui.layer_id(), section.outer));
+                    self.unpainted.push((ui.layer_id(), section.outer, ui.is_sizing_pass()));
                     return;
                 }
                 // A surface response provides semantic focus and owns only the actual
                 // painted card; child controls retain their own accessible responses.
-                let response = ui.interact(egui_rect(section.outer), surface_id, egui::Sense::click());
+                let response = ui.interact(paint_bounds, surface_id, egui::Sense::click());
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), &presentation.title));
                 if section.tabs.len() + section.hidden_tabs.len() > 1 {
                     let mut tablist = ui.new_child(
                         egui::UiBuilder::new()
                             .id_salt("tablist_semantics")
                             .scope_id(surface_id.with("tablist"))
-                            .max_rect(egui_rect(section.header))
+                            .max_rect(egui_rect(paint_section.header))
                             .accessibility_role(egui::accesskit::Role::TabList)
                             .accessibility_label(&presentation.title),
                     );
@@ -2289,7 +2435,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         tab_ui = ui.new_child(
                             egui::UiBuilder::new()
                                 .id_salt(control.id)
-                                .max_rect(egui_rect(control.bounds))
+                                .max_rect(egui_rect(control.bounds).translate(chrome_offset))
                                 .accessibility_parent(surface_id.with("tablist")),
                         );
                         &mut tab_ui
@@ -2300,7 +2446,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         ui_kit::panel_host_disclosure(
                             target_ui,
                             control.id,
-                            egui_rect(control.bounds),
+                            egui_rect(control.bounds).translate(chrome_offset),
                             label,
                             control.enabled,
                             section.collapsed,
@@ -2310,7 +2456,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         ui_kit::panel_host_control_label_opacity(
                             target_ui,
                             control.id,
-                            egui_rect(control.bounds),
+                            egui_rect(control.bounds).translate(chrome_offset),
                             HostChrome {
                                 label,
                                 icon: if matches!(target, HostPointerTarget::Menu { .. }) {
@@ -2371,19 +2517,25 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         }
                         _ => {}
                     });
+                    if let HostPointerTarget::HeaderAction { instance, action } = target
+                        && instance.0 == "history"
+                        && response.interact_rect.is_positive()
+                    {
+                        crate::scenario::publish_target(&format!("history:{}", action.0), response.interact_rect);
+                    }
                     let clicked = response.clicked();
                     let secondary = response.secondary_clicked();
                     if let Some(status) = data.and_then(|value| value.status.as_deref()) {
-                        response.clone().on_hover_text(status);
+                        response.clone().backing_on_hover_text(status);
                     }
                     if let HostPointerTarget::HeaderAction { action, .. } = target
                         && let Some(reason) = data
                             .and_then(|presentation| presentation.actions.iter().find(|binding| binding.id == *action))
                             .and_then(|binding| binding.disabled_reason.as_deref())
                     {
-                        response.clone().on_disabled_hover_text(reason);
+                        response.clone().backing_on_disabled_hover_text(reason);
                     }
-                    if self.allow_actions && (clicked || secondary) {
+                    if self.allow_actions && projected.is_none() && (clicked || secondary) {
                         match target {
                             HostPointerTarget::Collapse { .. } if clicked => self.commands.push(HostCommand::WidgetLayout(
                                 apply_action(
@@ -2403,6 +2555,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 ),
                                 control.id,
                             )),
+                            HostPointerTarget::HeaderAction { instance, .. } if secondary => {
+                                if let Some(at) = response.interact_pointer_pos() {
+                                    self.frame_content.header_action_context_menu(instance, at);
+                                }
+                            }
                             HostPointerTarget::Menu { instance } => self.commands.push(HostCommand::OpenMenu {
                                 menu: HostMenu::Panel(instance.clone()),
                                 anchor: control.bounds,
@@ -2433,27 +2590,27 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         }
                     }
                 }
-                let t = crate::theme::Tokens::get();
+                let t = solidcraft_theme::Tokens::get();
                 // The title and its controls share the card background. One
                 // kit separator spans the header, rather than per-control tiles.
                 if !section.collapsed && !section.inline {
-                    let header = egui_rect(section.header);
+                    let header = egui_rect(paint_section.header);
                     t.secondary_hline(ui.painter(), header.x_range(), header.bottom(), t.dialog_rule);
                 }
                 // Content scrolls only where it chooses. Each slot is an isolated
                 // bounded child, so malicious/minimum-size content cannot enlarge
                 // the outer host or cover the shared menu and tab strip. Keep
                 // content fills inside the frame's rounded corners as well.
-                let mut content_ui = ui.new_child(egui::UiBuilder::new().id_salt("content_clip").max_rect(egui_rect(section.outer)));
+                let mut content_ui = ui.new_child(egui::UiBuilder::new().id_salt("content_clip").max_rect(paint_bounds));
                 content_ui.set_clip_rect(content_clip);
                 let content_ui = &mut content_ui;
                 if !section.collapsed && section.inline {
-                    if let Some(body) = section.inline_content {
+                    if let Some(body) = paint_section.inline_content {
                         render_slot(
                             content_ui,
                             ContentSlot::Inline,
                             body,
-                            context,
+                            content_context,
                             content,
                             services,
                             self.frame_content,
@@ -2463,12 +2620,12 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         );
                     }
                 } else if !section.collapsed {
-                    if let Some(header) = content_header_bounds(section) {
+                    if let Some(header) = content_header_bounds(paint_section) {
                         render_slot(
                             content_ui,
                             ContentSlot::Header,
                             header,
-                            context,
+                            content_context,
                             content,
                             services,
                             self.frame_content,
@@ -2477,12 +2634,12 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             &mut failure,
                         );
                     }
-                    if let Some(body) = section.body {
+                    if let Some(body) = paint_section.body {
                         render_slot(
                             content_ui,
                             ContentSlot::Body,
                             body,
-                            context,
+                            content_context,
                             content,
                             services,
                             self.frame_content,
@@ -2491,11 +2648,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             &mut failure,
                         );
                     }
-                    if let Some(footer) = section.footer {
+                    if let Some(footer) = paint_section.footer {
                         let has_footer_actions = presentation.actions.iter().any(|action| !section.actions.iter().any(|(id, _)| *id == action.id));
                         let row_height = if has_footer_actions { self.layout.metrics.control_extent.min(footer.size.height) } else { 0.0 };
                         if row_height > 0.0 && egui_rect(footer).intersect(content_ui.clip_rect()).is_positive() {
-                            let inset = crate::theme::Tokens::get().space_4.min(footer.size.width / 2.0);
+                            let inset = solidcraft_theme::Tokens::get().space_4.min(footer.size.width / 2.0);
                             let row = LogicalRect {
                                 origin: Point { x: footer.origin.x + inset, y: footer.origin.y },
                                 size: Size { width: footer.size.width - 2.0 * inset, height: row_height },
@@ -2521,7 +2678,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                             ui.ctx().accesskit_node_builder(response.id, |node| node.set_toggled(pressed.into()));
                                         }
                                         let visible = response.rect.intersect(ui.clip_rect()).intersect(egui_rect(row));
-                                        if visible.is_positive() {
+                                        if projected.is_none() && visible.is_positive() {
                                             self.controls.push(HostFrameControl {
                                                 id: response.id,
                                                 target,
@@ -2531,11 +2688,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                                 enabled: action.enabled && response.enabled(),
                                             });
                                         }
-                                        if self.allow_actions && response.clicked() {
+                                        if self.allow_actions && projected.is_none() && response.clicked() {
                                             self.commands.push(HostCommand::Content(context.instance.clone(), action.id.clone(), response.id));
                                         }
                                         if let Some(reason) = &action.disabled_reason {
-                                            response.on_disabled_hover_text(reason);
+                                            response.backing_on_disabled_hover_text(reason);
                                         }
                                     }
                                 });
@@ -2549,7 +2706,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 origin: Point { x: footer.origin.x, y: footer.origin.y + row_height },
                                 size: Size { width: footer.size.width, height: remaining },
                             },
-                            context,
+                            content_context,
                             content,
                             services,
                             self.frame_content,
@@ -2566,8 +2723,15 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         && *id == section.section
                     {
                         let horizontal = !matches!(edge, HostResizeEdge::Left | HostResizeEdge::Right);
-                        let extent = if horizontal { section.outer.size.height } else { section.outer.size.width };
-                        ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name, horizontal, extent);
+                        let extent = if horizontal { paint_section.outer.size.height } else { paint_section.outer.size.width };
+                        ui_kit::panel_host_sash(
+                            ui,
+                            control.id,
+                            egui_rect(control.bounds).translate(chrome_offset),
+                            &control.accessible_name,
+                            horizontal,
+                            extent,
+                        );
                     }
                 }
                 if let Some(focused) = ui.memory(|memory| memory.focused())
@@ -2589,6 +2753,12 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 }
             },
         );
+        if let (Some(cards), Some(start)) = (self.drag_cards.as_mut(), start) {
+            let end = shape_count(self.ui.ctx(), layer);
+            if start < end {
+                cards.push(CardPaint { instance: geometry.instance.clone(), layer, bounds: paint_bounds, committed_bounds, start, end });
+            }
+        }
         if let Some(reason) = failure { Err(reason) } else { Ok(()) }
     }
 }
@@ -2610,7 +2780,7 @@ fn render_slot(
         return;
     }
     let bounds = egui_rect(bounds);
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let inset = bounds.shrink2(egui::vec2(t.space_4.min(bounds.width().max(0.0) / 2.0), t.space_2.min(bounds.height().max(0.0) / 2.0)));
     let clip = ui.clip_rect().intersect(inset);
     if !clip.is_positive() {
@@ -2744,7 +2914,7 @@ fn scroll_tracks(layout: &HostLayout) -> Vec<(bool, LogicalRect)> {
     if !capacity.is_positive() {
         return Vec::new();
     }
-    let thickness = crate::theme::Tokens::get().space_8.min(capacity.width()).min(capacity.height());
+    let thickness = solidcraft_theme::Tokens::get().space_8.min(capacity.width()).min(capacity.height());
     let horizontal = layout.extent.width > layout.capacity.size.width;
     let vertical = layout.extent.height > layout.capacity.size.height;
     let mut tracks = Vec::new();
@@ -2790,7 +2960,83 @@ impl WorkspacePanelHost {
         let (Some(menu), Some(anchor)) = (self.menu.clone(), self.menu_anchor) else {
             return;
         };
-        let Some(bounds) = menu_geometry(frame.layout.capacity, anchor) else {
+        let layout = runtime.layout().layout();
+        let mut groups = Vec::new();
+        let mut content_actions = Vec::new();
+        let mut tabs = Vec::new();
+        match &menu {
+            HostMenu::Panel(instance) => {
+                let Ok(section) = layout.containing(instance) else {
+                    self.clear_menu();
+                    return;
+                };
+                let mut presentation = Vec::new();
+                if runtime.layout().interaction().focused.as_ref() != Some(instance) || section.collapsed {
+                    presentation.push(HostSharedAction::Focus);
+                }
+                if section_collapsible(layout, runtime.layout().registry(), section).unwrap_or(false) {
+                    presentation.push(HostSharedAction::Collapse);
+                }
+                let mut placement: Vec<_> = [Zone::Left, Zone::Right, Zone::Bottom, Zone::Floating]
+                    .into_iter()
+                    .filter(|zone| *zone != section.location.zone() || section.tabs.len() > 1)
+                    .map(HostSharedAction::Move)
+                    .collect();
+                placement.extend(
+                    frame
+                        .layout
+                        .sections
+                        .iter()
+                        .filter(|card| card.section != section.id && !card.peek && intersect_rect(card.outer, frame.layout.capacity).is_some())
+                        .map(|card| HostSharedAction::Join(card.section.clone())),
+                );
+                if !cfg!(target_arch = "wasm32") {
+                    placement.push(HostSharedAction::Popout);
+                }
+                for group in [presentation, placement, vec![HostSharedAction::Close]] {
+                    let admitted: Vec<_> = group
+                        .into_iter()
+                        .filter_map(|shared| {
+                            let action = shared_action(
+                                runtime,
+                                instance,
+                                &shared,
+                                &native,
+                                frame.layout.capacity,
+                                &frame.layout.geometry_policy.identity_reservations,
+                            )
+                            .ok()?;
+                            prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, action.clone()).ok()?;
+                            Some((shared, action))
+                        })
+                        .collect();
+                    if !admitted.is_empty() {
+                        groups.push(admitted);
+                    }
+                }
+                let actions = metadata.get(instance).into_iter().flat_map(|presentation| &presentation.actions);
+                content_actions.extend(actions.filter(|entry| {
+                    !frame.controls.iter().any(|control| {
+                        matches!(
+                            &control.target,
+                            HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance: owner, action })
+                                if owner == instance && *action == entry.id
+                        )
+                    })
+                }));
+                tabs.extend(section.tabs.iter().filter(|tab| *tab != instance));
+            }
+            HostMenu::Tabs(section) => {
+                if let Ok(section) = layout.section(section) {
+                    tabs.extend(&section.tabs);
+                }
+            }
+        }
+        let has_shared = !groups.is_empty();
+        let has_content = !content_actions.is_empty();
+        let rows = groups.iter().map(Vec::len).sum::<usize>() + content_actions.len() + 2 * tabs.len() + usize::from(self.last_rejection.is_some());
+        let separators = (groups.len() + usize::from(has_content) + tabs.len()).saturating_sub(1);
+        let Some(bounds) = menu_geometry(frame.layout.capacity, anchor, rows, separators) else {
             self.clear_menu();
             return;
         };
@@ -2813,150 +3059,99 @@ impl WorkspacePanelHost {
                 return;
             }
             frame.menu_bounds = Some(logical_rect(bounds));
-            egui::ScrollArea::vertical().id_salt(("items", scroll_id)).max_height(ui.available_height()).show(ui, |ui| {
+            egui::ScrollArea::vertical().id_salt(("items", scroll_id)).min_scrolled_height(0.0).max_height(ui.available_height()).show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 0.0;
                 if let Some(reason) = &self.last_rejection {
-                    ui.colored_label(crate::theme::Tokens::get().form_error, locale.text(rule_key(reason.rule)));
+                    ui.colored_label(solidcraft_theme::Tokens::get().form_error, locale.text(rule_key(reason.rule)));
                 }
-                match &menu {
-                    HostMenu::Panel(instance) => {
-                        if let Some(presentation) = metadata.get(instance) {
-                            ui.label(&presentation.title);
-                            if let Some(status) = &presentation.status {
-                                ui.label(status);
-                            }
+                if let HostMenu::Panel(instance) = &menu {
+                    for (index, group) in groups.into_iter().enumerate() {
+                        if index > 0 {
+                            ui_kit::Menu::separator(ui);
                         }
-                        let mut actions = vec![HostSharedAction::Focus];
-                        if runtime.layout().layout().containing(instance).is_ok_and(|section| {
-                            section_collapsible(runtime.layout().layout(), runtime.layout().registry(), section).unwrap_or(false)
-                        }) {
-                            actions.push(HostSharedAction::Collapse);
-                        }
-                        actions.extend([Zone::Left, Zone::Right, Zone::Bottom, Zone::Floating].into_iter().map(HostSharedAction::Move));
-                        actions.extend(
-                            runtime
-                                .layout()
-                                .layout()
-                                .sections
-                                .iter()
-                                .filter(|section| !section.tabs.contains(instance))
-                                .map(|section| HostSharedAction::Join(section.id.clone())),
-                        );
-                        actions.extend([HostSharedAction::Popout, HostSharedAction::Close]);
-                        for shared in actions {
+                        for (shared, action) in group {
                             let target = HostControlTarget::Shared { instance: instance.clone(), action: shared.clone() };
                             let label = shared_label(&shared, instance, runtime, metadata, locale);
-                            let action = shared_action(
-                                runtime,
-                                instance,
-                                &shared,
-                                &native,
-                                frame.layout.capacity,
-                                &frame.layout.geometry_policy.identity_reservations,
-                            )
-                            .and_then(|action| {
-                                prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, action.clone())?;
-                                Ok(action)
-                            });
-                            let reason = action.as_ref().err().map(|reason| locale.text(rule_key(reason.rule)).to_owned());
-                            let response = menu_row(ui, control_id(runtime, owners, &target), &label, action.is_ok(), &mut self.menu_reveal);
+                            let collapsed = layout.containing(instance).is_ok_and(|section| section.collapsed);
+                            let response = menu_row(
+                                ui,
+                                control_id(runtime, owners, &target),
+                                &label,
+                                shared_menu_icon(&shared, collapsed, frame.layout.direction),
+                                true,
+                                &mut self.menu_reveal,
+                            );
+                            self.menu_items.push(response.id);
+                            if shared == HostSharedAction::Collapse {
+                                ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(!collapsed));
+                            }
+                            record_control(frame, &response, target, &label, true, bounds.intersect(ui.clip_rect()));
+                            if allow_actions && response.clicked() {
+                                commands.push(HostCommand::WidgetLayout(action, response.id));
+                            }
+                        }
+                    }
+                    if has_content {
+                        if has_shared {
+                            ui_kit::Menu::separator(ui);
+                        }
+                        let spec = layout.instance(instance).and_then(|panel| runtime.layout().registry().get(&panel.kind)).ok();
+                        for action in content_actions {
+                            let target = HostControlTarget::Content { instance: instance.clone(), action: action.id.clone() };
+                            let registered = spec.and_then(|spec| spec.header_actions.iter().find(|entry| entry.id == action.id));
+                            let response = menu_row(
+                                ui,
+                                control_id(runtime, owners, &target),
+                                &action.label,
+                                registered.map_or("settings", |entry| entry.icon.as_str()).into(),
+                                action.enabled,
+                                &mut self.menu_reveal,
+                            );
                             if response.enabled() {
                                 self.menu_items.push(response.id);
                             }
-                            if shared == HostSharedAction::Collapse {
-                                ui.ctx().accesskit_node_builder(response.id, |node| {
-                                    node.set_expanded(!runtime.layout().layout().containing(instance).is_ok_and(|section| section.collapsed))
-                                });
+                            if let Some(pressed) = action.pressed {
+                                ui.ctx().accesskit_node_builder(response.id, |node| node.set_toggled(pressed.into()));
                             }
-                            record_control(frame, &response, target, &label, action.is_ok(), bounds.intersect(ui.clip_rect()));
-                            if allow_actions
-                                && response.clicked()
-                                && let Ok(action) = action
-                            {
-                                commands.push(HostCommand::WidgetLayout(action, response.id));
-                            }
-                            if let Some(reason) = reason {
-                                response.on_disabled_hover_text(reason);
-                            }
-                        }
-                        if let Some(presentation) = metadata.get(instance) {
-                            for action in &presentation.actions {
-                                let target = HostControlTarget::Content { instance: instance.clone(), action: action.id.clone() };
-                                let response =
-                                    menu_row(ui, control_id(runtime, owners, &target), &action.label, action.enabled, &mut self.menu_reveal);
-                                if response.enabled() {
-                                    self.menu_items.push(response.id);
-                                }
-                                if let Some(pressed) = action.pressed {
-                                    ui.ctx().accesskit_node_builder(response.id, |node| node.set_toggled(pressed.into()));
-                                }
-                                record_control(frame, &response, target, &action.label, action.enabled, bounds.intersect(ui.clip_rect()));
-                                if allow_actions && response.clicked() {
-                                    let registered = runtime
-                                        .layout()
-                                        .layout()
-                                        .instance(instance)
-                                        .and_then(|panel| runtime.layout().registry().get(&panel.kind))
-                                        .is_ok_and(|spec| spec.header_actions.iter().any(|entry| entry.id == action.id));
-                                    if registered {
-                                        commands.push(HostCommand::WidgetLayout(
-                                            apply_action(
-                                                frame.layout.revision,
-                                                vec![Mutation::HeaderAction { instance: instance.clone(), action: action.id.clone() }],
-                                            ),
-                                            response.id,
-                                        ));
-                                    } else {
-                                        commands.push(HostCommand::Content(instance.clone(), action.id.clone(), response.id));
-                                    }
-                                }
-                                if let Some(reason) = &action.disabled_reason {
-                                    response.on_disabled_hover_text(reason);
+                            record_control(frame, &response, target, &action.label, action.enabled, bounds.intersect(ui.clip_rect()));
+                            if allow_actions && response.clicked() {
+                                if registered.is_some() {
+                                    commands.push(HostCommand::WidgetLayout(
+                                        apply_action(
+                                            frame.layout.revision,
+                                            vec![Mutation::HeaderAction { instance: instance.clone(), action: action.id.clone() }],
+                                        ),
+                                        response.id,
+                                    ));
+                                } else {
+                                    commands.push(HostCommand::Content(instance.clone(), action.id.clone(), response.id));
                                 }
                             }
-                        }
-                        // Collapsed and inline groups have one total header.
-                        // Retain access to inactive identities through the same
-                        // bounded shared menu, after the selected panel's actions.
-                        if let Ok(section) = runtime.layout().layout().containing(instance) {
-                            for tab in section.tabs.iter().filter(|tab| *tab != instance) {
-                                menu_instance(
-                                    ui,
-                                    runtime,
-                                    owners,
-                                    metadata,
-                                    frame,
-                                    commands,
-                                    &mut self.menu_items,
-                                    &mut self.menu_reveal,
-                                    tab,
-                                    bounds,
-                                    allow_actions,
-                                    locale,
-                                );
+                            if let Some(reason) = &action.disabled_reason {
+                                response.backing_on_disabled_hover_text(reason);
                             }
                         }
                     }
-                    HostMenu::Tabs(section) => {
-                        if let Ok(section) = runtime.layout().layout().section(section) {
-                            for instance in &section.tabs {
-                                menu_instance(
-                                    ui,
-                                    runtime,
-                                    owners,
-                                    metadata,
-                                    frame,
-                                    commands,
-                                    &mut self.menu_items,
-                                    &mut self.menu_reveal,
-                                    instance,
-                                    bounds,
-                                    allow_actions,
-                                    locale,
-                                );
-                            }
-                        }
+                }
+                for (index, instance) in tabs.into_iter().enumerate() {
+                    if has_shared || has_content || index > 0 {
+                        ui_kit::Menu::separator(ui);
                     }
+                    menu_instance(
+                        ui,
+                        runtime,
+                        owners,
+                        metadata,
+                        frame,
+                        commands,
+                        &mut self.menu_items,
+                        &mut self.menu_reveal,
+                        instance,
+                        bounds,
+                        allow_actions,
+                        locale,
+                    );
                 }
             });
             self.menu_reveal = None;
@@ -2964,24 +3159,35 @@ impl WorkspacePanelHost {
     }
 }
 
-fn menu_geometry(capacity: LogicalRect, anchor: LogicalRect) -> Option<egui::Rect> {
+fn menu_geometry(capacity: LogicalRect, anchor: LogicalRect, rows: usize, separators: usize) -> Option<egui::Rect> {
     let capacity = egui_rect(capacity);
-    if !capacity.is_positive() || !capacity.is_finite() {
+    if rows == 0 || !capacity.is_positive() || !capacity.is_finite() {
         return None;
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     if capacity.width() <= t.space_6 * 2.0 || capacity.height() <= t.space_6 * 2.0 {
         return None;
     }
-    let width = t.form_card_width.min(capacity.width());
-    let height = (t.control_height * 12.0 + t.space_12).min(capacity.height());
+    let width = ui_kit::LIST_W.min(capacity.width());
+    let content_height = rows as f32 * (t.control_height + t.space_2) + separators as f32 * (t.space_10 + 1.0);
+    let height = (content_height.min((t.control_height + t.space_2) * 12.0) + t.space_12).min(capacity.height());
     let left = anchor.origin.x.min(capacity.right() - width).max(capacity.left());
     let top = (anchor.origin.y + anchor.size.height).min(capacity.bottom() - height).max(capacity.top());
     Some(egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(width, height)))
 }
 
-fn menu_row(ui: &mut egui::Ui, id: egui::Id, label: &str, enabled: bool, reveal: &mut Option<egui::Id>) -> egui::Response {
-    let response = ui.push_id(id.with("menu"), |ui| ui.add_enabled_ui(enabled, |ui| ui_kit::button(ui, label, ui_kit::Button::Small)).inner).inner;
+fn menu_row(ui: &mut egui::Ui, id: egui::Id, label: &str, icon: ui_kit::Icon<'_>, enabled: bool, reveal: &mut Option<egui::Id>) -> egui::Response {
+    let response = ui
+        .push_id(id.with("menu"), |ui| {
+            ui.add_enabled_ui(enabled, |ui| {
+                let registry_id = format!("panel:{id:?}");
+                let mut row = ui_kit::MenuItem::new(&registry_id, label, icon);
+                row.enabled = enabled;
+                row.show(ui)
+            })
+            .inner
+        })
+        .inner;
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_role(egui::accesskit::Role::MenuItem));
     let requested = *reveal == Some(response.id);
     if requested {
@@ -2992,7 +3198,7 @@ fn menu_row(ui: &mut egui::Ui, id: egui::Id, label: &str, enabled: bool, reveal:
     if response.enabled() && response.has_focus() && (requested || response.gained_focus()) {
         response.scroll_to_me(None);
     }
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 fn record_control(frame: &mut HostFrame, response: &egui::Response, target: HostControlTarget, name: &str, enabled: bool, clip: egui::Rect) {
@@ -3024,44 +3230,55 @@ fn menu_instance(
     allow_actions: bool,
     locale: solidcraft_ui_text::Locale,
 ) {
-    let label = metadata.get(instance).map_or_else(|| locale.text("ui.panel_host.tab").to_owned(), |value| value.title.clone());
-    ui.label(&label);
-    if metadata.get(instance).is_some_and(|presentation| presentation.attention) {
-        ui.label(locale.text("ui.panel_host.attention"));
+    let presentation = metadata.get(instance);
+    let label = presentation.map_or_else(|| locale.text("ui.panel_host.tab"), |value| value.title.as_str());
+    let icon = presentation.map_or("list", |value| value.icon.as_str());
+    let target = HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Focus };
+    let action = apply_action(runtime.layout().inspect().revision, vec![Mutation::Focus { instance: instance.clone() }]);
+    let check = runtime.layout().prepare(action.clone());
+    let accessible = locale.format("ui.panel_host.focus_target", &[("title", label)]);
+    let response = menu_row(ui, control_id(runtime, owners, &target), &accessible, icon.into(), check.is_ok(), reveal);
+    if response.enabled() {
+        items.push(response.id);
     }
-    ui.horizontal(|ui| {
-        let target = HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Focus };
-        let action = apply_action(runtime.layout().inspect().revision, vec![Mutation::Focus { instance: instance.clone() }]);
-        let check = runtime.layout().prepare(action.clone());
-        let response = menu_row(ui, control_id(runtime, owners, &target), locale.text("ui.panel_host.focus"), check.is_ok(), reveal);
-        let accessible = locale.format("ui.panel_host.focus_target", &[("title", &label)]);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, check.is_ok() && ui.is_enabled(), &accessible));
-        ui.ctx().accesskit_node_builder(response.id, |node| node.set_role(egui::accesskit::Role::MenuItem));
-        if response.enabled() {
-            items.push(response.id);
-        }
-        record_control(frame, &response, target, &accessible, check.is_ok(), clip.intersect(ui.clip_rect()));
-        if allow_actions && response.clicked() {
-            commands.push(HostCommand::WidgetLayout(action, response.id));
-        }
-        if let Err(reason) = check {
-            response.on_disabled_hover_text(locale.text(rule_key(reason.rule)));
-        }
-        let target = HostControlTarget::PanelMenu { instance: instance.clone() };
-        let response = menu_row(ui, control_id(runtime, owners, &target), locale.text("ui.panel_host.menu"), true, reveal);
-        if response.enabled() {
-            items.push(response.id);
-        }
-        record_control(frame, &response, target, locale.text("ui.panel_host.menu"), true, clip.intersect(ui.clip_rect()));
-        if allow_actions && response.clicked() {
-            commands.push(HostCommand::OpenMenu {
-                menu: HostMenu::Panel(instance.clone()),
-                anchor: logical_rect(response.rect),
-                source: response.id,
-                secondary: false,
-            });
-        }
-    });
+    record_control(frame, &response, target, &accessible, check.is_ok(), clip.intersect(ui.clip_rect()));
+    if allow_actions && response.clicked() {
+        commands.push(HostCommand::WidgetLayout(action, response.id));
+    }
+    if let Err(reason) = check {
+        response.backing_on_disabled_hover_text(locale.text(rule_key(reason.rule)));
+    }
+    let target = HostControlTarget::PanelMenu { instance: instance.clone() };
+    let actions_label = format!("{label} — {}", locale.text("ui.panel_host.menu"));
+    let response = menu_row(ui, control_id(runtime, owners, &target), &actions_label, "dots".into(), true, reveal);
+    if response.enabled() {
+        items.push(response.id);
+    }
+    record_control(frame, &response, target, &actions_label, true, clip.intersect(ui.clip_rect()));
+    if allow_actions && response.clicked() {
+        commands.push(HostCommand::OpenMenu {
+            menu: HostMenu::Panel(instance.clone()),
+            anchor: logical_rect(response.rect),
+            source: response.id,
+            secondary: false,
+        });
+    }
+}
+
+fn shared_menu_icon(action: &HostSharedAction, collapsed: bool, direction: Direction) -> ui_kit::Icon<'static> {
+    match action {
+        HostSharedAction::Focus => "fit",
+        HostSharedAction::Close => "close",
+        HostSharedAction::Collapse if collapsed => return ui_kit::Icon::Paint(&ui_kit::panel_expand_menu_icon),
+        HostSharedAction::Collapse => return ui_kit::Icon::Paint(&ui_kit::panel_collapse_menu_icon),
+        HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) if matches!(direction.edge(*zone), Ok(PhysicalEdge::Left)) => "panel_dock_left",
+        HostSharedAction::Move(Zone::Left | Zone::Right) => "panel_dock_right",
+        HostSharedAction::Move(Zone::Bottom) => "panel_dock_bottom",
+        HostSharedAction::Move(Zone::Floating) => "panel_float",
+        HostSharedAction::Move(Zone::Window) | HostSharedAction::Popout => "panel_popout",
+        HostSharedAction::Join(_) => "list",
+    }
+    .into()
 }
 
 fn shared_label(
@@ -3075,13 +3292,23 @@ fn shared_label(
         return locale.text("ui.panel_host.expand").to_owned();
     }
     if let HostSharedAction::Join(section) = action {
-        let title = runtime
-            .layout()
+        let layout = runtime.layout();
+        let title = layout
             .layout()
             .section(section)
             .ok()
-            .and_then(|section| metadata.get(&section.active))
-            .map(|presentation| presentation.title.as_str())
+            .and_then(|target| {
+                let display = metadata.get(&target.active)?.title.as_str();
+                // The Render scene tree and Inspector can both show the title
+                // "Scene". Use the registered panel name when titles collide.
+                if metadata.iter().any(|(id, other)| id != &target.active && other.title == display) {
+                    let panel = layout.layout().instance(&target.active).ok()?;
+                    let spec = layout.registry().get(&panel.kind).ok()?;
+                    Some(locale.text(&spec.title_key))
+                } else {
+                    Some(display)
+                }
+            })
             .unwrap_or_else(|| locale.text("ui.panel_host.tab"));
         return locale.format("ui.panel_host.join_target", &[("title", title)]);
     }
@@ -3090,8 +3317,13 @@ fn shared_label(
             HostSharedAction::Focus => "ui.panel_host.focus",
             HostSharedAction::Close => "ui.panel_host.close",
             HostSharedAction::Collapse => "ui.panel_host.collapse",
-            HostSharedAction::Move(Zone::Left) => "ui.panel_host.left",
-            HostSharedAction::Move(Zone::Right) => "ui.panel_host.right",
+            HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) => {
+                if matches!(runtime.environment().direction.edge(*zone), Ok(PhysicalEdge::Left)) {
+                    "ui.panel_host.left"
+                } else {
+                    "ui.panel_host.right"
+                }
+            }
             HostSharedAction::Move(Zone::Bottom) => "ui.panel_host.bottom",
             HostSharedAction::Move(Zone::Floating) => "ui.panel_host.floating",
             HostSharedAction::Move(Zone::Window) | HostSharedAction::Popout => "ui.panel_host.popout",

@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::doc::point_cloud::{COORDINATES, ColorBy, Filter, Keep, MAX_FILTERS, Names, PLAIN, PointCloud, UNITS, byte, label_color};
 use solidcraft_engine::view::POINT_CLOUDS_FOLDER;
 
-use super::{Actions, Row, draw_row, is_open, panel_pos, rows_start_open, toggle, toggle_folder};
+use super::{Actions, Row, draw_row, is_open, rows_start_open, toggle, toggle_folder};
 use crate::SolveApp;
 use crate::context_menu::Target;
 use crate::ui_kit;
@@ -24,7 +24,7 @@ use point_cloud_tracks::{Ask, Paint, Tracks};
 use range_track::{Part, Track, range_track};
 
 /// Filters the GPU applies; the others are kept but not drawn.
-pub const DRAWN_FILTERS: usize = solidcraft_gpu::view::FILTERS;
+pub const DRAWN_FILTERS: usize = solidcraft_viewport_gpu::view::FILTERS;
 
 /// The Edit Point Cloud card: the cloud, the undo depth when it opened, what it worked out once
 /// for the cloud's data (the automatic height range, the number of dots), its tracks' bars, and
@@ -296,9 +296,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         _ => Paint::One,
     };
     let changes_of = c.colored_property().filter(|n| c.complex.integer(n)).map(str::to_string);
-    let at = panel_pos(app);
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_point_cloud_panel"), "point", &title)
-        .placed(egui::Align2::LEFT_TOP, at)
+        .placed(pivot, at)
         .fields()
         .actions("", solidcraft_ui_text::tr("ui.close"), None)
         .show(ctx, true, |ui| {

@@ -192,6 +192,7 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         .bodies
         .iter()
         .enumerate()
+        .filter(|(_, b)| !super::more::beyond_cylinder_reach(b, p))
         .filter_map(|(i, b)| {
             #[cfg(test)]
             super::cost_tests::count(|c| c.cylinder_search += 1);
@@ -764,6 +765,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         designation,
         length,
         modeled,
+        continuous_flanks,
         from,
         up_to,
         form,
@@ -785,7 +787,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     let extent = match (length, up_to) {
         (Some(e), _) => Extent::Length(val(vals, e, Kind::Length)?),
         (None, Some(crate::ThreadLimit::Face(q))) => Extent::UpToPoint(q.0),
-        (None, Some(crate::ThreadLimit::Plane(pl))) => Extent::UpTo(doc.resolve_plane_in(vals, pl, 0, Some(st))?),
+        (None, Some(crate::ThreadLimit::Plane(pl))) => Extent::UpTo(doc.resolve_plane_in(vals, pl, 0, f.component, Some(st))?),
         (None, None) => Extent::Full,
     };
     // A form left at its default is the one the designation names (`Tr20x4`).
@@ -826,7 +828,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             None => note,
         });
     }
-    if let Some(note) = cut(st, on, (*tip, angle, depth))? {
+    if let Some(note) = cut_with_flanks(st, on, (*tip, angle, depth), *continuous_flanks)? {
         *warning = Some(match warning.take() {
             Some(w) => format!("{w}; {note}"),
             None => note,
@@ -845,11 +847,18 @@ pub(super) fn runout(vals: &BTreeMap<String, Value>, e: &Option<crate::ThreadRun
     })
 }
 
-/// Cut a modelled thread resolved on its face into its body: the grooves (SMLib's exact screw
-/// sweeps, a taper's crests by its envelope) by one B-rep boolean, then the chamfered tip
-/// (`tip`, with its angle and depth when given). What the user should be told about the result, if
-/// anything, is returned.
+/// Cut a modelled thread with its historical half-turn faces and groove-before-chamfer
+/// order. Existing hole features use this layout; Thread features keep their saved choice.
 pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (ThreadTip, Option<f64>, Option<f64>)) -> Result<Option<String>> {
+    cut_with_flanks(st, on, (tip, angle, depth), false)
+}
+
+fn cut_with_flanks(
+    st: &mut ModelState,
+    on: ThreadOn,
+    (tip, angle, depth): (ThreadTip, Option<f64>, Option<f64>),
+    continuous_flanks: bool,
+) -> Result<Option<String>> {
     let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side, narrow, shoulder_unchecked } = on;
     let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
     let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
@@ -874,7 +883,7 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
             kernel::boolean(&input.body, &sleeve, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("narrowing the hole removed everything".into()))?;
         let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
         let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&filled, &[&l, &unnamed]));
-        input = Traced { body: filled, lineage };
+        input = Traced { body: filled, lineage, recipe: None };
         groove_radius = r_min;
     }
     // The exact grooves: SMLib's screw sweeps, cut by one B-rep boolean.
@@ -887,11 +896,28 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
         }
         false => None,
     };
+    // Preserve historical construction order when rebuilding an older feature.
+    let chamfer = |mut input: Traced| -> Result<Traced> {
+        if tip != ThreadTip::None {
+            for cone in tip_cones(&t, radius, ends, (tip, from_side), angle, depth, taper)? {
+                let faces = cone.face_count();
+                let cut =
+                    kernel::boolean(&input.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
+                let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
+                let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&cut, &[&l, &unnamed]));
+                input = Traced { body: cut, lineage, recipe: None };
+            }
+        }
+        Ok(input)
+    };
+    if continuous_flanks {
+        input = chamfer(input)?;
+    }
     let cut_grooves = |ends: [End; 2]| -> Result<(Option<Body>, usize)> {
         let mut grooves = Vec::new();
         for g in thread_grooves(&t, groove_radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
             let section = Region2 { outer: solidcore_record::Loop2::polygon(&g.section), holes: Vec::new() };
-            grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law)?);
+            grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law, continuous_flanks)?);
         }
         if let Some(taper) = taper
             && let Some(envelope) = taper_envelope(&t, radius, ends, taper)?
@@ -931,18 +957,10 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
     // The groove's faces have no role to name them by.
     let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
     let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
-    let mut nb = Traced { body: nb, lineage };
-    if tip != ThreadTip::None {
-        for cone in tip_cones(&t, radius, ends, (tip, from_side), angle, depth, taper)? {
-            let faces = cone.face_count();
-            let cut = kernel::boolean(&nb.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
-            let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
-            let lineage = nb.lineage.and_then(|l| crate::lineage::Lineage::step(&cut, &[&l, &unnamed]));
-            nb = Traced { body: cut, lineage };
-        }
-    }
+    let nb = Traced { body: nb, lineage, recipe: None };
+    let nb = if continuous_flanks { nb } else { chamfer(nb)? };
     if let Some(slot) = st.bodies.get_mut(i) {
-        *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+        *slot = mb.remade(nb);
     }
     Ok(note)
 }
@@ -950,7 +968,7 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
 /// The chamfered tip of an external thread (ISO 4753, chamfered end CH) at the free ends `tip`
 /// names (`Start`: the end of the axis `from`, which must be free; `Both`: each free end):
 /// the material outside a cone `angle` to the axis (default 45°) that reaches the diameter
-/// d_f = d - 2 `depth` at the face's end, as a ring to cut after the groove, so the last teeth
+/// d_f = d - 2 `depth` at the face's end, as a ring to cut from the stock, so the last teeth
 /// taper into it. ISO 4753 bounds d_f by the external thread's minor diameter; the default is
 /// that bound, d3 = d - 1.226869 P (ISO 724, the rounded root of the design profile). It lies
 /// below the modelled basic root d1, so the cone crosses the root cylinder and leaves a whole

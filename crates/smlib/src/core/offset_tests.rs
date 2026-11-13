@@ -327,7 +327,7 @@ fn solidcore_case(name: &'static str) -> Got {
             let size = if sheet { area(&body, 1e-8) } else { volume(&body, 1e-8) }.unwrap_or_else(|e| panic!("{name}: size: {e}"));
             let n = counts(&body).unwrap();
             let (rec, _) = native(&to_arrays(&body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-            solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+            solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
             let bx = bounds(&body).unwrap();
             Measured { size, bounds: bx, counts: n, kinds: kinds(&rec) }
         });
@@ -643,7 +643,7 @@ fn an_l_sheet_thickens() {
 /// solidcore#2350's parabolic sheet: the quadratic Bézier (-10, 0), (0, 10), (10, 0) lofted 20
 /// along z, a B-spline face whose radius of curvature at its apex is 10. Thickened 11 towards
 /// its centre of curvature its offset folds there: solidcore's one construction refuses it
-/// naming 10, the largest wall that works (`fixes.shell_one_construction`); 2 builds.
+/// naming 10, the largest wall that works; 2 builds.
 #[test]
 fn a_wall_thicker_than_its_face_curves_is_refused_naming_the_largest() {
     use crate::sweeps::Curve;

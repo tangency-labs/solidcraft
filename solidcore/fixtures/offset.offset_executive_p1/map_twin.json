@@ -1,0 +1,574 @@
+{
+  "cases": [
+    {
+      "name": "equal_up_same",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "equal_up_down",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "equal_flip_same",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "equal_flip_down",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "equal_d3",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 3.0,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "equal_negative_distance",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": -0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "equal_zero_distance",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.0,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "smaller_offset",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "smaller_offset_flip_down",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0.2,
+          0.2,
+          0.8,
+          0.8
+        ],
+        "flip": true,
+        "mate": true
+      }
+    },
+    {
+      "name": "truncated_offset",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0.5,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "truncated_offset_down",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          0.5,
+          1
+        ],
+        "flip": false,
+        "mate": true
+      }
+    },
+    {
+      "name": "larger_original",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          2,
+          2
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "larger_original_flip",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          2,
+          2
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": true,
+        "mate": false
+      }
+    },
+    {
+      "name": "disjoint",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          2,
+          2,
+          3,
+          3
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "small_rectangles",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          0.001,
+          0.001
+        ],
+        "offset": [
+          0,
+          0,
+          0.001,
+          0.001
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "huge_rectangles",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1000000.0,
+          1000000.0
+        ],
+        "offset": [
+          0,
+          0,
+          1000000.0,
+          1000000.0
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "shifted_2e-23",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          1.1920928955078125e-07,
+          0,
+          1.0000001192092896,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "shifted_2e-18",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          3.814697265625e-06,
+          0,
+          1.0000038146972656,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "shifted_2e-15",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          3.0517578125e-05,
+          0,
+          1.000030517578125,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "shifted_2e-12",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0.000244140625,
+          0,
+          1.000244140625,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "shifted_2e-8",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0.00390625,
+          0,
+          1.00390625,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "shifted_2e-5",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0.03125,
+          0,
+          1.03125,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "split_bottom_half",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": false,
+        "mate": false,
+        "split_bottom": 0.5
+      }
+    },
+    {
+      "name": "split_bottom_offcenter_down",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "flip": false,
+        "mate": true,
+        "split_bottom": 0.3
+      }
+    },
+    {
+      "name": "split_bottom_shifted_flip",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          0.000244140625,
+          0,
+          1.000244140625,
+          1
+        ],
+        "flip": true,
+        "mate": false,
+        "split_bottom": 0.5
+      }
+    },
+    {
+      "name": "overhanging_offset",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          -1.2,
+          0,
+          2.2,
+          1
+        ],
+        "flip": false,
+        "mate": false
+      }
+    },
+    {
+      "name": "overhanging_offset_flip_down",
+      "inputs": {
+        "op": "map_twin",
+        "offset_distance": 0.25,
+        "original": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "offset": [
+          -1.2,
+          0,
+          2.2,
+          1
+        ],
+        "flip": true,
+        "mate": true
+      }
+    }
+  ]
+}

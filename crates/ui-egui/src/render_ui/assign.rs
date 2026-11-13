@@ -494,7 +494,7 @@ pub(crate) fn hover_tooltip(app: &mut SolveApp, response: &egui::Response, candi
 }
 
 pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::Rect) {
-    crate::shell::register_panel(app, "render:selection", None, None);
+    crate::shell::register_panel(app, "render:selection", None);
     if super::result_active(app) || app.render_workspace.view.stage != super::Stage::Look {
         return;
     }
@@ -533,14 +533,14 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
         .collect::<Vec<_>>();
     let anchor = egui::pos2(
         crate::ui_kit::within(screen.center().x, free.left(), free.right()),
-        crate::ui_kit::within(screen.top() - crate::theme::Tokens::get().space_12, free.top(), free.bottom()),
+        crate::ui_kit::within(screen.top() - solidcraft_theme::Tokens::get().space_12, free.top(), free.bottom()),
     );
     let ctx = ui.ctx().clone();
     let pill = ui_kit::Container::selection_card(&ctx, egui::Id::unique("render_selection"), anchor, free, |ui| {
         ui_kit::selection_actions(ui, &selection_name(app, &sel), &actions)
     });
     crate::scenario::publish_rect("render:selection", pill.response.rect);
-    crate::shell::register_panel(app, "render:selection", Some(pill.response.rect), None);
+    crate::shell::register_panel(app, "render:selection", Some(pill.response.rect));
     match pill.inner {
         Some(0) => app.start("appearance.chain"),
         Some(1) => app.start("appearance.replace"),

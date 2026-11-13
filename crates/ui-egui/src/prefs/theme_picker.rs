@@ -15,7 +15,7 @@ pub(super) struct Classification {
 pub(super) fn theme_traits(t: &Tokens) -> Classification {
     let linear = solidcraft_color::srgb::decode8;
     let luminance = 0.2126 * linear(t.dialog_footer.r()) + 0.7152 * linear(t.dialog_footer.g()) + 0.0722 * linear(t.dialog_footer.b());
-    Classification { dark: luminance < 0.5, high: crate::theme::contrast_ratio(t.form_ink, t.dialog_footer) >= 20.0 }
+    Classification { dark: luminance < 0.5, high: solidcraft_theme::contrast_ratio(t.form_ink, t.dialog_footer) >= 20.0 }
 }
 
 pub(super) fn palette(p: &Prefs, id: &str) -> Tokens {
@@ -304,7 +304,17 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     let selected_index = visible.iter().position(|e| e.id == reveal);
     let identity = format!("{reveal}:{:?}:{:?}:{}:{}", state.tone, state.high, state.imported, state.grid);
     let reveal_key = ui.make_persistent_id("theme_picker_reveal");
-    let changed = ui.data(|d| d.get_temp::<String>(reveal_key)).as_ref() != Some(&identity);
+    // The theme in use also comes into view each time the picker does (#11445): Preferences
+    // opens, or its page or a cleared search shows it again. Only then: the arrows, the wheel and
+    // a drag move the row freely while it stays in view.
+    let shown_key = ui.make_persistent_id("theme_picker_shown");
+    let pass = ui.ctx().cumulative_pass_nr();
+    let returning = ui.data_mut(|d| {
+        let returning = d.get_temp::<u64>(shown_key).is_none_or(|last| last.saturating_add(1) < pass);
+        d.insert_temp(shown_key, pass);
+        returning
+    });
+    let changed = returning || ui.data(|d| d.get_temp::<String>(reveal_key)).as_ref() != Some(&identity);
     let mut chosen = None;
     let mut card = |ui: &mut egui::Ui, index: usize, width: f32| {
         let Some(e) = visible.get(index) else { return };
@@ -372,7 +382,19 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             state.imported = false;
         });
     } else {
-        ui_kit::theme_browser(ui, "appearance_theme_picker", visible.len(), state.grid, changed.then_some(selected_index).flatten(), &mut card);
+        let arrows = ui_kit::PageLabels {
+            previous: solidcraft_ui_text::tr("prefs.appearance.previous_themes"),
+            next: solidcraft_ui_text::tr("prefs.appearance.next_themes"),
+        };
+        ui_kit::theme_browser(
+            ui,
+            "appearance_theme_picker",
+            visible.len(),
+            state.grid,
+            changed.then_some(selected_index).flatten(),
+            &arrows,
+            &mut card,
+        );
     }
     ui.data_mut(|d| {
         d.insert_temp(key, state.clone());

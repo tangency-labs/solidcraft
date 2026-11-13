@@ -70,11 +70,27 @@ pub(crate) fn stored(doc: &Document, text: &str) -> String {
 }
 
 /// A computed model-space value written back to an editable field. Use all significant digits:
-/// display precision must never round a value that will be sent back to the model.
+/// display precision must never round a value that will be sent back to the model. Snapped
+/// drag writes go through [`model_drag`] instead (#9035).
 pub(crate) fn model(doc: &Document, mm: f64) -> String {
     let unit = unit(doc);
     let scale = unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
     format!("{} {unit}", mm / scale)
+}
+
+/// A snapped-drag length for an editable field: rounded to Preferences › Length decimals, but
+/// never coarser than the snap step so the written value still matches what the arrow snapped to
+/// (#9035). Alt/free drag keeps [`model`]'s full precision.
+pub(crate) fn model_drag(doc: &Document, mm: f64, step_mm: f64, decimals: u8) -> String {
+    let u = unit(doc);
+    let scale = unit_info(u).map(|(_, scale)| scale).unwrap_or(1.0);
+    if !mm.is_finite() || !scale.is_finite() || scale <= 0.0 {
+        return format!("{mm} {u}");
+    }
+    let step_u = if step_mm.is_finite() && step_mm > 0.0 { step_mm / scale } else { 0.0 };
+    let step_places = if step_u > 0.0 { (-step_u.log10()).ceil().max(0.0) as u8 } else { 0 };
+    let places = decimals.max(step_places).min(8);
+    solidcraft_engine::doc::display_units::format_length(mm, u, places)
 }
 
 /// A computed length shown in an editable field or a message, in the design's unit, to a
@@ -86,6 +102,51 @@ pub(crate) fn shown(doc: &Document, mm: f64) -> String {
     let text = format!("{:.6}", mm / scale);
     let text = text.trim_end_matches('0').trim_end_matches('.');
     format!("{} {unit}", if text == "-0" || text.is_empty() { "0" } else { text })
+}
+
+/// The diameter in a radius worked out from one, `(D) / 2`: what a diameter typed into Cylinder
+/// or Sphere is kept as (#6609). `None` for any other radius, such as `(a) / (b) / 2`.
+pub(crate) fn diameter_of(radius: &str) -> Option<&str> {
+    inside(radius, "(", ") / 2")
+}
+
+/// A diameter switched to the radius (`twice` false) or a radius to the diameter, so the size
+/// stays: a number keeps its unit (`20 mm` and `10 mm`), a size switched before goes back to its
+/// text, and any other expression is wrapped (`(d) / 2`, `2 * (r)`).
+pub(crate) fn scaled(text: &str, twice: bool) -> String {
+    let text = text.trim();
+    let back = if twice { diameter_of(text) } else { inside(text, "2 * (", ")") };
+    if let Some(back) = back {
+        return back.to_string();
+    }
+    if text.is_empty() {
+        return String::new();
+    }
+    if solidcraft_engine::doc::expr::is_literal(text) {
+        // The unit is the word at the end (`1e3 mm` is a thousand millimetres).
+        let number = text.trim_end_matches(char::is_alphabetic);
+        let unit = text.get(number.len()..).unwrap_or_default();
+        if let Ok(x) = number.replace(char::is_whitespace, "").replace(',', ".").parse::<f64>() {
+            let x = if twice { x * 2.0 } else { x / 2.0 };
+            return if unit.is_empty() { format!("{x}") } else { format!("{x} {unit}") };
+        }
+    }
+    if twice { format!("2 * ({text})") } else { format!("({text}) / 2") }
+}
+
+/// The text between `open` and `close` when they wrap all of `text`: the parenthesis `open` ends
+/// with is the one `close` starts with.
+fn inside<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let inner = text.trim().strip_prefix(open)?.strip_suffix(close)?;
+    let mut depth = 0usize;
+    for c in inner.chars() {
+        match c {
+            '(' => depth = depth.saturating_add(1),
+            ')' => depth = depth.checked_sub(1)?,
+            _ => {}
+        }
+    }
+    (depth == 0 && !inner.trim().is_empty()).then_some(inner.trim())
 }
 
 /// The editable length expressions in a dialog. Counts, angles, ratios, selectors and standard
@@ -131,9 +192,10 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             _ => vec![],
         },
         D::Sheet(k) => match k {
-            Sm::Flange { height, radius, distance, relief_size, own, .. } => {
+            Sm::Flange { height, radius, distance, relief_size, own, segments, .. } => {
                 let mut values = vec![height, radius, distance, relief_size];
                 values.extend(own.iter_mut().map(|(_, _, height)| height));
+                values.extend(segments.iter_mut().flat_map(|(_, list)| list.iter_mut().map(|row| &mut row.height)));
                 values
             }
             Sm::Hem { length, gap, .. } => vec![length, gap],

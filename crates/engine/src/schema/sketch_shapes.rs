@@ -1,5 +1,5 @@
 //! Contracts and result types for the drawing commands in `cmd/sketch.rs`: a line, a point, the
-//! circles and the arcs (#12953), the rectangles and the polygons (#13196).
+//! circles and the arcs (#12953), the rectangles and the polygons (#13196), and the two slots.
 
 use std::borrow::Cow;
 
@@ -26,7 +26,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
     let mut forms = vec![
         json!(point),
         json!({
-            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters.",
+            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
             "type": "array", "items": coordinate, "minItems": 2, "maxItems": 2
         }),
         json!({"description": "An existing point's id such as \"l1.end\" or \"p3\", or a snap such as \"mid:l1\".", "type": "string"}),
@@ -146,8 +146,9 @@ impl JsonSchema for LinePoints {
 /// (what the design makes of it, such as a line that is not there, stays the handler's).
 fn snap_form(v: &Value) -> Option<bool> {
     let text = v.as_str();
-    let snapped =
-        text.is_some_and(|t| ["mid:", "on:", "vertex:"].iter().any(|k| t.starts_with(k))) || v.get("vertex").is_some() || v.get("on_edge").is_some();
+    let snapped = text.is_some_and(|t| ["mid:", "on:", "vertex:", "x:"].iter().any(|k| t.starts_with(k)))
+        || v.get("vertex").is_some()
+        || v.get("on_edge").is_some();
     if !snapped {
         return None;
     }
@@ -156,7 +157,7 @@ fn snap_form(v: &Value) -> Option<bool> {
     let vertex =
         v.get("vertex").and_then(params::vec3).is_some() || text.and_then(|t| t.strip_prefix("vertex:")).is_some_and(|t| finite3(&numbers(t)));
     let edge = v.get("on_edge").and_then(params::vec3).is_some();
-    let mid = text.is_some_and(|t| t.starts_with("mid:"));
+    let mid = text.is_some_and(|t| t.starts_with("mid:") || t.starts_with("x:"));
     let on = text
         .and_then(|t| t.strip_prefix("on:"))
         .and_then(|t| t.rsplit_once(':'))
@@ -164,7 +165,8 @@ fn snap_form(v: &Value) -> Option<bool> {
     Some(vertex || edge || mid || on)
 }
 
-/// `sketch.point`'s `point`: `[x, y]` (numbers, or text expressions over the design's parameters),
+/// `sketch.point`'s `point`: `[x, y]` (numbers, or text expressions over the design's parameters;
+/// text naming no parameter is just that number, in the design's length unit, and does not itself fix the point),
 /// `{x, y}`, or a snap that makes the point. An existing point's id is not taken.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PointOrSnap(pub Value);
@@ -176,7 +178,7 @@ impl<'de> Deserialize<'de> for PointOrSnap {
             Some(true) => return Ok(PointOrSnap(v)),
             Some(false) => {
                 return Err(D::Error::custom(whole(format!(
-                    "`point` {v} is not a snap it takes: \"mid:<line>\", \"on:<curve>:x,y\", \"vertex:x,y,z\", {{vertex: [x,y,z]}} or {{on_edge: [x,y,z]}}"
+                    "`point` {v} is not a snap it takes: \"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\", {{vertex: [x,y,z]}} or {{on_edge: [x,y,z]}}"
                 ))));
             }
             None => {}
@@ -205,11 +207,11 @@ impl JsonSchema for PointOrSnap {
         let coordinate = generator.subschema_for::<LengthExpr>();
         let model = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "A point to make: [x, y] in mm (a coordinate may be an expression over the design's parameters: the point then follows them), or a snap that makes it and holds it: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). An existing point's id is not taken.",
+            "description": "A point to make: [x, y] in mm (a coordinate may be an expression over the design's parameters: the point is then fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point), or a snap that makes it and holds it: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). An existing point's id is not taken.",
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2},
-                {"type": "string", "pattern": "^(mid:|on:|vertex:)"},
+                {"type": "string", "pattern": "^(mid:|on:|x:|vertex:)"},
                 {"type": "object", "properties": {"vertex": model}, "required": ["vertex"]},
                 {"type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}
             ]
@@ -225,7 +227,7 @@ pub struct DrawId(pub String);
 /// `id`, or an entry of `ids`, as `named_id` refuses it (the entry's position is not named).
 fn id_problem(id: &str) -> Option<String> {
     (!solidcraft_doc::persistent_name::text_fits_name(id))
-        .then(|| format!("the id `{id}` cannot be written into a name whole; give an id without `|`, `,`, `~`, `#` or `]`"))
+        .then(|| format!("the id `{id}` cannot be written into a name whole; give an id without `|`, `,`, `~`, `#`, `]`, `(` or `)`"))
 }
 
 impl<'de> Deserialize<'de> for DrawId {
@@ -532,6 +534,93 @@ pub struct ArcCenterPointParams {
     pub connect: Option<bool>,
 }
 
+/// A slot's `width`, as `slot_c2c` and `slot_overall` read it: a number above 1e-9 and below 1e9.
+/// A value that is missing, not a number or too small is the handler's one message.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SlotWidth(pub f64);
+
+impl<'de> Deserialize<'de> for SlotWidth {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_f64()
+            .and_then(params::finite)
+            .filter(|w| *w > 1e-9)
+            .map(SlotWidth)
+            .ok_or_else(|| D::Error::custom(whole("`width` must be positive")))
+    }
+}
+
+impl JsonSchema for SlotWidth {
+    fn schema_name() -> Cow<'static, str> {
+        "SlotWidth".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The slot's width in mm: the distance between its two straight sides, and the diameter of its round ends. Positive.",
+            "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9
+        })
+    }
+}
+
+/// Marks `p0`, `p1` and `width` required in a slot's schema. The types hold them as optional
+/// (`#[schemars(required)]` doesn't do this for a key with `serde(default)`), so that a call
+/// that leaves one out reaches the handler, which refuses it with its own message.
+fn slot_required(schema: &mut Schema) {
+    schema.insert("required".into(), json!(["p0", "p1", "width"]));
+}
+
+/// Draw a slot from the centres of its two round ends and its width.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = slot_required)]
+pub struct SlotCenterToCenterParams {
+    /// The sketch to draw in: its feature id or name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// The centre of one round end, as [x, y] or {x, y} in mm. An expression, a point's id or a
+    /// snap is not taken.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlainPoint")]
+    pub p0: Option<PlainPoint>,
+    /// The centre of the other round end. Not the same point as `p0`.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlainPoint")]
+    pub p1: Option<PlainPoint>,
+    /// The width of the slot, in mm.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "SlotWidth")]
+    pub width: Option<SlotWidth>,
+    /// Make a new point that lands exactly on an existing point (the origin too) coincident with
+    /// it. Default: true.
+    #[serde(default)]
+    pub connect: Option<bool>,
+}
+
+/// Draw a slot from the two ends of its whole length and its width.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = slot_required)]
+pub struct SlotOverallParams {
+    /// The sketch to draw in: its feature id or name. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+    /// The outer end of one round end, on the slot's axis, as [x, y] or {x, y} in mm. An
+    /// expression, a point's id or a snap is not taken.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlainPoint")]
+    pub p0: Option<PlainPoint>,
+    /// The outer end of the other round end. The distance from `p0` must be more than `width`.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlainPoint")]
+    pub p1: Option<PlainPoint>,
+    /// The width of the slot, in mm.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "SlotWidth")]
+    pub width: Option<SlotWidth>,
+    /// Make a new point that lands exactly on an existing point (the origin too) coincident with
+    /// it. Default: true.
+    #[serde(default)]
+    pub connect: Option<bool>,
+}
+
 /// What a command added to its sketch: the ids that the sketch has now and did not before.
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub struct Created {
@@ -548,7 +637,7 @@ pub struct Created {
     pub wires: Vec<String>,
 }
 
-/// What a drawing command returns for a line, a circle or an arc.
+/// What a drawing command returns for a line, a circle, an arc or a slot.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DrawResult {
     /// The ids of the curves drawn, in order.
@@ -566,6 +655,15 @@ pub struct DrawResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// What a straight slot returns, including its construction centre and middle point.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SlotResult {
+    #[serde(flatten)]
+    pub drawn: DrawResult,
+    pub centre_line: Option<String>,
+    pub middle: Option<String>,
 }
 
 /// What `sketch.point` returns.
@@ -615,7 +713,7 @@ impl JsonSchema for CornerPoint {
         let point = generator.subschema_for::<Point2>();
         let coordinate = generator.subschema_for::<LengthExpr>();
         json_schema!({
-            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters, such as [\"w / 2\", 5]: the corner then follows the parameters. Not a point's id or a snap.",
+            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters, such as [\"w / 2\", 5]: the corner is then fixed and follows the parameters; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner. Not a point's id or a snap.",
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2}
@@ -869,6 +967,10 @@ pub struct RectResult {
 /// What `sketch.rectangle.rounded` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RoundedRectResult {
+    /// The construction diagonal between opposite corner-arc centres.
+    pub diagonal: Option<String>,
+    /// The point held at the midpoint of the construction diagonal.
+    pub centre: Option<String>,
     /// The ids of the four sides, then the four corner arcs.
     pub curves: Vec<String>,
     /// The ids of the constraints added: the rectangle's, then the fillet's (tangencies and the

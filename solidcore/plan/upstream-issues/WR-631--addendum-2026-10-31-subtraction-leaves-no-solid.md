@@ -1,0 +1,9 @@
+Updates: WR-631
+
+An accepted cliff overflow whose subtraction leaves no manifold solid is now refused, where the port returned success with an empty or open body.
+
+- **Case:** #1467's 40 x 20 x 10 box, its top edge on the 10 high face rounded r10.01 or r10.02 (the round's face meets the bottom face a hair, 2e-5 at r10.02, from its edge; the earlier addendum's open item). The removal region closes into a manifold solid, but the manifold Boolean subtracting it from the box succeeds with an empty (r10.02) or open (r10.01) body. SolidCraft's rig sees the same on its case 5158 (r10.01 on a 10 mm face).
+- **The fork:** `SmFilletExecutive::SubtractRemovalRegion` (tangency-labs/smlib@8ba4667, @ae2a6de; no later commit of branch `replay/1.0.1` changes it) checks only the Boolean's status and that its result is the target (`SmMerge` always hands back the target), so it has no check for this. The fork's 1001 on case 5158 came from a build that predates tangency-labs/smlib@3f22e97.
+- **Rust port (not the fork's):** with `Kernel::fixes.fillet_cliff_overflow`, a subtraction from a manifold solid that leaves no faces or no manifold solid puts the target back and is refused with `FilletErrorType::NoRoom`, `NoRoomReason::CliffSubtractionLeavesNoSolid`, "Fillet Error: subtracting a cliff overflow's removal region leaves no solid" (`blend/fillet_executive/session/cliff_overflow.rs`). It is a refusal of room, as ae2a6de keeps each step's own error: a radius fitter backs off from it as from any blend too large for its faces. Why the Boolean loses the body at the sliver is not yet found.
+
+Tests: `crates/solidcore/tests/wr631_cliff_overflow_construction.rs` (`an_overflow_whose_subtraction_leaves_no_solid_is_refused`: r10.01 and r10.02, either a manifold solid of the closed-form volume or this refusal with the box left whole; it fails without the change, which built an open body at r10.01).

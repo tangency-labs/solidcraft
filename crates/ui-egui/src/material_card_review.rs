@@ -55,11 +55,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.material_card_review = Some(window);
         return;
     }
-    let palette = app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive());
-    let side =
-        if palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx) { crate::frame::Side::Left } else { crate::frame::Side::Right };
-    let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
-    let docked = egui::pos2(side.anchor_x(viewport), top);
+    let side = crate::frame::Side::Right;
+    let (_, docked) = crate::shell::floating_editor_anchor(app, ctx);
     let title = tr("ui.material_review.title");
     let moved = crate::frame::dock_offset(ctx, "material_card_review");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
@@ -72,13 +69,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         side,
         ui_kit::Panel::feature_frame(ctx, app.ui.layout, side),
     )
-    .wide();
-    let panel = if side == crate::frame::Side::Left {
-        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));
-        panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
-    } else {
-        panel
-    };
+    .width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min((docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W)));
     let mut close = false;
     panel.window(ctx).show(ctx, |ui| {
         let (closed, action) = panel.feature(

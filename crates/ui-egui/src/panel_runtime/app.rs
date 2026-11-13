@@ -12,6 +12,8 @@ pub trait AppPanelServices {
         Ok(())
     }
     fn refresh_read_only(&mut self, session: &Session) -> PanelResult<()>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_presentation_viewport(&mut self, _native: Option<&HostId>) {}
     fn services(&mut self) -> ContentServices<'_>;
 }
 
@@ -20,6 +22,8 @@ pub struct AppPanelRuntime {
     runtime: PanelRuntime,
     services: Box<dyn AppPanelServices>,
     native: Box<dyn NativeHostAdapter>,
+    #[cfg(not(target_arch = "wasm32"))]
+    desktop: Option<super::native::DesktopNativeAdapter>,
     host: Option<WorkspacePanelHost>,
     last_tick_frame: Option<u64>,
     last_error: Option<PanelError>,
@@ -38,6 +42,8 @@ impl AppPanelRuntime {
             runtime,
             services,
             native: Box::<InAppNativeAdapter>::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            desktop: None,
             host: None,
             last_tick_frame: None,
             last_error: None,
@@ -217,9 +223,13 @@ impl AppPanelRuntime {
         serde_json::to_value(self.runtime.layout().inspect()).map_err(|_| error(Rule::Schema, "cannot encode layout reset reply"))
     }
     pub(super) fn preference_identity_reservations(&self) -> PanelResult<std::collections::BTreeSet<SectionId>> {
+        Ok(self.placement_reservations()?.sections)
+    }
+
+    pub(super) fn placement_reservations(&self) -> PanelResult<LayoutPreparationContext> {
         let envelope =
             commands::current_envelope_snapshot(self.catalogue.as_ref(), &self.runtime.layout().inspect(), self.runtime.layout().registry())?;
-        Ok(preparation_context(&envelope)?.sections)
+        preparation_context(&envelope)
     }
     pub(super) fn apply_legacy_preferences(
         &mut self,
@@ -443,6 +453,146 @@ impl AppPanelRuntime {
         self.native = native;
         Ok(())
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn enable_desktop_windows(&mut self, ctx: &egui::Context) -> PanelResult<()> {
+        if self.production.is_some() && self.desktop.is_none() && !ctx.embed_viewports() {
+            let desktop = super::native::DesktopNativeAdapter::default();
+            self.set_native_adapter(Box::new(desktop.clone()))?;
+            self.desktop = Some(desktop);
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn show_desktop_windows(&mut self, app: &mut crate::SolveApp, ctx: &egui::Context, enabled: bool) -> PanelResult<()> {
+        use super::native_ui::WindowAction;
+
+        let (Some(desktop), Some(state)) = (self.desktop.clone(), self.production.clone()) else { return Ok(()) };
+        if !self.runtime.layout().layout().sections.iter().any(|section| section.location.zone() == Zone::Window) {
+            return Ok(());
+        }
+        self.reconcile(&app.session)?;
+        let windows: Vec<_> = self
+            .runtime
+            .layout()
+            .layout()
+            .sections
+            .iter()
+            .filter_map(|section| {
+                let SectionLocation::Window { host, .. } = &section.location else { return None };
+                Some((host.clone(), section.clone()))
+            })
+            .collect();
+        let mut failure = None;
+        for (host, section) in windows {
+            let paint = (|| -> PanelResult<()> {
+                let layout = self.runtime.layout();
+                let available = section.tabs.iter().map(|id| (id.clone(), layout.availability(id))).collect();
+                let active = (!app.home.open).then(|| presented_tab(&section, &available)).flatten();
+                let Some(active) = active else {
+                    desktop.suspend(&host);
+                    self.mount_native(&app.session, &host, &ResolvedLayout::default(), &mut EmptyPanelHost)?;
+                    return Ok(());
+                };
+                let (min, max) = tab_bounds(layout.layout(), layout.registry(), &section)?;
+                if !desktop.owns(&host, &section.id) {
+                    return Err(error(Rule::Lifecycle, "native window lost its layout registration"));
+                }
+                let title = self.runtime.instance_presentation(active)?.title;
+                let size = section.size;
+                let preferred =
+                    Size { width: size.width.max(360.0).clamp(min.width, max.width), height: size.height.max(440.0).clamp(min.height, max.height) };
+                let Some(builder) = desktop.builder(ctx, &host, active, title, preferred, (min, max)) else { return Ok(()) };
+                let Some(viewport) = desktop.viewport_id(&host) else { return Ok(()) };
+                let action = match desktop.ready(ctx, &host, &builder) {
+                    Ok(false) => return Ok(()),
+                    Err(reason) => {
+                        self.recover_unopened_window(&app.session, host, &section)?;
+                        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+                        return Err(reason);
+                    }
+                    Ok(true) => {
+                        self.services.set_presentation_viewport(Some(&host));
+                        let mut services = self.services.services();
+                        let mut content = super::production::ProductionFrame { app, state: state.clone() };
+                        let result = ctx.show_viewport_immediate(viewport, builder, |ui, class| {
+                            if class == egui::ViewportClass::EmbeddedWindow {
+                                return Err(error(Rule::Capability, "desktop viewport became unavailable"));
+                            }
+                            desktop.observe(ui.ctx(), &host, active);
+                            solidcraft_ui_registry::isolated(|| {
+                                super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
+                            })
+                        });
+                        self.services.set_presentation_viewport(None);
+                        result?
+                    }
+                };
+                let Some(action) = action else { return Ok(()) };
+                let close = matches!(action, WindowAction::Redock);
+                let mutation = match action {
+                    WindowAction::Activate(instance) => Mutation::Activate { instance },
+                    WindowAction::Expand(section) => Mutation::Collapse { section, collapsed: false },
+                    WindowAction::Content(instance, action) => Mutation::HeaderAction { instance, action },
+                    WindowAction::Redock => Mutation::NativeClose { host },
+                };
+                if let Err(reason) = self.dispatch(&app.session, LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] }) {
+                    if close {
+                        ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::CancelClose);
+                    }
+                    return Err(reason);
+                }
+                ctx.request_repaint();
+                Ok(())
+            })();
+            if let Err(reason) = paint {
+                failure.get_or_insert(reason);
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn recover_unopened_window(&mut self, session: &Session, host: HostId, section: &Section) -> PanelResult<()> {
+        let close = LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::NativeClose { host }] };
+        match self.dispatch(session, close.clone()) {
+            Ok(_) => return Ok(()),
+            // A failed OS window must not strand an open panel. Recovery may use
+            // the shared host's bounded overflow extent when the dock fills meanwhile.
+            Err(reason) if reason.rule == Rule::NoSpace => {
+                self.with_adapters(|runtime, native, services| runtime.dispatch(close, native, services))?;
+                return Ok(());
+            }
+            Err(_) => {}
+        }
+        // The former tab group may have filled or become incompatible during
+        // creation. Restore the whole cohort as one floating section.
+        let layout = self.runtime.layout().layout();
+        let id = next_section_id_with_reservations(layout, &self.preference_identity_reservations()?)?;
+        let mut mutations = Vec::new();
+        for (index, instance) in section.tabs.iter().enumerate() {
+            let destination = if index == 0 {
+                Destination::NewSection {
+                    section: id.clone(),
+                    index: layout.sections.len(),
+                    location: SectionLocation::Floating { origin: Point { x: 0.0, y: 0.0 } },
+                    size: section.size,
+                }
+            } else {
+                Destination::JoinTab { section: id.clone(), index }
+            };
+            mutations.push(Mutation::Move { instance: instance.clone(), destination });
+        }
+        mutations.push(Mutation::Activate { instance: section.active.clone() });
+        if section.collapsed {
+            mutations.push(Mutation::Collapse { section: id, collapsed: true });
+        }
+        self.with_adapters(|runtime, native, services| {
+            runtime.dispatch(LayoutAction::Apply { expected_revision: None, mutations }, native, services)
+        })?;
+        Ok(())
+    }
+
     pub fn native_capabilities(&self) -> HostCapabilities {
         self.native.capabilities()
     }
@@ -560,6 +710,27 @@ impl AppPanelRuntime {
     fn show_production_host(&mut self, app: &mut crate::SolveApp, ui: &mut egui::Ui) -> PanelResult<()> {
         self.prepare_host_paint(&app.session, ui)?;
         app.panel_content_frame = self.host.as_ref().and_then(WorkspacePanelHost::frame).cloned();
+        if let Some(frame) = &app.panel_content_frame {
+            for section in &frame.layout.sections {
+                let rect = super::workspace::egui_rect(section.outer);
+                match section.instance.0.as_str() {
+                    "browser" | "render-browser" => {
+                        app.shell.browser = Some(rect);
+                        crate::scenario::publish_rect("browser:card", rect);
+                    }
+                    "history" => {
+                        app.shell.history = Some(rect);
+                        crate::scenario::publish_rect("history:card", rect);
+                        crate::scenario::publish_rect(if section.zone == Zone::Bottom { "history:strip" } else { "history:vertical" }, rect);
+                    }
+                    crate::sketch_palette::INSTANCE_ID => {
+                        app.viewport.palette_rect = Some(rect);
+                        crate::scenario::publish_rect("sketch_palette:outer", rect);
+                    }
+                    _ => {}
+                }
+            }
+        }
         let mut services = self.services.services();
         let host = self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?;
         let pending = self.preferences.as_ref().is_some_and(|state| state.pending.is_some());
@@ -682,7 +853,9 @@ impl AppPanelRuntime {
                 if (self.runtime.environment() != &before || self.runtime.layout().inspect().revision != revision)
                     && let Some(host) = &mut self.host
                 {
-                    host.invalidate_context();
+                    // Presentation metadata can revise an unrelated panel.
+                    // Scope and focused-owner checks decide input ownership.
+                    host.invalidate_geometry();
                     host.reconcile_scope(&self.runtime);
                 }
             }
@@ -949,23 +1122,15 @@ impl crate::SolveApp {
     }
 }
 
-pub(crate) fn sync_production_setting(app: &mut crate::SolveApp) -> PanelResult<()> {
-    let production = app.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some());
-    if app.preferences.shared_panel_layout && app.panel_runtime.is_none() {
-        super::production::enable_production(app)
-    } else if !app.preferences.shared_panel_layout && production {
-        app.disable_panel_runtime()
-    } else {
-        Ok(())
+pub(super) fn ensure_production(app: &mut crate::SolveApp) -> PanelResult<()> {
+    if app.panel_runtime.is_none() {
+        super::production::enable_production(app)?;
     }
+    Ok(())
 }
 
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
-    // Switching placement systems waits until Preferences Apply/Cancel settles
-    // its snapshot. Content state itself always remains owned by the app.
-    if !app.prefs_window.open
-        && let Err(reason) = sync_production_setting(app)
-    {
+    if let Err(reason) = ensure_production(app) {
         app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
         if let Some(integration) = &mut app.panel_runtime {
             integration.last_error = Some(reason);
@@ -986,7 +1151,20 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         }
         integration.last_tick_frame = Some(frame);
         // Errors remain inspectable without inventing untranslated production UI.
-        let result = integration.sync_native_direction(direction).and_then(|()| integration.tick(&app.session));
+        if integration.production.is_some()
+            && let Some(host) = &mut integration.host
+        {
+            host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            host.set_live_drag(app.preferences.live_panel_drag_preview);
+        }
+        let result = (|| {
+            #[cfg(not(target_arch = "wasm32"))]
+            if !app.embedded && !app.embed_editor {
+                integration.enable_desktop_windows(ctx)?;
+            }
+            integration.sync_native_direction(direction)?;
+            integration.tick(&app.session)
+        })();
         if result.is_err() || !integration.preferences.as_ref().is_some_and(|state| state.failed) {
             integration.last_error = result.err();
         }
@@ -998,6 +1176,26 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         .is_some_and(|state| state.failed || state.rejected.is_some())
     {
         super::preferences::report_notice(app);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn show_desktop_windows(app: &mut crate::SolveApp, ctx: &egui::Context) {
+    let Some(mut integration) = app.panel_runtime.take() else { return };
+    let enabled = !crate::ui_kit::Container::modal_input_blocked(ctx);
+    if let Err(reason) = integration.show_desktop_windows(app, ctx, enabled) {
+        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+        integration.last_error = Some(reason);
+    }
+    app.panel_runtime = Some(integration);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl crate::SolveApp {
+    pub fn refresh_panel_monitors(&mut self, monitors: impl FnOnce() -> Vec<super::NativeMonitor>) {
+        if let Some(desktop) = self.panel_runtime.as_ref().and_then(|integration| integration.desktop.as_ref()) {
+            desktop.update_monitors(monitors);
+        }
     }
 }
 
@@ -1060,62 +1258,9 @@ pub(crate) fn finish_app_host(app: &mut crate::SolveApp, ui: &mut egui::Ui) {
 }
 
 impl crate::SolveApp {
-    /// Alternate placement only. The caller keeps the app bar, ribbon, existing
-    /// viewport/navigation and late feature/system overlays in their normal flow.
-    pub(crate) fn universal_workspace_ui(&mut self, ui: &mut egui::Ui) {
-        // Capture before either ribbon or bottom chrome consumes root layout.
-        // Rendering and picking always share this full domain below the app bar.
-        let render_domain = ui.available_rect_before_wrap();
-        self.viewport.host_confirm = None;
-        crate::ui_kit::Container::begin_host_windows(ui.ctx());
-        self.viewport.host_windows = Some(Vec::new());
-        if self.session.active_sketch.is_none() {
-            self.viewport.palette_rect = None;
-        }
-        // Clear stale Browser-owned metadata; the retained independent
-        // redefine/feature editor publishes its actual paint later in this pass.
-        if self.dialog.is_none() {
-            self.viewport.dialog_rect = None;
-        }
-        // Unoccupied dock capacity and ribbon spacing are application backdrop,
-        // not panel paint/input regions. Cover the native GPU clear through the
-        // shared viewport surface without changing any declared panel geometry.
-        let backdrop = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Viewport);
-        crate::ui_kit::Container::paint_frame(ui.painter(), backdrop.edge_frame(crate::theme::Tokens::get().panel), ui.available_rect_before_wrap());
-        crate::timeline::follow_view_pick(self);
-        crate::render_ui::focus_shortcut(self, ui);
-        crate::dialogs::sync_feature_edit(self);
-        if cfg!(not(target_arch = "wasm32")) && self.preferences.agent_chat_popped {
-            // Keep the previous embedded-window rect for hover shortcuts.
-            // `show` owns geometry/lifecycle and also polls in this path.
-            crate::agent_chat::show(self, ui);
-        } else {
-            // The root Assistant panel is suppressed. Forget only presentation
-            // geometry and placement, so a later pop uses the saved window place.
-            crate::agent_chat::poll(self, ui.ctx());
-            if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) {
-                crate::agent_chat::prepare_shared(self, ui.ctx());
-            } else {
-                self.agent_chat.panel_rect = None;
-                self.agent_chat.drop_rect = None;
-                self.agent_chat.dock_space = None;
-                self.agent_chat.window_placed = false;
-            }
-        }
-        self.shell.browser = None;
-        self.shell.browser_hidden = false;
-        self.shell.history = None;
-        self.shell.panels.clear();
-        self.shell.workspace_panels.clear();
-        self.shell.dialog_column = None;
-        self.shell.left_space = None;
-        self.shell.history_dock_space = None;
-        self.shell.history_folding = None;
-        self.shell.history_fold_motion = None;
-        self.publish_tab_accent(ui.ctx());
-        crate::browser::publish_row_prefs(self, ui.ctx());
+    pub(crate) fn prepare_workspace_panels(&mut self, ui: &egui::Ui, render_domain: egui::Rect, visible: bool) -> bool {
         let mut placement = render_domain;
-        self.shell.status_bar = if crate::status_bar::shown(self) {
+        let status_bar = if crate::status_bar::shown(self) {
             let height = crate::status_bar::HEIGHT.min(placement.height().max(0.0));
             let bar = egui::Rect::from_min_max(egui::pos2(placement.left(), placement.bottom() - height), placement.max);
             placement.max.y = bar.top();
@@ -1123,38 +1268,13 @@ impl crate::SolveApp {
         } else {
             None
         };
-        if !self.embedded {
+        let cards = if !self.embedded {
             let cards = crate::toolbar::shell_cards(self, placement);
-            self.shell.cards = vec![cards.workspace, cards.ribbon];
             placement.min.y = cards.bottom.min(placement.bottom()).max(placement.top());
+            vec![cards.workspace, cards.ribbon]
         } else {
-            self.shell.cards.clear();
-        }
-        if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && crate::render_workspace::active(self) {
-            // These remain legacy content surfaces. Their actual edge reservations
-            // constrain panel placement without changing the full render domain.
-            crate::render_ui::shots_strip(self, ui);
-            crate::render_workspace::panel(self, ui);
-            if self.ui.show_browser && !crate::render_ui::focused(self) {
-                // Keep the unmigrated library in its existing lower card slot.
-                // Reserve its real top edge before admitting shared placements.
-                let bounds = crate::shell::panel_bounds(self, ui.available_rect_before_wrap());
-                let upper = crate::ui_kit::Panel::stack_first_bounds(bounds);
-                crate::render_workspace::appearances_card(self, ui, crate::ui_kit::Panel::stack_next_bounds(bounds, upper));
-            }
-            for (id, (bounds, edge)) in &self.shell.workspace_panels {
-                if *id == "render:appearances" {
-                    placement.max.y = bounds.top().clamp(placement.top(), placement.bottom());
-                    continue;
-                }
-                match edge {
-                    Some(crate::ui_kit::Edge::Left) => placement.min.x = bounds.right().clamp(placement.left(), placement.right()),
-                    Some(crate::ui_kit::Edge::Right) => placement.max.x = bounds.left().clamp(placement.left(), placement.right()),
-                    Some(crate::ui_kit::Edge::Bottom) => placement.max.y = bounds.top().clamp(placement.top(), placement.bottom()),
-                    _ => {}
-                }
-            }
-        }
+            Vec::new()
+        };
         let gap = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Panel).gap();
         placement.min.x += gap.min(placement.width() / 2.0);
         placement.max.x -= gap.min(placement.width());
@@ -1162,13 +1282,11 @@ impl crate::SolveApp {
         if self.embedded {
             placement.min.y += gap.min(placement.height());
         }
-        let chrome: Vec<_> = self
-            .shell
-            .cards
+        let chrome: Vec<_> = cards
             .iter()
             .copied()
-            .chain(self.shell.status_bar)
-            .chain(self.shell.workspace_panels.values().map(|(bounds, _)| *bounds))
+            .chain(status_bar)
+            .chain(self.shell.workspace_panels.values().copied())
             .map(|bounds| bounds.intersect(render_domain))
             .filter(|bounds| bounds.is_positive() && bounds.is_finite())
             .map(logical_rect)
@@ -1176,7 +1294,11 @@ impl crate::SolveApp {
         let force_opaque = self.services.reduce_transparency.as_ref().and_then(|read| read(true)) == Some(true);
         let direction = crate::i18n::panel_direction(&self.preferences.language);
         let shortcuts = crate::keymap::panel_shortcuts(self);
-        let prepared = match &mut self.panel_runtime {
+        if visible {
+            self.shell.cards = cards;
+            self.shell.status_bar = status_bar;
+        }
+        match &mut self.panel_runtime {
             Some(integration) => {
                 let result = (|| {
                     integration.sync_native_direction(direction)?;
@@ -1193,13 +1315,68 @@ impl crate::SolveApp {
                 result.is_ok()
             }
             None => false,
-        };
+        }
+    }
+
+    /// The caller keeps the app bar, ribbon, existing
+    /// viewport/navigation and late feature/system overlays in their normal flow.
+    pub(crate) fn universal_workspace_ui(&mut self, ui: &mut egui::Ui) {
+        // Capture before either ribbon or bottom chrome consumes root layout.
+        // Rendering and picking always share this full domain below the app bar.
+        let render_domain = ui.available_rect_before_wrap();
+        self.viewport.host_confirm = None;
+        crate::ui_kit::Container::begin_host_windows(ui.ctx());
+        // Navigation runs before the editors repaint. Keep their last measured bounds
+        // until this frame has replacements so orbit and fitting use the same room.
+        self.viewport.host_windows.get_or_insert_with(Vec::new);
+        self.viewport.palette_rect = None;
+        // Clear stale Browser-owned metadata; the retained independent
+        // redefine/feature editor publishes its actual paint later in this pass.
+        if self.dialog.is_none() {
+            self.viewport.dialog_rect = None;
+        }
+        // Unoccupied dock capacity and ribbon spacing are application backdrop,
+        // not panel paint/input regions. Cover the native GPU clear through the
+        // shared viewport surface without changing any declared panel geometry.
+        let backdrop = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Viewport);
+        crate::ui_kit::Container::paint_frame(
+            ui.painter(),
+            backdrop.edge_frame(solidcraft_theme::Tokens::get().panel),
+            ui.available_rect_before_wrap(),
+        );
+        crate::timeline::follow_view_pick(self);
+        crate::dialogs::sync_feature_edit(self);
+        if cfg!(not(target_arch = "wasm32")) && self.preferences.agent_chat_popped {
+            // Keep the previous embedded-window rect for hover shortcuts.
+            // `show` owns geometry/lifecycle and also polls in this path.
+            crate::agent_chat::show(self, ui);
+        } else {
+            // The root Assistant panel is suppressed. Forget only presentation
+            // geometry and placement, so a later pop uses the saved window place.
+            crate::agent_chat::poll(self, ui.ctx());
+            if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) {
+                crate::agent_chat::prepare_shared(self, ui.ctx());
+            } else {
+                self.agent_chat.panel_rect = None;
+                self.agent_chat.drop_rect = None;
+                self.agent_chat.window_placed = false;
+            }
+        }
+        self.shell.browser = None;
+        self.shell.history = None;
+        self.shell.workspace_panels.clear();
+        self.publish_tab_accent(ui.ctx());
+        crate::browser::publish_row_prefs(self, ui.ctx());
+        let prepared = self.prepare_workspace_panels(ui, render_domain, true);
         self.shell.content = Some(render_domain);
         if render_domain.is_positive() && render_domain.is_finite() {
             crate::preview::update(self, ui.ctx());
             let mut scene = ui.new_child(egui::UiBuilder::new().id_salt("universal_panel_viewport").max_rect(render_domain));
             scene.set_clip_rect(scene.clip_rect().intersect(render_domain));
             self.show_workspace(&mut scene);
+        } else {
+            self.viewport.rect = None;
+            self.viewport.layout = None;
         }
         // Chrome paints and receives input above the full-domain scene. Its
         // measured rectangles affect usable space, never the camera projection.

@@ -1,0 +1,82 @@
+{
+ "cases": [
+  {
+   "name": "cov_quartic_circ_arc_tiny_sweep_1.2e-06",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp:405 N_CreateQuarticCircArc root v1 in [0,1] (coverage: nurbs/crv_common.rs:291)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 10.0,
+    "as": 0.0,
+    "ae": 1.2e-06,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "cov_quartic_circ_arc_tiny_sweep_2e-06",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp:405 N_CreateQuarticCircArc root v1 in [0,1] (coverage: nurbs/crv_common.rs:291)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 10.0,
+    "as": 0.0,
+    "ae": 2e-06,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "cov_quartic_circ_arc_tiny_sweep_2.4e-06",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp:405 N_CreateQuarticCircArc root v1 in [0,1] (coverage: nurbs/crv_common.rs:291)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 10.0,
+    "as": 0.0,
+    "ae": 2.4e-06,
+    "ctp": 4
+   }
+  }
+ ]
+}

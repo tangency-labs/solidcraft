@@ -59,7 +59,7 @@
  {"shot": "sketch_pattern_rect_grid"},
 
  {"note": "A picked Direction reaches the command's dir: along the Y origin axis the instances run up the sketch, not across it. The grid above has grown the sketch well past the frame the first circle was drawn in, so refit the view before clicking a point 100 mm out. It sits 40 mm up, clear of the bottom-right corner where the tool's prompt stacks and takes clicks (#7893)."},
- {"call": "ui.view", "params": {"view": "fit"}},
+ {"call": "ui.camera", "params": {"target": [75, 35, 0], "distance": 250}},
  {"start": "sketch.circle.center"},
  {"click": {"sketch": [100, 40]}},
  {"click": {"sketch": [105, 40]}},

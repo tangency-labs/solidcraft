@@ -1,0 +1,163 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "4294-oblique-through-all-cut-of-slotted-ring",
+  "expected": {
+    "bbox": {
+      "max": [
+        37.5,
+        40.0,
+        39.97186
+      ],
+      "min": [
+        -37.5,
+        -40.0,
+        -40.0
+      ]
+    },
+    "body_count": 1,
+    "method": "the ring section (YZ) is the annulus less the slot |y| < 1.5 above it: A = pi*(40^2-22.5^2) - Int_-1.5^1.5 (sqrt(1600-y^2)-sqrt(506.25-y^2)) dy. The XZ sketch has y = -Z, so the wedge is z >= -0.014, x <= -37.5 + z + 0.014, through all y: it removes Int over the section with z >= -0.014 of (z + 0.014) dA (python quadrature). V = 75*A - removed. Nothing may stand outside the ring: bbox x -37.5..37.5, y -40..40, z -40..39.97186 (the outer arc at the slot)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4294"
+    ],
+    "volume_mm3": 220314.0171,
+    "what": "a symmetric through-all cut by a 45 deg wedge across the end of a slotted ring (r 22.5..40, a 3 mm slot, 75 mm long): truck left a stray planar sheet out to the sketch's boundary at x = -65, with no error"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12
+    }
+  },
+  "records": "4294-oblique-through-all-cut-of-slotted-ring.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 33965.929723101384,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 220314.65264722702
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4294"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a symmetric through-all cut by a 45 deg wedge across the end of a slotted ring (r 22.5..40, a 3 mm slot, 75 mm long): truck left a stray planar sheet out to the sketch's boundary at x = -65, with no error",
+  "why_not": []
+}

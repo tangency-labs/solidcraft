@@ -104,6 +104,13 @@ plain!(
 
 impl<T> Answer for Option<T> {}
 
+/// Points classified one by one ([`super::classify_points`]): the first point's refusal is the call's.
+impl Answer for Vec<Result<crate::PointClass>> {
+    fn refusal(&self) -> Option<String> {
+        self.iter().find_map(|r| r.as_ref().err().map(Error::to_string))
+    }
+}
+
 /// The calls running now, in the order they started.
 static IN_FLIGHT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 

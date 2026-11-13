@@ -12,6 +12,7 @@ use crate::SolveApp;
 pub(super) enum Kind {
     Preview,
     Final,
+    DenoiseMask,
     LivePreview,
     LiveFinal,
 }

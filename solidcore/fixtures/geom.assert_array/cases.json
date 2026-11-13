@@ -1,0 +1,463 @@
+{
+ "cases": [
+  {
+   "name": "circle_radius_value_report",
+   "upstream_ref": "source/SMLib/src/SmCircle.cpp:428",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 7,
+     "test_index": 0,
+     "test_class": 14021,
+     "owner": 7,
+     "owner_type": 14021,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 0,
+     "tol": 1e-14,
+     "value": 0.00010000000000021103,
+     "owner_ts": 0,
+     "other_ts": 2
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "edge_boolean_report_0",
+   "upstream_ref": "source/SMLib/src/SmEdge.cpp:7498",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 11,
+     "test_index": 0,
+     "test_class": 16016,
+     "owner": 11,
+     "owner_type": 16016,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 0,
+     "tol": 1.23456e-61,
+     "value": 1.23456e-61,
+     "owner_ts": 5,
+     "other_ts": 2,
+     "message": ""
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "edge_boolean_report_1",
+   "upstream_ref": "source/SMLib/src/SmEdge.cpp:7505",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 11,
+     "test_index": 1,
+     "test_class": 16016,
+     "owner": 11,
+     "owner_type": 16016,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 0,
+     "tol": 1.23456e-61,
+     "value": 1.23456e-61,
+     "owner_ts": 5,
+     "other_ts": 2,
+     "message": ""
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "edge_boolean_report_2",
+   "upstream_ref": "source/SMLib/src/SmEdge.cpp:7508",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 11,
+     "test_index": 2,
+     "test_class": 16016,
+     "owner": 11,
+     "owner_type": 16016,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 0,
+     "tol": 1.23456e-61,
+     "value": 1.23456e-61,
+     "owner_ts": 5,
+     "other_ts": 2,
+     "message": ""
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "brep_pair_report_custom_message",
+   "upstream_ref": "source/SMLib/inc/SmAssertArray.h:957",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 3,
+     "test_index": 5,
+     "test_class": 16011,
+     "owner": 3,
+     "owner_type": 16011,
+     "other": 4,
+     "other_type": 16002,
+     "list_index": 0,
+     "tol": -1e-05,
+     "value": 3e-05,
+     "owner_ts": 1,
+     "other_ts": 4,
+     "message": "gap too big"
+    },
+    "set_value": 4e-05,
+    "owner_param": [
+     0.25,
+     0.75
+    ]
+   }
+  },
+  {
+   "name": "brep_validate_pointers_last",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp (sAssertValidatePointers_list)",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 3,
+     "test_index": 146,
+     "test_class": 16011,
+     "owner": 3,
+     "owner_type": 16011,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 1,
+     "tol": 1.23456e-61,
+     "value": 1.23456e-61
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "brep_list_index_out_of_range_default",
+   "upstream_ref": "source/SMLib/src/SmAssertArray.cpp:107",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 3,
+     "test_index": 0,
+     "test_class": 16011,
+     "owner": 3,
+     "owner_type": 16011,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 9,
+     "tol": 1.23456e-61,
+     "value": 1.23456e-61
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "polar_is_current",
+   "upstream_ref": "source/SMLib/src/SmAssertArray.cpp:53",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 2,
+     "test_index": 3,
+     "test_class": 12084,
+     "owner": 2,
+     "owner_type": 12084,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 1,
+     "tol": 1.23456e-61,
+     "value": 1.23456e-61
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "trimming_check_face",
+   "upstream_ref": "source/SMLib/src/SmAssertArray.cpp:139",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 2,
+     "test_index": 4,
+     "test_class": 12225,
+     "owner": 2,
+     "owner_type": 0,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 2,
+     "tol": 1.23456e-61,
+     "value": 1.23456e-61
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "poly_loop_null_message",
+   "upstream_ref": "source/SMLib/src/SmPoly.cpp (sAssertPolyLoop_list)",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 1,
+     "test_index": 0,
+     "test_class": 18006,
+     "owner": 1,
+     "owner_type": 18006,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 0,
+     "tol": 1.23456e-61,
+     "value": 1.23456e-61,
+     "message": null
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "unknown_type_default_list",
+   "upstream_ref": "source/SMLib/src/SmAssertArray.cpp:154",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 1,
+     "test_index": 0,
+     "test_class": 11001,
+     "owner": 1,
+     "owner_type": 0,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 0,
+     "tol": 1.23456e-61,
+     "value": 1.23456e-61
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "use_default_tol_and_neg_zero",
+   "upstream_ref": "source/SMLib/inc/SmTol.h:147",
+   "inputs": {
+    "op": "report",
+    "spec": {
+     "reporter": 1,
+     "test_index": 0,
+     "test_class": 14021,
+     "owner": 1,
+     "owner_type": 0,
+     "other": 0,
+     "other_type": 0,
+     "list_index": 0,
+     "tol": 9876543.21,
+     "value": -0.0
+    },
+    "set_value": null,
+    "owner_param": null
+   }
+  },
+  {
+   "name": "solution_array_assert_run",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1247",
+   "inputs": {
+    "op": "sequence",
+    "ops": [
+     {
+      "set_last_add": false
+     },
+     {
+      "add": {
+       "reporter": 5,
+       "test_index": 0,
+       "test_class": 12020,
+       "owner": 5,
+       "owner_type": 12020,
+       "other": 0,
+       "other_type": 0,
+       "list_index": 0,
+       "tol": 1.23456e-61,
+       "value": 1.23456e-61
+      }
+     },
+     {
+      "add": {
+       "reporter": 5,
+       "test_index": 0,
+       "test_class": 12020,
+       "owner": 5,
+       "owner_type": 12020,
+       "other": 0,
+       "other_type": 0,
+       "list_index": 0,
+       "tol": 1e-09,
+       "value": 1.0
+      }
+     },
+     {
+      "set_last_add": false
+     },
+     {
+      "add": {
+       "reporter": 5,
+       "test_index": 2,
+       "test_class": 12020,
+       "owner": 5,
+       "owner_type": 12020,
+       "other": 0,
+       "other_type": 0,
+       "list_index": 0,
+       "tol": 1.23456e-61,
+       "value": 1.23456e-61
+      }
+     },
+     {
+      "contains": {
+       "reporter": 99,
+       "test_index": 2,
+       "test_class": 12020,
+       "owner": 5,
+       "owner_type": 0,
+       "other": 0,
+       "other_type": 0,
+       "list_index": 0,
+       "tol": 1.23456e-61,
+       "value": 1.23456e-61
+      }
+     },
+     {
+      "contains": {
+       "reporter": 5,
+       "test_index": 1,
+       "test_class": 12020,
+       "owner": 5,
+       "owner_type": 0,
+       "other": 0,
+       "other_type": 0,
+       "list_index": 0,
+       "tol": 1.23456e-61,
+       "value": 1.23456e-61
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "edge_pair_reports_dedup",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:220",
+   "inputs": {
+    "op": "sequence",
+    "ops": [
+     {
+      "add": {
+       "reporter": 10,
+       "test_index": 1,
+       "test_class": 16016,
+       "owner": 10,
+       "owner_type": 16016,
+       "other": 20,
+       "other_type": 0,
+       "list_index": 0,
+       "tol": 1.23456e-61,
+       "value": 1.23456e-61
+      }
+     },
+     {
+      "add": {
+       "reporter": 10,
+       "test_index": 1,
+       "test_class": 16016,
+       "owner": 10,
+       "owner_type": 16016,
+       "other": 21,
+       "other_type": 0,
+       "list_index": 0,
+       "tol": 1.23456e-61,
+       "value": 1.23456e-61
+      }
+     },
+     {
+      "add": {
+       "reporter": 11,
+       "test_index": 1,
+       "test_class": 16016,
+       "owner": 10,
+       "owner_type": 16016,
+       "other": 20,
+       "other_type": 0,
+       "list_index": 0,
+       "tol": 1.23456e-61,
+       "value": 1.23456e-61
+      }
+     },
+     {
+      "set_last_add": true
+     },
+     {
+      "add": {
+       "reporter": 10,
+       "test_index": 1,
+       "test_class": 16011,
+       "owner": 10,
+       "owner_type": 16016,
+       "other": 20,
+       "other_type": 0,
+       "list_index": 1,
+       "tol": 1.23456e-61,
+       "value": 1.23456e-61
+      }
+     },
+     {
+      "add": {
+       "reporter": 10,
+       "test_index": 1,
+       "test_class": 16011,
+       "owner": 10,
+       "owner_type": 16016,
+       "other": 20,
+       "other_type": 0,
+       "list_index": 1,
+       "tol": 1.23456e-61,
+       "value": 1.23456e-61
+      }
+     },
+     {
+      "contains": {
+       "reporter": 0,
+       "test_index": 1,
+       "test_class": 16011,
+       "owner": 10,
+       "owner_type": 0,
+       "other": 20,
+       "other_type": 0,
+       "list_index": 1,
+       "tol": 1.23456e-61,
+       "value": 1.23456e-61
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty_sequence",
+   "upstream_ref": "source/SMLib/inc/SmAssertArray.h:478",
+   "inputs": {
+    "op": "sequence",
+    "ops": []
+   }
+  }
+ ]
+}

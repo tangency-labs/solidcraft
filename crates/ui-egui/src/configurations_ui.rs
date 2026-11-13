@@ -53,14 +53,14 @@ pub(super) fn configurations_rows(
         .enumerate()
         .map(|(index, label)| {
             let min_width = if index == 0 {
-                name_width + gap + status_width + crate::theme::Tokens::get().space_24
+                name_width + gap + status_width + solidcraft_theme::Tokens::get().space_24
             } else {
-                ui_kit::row_height() * 2.0 + crate::theme::Tokens::get().space_24
+                ui_kit::row_height() * 2.0 + solidcraft_theme::Tokens::get().space_24
             };
             if index == labels.len() - 1 {
                 ui_kit::Column::new(label, 0.0)
                     .icon_only()
-                    .min_content_width(crate::theme::Tokens::get().control_height + crate::theme::Tokens::get().space_12)
+                    .min_content_width(solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_12)
             } else {
                 let weight = if index == 0 {
                     1.6
@@ -76,6 +76,22 @@ pub(super) fn configurations_rows(
             }
         })
         .collect();
+    // Keyboard moves between the value cells: Enter down the column, Shift+Enter up, Tab and
+    // Shift+Tab along the row and on to the next or previous row.
+    let cells = egui::Id::unique("configuration_cells");
+    let names: Vec<&str> = tb.rows.iter().map(|(name, _)| name.as_str()).collect();
+    let target = |row: usize, column: usize, key: ui_kit::CellKey| -> Option<(String, String)> {
+        let width = tb.columns.len();
+        let at = |r: usize, c: usize| Some((names.get(r)?.to_string(), tb.columns.get(c)?.clone()));
+        match key {
+            ui_kit::CellKey::Down => at(row + 1, column),
+            ui_kit::CellKey::Up => at(row.checked_sub(1)?, column),
+            ui_kit::CellKey::Next if column + 1 < width => at(row, column + 1),
+            ui_kit::CellKey::Next => at(row + 1, 0),
+            ui_kit::CellKey::Previous if column > 0 => at(row, column - 1),
+            ui_kit::CellKey::Previous => at(row.checked_sub(1)?, width.checked_sub(1)?),
+        }
+    };
     ui_kit::table_custom(ui, "configuration_table", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
         table.headers(ui, |ui, index| {
             if index == labels.len() - 1 {
@@ -94,11 +110,11 @@ pub(super) fn configurations_rows(
                 false
             }
         });
-        for (name, values) in &tb.rows {
+        for (row_index, (name, values)) in tb.rows.iter().enumerate() {
             let active = tb.active.as_deref() == Some(name.as_str());
             // Rows off screen keep their space without building their cells; one with an edit
             // in progress stays live, so leaving its cell still commits the edit.
-            let editing = rule_editor.drafts.keys().any(|(row, _)| row == name);
+            let editing = rule_editor.drafts.keys().any(|(row, _)| row == name) || ui_kit::landing_in_row(ui.ctx(), cells, name);
             table.row_visible(ui, name, active, editing, |row| {
                 row.cell(|ui| {
                     // A measured name slot keeps status/actions inside the Configuration column.
@@ -126,7 +142,7 @@ pub(super) fn configurations_rows(
                         }
                     }
                 });
-                for (column, value) in tb.columns.iter().zip(values) {
+                for (column_index, (column, value)) in tb.columns.iter().zip(values).enumerate() {
                     row.cell(|ui| {
                         let (kind, _) = column_parts(column);
                         let shown = display_cell(kind, value);
@@ -138,16 +154,31 @@ pub(super) fn configurations_rows(
                             run(app, error, "config.row", json!({"name":name,"values":{column:choice}}));
                         }
                         crate::scenario::publish_handle(&format!("config:cell:{name}:{column}"), response.rect.center());
-                        let focused = response.has_focus();
+                        // A cell the keyboard has just landed in leaves this pass's key to the cell it came from.
+                        let landed = ui_kit::landing(ui, cells, name, column, &response, &text);
+                        let focused = response.has_focus() && !landed;
                         let completed = crate::params_dialog::complete(ui, &response, &mut text);
                         if response.changed() || completed {
                             rule_editor.drafts.insert(key.clone(), text.clone());
                         }
+                        let moved = if completed { None } else { ui_kit::cell_key(ui, focused || (response.lost_focus() && !landed)) };
+                        let goes = moved.and_then(|key| target(row_index, column_index, key));
+                        // Tab stays inside the table while there is a cell to go to; at either
+                        // end it leaves the table in egui's order.
+                        let tab_target =
+                            [ui_kit::CellKey::Next, ui_kit::CellKey::Previous].into_iter().any(|key| target(row_index, column_index, key).is_some());
+                        if tab_target {
+                            ui_kit::keep_tab_in_cell(ui, &response);
+                        }
                         let enter = !completed && focused && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-                        if response.lost_focus() || enter {
+                        let tabbed = focused && matches!(moved, Some(ui_kit::CellKey::Next | ui_kit::CellKey::Previous)) && goes.is_some();
+                        if response.lost_focus() || enter || tabbed {
                             rule_editor.drafts.remove(&key);
                             if text != shown {
                                 run(app, error, "config.row", json!({"name":name,"values":{column:cell_value(column,&text)}}));
+                            }
+                            if let Some((row, column)) = goes {
+                                ui_kit::land_in_cell(ui.ctx(), cells, &row, &column);
                             }
                         }
                     });
@@ -365,7 +396,7 @@ fn column_menu(
         }
         // The popup remembers its size: once the filter has emptied the list, a list that fills
         // again would be clipped to that small height, so a list that scrolls takes the full one.
-        let list_height = crate::theme::Tokens::get().space_24 * 12.0;
+        let list_height = solidcraft_theme::Tokens::get().space_24 * 12.0;
         egui::ScrollArea::vertical().max_height(list_height).min_scrolled_height(list_height).show(ui, |ui| {
             for (label, p) in &matching {
                 if ui_kit::button(ui, label.as_str(), ui_kit::Button::Normal).clicked() {

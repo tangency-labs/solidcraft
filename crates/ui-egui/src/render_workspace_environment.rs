@@ -1,9 +1,10 @@
 //! Standalone Environment inspector body. Drawing and source browsing never save a setup.
 use super::{ImageMethod, Stage, cpu, hdr, setups, studio};
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{SolveApp, theme::Tokens, ui_kit};
+use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::render_settings::{RenderJob, RenderSetup};
+use solidcraft_theme::Tokens;
 use std::sync::{Arc, Weak};
 
 #[derive(Clone, Debug, Default)]
@@ -264,7 +265,6 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui) {
         ground(app, ui);
         atmosphere(app, ui);
     });
-    stage_confirmation(app, ui.ctx());
 }
 
 pub(super) fn open_sources(app: &mut SolveApp) {
@@ -353,7 +353,7 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 let allowed = gpu || index != 4 || app.render_workspace.view.raytrace.path.is_some();
                                 let item = ui.add_enabled_ui(allowed, |ui| ui_kit::list_picker(ui, key, app.tr(key), index == selected)).inner;
                                 crate::scenario::publish_target(&format!("render:environment:source:{index}"), item.rect);
-                                let item = if allowed { item } else { item.on_hover_text(app.tr("render.cpu_celestial_path_required")) };
+                                let item = if allowed { item } else { item.backing_on_hover_text(app.tr("render.cpu_celestial_path_required")) };
                                 if item.clicked() {
                                     if index == 3 {
                                         open_sources(app);
@@ -429,7 +429,7 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ("seed", &sampling.seed.to_string()),
                     ],
                 );
-                let action = ui_kit::button(ui, app.tr("render.cpu_volume_enable_path"), ui_kit::Button::Normal).on_hover_text(detail);
+                let action = ui_kit::button(ui, app.tr("render.cpu_volume_enable_path"), ui_kit::Button::Normal).backing_on_hover_text(detail);
                 crate::scenario::publish_target("render:environment:enable-indirect", action.rect);
                 if action.clicked()
                     && let Err(error) = enable_indirect_lighting(app)
@@ -1080,7 +1080,7 @@ pub(super) fn atmosphere(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::checkbox(ui, app.tr("render.environment.medium"), &mut enabled)
                 })
                 .inner;
-            let toggle = if let Some(reason) = &prospective_reason { toggle.on_disabled_hover_text(reason) } else { toggle };
+            let toggle = if let Some(reason) = &prospective_reason { toggle.backing_on_disabled_hover_text(reason) } else { toggle };
             crate::scenario::publish_target("render:volume-enable", toggle.rect);
             changed |= toggle.changed();
             ui.add_enabled_ui(enabled, |ui| {
@@ -1133,7 +1133,7 @@ pub(super) fn atmosphere(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ("seed", &sampling.seed.to_string()),
                     ],
                 );
-                let action = ui_kit::button(ui, app.tr("render.cpu_volume_enable_path"), ui_kit::Button::Normal).on_hover_text(detail);
+                let action = ui_kit::button(ui, app.tr("render.cpu_volume_enable_path"), ui_kit::Button::Normal).backing_on_hover_text(detail);
                 crate::scenario::publish_target("render:volume-enable-path", action.rect);
                 if action.clicked()
                     && let Err(error) = enable_indirect_lighting(app)

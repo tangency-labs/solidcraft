@@ -1,14 +1,15 @@
 //! Frames and weldments (#4003). `frame.member` lays structural members along the lines of a frame
-//! sketch, their cross-section a built-in profile or a profile sketch. `frame.profile.list` lists
-//! the built-in profiles, `frame.profile.properties` works out a profile's section, and
-//! `frame.profile.insert` draws one into a sketch.
+//! sketch, their cross-section a built-in profile, a standard size or a profile sketch.
+//! `frame.profile.list` lists the built-in profiles and the standard sizes,
+//! `frame.profile.properties` works out a profile's section, and `frame.profile.insert` draws one
+//! into a sketch.
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::Value;
 use solidcore_record::{Loop2, Seg2, Vec2};
-use solidcraft_doc::expr::Kind;
+use solidcraft_doc::frame::sizes::{self, Family};
 use solidcraft_doc::frame::{self, Anchor, MemberProfile, Profile, ProfileSpec};
 use solidcraft_doc::{FeatureKind, SketchId};
 use solidcraft_sketch::Sketch;
@@ -20,7 +21,7 @@ use crate::params::{bad, bool_, expr, num, str_, string_list, vec2};
 use crate::schema::features::FeatureResult;
 use crate::schema::frame::{
     CreatedIds, FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo, ProfileListParams, ProfileListResult, ProfileOut,
-    ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection,
+    ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, SizeFamilyInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -37,7 +38,7 @@ const INSERT_CONTRACT: TypedContract<ProfileInsertParams> = TypedContract::new()
 /// The profile parameter, as every frame command documents it.
 macro_rules! profile_doc {
     () => {
-        "profile: {kind: bar|round_bar|rect_tube|round_tube|angle|channel|i_beam, …its dimensions: each a number in the design's units or a length expression over its parameters (\"tube_wall\", \"2 in\")} (frame.profile.list gives each kind's dimensions and an example; dimensions left out take defaults from the profile's size)"
+        "profile: {kind: bar|round_bar|rect_tube|round_tube|angle|channel|i_beam, …its dimensions: each a number in the design's units or a length expression over its parameters (\"tube_wall\", \"2 in\"); a channel's flange_slope is an angle (a number of degrees)} (frame.profile.list gives each kind's dimensions and an example; dimensions left out take defaults from the profile's size) | {size: a standard steel size by name, such as \"RSC 203x89\", \"PFC 200x90x30\", \"RSA 50x50x5\", \"SHS 100x100x5\", \"RHS 200x100x6.3\" or \"CHS 42.4x3.2\" (frame.profile.list lists them), alone: it brings its dimensions}"
     };
 }
 
@@ -51,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!(
         "sketch: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); ",
         profile_doc!(),
-        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
+        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); locate?: [x,y] (the profile point that sits on each line, in mm from the profile's own origin: a bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of other profiles; takes precedence over `anchor` and keeps the member attached at that point when the profile size changes); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the size's name, `RSC 203x89`, the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
     )),
     CommandSpec::new("frame.profile.list", "Profile Library", crate::checked!("frame.profile.list", list))
         .icon("library")
@@ -59,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ProfileListResult>)
-        .params("Returns kinds: [{kind, label, required, optional, example}]: the built-in profiles, each SolidCraft's own parametric definition"),
+        .params("family?: RSC|PFC|RSA|SHS|RHS|CHS (list only that family's sizes). Returns kinds: [{kind, label, required, optional, example}]: the built-in profiles, each SolidCraft's own parametric definition; and sizes: [{family, kind, standard, source, names, additional?}]: the standard steel sizes by name, each family with the published table its dimensions come from (frame.profile.properties with {profile: {size}} gives a size's dimensions and section)"),
     CommandSpec::new("frame.profile.properties", "Profile Properties", crate::checked!("frame.profile.properties", properties))
         .icon("measure")
         .noundo()
@@ -82,26 +83,30 @@ pub static COMMANDS: &[CommandSpec] = &[
     )),
 ];
 
-/// The `profile` parameter: its kind and each dimension as given, a number or an expression.
+/// The `profile` parameter: its kind and each dimension as given, a number or an expression; or a
+/// standard size by name, alone.
 fn profile_spec(cmd: &str, p: &Value) -> Result<ProfileSpec> {
     let v = p.get("profile").ok_or_else(|| bad(cmd, "`profile` is required (frame.profile.list gives the kinds)"))?;
+    if frame::size_with_dimensions(v) {
+        return Err(bad(cmd, format!("`profile`: {}", frame::SIZE_ALONE)));
+    }
     serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("`profile`: {e}")))
 }
 
-/// The profile a spec makes in this design: a bare number in the design's units, an expression
-/// over its parameters.
+/// The profile a spec makes in this design: a bare length in the design's units, a bare angle in
+/// degrees, an expression over its parameters.
 fn resolve(s: &Session, cmd: &str, spec: &ProfileSpec) -> Result<Profile> {
     let doc = &s.doc;
-    spec.resolve(|name, e| {
-        doc.eval(&doc.with_design_unit(e, Kind::Length), Kind::Length)
-            .map_err(|err| solidcraft_doc::DocError::Invalid(format!("profile `{name}`: {err}")))
+    spec.resolve(|name, e, kind| {
+        doc.eval(&doc.with_design_unit(e, kind), kind).map_err(|err| solidcraft_doc::DocError::Invalid(format!("profile `{name}`: {err}")))
     })
     .map_err(|e| bad(cmd, e.to_string()))
 }
 
-/// The profile of `p`, worked out in this design.
-fn profile(s: &Session, cmd: &str, p: &Value) -> Result<Profile> {
-    resolve(s, cmd, &profile_spec(cmd, p)?)
+/// The profile of `p`, worked out in this design, and the standard size it is, if it is one.
+fn profile(s: &Session, cmd: &str, p: &Value) -> Result<(Profile, Option<String>)> {
+    let spec = profile_spec(cmd, p)?;
+    Ok((resolve(s, cmd, &spec)?, spec.size))
 }
 
 /// A frame command's reply, built from its schema's type so the two can't drift apart.
@@ -109,17 +114,44 @@ fn frame_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
 }
 
-fn list(_: &mut Session, _: &Value) -> Result<Value> {
+fn list(_: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "frame.profile.list";
+    let only = match p.get("family") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_str()
+                .and_then(|f| Family::ALL.into_iter().find(|x| x.prefix() == f))
+                .ok_or_else(|| bad(cmd, "`family` must be RSC, PFC, RSA, SHS, RHS or CHS"))?,
+        ),
+    };
     let kinds = frame::profile_kinds().iter().map(ProfileKindInfo::from).collect();
-    frame_reply("frame.profile.list", ProfileListResult { kinds, param_warnings: Vec::new() })
+    let all = sizes::standard_sizes();
+    let sizes = Family::ALL
+        .into_iter()
+        .filter(|f| only.is_none_or(|o| o == *f))
+        .filter_map(|family| {
+            let members: Vec<&sizes::StandardSize> = all.iter().filter(|s| s.family == family).collect();
+            let first = members.first()?;
+            Some(SizeFamilyInfo {
+                family: family.prefix().to_string(),
+                kind: first.profile.kind().to_string(),
+                standard: family.standard().to_string(),
+                source: family.source().to_string(),
+                names: members.iter().map(|s| s.name.clone()).collect(),
+                additional: members.iter().filter(|s| s.additional).map(|s| s.name.clone()).collect(),
+            })
+        })
+        .collect();
+    frame_reply(cmd, ProfileListResult { kinds, sizes, param_warnings: Vec::new() })
 }
 
 /// The profile's section as the commands report it.
-fn section(cmd: &str, profile: &Profile, density: Option<f64>) -> Result<ProfileSection> {
+fn section(cmd: &str, profile: &Profile, size: Option<String>, density: Option<f64>) -> Result<ProfileSection> {
     let region = profile.region().map_err(|e| bad(cmd, e.to_string()))?;
     let s = frame::section(&region);
     Ok(ProfileSection {
         profile: ProfileOut(profile.filled()),
+        size,
         area: s.area,
         centroid: s.centroid,
         ixx: s.ixx,
@@ -134,7 +166,7 @@ fn section(cmd: &str, profile: &Profile, density: Option<f64>) -> Result<Profile
 
 fn properties(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "frame.profile.properties";
-    let profile = profile(s, cmd, p)?;
+    let (profile, size) = profile(s, cmd, p)?;
     let density = match p.get("density") {
         None | Some(Value::Null) => None,
         Some(_) => Some(
@@ -143,12 +175,12 @@ fn properties(s: &mut Session, p: &Value) -> Result<Value> {
                 .ok_or_else(|| bad(cmd, "`density` must be a positive number of kg/m³ (at most 1e6)"))?,
         ),
     };
-    frame_reply(cmd, ProfilePropertiesResult { section: section(cmd, &profile, density)?, param_warnings: Vec::new() })
+    frame_reply(cmd, ProfilePropertiesResult { section: section(cmd, &profile, size, density)?, param_warnings: Vec::new() })
 }
 
 fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "frame.profile.insert";
-    let profile = profile(s, cmd, p)?;
+    let (profile, size) = profile(s, cmd, p)?;
     let at = match p.get("at") {
         None | Some(Value::Null) => Vec2::ZERO,
         Some(v) => vec2(v).ok_or_else(|| bad(cmd, "`at` must be [x, y] in sketch millimetres"))?,
@@ -169,7 +201,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let region = profile.region().map_err(|e| bad(cmd, e.to_string()))?;
     let placed = frame::placed(&region, frame::anchor_point(std::slice::from_ref(&region), anchor), at, angle);
-    let section = section(cmd, &profile, None)?;
+    let section = section(cmd, &profile, size, None)?;
     let (created, info) = edit(s, p, cmd, false, |sk, _| {
         let before = sk.clone();
         for l in std::iter::once(&placed.outer).chain(&placed.holes) {
@@ -248,7 +280,8 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
             let spec = profile_spec(cmd, p)?;
             let pr = resolve(s, cmd, &spec)?;
             pr.region().map_err(|e| bad(cmd, e.to_string()))?;
-            (MemberProfile::Library { profile: spec }, pr.description())
+            let name = spec.size.clone().unwrap_or_else(|| pr.description());
+            (MemberProfile::Library { profile: spec }, name)
         }
         (None, Some(v)) => {
             let id = sketch_id(s, Some(v), cmd, "profile_sketch")?;
@@ -265,6 +298,18 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => serde_json::from_value(v.clone()).map_err(|_| {
             bad(cmd, "`anchor` must be origin, center, centroid, top_left, top, top_right, left, right, bottom_left, bottom or bottom_right")
         })?,
+    };
+    let locate: Option<[f64; 2]> = match p.get("locate") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let a = v.as_array().filter(|a| a.len() == 2).ok_or_else(|| bad(cmd, "`locate` must be [x, y] in the profile's own coordinates"))?;
+            let x = a[0].as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, "`locate` x must be a finite length"))?;
+            let y = a[1].as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, "`locate` y must be a finite length"))?;
+            if x.abs() > frame::MAX_PROFILE_SIZE || y.abs() > frame::MAX_PROFILE_SIZE {
+                return Err(bad(cmd, "`locate` is outside the largest profile"));
+            }
+            Some([x, y])
+        }
     };
     let angle = match p.get("angle") {
         None | Some(Value::Null) => None,
@@ -291,8 +336,17 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, format!("`names` must map up to {} line ids to names", frame::MAX_MEMBERS))),
     };
     let base = body_name.clone().unwrap_or(default_name);
-    let mut kind =
-        FeatureKind::FrameMember { path_sketch: SketchId(path_sketch), lines, profile, anchor, angle, mirror, body_name, names: BTreeMap::new() };
+    let mut kind = FeatureKind::FrameMember {
+        path_sketch: SketchId(path_sketch),
+        lines,
+        profile,
+        anchor,
+        locate,
+        angle,
+        mirror,
+        body_name,
+        names: BTreeMap::new(),
+    };
     // Each member's name is pinned to its line as the feature is made, so deleting or adding a
     // line later leaves the other members' names alone.
     let st = s.model.state();

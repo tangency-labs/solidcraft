@@ -22,14 +22,14 @@ fn preset(value: &str) -> PanelResult<()> {
 }
 
 /// The caller explicitly opts into original synthetic content at the actual
-/// workspace composition point. An existing runtime is never replaced.
+/// workspace composition point. Explicit fixture mode can replace the production host.
 pub fn enable_host_specimen(app: &mut crate::SolveApp, name: &str) -> PanelResult<()> {
     enable_host_specimen_remembered(app, name, false, None)
 }
 
 fn enable_host_specimen_remembered(app: &mut crate::SolveApp, name: &str, remember: bool, requested_opacity: Option<f32>) -> PanelResult<()> {
     preset(name)?;
-    if app.panel_runtime().is_some() {
+    if app.panel_runtime.as_ref().is_some_and(|runtime| runtime.production.is_none()) {
         return Err(error(Rule::Lifecycle, "panel specimen cannot take over an existing runtime"));
     }
     let (layout, registry) = specimen_layout(name)?;
@@ -106,6 +106,7 @@ fn enable_host_specimen_remembered(app: &mut crate::SolveApp, name: &str, rememb
     } else {
         false
     };
+    app.disable_panel_runtime()?;
     app.panel_runtime = Some(integration);
     if repaired {
         super::preferences::report_notice(app);
@@ -373,7 +374,7 @@ impl PanelController for VisibleSpecimen {
         }
     }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         let rows = if self.editor { 7.0 } else { 5.0 };
         Ok(Arc::new(SpecimenMetrics {
             // The actual body below uses fixed-height truncated labels and a
@@ -400,7 +401,7 @@ impl PanelController for VisibleSpecimen {
                 let mut focus_result = Ok(());
                 egui::ScrollArea::vertical().id_salt(("specimen-body", &self.key.instance.0)).show(ui, |ui| {
                     result = self.probe.edit(&self.key, |state| {
-                        let t = crate::theme::Tokens::get();
+                        let t = solidcraft_theme::Tokens::get();
                         ui.spacing_mut().item_spacing.y = t.space_4;
                         ui.spacing_mut().interact_size.y = t.control_height;
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);

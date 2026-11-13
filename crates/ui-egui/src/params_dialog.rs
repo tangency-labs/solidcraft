@@ -227,11 +227,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.params = Some(d);
         return;
     }
-    let palette = app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive());
-    let side =
-        if palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx) { crate::frame::Side::Left } else { crate::frame::Side::Right };
-    let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
-    let docked = egui::pos2(side.anchor_x(viewport), top);
+    let side = crate::frame::Side::Right;
+    let (_, docked) = crate::shell::floating_editor_anchor(app, ctx);
     let moved = crate::frame::dock_offset(ctx, "PARAMETERS");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
@@ -247,12 +244,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     .wide()
     .body_rows(16.0)
     .reset_scroll(d.reset_scroll);
-    let panel = if side == crate::frame::Side::Left {
-        let available = crate::sketch_palette::room_left_of(app, ctx, viewport);
-        panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
-    } else {
-        panel
-    };
+    // A width or body height the user dragged the card to replaces that default; each axis stays
+    // automatic until the user drags it (review of #13422).
+    let chosen_width: Option<f32> = ctx.data_mut(|m| m.get_persisted(width_id())).filter(|w: &f32| w.is_finite());
+    let chosen_height: Option<f32> = ctx.data_mut(|m| m.get_persisted(height_id())).filter(|h: &f32| h.is_finite());
+    let width = chosen_width.map_or(solidcraft_theme::Tokens::get().form_card_width * 3.0, |w| w.max(crate::frame::DIALOG_MIN_W));
+    let panel = panel.body_height(chosen_height);
+    let panel = panel.width(width.min((docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W)));
     let all = if let Some((_, rows)) = d.listed.as_ref().filter(|(rev, _)| *rev == app.session.revision) {
         rows.clone()
     } else {
@@ -264,7 +262,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut outcome = (false, ui_kit::Action::None);
     let live = app.preferences.parameters_apply_live;
     let held_status = if live { None } else { held_status(held(&d, &all).len()) };
-    panel.window(ctx).show(ctx, |ui| {
+    let mut resize = Resize::None;
+    let shown = panel.window(ctx).show(ctx, |ui| {
         outcome = panel.feature(
             ui,
             ui_kit::FeatureOptions {
@@ -307,8 +306,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let name_floor = visible
                     .iter()
                     .map(|r| ui_kit::ContentWidth::name(ui, &r.name))
-                    .fold(crate::theme::Tokens::get().form_label_width, f32::max)
-                    .min(crate::theme::Tokens::get().form_card_width);
+                    .fold(solidcraft_theme::Tokens::get().form_label_width, f32::max)
+                    .min(solidcraft_theme::Tokens::get().form_card_width);
                 let Sections { favorites, users, groups } = sections(&visible, d.sort);
                 if !favorites.is_empty() {
                     ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| {
@@ -320,7 +319,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
                     ui.scope(|ui| {
-                        ui.spacing_mut().indent = crate::theme::Tokens::get().space_14;
+                        ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
                         ui.indent("model_groups", |ui| {
                             let layout = GroupLayout {
                                 revision: app.session.revision,
@@ -349,8 +348,39 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::ComputeStatus { text: held_status, busy: false, applying: false }
             },
         );
+        resize = resize_edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
         d.reset_scroll = false;
     });
+    match resize {
+        Resize::None => {}
+        Resize::Reset(axes) => ctx.data_mut(|m| {
+            if axes.width {
+                m.remove::<f32>(width_id());
+            }
+            if axes.height {
+                m.remove::<f32>(height_id());
+            }
+        }),
+        Resize::By(axes, delta) => {
+            let t = solidcraft_theme::Tokens::get();
+            if axes.width
+                && let Some(card) = shown.as_ref().map(|r| r.response.rect)
+            {
+                let w = (card.width() + delta.x).clamp(crate::frame::DIALOG_MIN_W, viewport.width().max(crate::frame::DIALOG_MIN_W));
+                if w.is_finite() {
+                    ctx.data_mut(|m| m.insert_persisted(width_id(), w));
+                }
+            }
+            if axes.height
+                && let Some(body) = panel.last_body_height(ctx)
+            {
+                let h = (body + delta.y).clamp(t.control_height * 2.0, viewport.height().max(t.control_height * 2.0));
+                if h.is_finite() {
+                    ctx.data_mut(|m| m.insert_persisted(height_id(), h));
+                }
+            }
+        }
+    }
     // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
     let (closed, action) = outcome;
     let applied = live || !matches!(action, ui_kit::Action::Ok | ui_kit::Action::Apply) || apply_held(app, &mut d, &all);
@@ -376,6 +406,99 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 /// Where the chosen order is kept: egui's persisted memory, like a section's open state.
 fn sort_id() -> egui::Id {
     egui::Id::unique("sc_params_sort")
+}
+
+/// Where the outer width the user dragged the card to is kept; absent while the width is automatic.
+fn width_id() -> egui::Id {
+    egui::Id::unique("sc_params_width")
+}
+
+/// Where the body height the user dragged the card to is kept; absent while the height is automatic.
+fn height_id() -> egui::Id {
+    egui::Id::unique("sc_params_height")
+}
+
+/// Where the column widths the user dragged are kept, shared by every section's table.
+fn columns_id() -> egui::Id {
+    egui::Id::unique("sc_params_columns")
+}
+
+/// Which of the card's two sizes a resize edge changes: the side edge its width, the bottom edge
+/// its body height, the corner both. The other axis keeps its automatic size.
+#[derive(Clone, Copy)]
+struct Axes {
+    width: bool,
+    height: bool,
+}
+
+/// What the card's resize edges asked for this frame.
+enum Resize {
+    None,
+    /// Grow the card by this much on these axes: x widens it, y lengthens its body.
+    By(Axes, egui::Vec2),
+    /// A double-click on an edge returns these axes to their automatic size.
+    Reset(Axes),
+}
+
+/// Drag areas on the card's free side edge (the one away from its dock side), its bottom edge
+/// and the corner between them. The header stays the title drag area. When the free edge is the
+/// right one and the body scrolls, `scrollbar` is the body viewport whose right edge carries the
+/// scrollbar: the side grip skips that span so scrollbar drags still scroll (#13422 review).
+fn resize_edges(ui: &mut egui::Ui, side: crate::frame::Side, scrollbar: Option<egui::Rect>) -> Resize {
+    let t = solidcraft_theme::Tokens::get();
+    let card = ui.min_rect();
+    let grip = t.space_6;
+    if !card.is_finite() || card.width() < grip * 4.0 || card.height() < t.form_header_height + grip * 2.0 {
+        return Resize::None;
+    }
+    // A card docked right is held by its right edge, so it grows from its left edge.
+    let free_left = side == crate::frame::Side::Right;
+    let x_edge = if free_left { card.left()..=card.left() + grip } else { card.right() - grip..=card.right() };
+    let corner_x = if free_left { card.left()..=card.left() + grip * 2.0 } else { card.right() - grip * 2.0..=card.right() };
+    // The scrollbar sits on the body's right edge, so only a right-hand grip can cover it.
+    let side_top = match scrollbar {
+        Some(body) if !free_left && body.is_finite() => body.bottom().max(card.top() + t.form_header_height),
+        _ => card.top() + t.form_header_height,
+    };
+    let mut edges = vec![(
+        "bottom",
+        egui::Rect::from_x_y_ranges(card.left() + grip * 2.0..=card.right() - grip * 2.0, card.bottom() - grip..=card.bottom()),
+        egui::CursorIcon::ResizeVertical,
+        Axes { width: false, height: true },
+    )];
+    if side_top < card.bottom() - grip * 2.0 {
+        edges.push((
+            "side",
+            egui::Rect::from_x_y_ranges(x_edge, side_top..=card.bottom() - grip * 2.0),
+            egui::CursorIcon::ResizeHorizontal,
+            Axes { width: true, height: false },
+        ));
+    }
+    edges.push((
+        "corner",
+        egui::Rect::from_x_y_ranges(corner_x, card.bottom() - grip * 2.0..=card.bottom()),
+        if free_left { egui::CursorIcon::ResizeNeSw } else { egui::CursorIcon::ResizeNwSe },
+        Axes { width: true, height: true },
+    ));
+    let mut out = Resize::None;
+    for (name, rect, cursor, axes) in edges {
+        let response = ui.interact(rect, ui.make_persistent_id(("params_resize", name)), egui::Sense::click_and_drag()).on_hover_cursor(cursor);
+        crate::scenario::publish_target(&format!("params:resize:{name}"), rect);
+        if response.dragged() {
+            ui.ctx().set_cursor_icon(cursor);
+        }
+        if response.double_clicked() {
+            out = Resize::Reset(axes);
+        } else if response.dragged() {
+            let delta = response.drag_delta();
+            let delta =
+                egui::vec2(if axes.width { if free_left { -delta.x } else { delta.x } } else { 0.0 }, if axes.height { delta.y } else { 0.0 });
+            if delta.is_finite() && delta != egui::Vec2::ZERO {
+                out = Resize::By(axes, delta);
+            }
+        }
+    }
+    out
 }
 
 /// The dialog's sections, each in the chosen order.
@@ -469,26 +592,38 @@ fn new_check(app: &mut SolveApp, d: &mut ParamsDialog, unit: &str) -> Result<Str
     r
 }
 
+/// One section's table of parameter rows with its sortable, resizable headings and add row.
+/// `salt` keeps each section's widgets apart; `name_floor` is the shared Name column minimum.
 fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str, name_floor: f32) {
     let units: Vec<_> = UNITS.iter().map(|unit| unit_label(unit)).collect();
     // Name keeps a larger share and a shared content floor so long identifiers stay readable
     // and every section's columns line up (#8533, #8551 review). Full window/column resize is #5097.
+    // Widths the user dragged a header divider to (#5097); the rest keep their automatic widths.
+    let manual: Vec<Option<f32>> = ui.ctx().data_mut(|m| m.get_persisted(columns_id())).unwrap_or_default();
     let columns = [
-        Column::new("", 0.0).min_content_width(crate::theme::Tokens::get().space_24 * 3.0),
+        Column::new("", 0.0).min_content_width(solidcraft_theme::Tokens::get().space_24 * 3.0),
         Column::new("Name", 2.0).flex().min_content_width(name_floor),
         Column::new("Unit", 0.65).min_content_width(
-            ui_kit::ContentWidth::dropdown(ui, &units).max(crate::theme::Tokens::get().space_24 * 3.0 + crate::theme::Tokens::get().space_6),
+            ui_kit::ContentWidth::dropdown(ui, &units).max(solidcraft_theme::Tokens::get().space_24 * 3.0 + solidcraft_theme::Tokens::get().space_6),
         ),
         Column::new("Expression", 1.5).flex(),
         Column::new("Value", 1.1).flex(),
         Column::new("Comment", 1.0).flex(),
         Column::new("Actions", 0.0).icon_only().min_content_width(ui_kit::table_row_height()),
     ];
+    let columns: Vec<_> = columns.into_iter().enumerate().map(|(i, c)| c.manual_width(manual.get(i).copied().flatten())).collect();
     // An expression being edited may open over the cells to its right, up to the table's edge.
     let right = ui.max_rect().right().min(ui.clip_rect().right());
+    // Enter commits a cell and moves to the one below in the same column, Shift+Enter above.
+    let cells = egui::Id::unique(("params_cells", salt));
+    let neighbour = |index: usize, key: Option<ui_kit::CellKey>| match key {
+        Some(ui_kit::CellKey::Down) => rows.get(index + 1).map(|r| r.name.clone()),
+        Some(ui_kit::CellKey::Up) => index.checked_sub(1).and_then(|i| rows.get(i)).map(|r| r.name.clone()),
+        _ => None,
+    };
     ui_kit::table_custom(ui, salt, &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
         // The Name heading sorts every section at once, each inside itself (#8563).
-        table.headers(ui, |ui, index| {
+        table.headers_resizable(ui, columns_id(), |ui, index| {
             if index != 1 {
                 return false;
             }
@@ -499,8 +634,10 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
         for (index, r) in rows.iter().enumerate() {
             // Skip cells outside the clip while preserving the table's row geometry (#2723).
             // Drafts remain live until their edits have been committed.
-            let busy =
-                d.editing.contains_key(&r.name) || d.comments.contains_key(&r.name) || d.renaming.as_ref().is_some_and(|(old, _)| *old == r.name);
+            let busy = d.editing.contains_key(&r.name)
+                || d.comments.contains_key(&r.name)
+                || d.renaming.as_ref().is_some_and(|(old, _)| *old == r.name)
+                || ui_kit::landing_in_row(ui.ctx(), cells, &r.name);
             table.row_visible(ui, &r.name, false, busy, |row| {
                 row.cell(|ui| {
                     let star = if r.favorite { "★" } else { "☆" };
@@ -534,13 +671,21 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                         let id = ui.make_persistent_id(("rename", salt, &r.name));
                         let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
                         let response = ui_kit::cell_editor(ui, id, new, "Name", false);
-                        let entered = enter_for(ui, focused);
+                        ui_kit::landing(ui, cells, &r.name, "name", &response, new);
+                        let key = ui_kit::cell_key(ui, focused);
+                        let entered = enter_for(ui, focused) || key == Some(ui_kit::CellKey::Up);
                         if response.lost_focus() || entered {
                             let (old, new) = (old.clone(), new.trim().to_owned());
                             if !new.is_empty() && new != old {
                                 d.error = app.run("parameters.rename", json!({"name":old,"new_name":new})).err();
                             }
                             d.renaming = None;
+                            // The name below (or above) opens for renaming, its text selected.
+                            if let Some(next) = neighbour(index, key) {
+                                ui_kit::land_in_cell(ui.ctx(), cells, &next, "name");
+                                d.renaming = Some((next.clone(), next));
+                                d.rename_table = salt.to_string();
+                            }
                         } else if !response.has_focus() {
                             response.request_focus();
                         }
@@ -586,16 +731,18 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                     if salt == "fav" {
                         crate::scenario::publish_handle(&format!("param:favorite:{}", r.name), response.rect.center());
                     }
+                    ui_kit::landing(ui, cells, &r.name, "expression", &response, &expression);
                     let completed = complete(ui, &response, &mut expression);
                     if response.changed() || completed {
                         d.editing.insert(r.name.clone(), expression.clone());
                     }
+                    let key = if completed { None } else { ui_kit::cell_key(ui, focused) };
                     // Held edits (#9279) preview nothing: the preview is a rebuild too.
                     let apply_live = app.preferences.parameters_apply_live;
                     if apply_live && response.has_focus() && matches!(live, Some(Ok(_))) {
                         d.preview = Some((r.name.clone(), expression.clone()));
                     }
-                    let entered = !completed && enter_for(ui, focused);
+                    let entered = !completed && (enter_for(ui, focused) || key == Some(ui_kit::CellKey::Up));
                     if !completed && (response.lost_focus() || entered) {
                         d.preview = None;
                         if expression != r.expression && !apply_live {
@@ -611,6 +758,9 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                         } else {
                             d.editing.remove(&r.name);
                         }
+                        if let Some(next) = neighbour(index, key) {
+                            ui_kit::land_in_cell(ui.ctx(), cells, &next, "expression");
+                        }
                     }
                 });
                 row.cell(|ui| {
@@ -621,7 +771,10 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                     let id = ui.make_persistent_id(("comment", &r.name));
                     let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
                     let response = ui_kit::cell_editor(ui, id, &mut comment, "Comment", false);
-                    let entered = enter_for(ui, focused);
+                    crate::scenario::publish_handle(&format!("param:comment:{}", r.name), response.rect.center());
+                    ui_kit::landing(ui, cells, &r.name, "comment", &response, &comment);
+                    let key = ui_kit::cell_key(ui, focused);
+                    let entered = enter_for(ui, focused) || key == Some(ui_kit::CellKey::Up);
                     if response.changed() {
                         d.comments.insert(r.name.clone(), comment.clone());
                     }
@@ -630,6 +783,9 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                             d.error = app.run("parameters.comment", json!({"name":r.name,"comment":comment})).err();
                         }
                         d.comments.remove(&r.name);
+                        if let Some(next) = neighbour(index, key) {
+                            ui_kit::land_in_cell(ui.ctx(), cells, &next, "comment");
+                        }
                     }
                 });
                 row.cell(|ui| {
@@ -780,7 +936,6 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
         row.cell(|_| {});
         row.cell(|ui| {
             let response = ui_kit::cell_editor(ui, name_id, &mut d.new_name, "new parameter", false);
-            select_all_on_tab(ui, &response, &d.new_name);
             crate::scenario::publish_handle("param:new:name", response.rect.center());
             if d.focus_new {
                 response.request_focus();
@@ -804,7 +959,6 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
         };
         row.cell(|ui| {
             let response = ui_kit::wide_cell_editor(ui, expr_id, &mut d.new_expr, "Expression", invalid, right, (&value, invalid));
-            select_all_on_tab(ui, &response, &d.new_expr);
             crate::scenario::publish_handle("param:new:expression", response.rect.center());
             let completed = complete(ui, &response, &mut d.new_expr);
             submit = !completed && enter_for(ui, focused_id.is_some());
@@ -815,7 +969,6 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
         });
         row.cell(|ui| {
             let response = ui_kit::cell_editor(ui, comment_id, &mut d.new_comment, "Comment", false);
-            select_all_on_tab(ui, &response, &d.new_comment);
             crate::scenario::publish_handle("param:new:comment", response.rect.center());
             left |= response.lost_focus();
             submit |= enter_for(ui, focused_id.is_some());
@@ -887,19 +1040,6 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             }
         }
     }
-}
-
-/// A box of the add row entered with Tab selects its text, so typing replaces it (#2919); a click
-/// puts the caret where it clicks, as anywhere else. The parameters' own boxes keep the caret at
-/// the end, where an edit of the value usually starts.
-fn select_all_on_tab(ui: &egui::Ui, resp: &egui::Response, text: &str) {
-    if !resp.gained_focus() || ui.input(|i| i.pointer.any_down() || i.pointer.any_released()) {
-        return;
-    }
-    let n = text.chars().count();
-    let mut state = egui::text_edit::TextEditState::load(ui.ctx(), resp.id).unwrap_or_default();
-    state.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
-    state.store(ui.ctx(), resp.id);
 }
 
 /// A completion offered under an expression box.
@@ -1303,7 +1443,7 @@ mod tests {
         assert!(crate::keymap::capturing(&h.app));
         escape_key(&mut h, true);
         assert!(!crate::keymap::capturing(&h.app));
-        assert!(h.app.prefs_window.open && h.app.params.is_some(), "Escape cancels only shortcut capture");
+        assert!(h.app.prefs_window.shell.open && h.app.params.is_some(), "Escape cancels only shortcut capture");
         assert_eq!(escape_state(&h), before);
     }
 
@@ -2056,6 +2196,49 @@ mod tests {
         h.step(&json!({"key": "Tab"})).unwrap();
         h.step(&json!({"text": "2"})).unwrap();
         assert_eq!(h.app.params.as_ref().unwrap().new_expr, "2", "Tab selected the expression, typing replaced it");
+    }
+
+    /// Enter commits a cell and moves to the cell below in the same column, its text selected;
+    /// Shift+Enter moves up; in the last row Enter only commits; a click keeps the caret.
+    #[test]
+    fn enter_moves_down_a_column_and_shift_enter_up() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        for (name, expression) in [("a", "1 mm"), ("b", "2 mm"), ("c", "3 mm")] {
+            h.app.run("parameters.add", json!({"name":name,"expression":expression,"comment":format!("note {name}")})).unwrap();
+        }
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(3);
+        let expr = |h: &crate::scenario::Harness, name: &str| h.app.session.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default();
+        let comment = |h: &crate::scenario::Harness, name: &str| h.app.session.doc.param(name).map(|p| p.comment.clone()).unwrap_or_default();
+        h.run(&json!([{"click":{"handle":"param:a"}}, {"key":"A","cmd":true}, {"text":"10 mm"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "a"), "10 mm", "Enter commits the cell");
+        h.run(&json!([{"text":"20 mm"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "b"), "20 mm", "and the cell below took the keyboard with its text selected");
+        h.run(&json!([{"text":"30 mm"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "c"), "30 mm");
+        h.run(&json!([{"click":{"handle":"param:c"}}, {"key":"A","cmd":true}, {"text":"31 mm"}, {"key":"Enter","shift":true}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "c"), "31 mm", "Shift+Enter commits too");
+        h.run(&json!([{"text":"21 mm"}, {"key":"Enter","shift":true}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "b"), "21 mm", "Shift+Enter moved up the column");
+        h.run(&json!([{"text":"11 mm"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        assert_eq!(expr(&h, "a"), "11 mm");
+        // The comment column moves the same way, and Escape still discards the edit it is in.
+        h.run(&json!([{"click":{"handle":"param:comment:a"}}, {"key":"A","cmd":true}, {"text":"first"}, {"key":"Enter"}])).unwrap();
+        h.frames(2);
+        h.run(&json!([{"text":"second"}])).unwrap();
+        h.frames(1);
+        assert_eq!(comment(&h, "a"), "first");
+        assert_eq!(h.app.params.as_ref().and_then(|d| d.comments.get("b").cloned()).as_deref(), Some("second"), "typing replaced b's comment");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert_eq!(comment(&h, "b"), "note b", "Escape discards the edit");
     }
 
     /// An open window lists and checks once per revision of the design, not once per frame

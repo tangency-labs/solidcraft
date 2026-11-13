@@ -45,16 +45,10 @@ const MAX_ID: usize = 200;
 /// and title tags never remove stored keys such as the bridge, origin names and direct interaction.
 const PROFILE_KEYS: &[&str] = &[
     "browser_bodies_folders",
-    "browser_collapsed",
     "browser_eye_left",
-    "browser_float",
-    "browser_share",
-    "browser_show",
-    "browser_width",
     "center_arc_follows_cursor",
     "color_vision",
     "dialog_buttons",
-    "dialog_place",
     "direct_interaction",
     "escape_twice_finishes_sketch",
     "free_orbit",
@@ -66,15 +60,18 @@ const PROFILE_KEYS: &[&str] = &[
     "history_sketches",
     "home_fit_size",
     "invert_navigator_arrows",
+    "keep_hover_while_navigating",
     "keep_work_on_tab_switch",
     "language",
     "layout",
     "line_drag_draws_one",
     "line_hover_tangent_arc",
+    "live_panel_drag_preview",
     "logo_accent",
     "look_at_anim",
     "look_at_speed",
     "manipulator_free_alt",
+    "maya_horizontal_zoom",
     "middle_double_click",
     "mouse_gestures",
     "nav",
@@ -113,6 +110,7 @@ const PROFILE_KEYS: &[&str] = &[
     "sketch_face_activates_part",
     "sketch_open_look_at",
     "sketch_recent_snap",
+    "sketch_snap_to_visible_grid",
     "sketch_state_icons",
     "sketch_tab_always",
     "sketch_tracking_guides",
@@ -125,14 +123,10 @@ const PROFILE_KEYS: &[&str] = &[
     "theme_follow",
     "theme_night",
     "theme_options",
-    "timeline_collapsed",
-    "timeline_left",
-    "timeline_left_browser_collapsed",
-    "timeline_left_width",
     "timeline_origin_bodies",
-    "timeline_under_browser",
     "toast_place",
     "trackpad_pan",
+    "trackpad_twist_turns",
     "trackpad_zoom_modifier",
     "ui_font",
     "ui_scale",
@@ -583,7 +577,7 @@ fn act(app: &mut SolveApp, id: &str, params: Value, done: &'static str) {
 
 /// General's saved profiles and row actions. All mutations still use settings.profile.*.
 pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let count = solidcraft_ui_text::format("prefs.reports_saved", &[("n", &app.settings_profiles.list.len().to_string())]);
     ui_kit::settings_section_count(ui, "profiles", app.tr("ui.profiles"), Some(&count), |ui| {
         let names = app.settings_profiles.names();
@@ -754,7 +748,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Run before the Preferences window so Escape belongs to this editor, including in a scrolled
 /// page. A separate popup container keeps the shared rename menu accessible and unclipped.
 pub(crate) fn rename_popup(app: &mut SolveApp, ctx: &egui::Context) {
-    if !app.prefs_window.open || app.prefs_window.section != prefs::PAGE_GENERAL || !app.prefs_window.filter.is_empty() {
+    if !app.prefs_window.shell.open || app.prefs_window.shell.section != prefs::PAGE_GENERAL || !app.prefs_window.shell.filter.is_empty() {
         app.settings_profiles.rename = None;
         return;
     }

@@ -280,7 +280,7 @@ pub struct HostMetrics {
 
 impl Default for HostMetrics {
     fn default() -> Self {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         Self {
             header_height: t.form_header_height,
             content_header_height: 0.0,
@@ -575,6 +575,7 @@ pub struct HostGeometryPolicy {
     pub requested_opacity: Option<f32>,
     pub default_opaque: bool,
     pub effective_surfaces: BTreeMap<SectionId, PanelSurface>,
+    pub(crate) hidden_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
     pub content: Vec<SideContentMeasure>,
     pub content_revision: u64,
     pub scroll: Point,
@@ -589,6 +590,7 @@ impl PartialEq for HostGeometryPolicy {
             && self.surface_alpha == other.surface_alpha
             && self.default_opaque == other.default_opaque
             && self.effective_surfaces == other.effective_surfaces
+            && self.hidden_header_actions == other.hidden_header_actions
             && self.identity_reservations == other.identity_reservations
             && self.content == other.content
             && self.content_revision == other.content_revision
@@ -609,6 +611,7 @@ impl Default for HostGeometryPolicy {
             requested_opacity: None,
             default_opaque: true,
             effective_surfaces: BTreeMap::new(),
+            hidden_header_actions: BTreeMap::new(),
             content: Vec::new(),
             content_revision: 0,
             scroll: Point { x: 0.0, y: 0.0 },
@@ -1181,7 +1184,9 @@ fn append_section(
     let inline = !section.collapsed && flow == Flow::Wide && outer.size.height <= metrics.inline_max_height;
     let header =
         rect(outer.origin.x, outer.origin.y, outer.size.width, if inline { outer.size.height } else { metrics.header_height.min(outer.size.height) });
-    let control_count = spec.header_actions.len() + 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
+    let hidden = policy.hidden_header_actions.get(instance);
+    let visible_actions = spec.header_actions.iter().filter(|action| !hidden.is_some_and(|hidden| hidden.contains(&action.id)));
+    let control_count = visible_actions.clone().count() + 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
     let extent = metrics.control_extent.min(header.size.width / control_count.max(1) as f32);
     let mut cursor = if out.direction == Direction::Ltr { right(header) } else { header.origin.x };
     let take = |cursor: &mut f32| {
@@ -1202,7 +1207,7 @@ fn append_section(
         let title_x = if out.direction == Direction::Ltr { leading } else { leading - title_width };
         let title = positive_rect(title_x, header.origin.y, title_width, header.size.height);
         leading += if out.direction == Direction::Ltr { title_width } else { -title_width };
-        for action in &spec.header_actions {
+        for action in visible_actions.clone() {
             let x = if out.direction == Direction::Ltr { leading } else { leading - extent };
             actions.push((action.id.clone(), rect(x, header.origin.y, extent, header.size.height)));
             leading += if out.direction == Direction::Ltr { extent } else { -extent };
@@ -1214,7 +1219,7 @@ fn append_section(
         };
         (title, content)
     } else {
-        for action in spec.header_actions.iter().rev() {
+        for action in visible_actions.rev() {
             actions.push((action.id.clone(), take(&mut cursor)));
         }
         actions.reverse();
@@ -1232,7 +1237,7 @@ fn append_section(
     // that same slot. Collapsing never removes access to individual tabs.
     let (title, tab_strip) = if section.tabs.len() > 1 {
         if let Some(heading) = heading {
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let grip_width = metrics.control_extent.min(t.space_10 + t.space_8).min(heading.size.width);
             let grip_x = if out.direction == Direction::Ltr { heading.origin.x } else { right(heading) - grip_width };
             let tabs_x = if out.direction == Direction::Ltr { grip_x + grip_width } else { heading.origin.x };
