@@ -144,9 +144,9 @@ pub(crate) fn booleans(app: &SolveApp) -> Vec<Item> {
     }
     let names = tools.join(", ");
     [
-        ("join", "combine", "creative_mode.join", "creative_mode.join_tip"),
-        ("cut", "cut", "creative_mode.cut", "creative_mode.cut_tip"),
-        ("intersect", "intersect", "creative_mode.intersect", "creative_mode.intersect_tip"),
+        ("join", "boolean_union", "creative_mode.join", "creative_mode.join_tip"),
+        ("cut", "boolean_subtract", "creative_mode.cut", "creative_mode.cut_tip"),
+        ("intersect", "boolean_intersect", "creative_mode.intersect", "creative_mode.intersect_tip"),
     ]
     .into_iter()
     .map(|(operation, icon, label, tip)| {
