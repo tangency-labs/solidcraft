@@ -87,6 +87,10 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
         None => Vec::new(),
     };
     segments.extend(pair_lines(doc, vals, f, st, pairs)?);
+    let mut seen = HashSet::new();
+    if let Some((id, _, _)) = segments.iter().find(|(id, _, _)| !seen.insert(id.as_str())) {
+        return Err(DocError::Invalid(format!("member id `{id}` is used twice")));
+    }
     if segments.is_empty() {
         return Err(DocError::Invalid("the frame member has no members (give it a sketch or pairs of points)".into()));
     }

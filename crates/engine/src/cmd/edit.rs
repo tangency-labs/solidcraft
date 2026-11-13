@@ -2156,13 +2156,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("old_surface_start").or_insert_with(|| json!(true));
     }
-    // Members keep their names through an edit, unless it gives them another name.
-    if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
+    // Members keep their names through an edit, unless it gives them another name. Pair ids are
+    // never reused, so `next_pair` is kept whatever the edit says about the names.
+    if let FeatureKind::FrameMember { names, body_name, next_pair, .. } = &old.kind
         && cid == "frame.member"
         && let Some(parameters) = params.as_object_mut()
-        && parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref()
     {
-        parameters.entry("names").or_insert_with(|| json!(names));
+        parameters.entry("next_pair").or_insert_with(|| json!(next_pair));
+        if parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref() {
+            parameters.entry("names").or_insert_with(|| json!(names));
+        }
     }
     if !old.participants.is_empty()
         && let Some(parameters) = params.as_object_mut()
