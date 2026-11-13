@@ -1069,7 +1069,7 @@ fn profiles_or_default(s: &Session, p: &Value, sketch: u64, cmd: &str) -> Result
 /// Without nesting this is `All`, as before. When the pick cannot be stored so that it finds the
 /// same profiles again (the sketch is not solved, or two profiles share their curves), it stays
 /// `All` too.
-fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
+pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
     let st = s.model.state();
     let Some(ss) = st.sketch(sketch) else { return ProfileSel::All };
     let drawn = solidcraft_sketch::find_drawn_profiles(&ss.sketch);
