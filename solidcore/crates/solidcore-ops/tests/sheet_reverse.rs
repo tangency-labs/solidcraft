@@ -77,7 +77,8 @@ fn turned_over_each_face_s_normal_is_the_other_way_at_the_same_point() {
             let back: Vec<(u32, bool)> = ea.iter().rev().map(|e| (e.edge, !e.forward)).collect();
             let same_cycle = (0..was.len().max(1)).any(|k| {
                 let mut turned = back.clone();
-                turned.rotate_left(k.min(turned.len()));
+                let by = k.min(turned.len());
+                turned.rotate_left(by);
                 turned == was
             });
             assert!(
