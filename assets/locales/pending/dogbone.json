@@ -34,7 +34,7 @@
     "ui.dogbone_title": "تجويف لقمة الراوتر"
   },
   "he": {
-    "cmd.solid_dogbone": "הקלת פינות",
+    "cmd.solid_dogbone": "דוגבון",
     "error.dogbone_corners": "בחר את קצוות הפינות הפנימיות, או פאה שאת פינותיה הפנימיות יש להקל",
     "help.solid.dogbone": "חותך הקלה עגולה בקוטר מקדח הראוטר בכל פינה פנימית, כך שחלק או לוח בעל פינה ישרה ייכנס במקום שבו המקדח היה משאיר עיגול. השתמש בו בכיסים, חריצים ומגרעות שתחתוך בראוטר CNC.",
     "ui.dogbone.corners": "פינות",
@@ -48,7 +48,7 @@
     "ui.dogbone.side": "צד",
     "ui.dogbone.style": "סגנון",
     "ui.dogbone.t_bone": "צורת T",
-    "ui.dogbone_title": "הקלת פינות"
+    "ui.dogbone_title": "דוגבון"
   },
   "ja": {
     "cmd.solid_dogbone": "ドッグボーン",
