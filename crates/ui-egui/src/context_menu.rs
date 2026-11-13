@@ -378,6 +378,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                         item.params = Some(json!({ "bodies": selected }));
                     }
                 }
+                // Remove N Tubes, when the selection is all members of this Frame Member.
+                if let Some(item) = v.iter_mut().find(|i| i.id == "frame.remove_member")
+                    && let Some(all) = remove_tube_item(app, &selected)
+                {
+                    item.label = all.label;
+                    item.params = all.params;
+                }
             }
             v
         }
@@ -3738,6 +3745,22 @@ mod tests {
         assert_eq!(item.params, Some(json!({ "members": members })));
         run_item(&mut h.app, &item, egui::pos2(0.0, 0.0));
         assert_eq!(made_by(&h, "Rail").1, vec![bodies[1].clone(), bodies[2].clone()], "{:?}", h.app.status);
+    }
+
+    /// A Browser row in a selection of members offers Remove N Tubes for the selection, as the
+    /// mesh items do; a row outside it, Remove Tube for that body alone.
+    #[test]
+    fn a_browser_row_in_a_member_selection_says_remove_n_tubes() {
+        let mut h = framed();
+        let (rail, bodies) = made_by(&h, "Rail");
+        select_bodies(&mut h, &[&bodies[0], &bodies[3]]);
+        let item = remove_tube(&items(&h.app, &Target::Body { name: bodies[3].clone() })).cloned().unwrap();
+        assert_eq!(item.label, "Remove 2 Tubes");
+        let members: Vec<Value> = [&bodies[0], &bodies[3]].iter().map(|b| json!({"feature": rail, "line": line_of(&h, rail, b)})).collect();
+        assert_eq!(item.params, Some(json!({ "members": members })));
+        let item = remove_tube(&items(&h.app, &Target::Body { name: bodies[1].clone() })).cloned().unwrap();
+        assert_eq!(item.label, "Remove Tube");
+        assert_eq!(item.params, Some(json!({"members": [{"feature": rail, "line": line_of(&h, rail, &bodies[1])}]})));
     }
 
     #[test]

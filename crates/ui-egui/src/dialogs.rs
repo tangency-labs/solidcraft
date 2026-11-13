@@ -4679,12 +4679,15 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         (Kind::Plastic(crate::dialogs_plastic::Pl::SnapFit { hook, .. }), Kind::Plastic(crate::dialogs_plastic::Pl::SnapFit { hook: fresh, .. })) => {
             *hook = *fresh;
         }
-        // The points an edit loaded belonged to that edit.
+        // The points an edit loaded belonged to that edit, and the tubes picked to that dialog.
+        // Ghost Frame Members is ticked whenever the dialog opens.
         (Kind::Frame(previous), Kind::Frame(fresh)) => {
             previous.whole = fresh.whole;
             previous.path.clone_from(&fresh.path);
             previous.refs.clone_from(&fresh.refs);
             previous.pair_ids.clone_from(&fresh.pair_ids);
+            previous.ghost = fresh.ghost;
+            previous.picked_tubes.clear();
         }
         _ => {}
     }
