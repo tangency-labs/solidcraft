@@ -1,7 +1,8 @@
 //! Surfaces between two sheets: a blend sheet between an edge of one sheet and an edge of
 //! another, each side held at its own continuity (G0 to G3), with the seam it makes on each side
-//! measured ([`blend_edges`]); and a fillet where two sheets meet, round, chordal or
-//! curvature-continuous, the sheets cut back to it on request ([`fillet_sheets`]).
+//! measured ([`blend_edges`]); a fillet where two sheets meet, round, chordal or
+//! curvature-continuous, the sheets cut back to it on request ([`fillet_sheets`]); and the same
+//! fillet between two sheets that cross, in the quadrant asked ([`fillet_crossing`]).
 //!
 //! The blend between edges:
 //!
@@ -36,6 +37,7 @@
 use solidcore::blend::fillet_executive::api::create_face_from_surface;
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::query::api_queries::face_internal_point;
+use solidcore::query::continuity::{point_side, FaceSide};
 use solidcore::sweep::section_blend::{
     section_blend_surface, section_frames as kernel_frames, EndOrder, FrameOptions, SectionFrame,
 };
@@ -48,7 +50,7 @@ use crate::body::{finish, Body, Expect};
 use crate::continuity::{ContinuityTolerances, SeamReport, MAX_STATIONS, MIN_STATIONS};
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{run_on, with_body};
+use crate::session::{read_body, run_on, with_body};
 use crate::sweep::railed::Continuity;
 use crate::{Error, Result};
 
@@ -506,4 +508,113 @@ fn inside_points(body: &Body) -> Result<Vec<[f64; 3]>> {
         }
         Ok(Ok(out))
     })?
+}
+
+// ---- fillet between two crossing sheets --------------------------------------------------------
+
+/// A side of a sheet: where its normal points, or the other way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SheetSide {
+    /// Where the sheet's normal points (its face's upward use).
+    Front,
+    /// The other way.
+    Back,
+}
+
+/// How a fillet between two crossing sheets is built: which quadrant it sits in, and the
+/// fillet's own settings.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FilletCrossing {
+    /// The side of the first sheet and the side of the second the fillet sits on: of the four
+    /// quadrants the crossing sheets make, the one on both.
+    pub sides: [SheetSide; 2],
+    /// The section, trimming, tolerance and seam measure ([`fillet_sheets`]).
+    pub fillet: FilletSheets,
+}
+
+/// The fillet between one-face sheets `a` and `b` that cross each other, in the quadrant
+/// `how.sides` names. Each sheet is cut along the other ([`crate::boolean::imprint`]: the kernel
+/// intersects them); of each sheet's pieces, those on the side of the other sheet the fillet sits
+/// on are kept (a point inside each piece, the kernel's, classified by the kernel's
+/// [`point_side`] against the other sheet at `how.fillet.tolerance`). The two kept halves then
+/// meet along the crossing, and are filleted there as [`fillet_sheets`] fillets sheets that
+/// meet: the ball rolls in the wedge between the two halves, which is the quadrant asked. With
+/// trimming, the sheets come back as the kept halves cut back to the fillet. Neither sheet
+/// changes.
+///
+/// # Errors
+/// - [`Error::Argument`]: as [`fillet_sheets`]'s, or the same body as both sheets;
+/// - [`Error::Unsupported`]: a sheet of more than one face, sheets that do not cross (sheets that
+///   stand apart are not filleted: no kernel blend starts from a point between two faces), a
+///   piece the other sheet's side does not decide (on it within the tolerance, or no foot);
+/// - those of the imprints, the face removal and [`fillet_sheets`].
+pub fn fillet_crossing(a: &Body, b: &Body, how: &FilletCrossing) -> Result<Fillet> {
+    if std::ptr::eq(a, b) {
+        return Err(Error::Argument);
+    }
+    let tol = how.fillet.tolerance;
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(Error::Argument);
+    }
+    for sheet in [a, b] {
+        if native_order(sheet).faces.len() != 1 {
+            return Err(Error::Unsupported(
+                "a fillet between crossing sheets takes sheets of one face each",
+            ));
+        }
+    }
+    let (cut_a, _) = crate::boolean::imprint(a.copy()?, b.copy()?)?;
+    let (cut_b, _) = crate::boolean::imprint(b.copy()?, a.copy()?)?;
+    let [side_a, side_b] = how.sides;
+    let half_a = half(&cut_a, b, side_b, tol)?;
+    let half_b = half(&cut_b, a, side_a, tol)?;
+    fillet_sheets(&half_a, &half_b, &how.fillet)
+}
+
+/// The pieces of `cut` on side `side` of the one-face sheet `other`, as one sheet.
+///
+/// # Errors
+/// [`Error::Unsupported`] for a sheet `other` does not cut in two, or a piece its side does not
+/// decide; those of the face removal.
+fn half(cut: &Body, other: &Body, side: SheetSide, tol: f64) -> Result<Body> {
+    let order = native_order(cut);
+    if order.faces.len() < 2 {
+        return Err(Error::Unsupported(
+            "the sheets do not cross: a fillet between sheets that stand apart is not built",
+        ));
+    }
+    let inside = inside_points(cut)?;
+    let sides = read_body("fillet_crossing::sides", other, |k, b| {
+        let Some(&f) = b.face_list().first() else {
+            return Ok(Err(Error::Argument));
+        };
+        let mut out = Vec::with_capacity(inside.len());
+        for p in &inside {
+            let p = Vec3::new(p[0], p[1], p[2]);
+            match point_side(k, b, f, p, tol) {
+                Ok(s) => out.push(s),
+                Err(e) => return Ok(Err(status(e))),
+            }
+        }
+        Ok(Ok(out))
+    })??;
+    let mut away = Vec::new();
+    for (i, s) in sides.iter().enumerate() {
+        match (s, side) {
+            (Some(FaceSide::Front), SheetSide::Front) | (Some(FaceSide::Back), SheetSide::Back) => {
+            }
+            (Some(FaceSide::Front | FaceSide::Back), _) => away.push(i),
+            (Some(FaceSide::On) | None, _) => {
+                return Err(Error::Unsupported(
+                    "a piece of a crossing sheet lies on the other sheet or has no foot on it",
+                ))
+            }
+        }
+    }
+    if away.is_empty() || away.len() == order.faces.len() {
+        return Err(Error::Unsupported(
+            "the sheets do not cross: no piece of a sheet on each side of the other",
+        ));
+    }
+    crate::trim::remove_faces(cut, &order, &away)
 }

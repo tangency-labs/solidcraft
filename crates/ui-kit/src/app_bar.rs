@@ -482,6 +482,35 @@ pub struct DocTab<'a> {
     pub dirty: bool,
     /// Its hover text (where it is saved); its full name goes above it when the tab cuts it short.
     pub place: &'a str,
+    /// What the file's signing provenance says, as a shield beside the name: persistent, where
+    /// the tooltip can only be read by hovering. `None` for an unsigned design (or none checked).
+    pub security: Option<TabBadge>,
+}
+
+/// The state a design tab's shield shows. The colour carries the state; the tooltip has the words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabBadge {
+    /// Records are there but have not been checked in this session.
+    Signed,
+    /// Checked: every record verifies and covers the file.
+    Verified,
+    /// Signed earlier, but the file was saved again without a key.
+    NotCovered,
+    /// A record does not verify.
+    Invalid,
+    /// A newer SolidCraft's record format.
+    Unsupported,
+}
+
+impl TabBadge {
+    fn ink(self, t: &solidcraft_theme::Tokens) -> egui::Color32 {
+        match self {
+            Self::Verified => t.agent_ok,
+            Self::Signed => t.app_bar_text.gamma_multiply(0.75),
+            Self::NotCovered | Self::Unsupported => t.warning,
+            Self::Invalid => t.error,
+        }
+    }
 }
 
 /// A row of a tab's menu (Close, Close Other Tabs…), with its label and the key shown when the
@@ -671,7 +700,8 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             };
             let label = format!("{shown_name}{}", if tab.dirty { " •" } else { "" });
             let text = ui.painter().layout_no_wrap(label, crate::type_face::semibold(t.font_button), t.app_bar_text).size().x;
-            (text + 40.0).clamp(72.0, MAX_FIT)
+            let badge = if tab.security.is_some() { 18.0 } else { 0.0 };
+            (text + 40.0 + badge).clamp(72.0, MAX_FIT)
         })
         .collect();
     let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - 34.0;
@@ -757,7 +787,8 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         let label = format!("{}{}", tab.name, if tab.dirty { " •" } else { "" });
         let font = if active { crate::type_face::semibold(t.font_button) } else { FontId::proportional(t.font_button) };
         let g = ui.painter().layout_no_wrap(label, font, ink);
-        let text_w = (tr.width() - 30.0).max(10.0);
+        let badge = if tab.security.is_some() { 18.0 } else { 0.0 };
+        let text_w = (tr.width() - 30.0 - badge).max(10.0);
         let tip = tab_tip(tab.name, tab.place, g.size().x > text_w);
         let clip = Rect::from_min_size(tr.min, vec2(text_w + 10.0, tr.height()));
         match strip.rename.as_mut().filter(|_| active) {
@@ -768,6 +799,10 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             None => {
                 ui.painter().with_clip_rect(clip).galley(pos2(tr.left() + 10.0, tr.center().y - g.size().y / 2.0), g, ink);
             }
+        }
+        if let Some(badge) = tab.security {
+            let br = Rect::from_center_size(pos2(tr.right() - 31.0, tr.center().y), vec2(14.0, 14.0));
+            crate::icons::paint_ink(ui.painter(), br, "shield", badge.ink(&t));
         }
         // ×
         let xr = Rect::from_center_size(pos2(tr.right() - 13.0, tr.center().y), vec2(16.0, 16.0));

@@ -60,7 +60,10 @@ pub(super) fn bspline(curve: &Curve) -> Option<BSplineCurve> {
 /// # Errors
 ///
 /// [`SolidError::Unported`] from `MakeNurb`.
-pub(super) fn bspline_with_nurb(kernel: &Kernel, curve: &Curve) -> Result<Option<BSplineCurve>> {
+pub(in crate::primitive::primitive_creation) fn bspline_with_nurb(
+    kernel: &Kernel,
+    curve: &Curve,
+) -> Result<Option<BSplineCurve>> {
     let Some(base) = bspline(curve) else {
         return Ok(None);
     };

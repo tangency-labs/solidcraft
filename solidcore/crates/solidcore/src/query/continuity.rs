@@ -166,6 +166,58 @@ fn side(
     }))
 }
 
+/// Which side of a face a point lies on ([`point_side`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FaceSide {
+    /// Where the face's normal points (in the sense of its upward face use).
+    Front,
+    /// The other way.
+    Back,
+    /// Within the tolerance of the face's surface.
+    On,
+}
+
+/// Which side of face `f` the point `p` lies on: `p` dropped on the face's surface (its whole
+/// natural domain, untrimmed), and the offset from the foot read along the unit normal there in
+/// the sense of the face's upward use (the side the face's normal points to, as a sheet's
+/// shell uses it): [`FaceSide::Front`] past `tol` that way, [`FaceSide::Back`] past it the other,
+/// [`FaceSide::On`] within it. `None` where the drop fails or the normal there is zero.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a point not finite, a tolerance not finite or negative, a
+/// face without a surface or without a face use; [`SolidError::Unsupported`] for a face use
+/// whose orientation is unknown; those of the drop and the evaluations.
+pub fn point_side(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    p: Point3,
+    tol: f64,
+) -> Result<Option<FaceSide>> {
+    if !tol.is_finite() || tol < 0.0 || !finite(p) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a point or tolerance that is not finite",
+        ));
+    }
+    let fu = crate::topology::face::p2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP, "a face without a face use"))?;
+    let sign = sense(b, fu, f)?;
+    let s = surface_of(b, f)?;
+    let Some(one) = side(k, s, sign, p, None)? else {
+        return Ok(None);
+    };
+    let along = (p - one.foot).dot(one.normal);
+    Ok(Some(if along > tol {
+        FaceSide::Front
+    } else if along < -tol {
+        FaceSide::Back
+    } else {
+        FaceSide::On
+    }))
+}
+
 /// The principal curvatures of a face at a point ([`principal_curvatures`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Principal {
@@ -562,7 +614,39 @@ pub fn iso_comb(
 mod tests {
     use super::*;
     use crate::kernel::KernelOptions;
+    use crate::primitive::api_primitives::create_plane;
     use crate::primitive::api_primitives::{create_cylinder, create_sphere};
+    use crate::topology::face::p1::turn_over;
+
+    /// A point above a flat sheet and one below are on its two sides, one on it is on it; the
+    /// sheet turned over ([`turn_over`]) swaps the two sides, the point on it still on it, and
+    /// turned over again they are as they were.
+    #[test]
+    fn points_above_and_below_a_sheet_are_on_its_two_sides() {
+        let mut k = Kernel::new(&KernelOptions::default());
+        let mut b = create_plane(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0).unwrap();
+        let f = b.face_list()[0];
+        let at = |b: &Brep, z: f64| {
+            point_side(&k, b, f, Point3::new(1.0, 1.0, z), 1e-9)
+                .unwrap()
+                .unwrap()
+        };
+        let (up, down) = (at(&b, 3.0), at(&b, -3.0));
+        assert!(
+            matches!(
+                (up, down),
+                (FaceSide::Front, FaceSide::Back) | (FaceSide::Back, FaceSide::Front)
+            ),
+            "{up:?} {down:?}"
+        );
+        assert_eq!(at(&b, 0.0), FaceSide::On);
+        turn_over(&k, &mut b, f).unwrap();
+        assert_eq!((at(&b, 3.0), at(&b, -3.0)), (down, up), "point_side swaps");
+        assert_eq!(at(&b, 0.0), FaceSide::On);
+        turn_over(&k, &mut b, f).unwrap();
+        assert_eq!((at(&b, 3.0), at(&b, -3.0)), (up, down));
+        assert!(point_side(&k, &b, f, Point3::new(f64::NAN, 0.0, 0.0), 1e-9).is_err());
+    }
 
     /// The principal curvatures of `b` at `p`, from the face whose foot of `p` is nearest.
     fn principal_of(k: &Kernel, b: &Brep, p: Point3) -> Principal {

@@ -281,7 +281,7 @@ impl Surface {
     /// `at`'s side (the same side coordinate as `dom`'s) rather than `dom`'s: where earlier
     /// sides grew the box, `at` is the face's own extent along the side, so the distance is
     /// met at the face, not where the surface has grown ([`Surface::extended_sides`]).
-    pub(super) fn extended_by_distance_at(
+    pub fn extended_by_distance_at(
         &self,
         k: &Kernel,
         dom: &Extent2d,

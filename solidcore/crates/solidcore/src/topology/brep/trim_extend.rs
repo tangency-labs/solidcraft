@@ -1,5 +1,6 @@
 //! A face on a plane extended past one of its edges by growing its trim within the plane
-//! ([`extend_trim`]).
+//! ([`extend_trim`]), by a distance or, for a straight edge, through a point
+//! ([`extend_trim_through`]).
 //!
 //! Not upstream. A plane continued past any edge is the plane itself, its own tangent and
 //! curvature continuation, so extending its face moves the trim, not the surface: the picked
@@ -292,6 +293,97 @@ pub fn extend_trim(
             "a distance not finite and positive",
         ));
     }
+    let g = grown(k, b, f, e, Move::By(distance))?;
+    let mut nb = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
+    nb.set_tolerance(g.tol);
+    let Built { face, edges, added } = build_into(k, &mut nb, g)?;
+    let check = check_brep_with_keys(k, &mut nb, CheckLevel::Level2, &notify_ref)?;
+    if !check.is_valid() {
+        return Err(unsupported(
+            "the extended trim crosses the face's other edges or is not valid",
+        ));
+    }
+    Ok(TrimExtension {
+        brep: nb,
+        face,
+        edges,
+        added,
+    })
+}
+
+/// Face `f` of `b`, on a plane, with its straight edge `e` (on its outer loop) moved outward,
+/// parallel, until it passes through `through`, its neighbouring edges carried along their end
+/// tangents to meet it, as [`extend_trim`] moves it by a distance: the trim grown to a corner
+/// another face has moved to (an arch's leg grown to meet its extended top). One of the carried
+/// neighbours must meet the moved edge at `through`, within ten of the body's tolerance. `b` is
+/// unchanged.
+///
+/// # Errors
+///
+/// As [`extend_trim`], and `Unsupported` for a curved edge or one without two neighbours, a
+/// point not outside the edge, or no carried neighbour meeting the moved edge at the point.
+pub fn extend_trim_through(
+    k: &mut Kernel,
+    b: &Brep,
+    f: FaceId,
+    e: EdgeId,
+    through: Point3,
+) -> Result<TrimExtension> {
+    let g = grown(k, b, f, e, Move::Through(through))?;
+    let mut nb = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
+    nb.set_tolerance(g.tol);
+    let Built { face, edges, added } = build_into(k, &mut nb, g)?;
+    let check = check_brep_with_keys(k, &mut nb, CheckLevel::Level2, &notify_ref)?;
+    if !check.is_valid() {
+        return Err(unsupported(
+            "the extended trim crosses the face's other edges or is not valid",
+        ));
+    }
+    Ok(TrimExtension {
+        brep: nb,
+        face,
+        edges,
+        added,
+    })
+}
+
+/// How far the picked edge moves: by a distance, or (a straight edge) to pass through a point.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Move {
+    /// Outward by this distance.
+    By(f64),
+    /// Outward, parallel, to pass through this point, which one of its carried neighbours must
+    /// meet it at.
+    Through(Point3),
+}
+
+/// A face's trim grown ([`grown`]), not yet built: the plane widened to hold it, its loops'
+/// curves (the outer loop first) with their counts, and the body's tolerance.
+pub(crate) struct Grown {
+    surface: Surface,
+    domain: Extent2d,
+    counts: Vec<usize>,
+    curves: Vec<NewCurve>,
+    /// The tolerance of the body the face came from.
+    pub(crate) tol: f64,
+}
+
+/// The unit direction from `v0` to `v1` and the in-plane normal to its right seen from
+/// `normal`: the way a straight edge from `v0` to `v1` moves out.
+fn outward(v0: Point3, v1: Point3, normal: Vec3) -> Result<(Vec3, Vec3)> {
+    let u = (v1 - v0)
+        .unitize()
+        .map_err(|_| unsupported("an edge of no length"))?;
+    let out = u
+        .cross(normal)
+        .unitize()
+        .map_err(|_| unsupported("an edge along the plane's normal"))?;
+    Ok((u, out))
+}
+
+/// Face `f` of `b` with its edge `e` moved as `how` says and its neighbours carried (module
+/// docs): the grown trim's curves and the plane that holds them. `b` is only read.
+pub(crate) fn grown(k: &Kernel, b: &Brep, f: FaceId, e: EdgeId, how: Move) -> Result<Grown> {
     let surface = b
         .face(f)?
         .surface
@@ -325,6 +417,24 @@ pub fn extend_trim(
         .cloned()
         .ok_or_else(|| SolidError::invalid_input(OP, "the picked edge"))?;
     let n = outer.len();
+    let straight = is_straight(&picked.curve, tol)?;
+    let distance = match how {
+        Move::By(d) => d,
+        Move::Through(p) => {
+            if !straight || n < 3 {
+                return Err(unsupported(
+                    "a curved edge, or one without two neighbours, moved through a point",
+                ));
+            }
+            let v0 = picked.start(k)?;
+            let (_, out) = outward(v0, picked.end(k)?, normal)?;
+            let d = (p - v0).dot(out);
+            if !(d.is_finite() && d > tol) {
+                return Err(unsupported("a point not outside the edge"));
+            }
+            d
+        }
+    };
 
     // the face's size, for how far a neighbour is followed
     let mut size = 0.0;
@@ -338,7 +448,6 @@ pub fn extend_trim(
     // rails and flat sections are) moves exactly along the in-plane normal; a curved one to its
     // offset (to its right seen from the side it runs with: the face's normal when it runs along
     // its curve)
-    let straight = is_straight(&picked.curve, tol)?;
     let moved = if straight {
         None
     } else {
@@ -383,13 +492,7 @@ pub fn extend_trim(
         let target = match &moved {
             None => {
                 // the line `distance` out along the in-plane normal to the right of the run
-                let u = (v1 - v0)
-                    .unitize()
-                    .map_err(|_| unsupported("an edge of no length"))?;
-                let out = u
-                    .cross(normal)
-                    .unitize()
-                    .map_err(|_| unsupported("an edge along the plane's normal"))?;
+                let (u, out) = outward(v0, v1, normal)?;
                 let (p, q) = (v0 + out * distance, v1 + out * distance);
                 Curve::from(create_line_segment(p - u * reach, q + u * reach)?)
             }
@@ -404,6 +507,14 @@ pub fn extend_trim(
             let run = picked.direction(k, false)?;
             if (w1 - w0).dot(run) <= tol {
                 return Err(unsupported("the neighbours cross before the distance"));
+            }
+        }
+        if let Move::Through(p) = how {
+            let at = |w: Point3| (w - p).length() <= 10.0 * tol;
+            if !(at(w0) || at(w1)) {
+                return Err(unsupported(
+                    "a neighbour carried along its tangent does not meet the moved edge at the point",
+                ));
             }
         }
         corners.push(w0);
@@ -508,6 +619,42 @@ pub fn extend_trim(
             });
         }
     }
+    Ok(Grown {
+        surface: grown,
+        domain: grown_domain,
+        counts,
+        curves: all,
+        tol,
+    })
+}
+
+/// A grown face made in a body ([`build_into`]).
+pub(crate) struct Built {
+    /// The face.
+    pub(crate) face: FaceId,
+    /// Each old edge with the edge it is now (the picked edge's the moved edge, a straight
+    /// neighbour's the lengthened one).
+    pub(crate) edges: Vec<(EdgeId, EdgeId)>,
+    /// The edges added along a curved neighbour's tangent.
+    pub(crate) added: Vec<EdgeId>,
+}
+
+/// The grown face `g` made in `nb` (on its own copy of the plane, the upward use the same way
+/// as the plane), as a [`Built`]. `nb`'s other faces are untouched; its cached topology is
+/// refreshed.
+///
+/// # Errors
+///
+/// `Unsupported` where the curves make no face or a curve makes no edge of it; those of the
+/// face constructor.
+pub(crate) fn build_into(k: &mut Kernel, nb: &mut Brep, g: Grown) -> Result<Built> {
+    let Grown {
+        surface: grown,
+        domain: grown_domain,
+        counts,
+        curves: all,
+        tol,
+    } = g;
     let mut curves = Vec::new();
     let mut orientations = Vec::new();
     let mut ends: Vec<(Option<EdgeId>, Point3, Point3)> = Vec::new();
@@ -522,18 +669,15 @@ pub fn extend_trim(
         orientations.push(c.orientation);
     }
 
-    // the new body
-    let mut nb = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-    nb.set_tolerance(tol);
     let made = {
-        let mut state = ArenaNotifyState::new(&nb);
+        let mut state = ArenaNotifyState::new(&*nb);
         let mut env = state.env(None);
         let key_of = env.key_of;
         let this_face = |f: FaceId| key_of(EntityRef::Face(f));
         let region = nb.infinite_region();
         make_face_with_curves(
             k,
-            &mut nb,
+            nb,
             region,
             FaceCurvesInput {
                 loops: counts,
@@ -554,16 +698,10 @@ pub fn extend_trim(
         .face
         .ok_or_else(|| unsupported("the extended trim makes no face"))?;
     nb.refresh_cached_topology();
-    let check = check_brep_with_keys(k, &mut nb, CheckLevel::Level2, &notify_ref)?;
-    if !check.is_valid() {
-        return Err(unsupported(
-            "the extended trim crosses the face's other edges or is not valid",
-        ));
-    }
 
     // each new edge by its ends: the old edge it continues, or an added one
     let mut by_ends: BTreeMap<EdgeId, (Point3, Point3)> = BTreeMap::new();
-    for &ne in nb.edge_list() {
+    for ne in crate::topology::face::p4::edges(nb, face, None, false, None)? {
         let [a, z] = nb.edge(ne)?.vertices;
         by_ends.insert(ne, (nb.vertex(a)?.point, nb.vertex(z)?.point));
     }
@@ -581,12 +719,7 @@ pub fn extend_trim(
             None => added.push(found),
         }
     }
-    Ok(TrimExtension {
-        brep: nb,
-        face,
-        edges,
-        added,
-    })
+    Ok(Built { face, edges, added })
 }
 
 #[cfg(test)]
@@ -773,6 +906,55 @@ mod tests {
         );
         assert_eq!(out.added.len(), 1);
         assert_eq!(out.edges.len(), 3);
+    }
+
+    /// Moved through a point, an edge goes where the distance to that point would take it: the
+    /// rectangle's top through (3, 13) is its top moved up 5, edge for edge; a point inside the
+    /// face, or one off every carried neighbour's line, is refused, and so is a curved edge.
+    #[test]
+    fn an_edge_moved_through_a_point_is_the_edge_moved_by_its_distance() {
+        let mut k = Kernel::default();
+        let b = create_plane(&mut k, Point3::new(0.0, 0.0, 0.0), 9.0, 8.0).expect("plane");
+        let f = *b.face_list().first().expect("face");
+        let top = edge_between(&b, [9.0, 8.0], [0.0, 8.0]);
+        let by = extend_trim(&mut k, &b, f, top, 5.0).expect("by the distance");
+        // the corner the left side, carried up, meets the moved top at
+        let through =
+            extend_trim_through(&mut k, &b, f, top, Point3::new(0.0, 13.0, 0.0)).expect("through");
+        assert!(
+            near(bounds(&through.brep), bounds(&by.brep)),
+            "{:?}",
+            bounds(&through.brep)
+        );
+        assert_eq!(through.edges.len(), by.edges.len());
+        assert!(through.added.is_empty());
+        // inside the face
+        assert!(matches!(
+            extend_trim_through(&mut k, &b, f, top, Point3::new(3.0, 4.0, 0.0)),
+            Err(SolidError::Unsupported { .. })
+        ));
+        // outside, but on no carried neighbour: the sides run up x = 0 and x = 9
+        assert!(matches!(
+            extend_trim_through(&mut k, &b, f, top, Point3::new(3.0, 13.0, 0.0)),
+            Err(SolidError::Unsupported { .. })
+        ));
+        // a curved edge
+        let arc =
+            Curve::from(create_arc(Point3::new(5.0, 5.0, 0.0), 5.0, 0.0, 180.0).expect("arc"));
+        let (b, f) = planar(
+            &mut k,
+            &[
+                line([0.0, 0.0], [10.0, 0.0]),
+                line([10.0, 0.0], [10.0, 5.0]),
+                arc,
+                line([0.0, 5.0], [0.0, 0.0]),
+            ],
+        );
+        let e = edge_between(&b, [10.0, 5.0], [0.0, 5.0]);
+        assert!(matches!(
+            extend_trim_through(&mut k, &b, f, e, Point3::new(5.0, 15.0, 0.0)),
+            Err(SolidError::Unsupported { .. })
+        ));
     }
 
     #[test]

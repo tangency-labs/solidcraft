@@ -108,9 +108,6 @@ crates/engine/src/cmd/face.rs:sketch_of_faces groups coplanar picked faces by me
 crates/engine/src/cmd/features.rs:edge_points turns edge references into points on a mesh
 crates/engine/src/cmd/features_more.rs:emboss places an emboss by the display mesh
 crates/engine/src/cmd/features_more.rs:snap_point snaps a feature's point by the display mesh
-crates/engine/src/cmd/interference.rs:face_points takes a point per face from mesh triangles
-crates/engine/src/cmd/interference.rs:interference finds interference between B-rep bodies by display meshes
-crates/engine/src/cmd/interference.rs:meshes_apart decides two bodies are apart by mesh triangles
 crates/engine/src/cmd/joints.rs:cam_profile samples a cam's picked edges from the display mesh
 crates/engine/src/cmd/measure_sel.rs:closest measures closest points on mesh triangles
 crates/engine/src/cmd/measure_sel.rs:describe measures a selection on the display mesh
