@@ -95,6 +95,27 @@ fn each_kind_names_its_layer_in_the_capitals_of_its_id() {
     }
 }
 
+/// Each kind's paint band, drawn for a view and drawn for the sheet itself: borders, images, views,
+/// the views' annotations, tables, the sheet's own annotations, then the title block over them all.
+/// A note is the one kind drawn for either, so tables paint between a view's notes and the sheet's.
+#[test]
+fn each_kind_paints_in_its_band() {
+    use ObjectKind::*;
+    for (kind, for_view, for_sheet) in [
+        (SheetBorder, 0, 0),
+        (DrawingBorder, 0, 0),
+        (SheetImage, 1, 1),
+        (View, 2, 2),
+        (Dimension, 3, 3),
+        (Note, 3, 5),
+        (PartsList, 4, 4),
+        (RevisionTable, 4, 4),
+        (TitleBlock, 6, 6),
+    ] {
+        assert_eq!((kind.band(DrawnFor::View), kind.band(DrawnFor::Sheet)), (for_view, for_sheet), "{kind:?}");
+    }
+}
+
 #[test]
 fn each_side_of_the_sheet_is_above_zero_and_at_most_5000_mm() {
     const REFUSED: Invalid = Invalid("each side of the sheet is above 0 and at most 5000 mm");

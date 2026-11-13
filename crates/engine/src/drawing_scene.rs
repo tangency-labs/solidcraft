@@ -1,14 +1,15 @@
 //! The sheet scene (#4890 W10, #3890 W15): everything drawn on one sheet of a drawing as one paper
 //! scene ([`Scene`]), for the sheet page and every export, so the screen and the files draw the
-//! same thing. In paint order: the sheet's drawing border ([`SheetLayout::paper`]), then each view
-//! on the sheet by id, its lines as [`paper_group`] makes them, then the dimensions and notes of
-//! those views, by view and id ([`crate::drawing_dimension_paper`], [`crate::drawing_note_paper`]),
-//! then the notes on the sheet itself, then its title block's logos, lines and projection symbol, in
+//! same thing. Each group paints in its kind's band ([`ObjectKind::band`]), each band over the ones
+//! before it: the sheet's drawing border ([`SheetLayout::paper`]); the images placed on it
+//! ([`groups`]), so a view's lines draw over a photo; each view on the sheet, its lines as
+//! [`paper_group`] makes them; the dimensions and notes of those views
+//! ([`crate::drawing_dimension_paper`], [`crate::drawing_note_paper`]); the sheet's tables, once they
+//! join; the notes on the sheet itself; then its title block's logos, lines and projection symbol, in
 //! the drawing's projection ([`TitleBlockLayout::paper`]), with its labels and values set on them
-//! ([`title_block_text`]). Images placed on the sheet sit between the border and the views
-//! ([`groups`]), so a view's lines draw over a photo. Tables join as one more kind of
-//! group. A shaded view's group holds
-//! its pictures under its lines; nothing here draws their pixels ([`crate::drawing_picture`]).
+//! ([`title_block_text`]). Within a band, groups paint in the order they join: views by id, their
+//! dimensions and notes by view and id. A shaded view's group holds its pictures under its lines;
+//! nothing here draws their pixels ([`crate::drawing_picture`]).
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
 //! then moved to its centre, so the same lines on the same centre are the same bytes however they
@@ -68,7 +69,7 @@ use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::Source;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::text::{Font, TextRun, font_in};
-use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
+use solidcraft_geom::paper::{DrawnFor, Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, ArcMap};
 use solidcraft_sketch::PaperFonts;
@@ -135,8 +136,8 @@ pub struct ViewState {
     pub status: Status,
     /// What working out its lines cost, when they were.
     pub stats: Option<Stats>,
-    /// What it says beside its lines, when its status doesn't say why, as a note does: the joints its
-    /// position names that are gone ([`crate::drawing_view::gone_joints_reason`]).
+    /// What it says beside its lines, when its status doesn't say why, as a note does: the joints or
+    /// motion study its position names that are gone ([`crate::drawing_view::position_reason`]).
     pub why: Option<String>,
 }
 
@@ -550,7 +551,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     });
     let placing = measured.as_ref().map(|(_, extents, around)| (*extents, *around)).map_err(|why| *why);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
-    let why = crate::drawing_view::gone_joints_reason(crate::drawing_view::gone_joints(s, view).len());
+    let why = crate::drawing_view::position_reason(s, view);
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone() };
     let styles = Styles::from(view);
     let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
@@ -595,6 +596,11 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     }
 }
 
+/// Why a sheet leaves out a dimension or a note whose view it doesn't draw.
+pub(crate) const NOT_DRAWN: &str = "its view isn't drawn";
+/// Why a sheet leaves out a dimension that measures something its view has no place to draw.
+pub(crate) const NO_PLACE: &str = "what it measures has no place to draw on its view";
+
 /// The records of `wanted` read once, each by its kind, each drawn through its view's frame (`None`:
 /// its view isn't drawn), in its line group, in `wanted`'s order. A record that can't be read says so
 /// instead.
@@ -628,7 +634,7 @@ fn draw_dimensions(
                 Some(paper) => drawn(Some(Arc::new(paper.group)), paper.fonts, paper.why, paper.pending),
                 None => {
                     let nothing = !resolved.points.is_empty() && frame(record.view).is_some();
-                    drawn(None, Vec::new(), nothing.then(|| "what it measures has no place to draw on its view".to_string()), false)
+                    drawn(None, Vec::new(), nothing.then(|| NO_PLACE.to_string()), false)
                 }
             }
         }
@@ -768,21 +774,22 @@ fn annotations_on(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<Annotati
 
 /// A sheet's scene being put together: what [`assemble`] gives, for its dimensions to join.
 struct Assembly {
+    /// The sheet's size and fonts: [`Assembly::finish`] puts the groups in it.
     scene: Scene,
-    /// The groups in the scene, as a paper scene counts them.
+    /// The groups that joined, each with its paint band ([`ObjectKind::band`]), in the order they joined.
+    groups: Vec<(u8, Group)>,
+    /// The groups that joined, as a paper scene counts them.
     records: usize,
     /// One group checked alone on the sheet before it joins, so one past the limits leaves out only
     /// itself, and checking costs one pass over each group.
     alone: Scene,
     states: Vec<ViewState>,
-    objects: Vec<SheetObject>,
+    /// The objects on the sheet, each with its group's paint band, in the order they joined.
+    objects: Vec<(u8, SheetObject)>,
     /// The frame and centre of each view whose lines are in the scene.
     placed: BTreeMap<u64, (ViewFrame, Vec2)>,
     dimensions: Vec<DimensionState>,
     notes: Vec<NoteState>,
-    /// The sheet's title block, painted over everything by [`Assembly::finish`]: counted in `records`
-    /// from the start, so nothing takes its records.
-    block: Option<Group>,
 }
 
 /// Why a group stayed out of a scene.
@@ -792,9 +799,10 @@ enum LeftOut {
 }
 
 impl Assembly {
-    /// Puts `group`, whose text uses `fonts`, in the scene moved to `centre`, and gives the box round
-    /// it there. Only a group that joins adds to the scene's fonts, and a font's records it adds count.
-    fn add(&mut self, group: &Group, fonts: &[Font], centre: Vec2) -> std::result::Result<Aabb2, LeftOut> {
+    /// Puts `group`, drawn `of` a view or the sheet and whose text uses `fonts`, in the scene moved to
+    /// `centre`, in its paint band, and gives the box round it there. Only a group that joins adds to
+    /// the scene's fonts, and a font's records it adds count.
+    fn add(&mut self, group: &Group, fonts: &[Font], centre: Vec2, of: DrawnFor) -> std::result::Result<Aabb2, LeftOut> {
         self.alone.add_fonts(fonts.iter().cloned());
         let more = group.records().saturating_add(self.scene.font_records_beyond(&self.alone.fonts));
         if self.records.saturating_add(more) > MAX_RECORDS {
@@ -809,7 +817,8 @@ impl Assembly {
         }
         self.records += more;
         let bounds = self.alone.groups.first().map_or(Aabb2::EMPTY, |one| group_bounds(one, &self.alone.fonts));
-        self.scene.groups.append(&mut self.alone.groups);
+        let band = group.kind.band(of);
+        self.groups.extend(self.alone.groups.drain(..).map(|joined| (band, joined)));
         self.scene.add_fonts(std::mem::take(&mut self.alone.fonts));
         Ok(bounds)
     }
@@ -822,11 +831,11 @@ impl Assembly {
             let mut why = one.why.clone();
             let mut drawn = false;
             match (self.placed.get(&one.view).map(|(_, centre)| *centre), &one.group) {
-                (None, _) => why = Some("its view isn't drawn".into()),
-                (Some(centre), Some(group)) => match self.add(group, &one.fonts, centre) {
+                (None, _) => why = Some(NOT_DRAWN.into()),
+                (Some(centre), Some(group)) => match self.add(group, &one.fonts, centre, DrawnFor::View) {
                     Ok(bounds_mm) => {
                         drawn = true;
-                        self.objects.extend(SheetObject::on_paper(one.dimension, one.kind, bounds_mm, None));
+                        self.objects.extend(SheetObject::on_paper(one.dimension, one.kind, bounds_mm, None).map(banded(DrawnFor::View)));
                     }
                     Err(LeftOut::TooManyRecords) => {
                         why = Some(format!("with its lines the sheet is more than a paper scene's {MAX_RECORDS} records"))
@@ -848,9 +857,9 @@ impl Assembly {
     fn add_sheet_notes(&mut self, notes: &[SheetNote]) {
         for one in notes {
             let mut why = one.why.clone();
-            let drawn = match self.add(&one.group, &one.fonts, Vec2::ZERO) {
+            let drawn = match self.add(&one.group, &one.fonts, Vec2::ZERO, DrawnFor::Sheet) {
                 Ok(bounds_mm) => {
-                    self.objects.extend(SheetObject::on_paper(one.note, ObjectKind::Note, bounds_mm, None));
+                    self.objects.extend(SheetObject::on_paper(one.note, ObjectKind::Note, bounds_mm, None).map(banded(DrawnFor::Sheet)));
                     true
                 }
                 Err(LeftOut::TooManyRecords) => {
@@ -866,20 +875,32 @@ impl Assembly {
         }
     }
 
-    /// The scene with its title block on top, checked whole.
+    /// The scene with its groups in paint order, checked whole, and its objects in the same order.
     fn finish(self) -> Result<(Scene, Vec<ViewState>, Vec<SheetObject>, Vec<DimensionState>, Vec<NoteState>)> {
         let mut scene = self.scene;
-        scene.groups.extend(self.block);
+        scene.groups = in_paint_order(self.groups);
         scene.validate().map_err(|e| bad(CMD, e.to_string()))?;
-        Ok((scene, self.states, self.objects, self.dimensions, self.notes))
+        Ok((scene, self.states, in_paint_order(self.objects), self.dimensions, self.notes))
     }
+}
+
+/// `joined` without its bands, band by band. The sort is stable, so what shares a band keeps the
+/// order it joined in.
+fn in_paint_order<T>(mut joined: Vec<(u8, T)>) -> Vec<T> {
+    joined.sort_by_key(|(band, _)| *band);
+    joined.into_iter().map(|(_, one)| one).collect()
+}
+
+/// An object on the sheet with the paint band of its group, drawn `of` a view or the sheet.
+fn banded(of: DrawnFor) -> impl Fn(SheetObject) -> (u8, SheetObject) {
+    move |object| (object.kind.band(of), object)
 }
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
 /// lines, in id order) moved to its centre, with its title block (`logos` under its lines), its symbol in
-/// `projection` and its cells' text as [`block_text`] set it, to go on top ([`Assembly::finish`]). A view
-/// that would take the scene past a paper scene's limits is left out and says why, and the views after it
-/// are still drawn when they fit.
+/// `projection` and its cells' text as [`block_text`] set it, which its band puts on top
+/// ([`Assembly::finish`]). A view that would take the scene past a paper scene's limits is left out and
+/// says why, and the views after it are still drawn when they fit.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
     projection: Projection,
@@ -902,8 +923,8 @@ fn assemble<D: Borrow<Drawn>>(
         });
         border.push(Group { object: record.id, kind: ObjectKind::DrawingBorder, items: items.collect() });
     }
-    // The block sits on the border. It's painted over the views, but counted with the border (its
-    // text's fonts too), so no view takes its records.
+    // The block sits on the border. It joins with the border (its text's fonts too), so no view takes
+    // its records, and its band paints it over the views.
     let (block, fonts) = match (&record.title_block, &layout) {
         (Some(block), Some(layout)) => {
             let placed = block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?;
@@ -922,22 +943,25 @@ fn assemble<D: Borrow<Drawn>>(
     // The border's groups are one object, measured before the images painted with them join them:
     // an image isn't one of the objects a sheet's commands pick.
     let bounds_mm = border.iter().map(|group| group_bounds(group, &[])).fold(Aabb2::EMPTY, |all, one| all.union(&one));
-    let objects: Vec<SheetObject> = SheetObject::on_paper(record.id, ObjectKind::DrawingBorder, bounds_mm, None).into_iter().collect();
+    let objects: Vec<(u8, SheetObject)> =
+        SheetObject::on_paper(record.id, ObjectKind::DrawingBorder, bounds_mm, None).map(banded(DrawnFor::Sheet)).into_iter().collect();
     border.extend_from_slice(images);
-    let records = border.iter().chain(&block).map(Group::records).fold(0usize, usize::saturating_add);
-    let mut scene = Scene::new(size_mm, border);
+    border.extend(block);
+    let records = border.iter().map(Group::records).fold(0usize, usize::saturating_add);
+    let groups = border.into_iter().map(|group| (group.kind.band(DrawnFor::Sheet), group)).collect();
+    let mut scene = Scene::new(size_mm, Vec::new());
     let alone = Scene::new(size_mm, Vec::with_capacity(1));
     // The block's fonts, each once: all they hold counts, as the table held none before.
     scene.add_fonts(fonts);
     let records = records.saturating_add(alone.font_records_beyond(&scene.fonts));
     let (states, placed, dimensions, notes) = (Vec::new(), BTreeMap::new(), Vec::new(), Vec::new());
-    let mut assembly = Assembly { scene, records, alone, states, objects, placed, dimensions, notes, block };
+    let mut assembly = Assembly { scene, groups, records, alone, states, objects, placed, dimensions, notes };
     for (view, centre, drawn) in views {
         let drawn: &Drawn = drawn.borrow();
         let mut status = drawn.status.clone();
         let mut lines = None;
         if let Some(group) = &drawn.group {
-            match assembly.add(group, &[], centre) {
+            match assembly.add(group, &[], centre, DrawnFor::View) {
                 Ok(bounds) => {
                     lines = Some(bounds);
                     if let Some(frame) = drawn.frame {
@@ -953,7 +977,9 @@ fn assemble<D: Borrow<Drawn>>(
             }
         }
         let boundary_mm = drawn.boundary.map(|b| Aabb2 { min: b.min + centre, max: b.max + centre });
-        assembly.objects.extend(SheetObject::on_paper(view, ObjectKind::View, lines.unwrap_or(Aabb2::EMPTY), boundary_mm));
+        assembly
+            .objects
+            .extend(SheetObject::on_paper(view, ObjectKind::View, lines.unwrap_or(Aabb2::EMPTY), boundary_mm).map(banded(DrawnFor::View)));
         assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone() });
     }
     Ok(assembly)
@@ -981,7 +1007,7 @@ fn group_bounds(group: &Group, fonts: &[Font]) -> Aabb2 {
 
 /// `group` moved `by` on paper: each point plus `by`, exactly, so the same lines moved to the same
 /// centre are the same bytes however they got there.
-fn moved(group: &Group, by: Vec2) -> Group {
+pub(crate) fn moved(group: &Group, by: Vec2) -> Group {
     let segs = |path: &[Seg2]| -> Vec<Seg2> {
         // A shift keeps an arc's radius and angles: no turn, no mirror.
         path.iter().map(|seg| seg.mapped(|p| p + by, ArcMap::turn(0.0, false))).collect()
@@ -1601,7 +1627,7 @@ pub fn cancel(s: &mut Session) {
 }
 
 /// A copy of `s` as the design places its parts: an occurrence move not captured yet is left out.
-fn designed(s: &Session) -> Session {
+pub(crate) fn designed(s: &Session) -> Session {
     let mut copy = s.scratch();
     copy.pending_moves.clear();
     copy
@@ -1664,7 +1690,7 @@ fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView
 /// Each is worked out only when a view drawing it is behind.
 fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
     // Each with what it says now: a joint deleted may leave its picture as it was.
-    let says = |view: &ResolvedView| crate::drawing_view::gone_joints_reason(crate::drawing_view::gone_joints(s, view).len());
+    let says = |view: &ResolvedView| crate::drawing_view::position_reason(s, view);
     let behind: Vec<(u64, Choice, Option<String>)> = on
         .filter_map(|id| {
             let entry = s.drawing_scenes.views.get(&id).filter(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))?;

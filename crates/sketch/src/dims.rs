@@ -47,6 +47,9 @@ pub struct DimLayout {
     /// The direction the value text runs in: level (+x), or along a linear dimension's line when
     /// it is above it ([`DimSizes::above`]).
     pub text_dir: Vec2,
+    /// How many of [`DimLayout::lines`], from the first, are extension lines: each kind lays those out
+    /// before its dimension lines and arcs.
+    pub extensions: usize,
 }
 
 /// The sizes a dimension is laid out with, in its frame's units: [`DimSizes::screen`] on screen,
@@ -365,6 +368,34 @@ fn box_exit(half: Vec2, u: Vec2) -> f64 {
     (half.x / u.x.abs()).min(half.y / u.y.abs())
 }
 
+/// How far a linear dimension's line runs on past an arrow that is outside, in arrow lengths.
+const TAIL: f64 = 1.8;
+
+/// Half a linear dimension's text along its line (level, or running along it when `above`), and a gap.
+fn half_along(sizes: &DimSizes, dir: Vec2, half: Vec2) -> f64 {
+    let text = if sizes.above { half.x } else { half.x * dir.x.abs() + half.y * dir.y.abs() };
+    text + sizes.gap
+}
+
+/// Whether a linear dimension's arrows go inside its `span`: it holds them and its text, and the
+/// text, `s` along from the middle and `along` half long ([`half_along`]), lies between them.
+fn fits(span: f64, s: f64, along: f64, arrow: f64) -> bool {
+    span > 2.0 * arrow + 2.0 * along && s.abs() + along <= span * 0.5
+}
+
+/// Where [`dim_layout_sized`] puts a dimension's text, from its frame's origin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DimText {
+    /// The default place ([`default_text_offset`]).
+    Default,
+    /// A place of its own.
+    At(Vec2),
+    /// A linear dimension's text this far across its line, and along it in the middle when it fits
+    /// between the arrows, or else beyond the arrow at the line's `dir` end, a gap past the arrow's
+    /// tail (ISO 129-1). The other kinds take their default place.
+    Across(f64),
+}
+
 /// Lay a dimension out. `text` is the stored text position (None: the default place), `px`
 /// the sketch length of one screen pixel and `half` the half size of the text box (sketch
 /// units), which the dimension line leaves a gap for.
@@ -375,12 +406,18 @@ pub fn dim_layout(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2) -> DimL
 /// [`dim_layout`] with the extension lines of a linear dimension starting from the nearest
 /// point of the geometry in `reach` ([`dim_reach`]) instead of the measured points.
 pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2, reach: [Option<(Vec2, Vec2)>; 2]) -> DimLayout {
-    dim_layout_sized(f, text, &DimSizes::screen(px), half, reach)
+    dim_layout_sized(f, text.map_or(DimText::Default, DimText::At), &DimSizes::screen(px), half, reach)
 }
 
 /// [`dim_layout_reaching`] with its sizes given: on paper, a drawing's in millimetres. `half` is the
 /// text box's half size in the text's own direction ([`DimLayout::text_dir`]).
-pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half: Vec2, reach: [Option<(Vec2, Vec2)>; 2]) -> DimLayout {
+pub fn dim_layout_sized(f: &DimFrame, text: DimText, sizes: &DimSizes, half: Vec2, reach: [Option<(Vec2, Vec2)>; 2]) -> DimLayout {
+    // The text's place from the frame's origin, given its default place.
+    let place = |default: Vec2| match text {
+        DimText::At(t) => t,
+        DimText::Across(h) if matches!(f, DimFrame::Linear { .. }) => Vec2::new(0.0, h),
+        DimText::Default | DimText::Across(_) => default,
+    };
     let sizes = sizes.usable();
     let (arrow, gap, over) = (sizes.arrow, sizes.gap, sizes.overshoot);
     // The default text places as on screen, in 22nds of the offset: a linear one 22 across, the
@@ -392,15 +429,15 @@ pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half
     let mut out = DimLayout { text_dir: Vec2::X, ..DimLayout::default() };
     match *f {
         DimFrame::HalfAxis { center, dir, len } => {
-            let t = text.unwrap_or_else(|| default_text_offset(f, px, half));
+            let t = place(default_text_offset(f, px, half));
             let (linear, t) = half_axis_side(center, dir, len, t);
-            return dim_layout_sized(&linear, Some(t), &sizes, half, reach);
+            return dim_layout_sized(&linear, DimText::At(t), &sizes, half, reach);
         }
         DimFrame::Linear { p0, p1, dir } => {
             let n = dir.perp();
             let m = (p0 + p1) * 0.5;
-            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::Linear { p0, p1, dir }, px, half));
-            let (s, h) = (t.x, t.y);
+            let t = place(default_text_offset(&DimFrame::Linear { p0, p1, dir }, px, half));
+            let h = t.y;
             // The dimension line sits `h` across from the middle of the measured points.
             let q0 = p0 + n * (h - (p0 - m).dot(n));
             let q1 = p1 + n * (h - (p1 - m).dot(n));
@@ -411,6 +448,18 @@ pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half
                     out.lines.push(vec![p + u * gap.min(v.len()), q + u * over]);
                 }
             }
+            out.extensions = out.lines.len();
+            let len = (q1 - q0).dot(dir);
+            let (lo, hi) = if len >= 0.0 { (q0, q1) } else { (q1, q0) };
+            let span = len.abs();
+            let along = half_along(&sizes, dir, half);
+            // A text with no place along the line that doesn't fit between the arrows goes beyond the one
+            // at the `dir` end, a gap past its tail.
+            let beyond = span * 0.5 + arrow * TAIL + along;
+            let s = match text {
+                DimText::Across(_) if !fits(span, 0.0, along, arrow) && beyond.is_finite() => beyond,
+                _ => t.x,
+            };
             out.text = m + n * h + dir * s;
             if sizes.above {
                 // Along the line, read from the bottom of the sheet or, for a vertical line, from
@@ -418,16 +467,10 @@ pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half
                 out.text_dir = if dir.x.abs() > 1e-9 { dir * dir.x.signum() } else { Vec2::new(0.0, 1.0) };
                 out.text += out.text_dir.perp() * (gap + half.y);
             }
-            let len = (q1 - q0).dot(dir);
-            let (lo, hi) = if len >= 0.0 { (q0, q1) } else { (q1, q0) };
-            let span = len.abs();
-            // Half the text along the line: running along it when above it; drawn level otherwise,
-            // when it fits between the arrows if its whole box does (`along`, its farthest corner),
-            // and the line stops where it meets the box (`meet`).
-            let along = if sizes.above { half.x } else { half.x * dir.x.abs() + half.y * dir.y.abs() } + gap;
+            // The line stops where it meets the text box (`meet`): `along` for text above it, the box's
+            // edge along the line for level text.
             let meet = if sizes.above { along } else { box_exit(half, dir) + gap };
-            let inside = s.abs() + along <= span * 0.5;
-            if span > 2.0 * arrow + 2.0 * along && inside {
+            if fits(span, s, along, arrow) {
                 // Arrows inside, pointing out, the line broken around level text.
                 out.arrows.push((lo, -dir));
                 out.arrows.push((hi, dir));
@@ -442,7 +485,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half
                 // Too tight (or the text pulled out): arrows outside pointing in, short tails.
                 out.arrows.push((lo, dir));
                 out.arrows.push((hi, -dir));
-                let tail = arrow * 1.8;
+                let tail = arrow * TAIL;
                 out.lines.push(vec![lo - dir * tail, hi + dir * tail]);
                 // A text outside the extension lines gets a leader along the line.
                 let tc = m + n * h + dir * s;
@@ -457,7 +500,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half
             }
         }
         DimFrame::Radial { center, radius, diameter, arc } => {
-            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::Radial { center, radius, diameter, arc }, px, half));
+            let t = place(default_text_offset(&DimFrame::Radial { center, radius, diameter, arc }, px, half));
             let u = t.normalized().unwrap_or(Vec2::new(1.0, 1.0) * std::f64::consts::FRAC_1_SQRT_2);
             let d = t.len();
             let at = center + u * radius;
@@ -471,6 +514,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half
                     }
                 }
             }
+            out.extensions = out.lines.len();
             // The leader stops where it meets the (level) text box.
             let rim = box_exit(half, u) + gap;
             let from = if diameter { center - u * radius } else { center };
@@ -500,7 +544,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half
         }
         DimFrame::Angular { vertex, d0, sweep } => {
             let a0 = d0.angle();
-            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::Angular { vertex, d0, sweep }, px, half));
+            let t = place(default_text_offset(&DimFrame::Angular { vertex, d0, sweep }, px, half));
             let r = t.len().max(arrow);
             out.text = vertex + t;
             // Extension rays from the vertex out past the arc.
@@ -508,6 +552,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half
                 let u = Vec2::from_angle(a);
                 out.lines.push(vec![vertex + u * (r * 0.15).min(gap * 3.0), vertex + u * (r + over)]);
             }
+            out.extensions = out.lines.len();
             let arc_len = r * sweep;
             if arc_len > 2.5 * arrow {
                 out.lines.push(arc_pts(vertex, r, a0, sweep));
@@ -529,7 +574,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half
             }
         }
         DimFrame::ArcLength { center, radius, start, sweep } => {
-            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::ArcLength { center, radius, start, sweep }, px, half));
+            let t = place(default_text_offset(&DimFrame::ArcLength { center, radius, start, sweep }, px, half));
             let r = t.len().max(arrow);
             out.text = center + t;
             for a in [start, start + sweep] {
@@ -537,6 +582,7 @@ pub fn dim_layout_sized(f: &DimFrame, text: Option<Vec2>, sizes: &DimSizes, half
                 let (from, to) = if r >= radius { (radius + gap, r + over) } else { (radius - gap, r - over) };
                 out.lines.push(vec![center + u * from, center + u * to]);
             }
+            out.extensions = out.lines.len();
             out.lines.push(arc_pts(center, r, start, sweep));
             out.arrows.push((center + Vec2::from_angle(start) * r, -Vec2::from_angle(start).perp()));
             out.arrows.push((center + Vec2::from_angle(start + sweep) * r, Vec2::from_angle(start + sweep).perp()));
@@ -782,7 +828,7 @@ mod tests {
         for (f, t) in defaults {
             let lay = dim_layout(&f, None, px, half);
             assert!(same_layout(&lay, &dim_layout(&f, Some(t), px, half), 1e-12), "{f:?}: {lay:?}");
-            assert_eq!(lay, dim_layout_sized(&f, None, &s, half, [None, None]));
+            assert_eq!(lay, dim_layout_sized(&f, DimText::Default, &s, half, [None, None]));
             assert_eq!(lay.text_dir, Vec2::X);
         }
         assert_eq!(default_text(&linear, Vec2::ZERO, px, half), Some(Vec2::new(0.0, 22.0 * px)));
@@ -796,10 +842,10 @@ mod tests {
         // A 100 mm edge at 1:2 is 50 mm on paper; its dimension line sits 10 mm from it by default.
         let edge = |scale: f64| DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(100.0 * scale, 0.0), dir: Vec2::X };
         let half = Vec2::new(4.0, 1.75);
-        let lay = dim_layout_sized(&edge(0.5), None, &PAPER, half, [None, None]);
+        let lay = dim_layout_sized(&edge(0.5), DimText::Default, &PAPER, half, [None, None]);
         assert!(close(lay.arrows[0].0, Vec2::new(0.0, 10.0)) && close(lay.arrows[1].0, Vec2::new(50.0, 10.0)), "{lay:?}");
         for scale in [1.0, 0.5, 0.2] {
-            let lay = dim_layout_sized(&edge(scale), None, &PAPER, half, [None, None]);
+            let lay = dim_layout_sized(&edge(scale), DimText::Default, &PAPER, half, [None, None]);
             let end = 100.0 * scale;
             // Extension lines `gap` clear of the edge and `overshoot` past the dimension line.
             assert!(close(lay.lines[0][0], Vec2::new(0.0, 1.0)) && close(lay.lines[0][1], Vec2::new(0.0, 12.0)), "1:{}: {lay:?}", 1.0 / scale);
@@ -813,7 +859,7 @@ mod tests {
             );
         }
         // A 5 mm span is too tight: the arrows go outside, pointing in, with tails of 1.8 arrows.
-        let lay = dim_layout_sized(&edge(0.05), None, &PAPER, half, [None, None]);
+        let lay = dim_layout_sized(&edge(0.05), DimText::Default, &PAPER, half, [None, None]);
         assert!(close(lay.arrows[0].1, Vec2::X) && close(lay.arrows[1].1, -Vec2::X), "{lay:?}");
         assert!(close(lay.lines[2][0], Vec2::new(-5.4, 10.0)) && close(lay.lines[2][1], Vec2::new(10.4, 10.0)), "{lay:?}");
     }
@@ -823,7 +869,7 @@ mod tests {
         let above = DimSizes { above: true, ..PAPER };
         let half = Vec2::new(8.0, 1.75);
         let f = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(100.0, 0.0), dir: Vec2::X };
-        let lay = dim_layout_sized(&f, Some(Vec2::new(0.0, 10.0)), &above, half, [None, None]);
+        let lay = dim_layout_sized(&f, DimText::At(Vec2::new(0.0, 10.0)), &above, half, [None, None]);
         // Two extension lines and one stroke from arrow to arrow.
         assert_eq!(lay.lines.len(), 3, "{lay:?}");
         assert!(close(lay.lines[2][0], Vec2::new(0.0, 10.0)) && close(lay.lines[2][1], Vec2::new(100.0, 10.0)), "{lay:?}");
@@ -831,12 +877,12 @@ mod tests {
         assert!(close(lay.text, Vec2::new(50.0, 12.75)) && close(lay.text_dir, Vec2::X), "{lay:?}");
         // A vertical line's text is on its left, read from the right.
         let v = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(0.0, 100.0), dir: Vec2::new(0.0, 1.0) };
-        let lay = dim_layout_sized(&v, Some(Vec2::new(0.0, 10.0)), &above, half, [None, None]);
+        let lay = dim_layout_sized(&v, DimText::At(Vec2::new(0.0, 10.0)), &above, half, [None, None]);
         assert!(close(lay.text, Vec2::new(-12.75, 50.0)) && close(lay.text_dir, Vec2::new(0.0, 1.0)), "{lay:?}");
         // Along a vertical line it is the text's length that has to fit: 16 mm of it doesn't fit
         // between the arrows of a 20 mm span, so they go outside, pointing in.
         let short = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(0.0, 20.0), dir: Vec2::new(0.0, 1.0) };
-        let lay = dim_layout_sized(&short, Some(Vec2::new(0.0, 10.0)), &above, half, [None, None]);
+        let lay = dim_layout_sized(&short, DimText::At(Vec2::new(0.0, 10.0)), &above, half, [None, None]);
         assert!(close(lay.arrows[0].1, Vec2::new(0.0, 1.0)), "{lay:?}");
         // At any angle and either way round, the text runs along the line pointing right (up when
         // vertical), on its upper side.
@@ -844,7 +890,7 @@ mod tests {
             let d = Vec2::from_angle(deg.to_radians());
             let (a, b) = (Vec2::new(3.0, 4.0), Vec2::new(3.0, 4.0) + d * 50.0);
             for (p0, p1, dir) in [(a, b, d), (b, a, d), (a, b, -d), (b, a, -d)] {
-                let lay = dim_layout_sized(&DimFrame::Linear { p0, p1, dir }, Some(Vec2::new(0.0, 10.0)), &above, half, [None, None]);
+                let lay = dim_layout_sized(&DimFrame::Linear { p0, p1, dir }, DimText::At(Vec2::new(0.0, 10.0)), &above, half, [None, None]);
                 let t = lay.text_dir;
                 assert!(t.x > 1e-9 || close(t, Vec2::new(0.0, 1.0)), "{deg}°: {t:?}");
                 assert!((t.dot(d).abs() - 1.0).abs() < 1e-9, "{deg}°: {t:?} along the line");
@@ -854,10 +900,66 @@ mod tests {
         }
         // Too tight, with the text pulled out to the right: the leader runs on under the whole text.
         let tight = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(5.0, 0.0), dir: Vec2::X };
-        let lay = dim_layout_sized(&tight, Some(Vec2::new(20.0, 10.0)), &above, half, [None, None]);
+        let lay = dim_layout_sized(&tight, DimText::At(Vec2::new(20.0, 10.0)), &above, half, [None, None]);
         assert!(close(lay.arrows[0].1, Vec2::X) && close(lay.text, Vec2::new(22.5, 12.75)), "{lay:?}");
         let leader = lay.lines.last();
         assert!(leader.is_some_and(|l| close(l[0], Vec2::new(10.4, 10.0)) && close(l[1], Vec2::new(31.5, 10.0))), "{lay:?}");
+    }
+
+    /// A text with no place of its own that doesn't fit between the arrows goes beyond the arrow at
+    /// the line's `dir` end, a gap past its tail, and the line runs on under it (#13393, ISO 129-1).
+    /// It moves exactly where the arrows go outside.
+    #[test]
+    fn an_unplaced_text_that_does_not_fit_goes_beyond_an_arrow() {
+        let above = DimSizes { above: true, ..PAPER };
+        // "10.00" in 3.5 mm text over a 10 mm span: 5 to the middle, a 5.4 tail, a 1 gap and half the text.
+        let half = Vec2::new(6.5, 1.75);
+        let f = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(10.0, 0.0), dir: Vec2::X };
+        let lay = dim_layout_sized(&f, DimText::Across(10.0), &above, half, [None, None]);
+        // 17.9 along from the middle, 1.75 above the line and a gap.
+        assert!(close(lay.arrows[0].1, Vec2::X) && close(lay.text, Vec2::new(22.9, 12.75)), "{lay:?}");
+        let leader = lay.lines.last();
+        assert!(leader.is_some_and(|l| close(l[0], Vec2::new(15.4, 10.0)) && close(l[1], Vec2::new(30.4, 10.0))), "{lay:?}");
+        // Upright, it goes beyond the top arrow; reversed points change nothing.
+        let up = DimFrame::Linear { p0: Vec2::new(0.0, 10.0), p1: Vec2::ZERO, dir: Vec2::new(0.0, 1.0) };
+        let lay = dim_layout_sized(&up, DimText::Across(10.0), &above, half, [None, None]);
+        assert!(close(lay.text, Vec2::new(-12.75, 22.9)), "{lay:?}");
+        // At the length the arrows flip: inside it fits and stays in the middle, just short of it it moves.
+        for sizes in [above, PAPER] {
+            for d in [Vec2::X, Vec2::new(0.0, 1.0), Vec2::new(0.6, 0.8)] {
+                let flip = 2.0 * sizes.arrow + 2.0 * half_along(&sizes, d, half);
+                for (span, moves) in [(flip + 0.01, false), (flip - 0.01, true)] {
+                    let f = DimFrame::Linear { p0: Vec2::ZERO, p1: d * span, dir: d };
+                    let middle = dim_layout_sized(&f, DimText::At(Vec2::new(0.0, 10.0)), &sizes, half, [None, None]);
+                    let free = dim_layout_sized(&f, DimText::Across(10.0), &sizes, half, [None, None]);
+                    let inside = middle.arrows[0].1.dot(d) < 0.0;
+                    assert_eq!((free != middle, inside), (moves, !moves), "{span} along {d:?}, above {}", sizes.above);
+                }
+            }
+        }
+        // The other kinds take their default place, and a text that has no finite place stays in the middle.
+        let others = [
+            DimFrame::Radial { center: Vec2::ZERO, radius: 1.0, diameter: true, arc: None },
+            DimFrame::Angular { vertex: Vec2::ZERO, d0: Vec2::X, sweep: 0.1 },
+            DimFrame::ArcLength { center: Vec2::ZERO, radius: 1.0, start: 0.0, sweep: 0.1 },
+        ];
+        for o in &others {
+            assert_eq!(
+                dim_layout_sized(o, DimText::Across(10.0), &above, half, [None, None]),
+                dim_layout_sized(o, DimText::Default, &above, half, [None, None])
+            );
+        }
+        for bad in [Vec2::new(f64::INFINITY, 1.0), Vec2::new(f64::NAN, 1.0)] {
+            let middle = dim_layout_sized(&f, DimText::At(Vec2::new(0.0, 10.0)), &above, bad, [None, None]);
+            assert_eq!(dim_layout_sized(&f, DimText::Across(10.0), &above, bad, [None, None]), middle, "{bad:?}");
+        }
+        // A place across the line so far out that one point's extension line overflows: the span is NaN, so the
+        // text doesn't fit, and its place beyond an arrow isn't finite. The text keeps a finite place.
+        let far = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(0.0, f64::MAX), dir: Vec2::X };
+        for sizes in [above, PAPER] {
+            let lay = dim_layout_sized(&far, DimText::Across(-1e308), &sizes, half, [None, None]);
+            assert!(lay.text.x.is_finite() && lay.text.y.is_finite(), "{lay:?}");
+        }
     }
 
     #[test]
@@ -877,9 +979,10 @@ mod tests {
             ];
             for f in each_kind() {
                 for (sizes, fallback) in &cases {
-                    let lay = dim_layout_sized(&f, None, sizes, half, [None, None]);
+                    let lay = dim_layout_sized(&f, DimText::Default, sizes, half, [None, None]);
                     assert!(finite(&lay), "{bad} in {sizes:?}, {f:?}: {lay:?}");
-                    assert_eq!(lay, dim_layout_sized(&f, None, fallback, half, [None, None]), "{bad} in {sizes:?}, {f:?}");
+                    assert!(lay.extensions <= lay.lines.len(), "{bad} in {sizes:?}, {f:?}: {lay:?}");
+                    assert_eq!(lay, dim_layout_sized(&f, DimText::Default, fallback, half, [None, None]), "{bad} in {sizes:?}, {f:?}");
                 }
                 // A screen pixel that big makes every size too big: all fall back together.
                 assert_eq!(dim_layout(&f, None, bad, half), dim_layout(&f, None, 1.0, half), "px {bad}, {f:?}");
@@ -951,8 +1054,65 @@ mod tests {
                     let lay = dim_layout(f, Some(text), 0.1, Vec2::new(hx, hy));
                     let mut points = lay.lines.iter().flatten().chain(lay.arrows.iter().map(|(p, _)| p));
                     assert!(lay.text.is_finite() && points.all(|p| p.is_finite()), "{f:?} {hx} {hy} {text:?}: {:?}", lay.lines);
+                    assert!(lay.extensions <= lay.lines.len(), "{f:?} {hx} {hy} {text:?}: {lay:?}");
                 }
             }
         }
+    }
+
+    /// Each kind lays out its extension lines (ISO 129-1) first and counts them, so a reader can tell
+    /// them from its dimension lines: a linear one's two, none when both would have no length; a
+    /// radius's extension of its arc when its arrow is past the arc's end, none on the arc or on a
+    /// whole circle; an angle's two rays; an arc length's two; a half axis's as the linear dimension it
+    /// is drawn as. Each starts at what it measures, out by the gap (an angle's ray by its own rule).
+    #[test]
+    fn each_kind_counts_its_extension_lines_first() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        // On a screen of one pixel: a 9 arrowhead, a 3 gap, a 4 overshoot and 22 across.
+        let (px, half) = (1.0, Vec2::new(2.0, 1.0));
+        let starts = |l: &DimLayout| l.lines.iter().take(l.extensions).map(|line| line[0]).collect::<Vec<_>>();
+
+        // 10 above an 80 long line: from the gap above each end (3) to the overshoot past the line (14).
+        let linear = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(80.0, 0.0), dir: Vec2::X };
+        let lay = dim_layout(&linear, Some(Vec2::new(0.0, 10.0)), px, half);
+        assert_eq!(lay.extensions, 2, "{lay:?}");
+        assert!(close(lay.lines[0][0], Vec2::new(0.0, 3.0)) && close(lay.lines[0][1], Vec2::new(0.0, 14.0)), "{lay:?}");
+        assert!(close(lay.lines[1][0], Vec2::new(80.0, 3.0)) && close(lay.lines[1][1], Vec2::new(80.0, 14.0)), "{lay:?}");
+        // On the line it measures, both have no length and neither is laid out; the line still is.
+        let flat = dim_layout(&linear, Some(Vec2::ZERO), px, half);
+        assert!(flat.extensions == 0 && !flat.lines.is_empty(), "{flat:?}");
+
+        // A quarter arc of radius 10 from 0° to 90°, its radius's text 20 out at 135°: the arc continued
+        // from its 90° end, (0, 10). At 45° the arrow is on the arc, and a whole circle has no ends.
+        let arc = DimFrame::Radial { center: Vec2::ZERO, radius: 10.0, diameter: false, arc: Some((0.0, FRAC_PI_2)) };
+        let past = dim_layout(&arc, Some(Vec2::from_angle(0.75 * PI) * 20.0), px, half);
+        assert_eq!(past.extensions, 1, "{past:?}");
+        assert!(close(starts(&past)[0], Vec2::new(0.0, 10.0)), "{past:?}");
+        assert_eq!(dim_layout(&arc, Some(Vec2::from_angle(0.25 * PI) * 20.0), px, half).extensions, 0);
+        let circle = DimFrame::Radial { center: Vec2::ZERO, radius: 10.0, diameter: false, arc: None };
+        assert_eq!(dim_layout(&circle, Some(Vec2::new(-20.0, 0.0)), px, half).extensions, 0);
+
+        // An angle of 1 radian from +x, its text 48 out by default: each ray from 0.15 of 48 out (7.2,
+        // short of three gaps, 9).
+        let angle = DimFrame::Angular { vertex: Vec2::ZERO, d0: Vec2::X, sweep: 1.0 };
+        let lay = dim_layout(&angle, None, px, half);
+        assert_eq!(lay.extensions, 2, "{lay:?}");
+        assert!(close(starts(&lay)[0], Vec2::X * 7.2) && close(starts(&lay)[1], Vec2::from_angle(1.0) * 7.2), "{lay:?}");
+
+        // An arc of radius 10 from 0.5 by 2 radians, its text 10 + 20 out by default: each end's line
+        // from the gap past the arc (13).
+        let arc_length = DimFrame::ArcLength { center: Vec2::ZERO, radius: 10.0, start: 0.5, sweep: 2.0 };
+        let lay = dim_layout(&arc_length, None, px, half);
+        assert_eq!(lay.extensions, 2, "{lay:?}");
+        assert!(close(starts(&lay)[0], Vec2::from_angle(0.5) * 13.0) && close(starts(&lay)[1], Vec2::from_angle(2.5) * 13.0), "{lay:?}");
+
+        // A half axis 8 long up +y, its text at (10, 4): the linear dimension from the centre to (0, 8),
+        // 10 to its right, its extension lines from the gap right of each end (x 3).
+        let half_axis = DimFrame::HalfAxis { center: Vec2::ZERO, dir: Vec2::Y, len: 8.0 };
+        let to_end = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(0.0, 8.0), dir: Vec2::Y };
+        let lay = dim_layout(&half_axis, Some(Vec2::new(10.0, 4.0)), px, half);
+        assert_eq!(lay, dim_layout(&to_end, Some(encode_text(&to_end, Vec2::new(10.0, 4.0))), px, half));
+        assert_eq!(lay.extensions, 2, "{lay:?}");
+        assert!(close(starts(&lay)[0], Vec2::new(3.0, 0.0)) && close(starts(&lay)[1], Vec2::new(3.0, 8.0)), "{lay:?}");
     }
 }

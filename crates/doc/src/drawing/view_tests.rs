@@ -11,7 +11,7 @@ use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
 use crate::drawing::{Excluded, Sheet, Source};
-use crate::drawing_view::{Exploded, JointPose, OccurrencePaths, Pose};
+use crate::drawing_view::{Exploded, JointPose, OccurrencePaths, Pose, StudyStep};
 use crate::format::DRAWING;
 use crate::ids::IdSource;
 
@@ -293,6 +293,26 @@ fn a_pose_follows_its_parent_and_saves_as_it_is() {
     assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
 }
 
+/// A view's position at a motion study's step saves as the study's id and the step, follows down its
+/// chain as joint values do until a view sets its own, and reads back as the same bytes.
+#[test]
+fn a_study_step_follows_its_parent_and_saves_as_it_is() {
+    let (mut d, _, [front, right, top]) = three();
+    let resolved = |d: &Drawing, id: u64| d.resolve_view(id).unwrap().pose;
+    let at = Pose::Study(StudyStep { id: 31, step: 40 });
+    view_mut(&mut d, front).settings.pose = Some(at.clone());
+    d.validate().unwrap();
+    assert_eq!(resolved(&d, top), Setting { value: at.clone(), set_by: SetBy::Parent(front) });
+    view_mut(&mut d, right).settings.pose = Some(Pose::Designed);
+    assert_eq!(resolved(&d, top), Setting { value: Pose::Designed, set_by: SetBy::Parent(right) });
+    let v = file(&d);
+    let saved = v["views"].as_array().unwrap().iter().find(|view| view["id"] == json!(ids::encode(front))).cloned().unwrap();
+    assert_eq!(saved["settings"], json!({"scale": "1:2", "pose": {"study": {"id": 31, "step": 40}}}));
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+}
+
 /// A position's limits are kept on reading, at each side of each limit. A joint the design no longer
 /// has reads (the view skips it, never refuses the file), and anything that isn't a position is refused.
 #[test]
@@ -335,6 +355,17 @@ fn a_pose_keeps_its_limits_on_reading() {
         (json!("posed"), "unknown variant"),
         (json!([]), ""),
         (json!(1.5), ""),
+        // A study step: a study the design no longer has reads (the view draws the design's placement).
+        (json!({"study": {"id": 999_999, "step": 0}}), "read"),
+        (json!({"study": {"id": 3, "step": u32::MAX}}), "read"),
+        (json!({"study": {"id": 3, "step": u64::from(u32::MAX) + 1}}), "invalid value"),
+        (json!({"study": {"id": 3, "step": -1}}), "invalid value"),
+        (json!({"study": {"id": 3, "step": 2.5}}), "invalid type"),
+        (json!({"study": {"id": -1, "step": 0}}), "invalid value"),
+        (json!({"study": {"step": 0}}), "missing field"),
+        (json!({"study": {"id": 3}}), "missing field"),
+        (json!({"study": {"id": 3, "step": 0, "at": 1}}), "unknown field"),
+        (json!({"study": 3}), "invalid type"),
     ];
     for (pose, says) in cases {
         let e = with(pose.clone());

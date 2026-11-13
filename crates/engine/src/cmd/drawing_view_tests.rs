@@ -297,7 +297,8 @@ fn a_views_line_group_follows_its_sheet_and_links_with_its_parent() {
     assert_eq!(inspect_view(&mut s, right)["settings"]["line_group"]["from"], "sheet", "linking clears it");
     edit_view(&mut s, right, json!({"linked": false}));
     assert_eq!(inspect_view(&mut s, right)["settings"]["line_group"]["set"], "0.35", "unlinking keeps the value it had");
-    assert!(edit_refused(&mut s, front, json!({"line_group": "0.6"})).contains("line_group"));
+    let why = edit_refused(&mut s, front, json!({"line_group": "0.6"}));
+    assert!(why.ends_with("`set.line_group` must be one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2"), "{why}");
 }
 
 /// A copy is one undo step of new views, independent of the ones it came from: with its linked
@@ -2384,10 +2385,108 @@ fn a_pose_naming_a_gone_joint_skips_it() {
     assert_eq!(drawn.map(|v| v.get("reason").cloned()), Some(None), "nothing gone, nothing said: {scene}");
 }
 
+/// Makes motion study Open in [`hinge_pair`]'s design, turning Hinge along `points` ([step, degrees])
+/// over `steps` steps, or makes it again with them: with the drawing closed, then open again.
+fn study(s: &mut Session, steps: u32, points: Value) {
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(s, "drawing.close", json!({}));
+    let again = if s.doc.assembly.studies.is_empty() { json!({}) } else { json!({"study": "Open"}) };
+    let mut p = json!({"name": "Open", "steps": steps, "keys": [{"joint": "Hinge", "points": points}]});
+    p.as_object_mut().unwrap().extend(again.as_object().unwrap().clone());
+    run(s, "motion.study", p);
+    run(s, "drawing.open", json!({"drawing": drawing}));
+}
+
+/// The top view's height with the leaf at `degrees`: the plate's 20 mm and the leaf's 20 cos.
+fn turned(degrees: f64) -> f64 {
+    20.0 + 20.0 * degrees.to_radians().cos()
+}
+
+/// A view at a step of a motion study draws the assembly as `motion.play` sets it there, and the design
+/// is left as it was. Inspect says the study, the step and the values it draws, in degrees. The view
+/// keeps the step, not the values, so it follows the study when the study changes (#13048).
+#[test]
+fn a_view_at_a_study_step_draws_as_play_sets_it_and_follows_the_study() {
+    let (mut s, view, hinge) = hinge_pair();
+    study(&mut s, 10, json!([[0, 0], [10, 90]]));
+    let (joints, placed) = (s.doc.assembly.joints.clone(), s.doc.occurrences.clone());
+    edit_view(&mut s, view, json!({"pose": {"study": "Open", "step": 10}}));
+    assert!((height(&mut s, view) - turned(90.0)).abs() < 1e-6);
+    edit_view(&mut s, view, json!({"pose": {"study": "Open", "step": 5}}));
+    assert!((height(&mut s, view) - turned(45.0)).abs() < 1e-6);
+    assert_eq!((&s.doc.assembly.joints, &s.doc.occurrences), (&joints, &placed), "the design is left as it was");
+    assert!(s.pending_moves.is_empty());
+    let id = s.doc.assembly.studies[0].id;
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    assert_eq!(pose["value"], json!({"study": {"id": id, "step": 5}}), "{pose}");
+    assert_eq!(pose["study"], json!({"id": id, "name": "Open", "step": 5}), "{pose}");
+    assert_eq!((&pose["drawn"][0]["joint"], &pose["skipped"]), (&json!(hinge), &json!([])), "{pose}");
+    assert!((pose["drawn"][0]["values"][0].as_f64().unwrap() - 45.0).abs() < 1e-9, "{pose}");
+    // The study turned to 60° at its end: step 5 is now 30°.
+    study(&mut s, 10, json!([[0, 0], [10, 60]]));
+    assert!((height(&mut s, view) - turned(30.0)).abs() < 1e-6);
+}
+
+/// A saved step past the study's end, once the study is made shorter, draws the study's last step, as
+/// `motion.play` holds a step there, and inspect gives the step it draws. A study the design no longer
+/// has draws the design's placement, and the sheet says why, as for a gone joint.
+#[test]
+fn a_study_step_past_the_end_draws_the_last_and_a_gone_study_is_said() {
+    let (mut s, view, _) = hinge_pair();
+    study(&mut s, 10, json!([[0, 0], [10, 90]]));
+    edit_view(&mut s, view, json!({"pose": {"study": "Open", "step": 10}}));
+    study(&mut s, 5, json!([[0, 0], [10, 90]]));
+    // The key reaches 90° at step 10; the study now ends at step 5, where it is at 45°.
+    assert!((height(&mut s, view) - turned(45.0)).abs() < 1e-6);
+    assert_eq!(inspect_view(&mut s, view)["settings"]["pose"]["study"]["step"], json!(5));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "motion.delete", json!({"study": "Open"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!((height(&mut s, view) - 40.0).abs() < 1e-6, "drawn as the design places it");
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    assert_eq!((pose.get("study"), &pose["drawn"]), (None, &json!([])), "{pose}");
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    let drawn = scene["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(view)))).cloned();
+    let entry = drawn.map(|v| (v["status"].clone(), v["reason"].clone()));
+    assert_eq!(entry, Some((json!("drawn"), json!("its position names a motion study the design no longer has"))), "{scene}");
+}
+
+/// Making or editing a view refuses a study step the design can't draw, with its reason, and leaves the
+/// drawing and the undo steps as they were: an unknown study, a step outside the study's timeline or
+/// not a whole one, and a step that isn't one.
+#[test]
+fn hostile_study_steps_are_refused() {
+    let (mut s, view, _) = hinge_pair();
+    study(&mut s, 10, json!([[0, 0], [10, 90]]));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let cases = [
+        (json!({"study": "Nowhere", "step": 1}), "no motion study `Nowhere`"),
+        (json!({"study": 999_999, "step": 1}), "no motion study `999999`"),
+        (json!({"study": "Open", "step": 11}), "motion study `Open`: 0 to 10"),
+        (json!({"study": "Open", "step": -1}), "0 to 10"),
+        (json!({"study": "Open", "step": 2.5}), "0 to 10"),
+        (json!({"study": "Open", "step": u64::MAX}), "0 to 10"),
+        (json!({"study": "Open", "step": "5"}), "0 to 10"),
+        (json!({"study": [1], "step": 1}), "`study` must be an id or a name"),
+        (json!({"study": "Open"}), "pose"),
+        (json!({"study": "Open", "step": 1, "at": 1}), "pose"),
+    ];
+    for (pose, says) in cases {
+        let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "pose": pose}));
+        assert!(e.contains(says), "{pose}: {e}");
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(&mut s, view, json!({"pose": pose}));
+        assert!(e.contains(says), "{pose}: {e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{pose}");
+    }
+}
+
 /// A nut on a thread: the design's own plate, 40 x 20 x 2 mm from the origin, and a 10 x 10 x 5 mm
 /// nut on it in component Nut, on cylindrical joint Thread about the vertical through the nut's
-/// centre, which a screw link advances 2 mm a turn. A drawing, open, with a front view at 1:1. The
-/// session and the view.
+/// centre, which a screw link advances 2 mm a turn. Motion study Turn keys only the thread's turn,
+/// 0 to 720° over 10 steps. A drawing, open, with a front view at 1:1. The session and the view.
 fn screw_nut() -> (Session, u64) {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 2, "body_name": "Plate"}));
@@ -2397,6 +2496,8 @@ fn screw_nut() -> (Session, u64) {
     let at = json!({"occurrence": 0, "point": [20, 10, 2], "z": [0, 0, 1]});
     run(&mut s, "joint.as_built", json!({"type": "cylindrical", "name": "Thread", "a": 0, "b": "Nut", "at": at}));
     run(&mut s, "joint.screw", json!({"joint": "Thread", "pitch": 2}));
+    let keys = json!([{"joint": "Thread", "index": 0, "points": [[0, 0], [10, 720]]}]);
+    run(&mut s, "motion.study", json!({"name": "Turn", "steps": 10, "keys": keys}));
     run(&mut s, "drawing.create", json!({}));
     let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
     let p = json!({"sheet": sheet, "view": "front", "scale": "1:1", "position_mm": [150, 150]});
@@ -2417,6 +2518,55 @@ fn a_posed_view_says_the_travel_its_screw_link_draws() {
     let values = &pose["drawn"][0]["values"];
     assert!((values[0].as_f64().unwrap_or(f64::NAN) - 720.0).abs() < 1e-6, "{pose}");
     assert!((values[1].as_f64().unwrap_or(f64::NAN) - 4.0).abs() < 1e-6, "{pose}");
+}
+
+/// A study keys only the thread's turn, and the nut's travel follows it through the screw link: two
+/// turns rise two pitches, 4 mm. (A screw link sets the travel whatever the solve holds; holding only
+/// the keyed values shows in a closed loop, which
+/// [`a_study_holds_only_the_values_it_keys_and_a_closed_loop_moves_the_rest`] covers.)
+#[test]
+fn a_study_step_holds_only_the_values_the_study_keys() {
+    let (mut s, view) = screw_nut();
+    // The plate's 2 mm and the nut's 5 above it.
+    assert!((height(&mut s, view) - 7.0).abs() < 1e-6);
+    edit_view(&mut s, view, json!({"pose": {"study": "Turn", "step": 10}}));
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    assert!((height(&mut s, view) - 11.0).abs() < 1e-6, "{pose}");
+    let slide = pose["drawn"][0]["values"][1].as_f64().unwrap_or(f64::NAN);
+    assert!((slide - 4.0).abs() < 1e-6, "{pose}");
+}
+
+/// A study holds only the values it keys, as `motion.play` does, and a closed loop moves the rest. In
+/// [`slotted_arm`](crate::cmd::joints::tests::slotted_arm), study Swing keys only the slot's angle; the
+/// loop slides the pin out along the slot as it turns. A view at the study's last step draws the slot
+/// at the angle and slide play gives there. Holding the slide too, the loop couldn't close.
+#[test]
+fn a_study_holds_only_the_values_it_keys_and_a_closed_loop_moves_the_rest() {
+    let mut s = crate::cmd::joints::tests::slotted_arm(false, 0.0);
+    let keys = json!([{"joint": "Slot", "index": 0, "points": [[0, 0], [10, 20]]}]);
+    run(&mut s, "motion.study", json!({"name": "Swing", "steps": 10, "keys": keys}));
+    // Played on a copy: the view draws from the design's placement, where the slide is 26 mm.
+    let mut played = s.scratch();
+    run(&mut played, "motion.play", json!({"study": "Swing", "step": 10}));
+    let id = |name: &str| played.doc.assembly.joints.iter().find(|j| j.name == name).map(|j| j.id).unwrap();
+    let values = solidcraft_doc::joints::joint_values(&played.doc.assembly);
+    let (want, yaw) = (values.get(&id("Slot")).cloned().unwrap(), values.get(&id("Yaw")).and_then(|v| v.first().copied()).unwrap());
+    // Play moved the loop: the slot turned to 20° and the pin slid out to the fixture's closed form for the
+    // clamp's turn, √(26² + 52² − 2·26·52 cos θ), 26.80 mm here, off the 26 mm it starts at.
+    let slid = (26.0f64.powi(2) + 52.0f64.powi(2) - 2.0 * 26.0 * 52.0 * yaw.cos()).sqrt();
+    assert!(
+        (want[0].to_degrees().abs() - 20.0).abs() < 1e-6 && (want[1].abs() - slid).abs() < 1e-6 && (want[1].abs() - 26.0).abs() > 0.5,
+        "play moved the loop: {want:?}, the clamp turned {yaw} rad"
+    );
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let p = json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 150]});
+    let view = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    edit_view(&mut s, view, json!({"pose": {"study": "Swing", "step": 10}}));
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    let drawn = &pose["drawn"][0]["values"];
+    let (angle, slide) = (drawn[0].as_f64().unwrap_or(f64::NAN), drawn[1].as_f64().unwrap_or(f64::NAN));
+    assert!((angle - want[0].to_degrees()).abs() < 1e-6 && (slide - want[1]).abs() < 1e-6, "drawn {angle}°, {slide} mm; play {want:?}: {pose}");
 }
 
 /// Dimensions on a posed view would measure the design's placement: they are refused there, by the

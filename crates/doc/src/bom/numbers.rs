@@ -34,6 +34,8 @@ pub struct ItemNumbers {
     pub fold: bool,
     #[serde(default, rename = "show_purchased_contents", skip_serializing_if = "std::ops::Not::not")]
     pub purchased_contents: bool,
+    #[serde(default, rename = "show_suppressed_parts", skip_serializing_if = "std::ops::Not::not")]
+    pub suppressed_parts: bool,
     /// One for each row numbered, rows gone since included, by key.
     #[serde(default)]
     pub items: Vec<ItemNumber>,
@@ -52,7 +54,15 @@ pub struct ItemNumber {
 impl ItemNumbers {
     /// The list it numbers.
     pub fn request(&self) -> Request {
-        Request { source: self.source, view: self.view, group: self.group, fold: self.fold, mass: false, purchased_contents: self.purchased_contents }
+        Request {
+            source: self.source,
+            view: self.view,
+            group: self.group,
+            fold: self.fold,
+            mass: false,
+            purchased_contents: self.purchased_contents,
+            suppressed_parts: self.suppressed_parts,
+        }
     }
 }
 
@@ -191,6 +201,7 @@ pub fn number(tree: &mut Tree, request: &Request, how: Numbering) -> Result<Opti
         group: request.group,
         fold: request.fold,
         purchased_contents: request.purchased_contents,
+        suppressed_parts: request.suppressed_parts,
         items,
     };
     Ok((old != Some(&new)).then_some(new))

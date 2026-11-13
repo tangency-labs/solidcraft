@@ -109,13 +109,17 @@ fn built(s: &Session, sheet: u64) -> SheetScene {
 /// shows, then a short piece of work, until there is none and no text waits for its font.
 fn settled(s: &mut Session, sheet: u64) -> SheetView {
     let started = std::time::Instant::now();
-    let mut answer = extract(s, sheet).unwrap();
-    while step(s) || answer.waiting_for_fonts {
+    extract(s, sheet).unwrap();
+    loop {
+        let more = step(s);
+        // Read after the step: its own read of a dimension can leave the dimension's text waiting.
+        let answer = extract(s, sheet).unwrap();
+        if !more && !answer.waiting_for_fonts {
+            return answer;
+        }
         assert!(started.elapsed().as_secs() < 120, "the sheet never settled");
         std::thread::yield_now();
-        answer = extract(s, sheet).unwrap();
     }
-    extract(s, sheet).unwrap()
 }
 
 /// The scene as its JSON text: what byte for byte compares.
@@ -612,8 +616,11 @@ fn a_title_blocks_text_waits_for_its_font_off_the_windows_thread() {
 fn a_dimensions_text_waits_for_its_font_off_the_windows_thread() {
     let (mut s, sheet, [front, _]) = front_and_top();
     settled(&mut s, sheet);
-    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}, "override_text": "\u{30f7} 100"});
+    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}});
     let added = run(&mut s, "drawing.dimension.add", p)["dimension"].as_str().and_then(ids::decode).unwrap();
+    // Its text through edit, which lays nothing out: add asks for a font itself (it never waits), and
+    // the read this test watches must be the first to ask.
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(added), "set": {"override_text": "\u{30f7} 100"}}));
     extract(&mut s, sheet).unwrap();
     step(&mut s);
     assert!(s.drawing_scenes.dimensions[&added].drawn.pending, "the window's sheet asked, not waited");
@@ -636,8 +643,11 @@ fn a_dimensions_text_waits_for_its_font_off_the_windows_thread() {
 fn a_view_drawn_again_reads_its_dimensions_text_without_waiting() {
     let (mut s, sheet, [front, _]) = front_and_top();
     settled(&mut s, sheet);
-    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}, "override_text": "\u{30f8} 100"});
+    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}});
     let added = run(&mut s, "drawing.dimension.add", p)["dimension"].as_str().and_then(ids::decode).unwrap();
+    // Its text through edit, which lays nothing out: add asks for a font itself (it never waits), and
+    // the read this test watches must be the first to ask.
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(added), "set": {"override_text": "\u{30f8} 100"}}));
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}}));
     extract(&mut s, sheet).unwrap();
     // Both views wait (the top one is projected from the front one): step until the front view's
@@ -650,6 +660,23 @@ fn a_view_drawn_again_reads_its_dimensions_text_without_waiting() {
     assert!(s.drawing_scenes.dimensions[&added].drawn.pending, "the view's job asked, not waited");
     assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
     assert!(!s.drawing_scenes.dimensions[&added].drawn.pending);
+}
+
+/// Adding a dimension whose number needs a font to fall back to never waits for the search, as add
+/// and its dry run run on the window thread: the reply has no layout and says its text waits. Once the
+/// sheet has drawn it, inspect has the layout. The character is this test's alone.
+#[test]
+fn adding_a_dimension_never_waits_for_its_texts_font() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    settled(&mut s, sheet);
+    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}, "override_text": "\u{30f9} 100"});
+    let added = run(&mut s, "drawing.dimension.add", p);
+    let waits = "its text waits for a font to fall back to; drawing.scene draws it when one is found";
+    assert!(added.get("layout").is_none() && added["layout_why"] == json!(waits), "{added}");
+    settled(&mut s, sheet);
+    // Found, or known to be in no font: either way the answer is in, and the layout with it.
+    let inspected = run(&mut s, "drawing.dimension.inspect", json!({"dimension": added["dimension"]}));
+    assert!(inspected.get("layout").is_some() && inspected["layout_why"] != json!(waits), "{inspected}");
 }
 
 /// The model's state alone changing, the design and the sheet as they were, sets the title
@@ -872,6 +899,29 @@ fn a_sheet_makes_one_copy_for_each_choice_it_draws() {
     let d = s.drawing("test").unwrap().clone();
     let mut sessions = crate::drawing_view::ViewSessions::new(&s);
     for view in [designed].into_iter().chain(posed) {
+        sessions.of(&d.resolve_view(view).unwrap()).unwrap();
+    }
+    assert_eq!(sessions.copies(), 2);
+    built(&s, sheet);
+}
+
+/// Two views at one step of a motion study share one copy, and a view at another step has its own.
+#[test]
+fn views_at_one_study_step_share_one_copy() {
+    let (mut s, designed, _) = hinge_pair();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "motion.study", json!({"name": "Open", "steps": 10, "keys": [{"joint": "Hinge", "points": [[0, 0], [10, 90]]}]}));
+    run(&mut s, "drawing.open", drawing);
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let view = |s: &mut Session, at: [f64; 2], step: u32| {
+        let p = json!({"sheet": ids::encode(sheet), "view": "top", "scale": "1:1", "position_mm": at, "pose": {"study": "Open", "step": step}});
+        ids::decode(run(s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap()
+    };
+    let at_steps = [view(&mut s, [60.0, 250.0], 4), view(&mut s, [150.0, 250.0], 4), view(&mut s, [250.0, 250.0], 7)];
+    let d = s.drawing("test").unwrap().clone();
+    let mut sessions = crate::drawing_view::ViewSessions::new(&s);
+    for view in [designed].into_iter().chain(at_steps) {
         sessions.of(&d.resolve_view(view).unwrap()).unwrap();
     }
     assert_eq!(sessions.copies(), 2);
@@ -2015,6 +2065,86 @@ fn a_dimension_is_drawn_after_the_views_on_the_sheet() {
     assert!(provided.stale_dimensions.is_empty());
 }
 
+/// The id under `key` in a command's reply.
+fn id_in(reply: Value, key: &str) -> u64 {
+    ids::decode(reply[key].as_str().unwrap()).unwrap()
+}
+
+/// Every kind of group `drawings` draws, on one sheet, paints as the code put them in by hand before
+/// paint bands (#4890): the border, an image, the views by id (shaded, the top view following the
+/// front, each picture inside its view's group), the views' dimension and note by view and id, the
+/// sheet's own note, then the title block with its logo. `build` and the provider give the same bytes.
+#[test]
+fn todays_sheets_paint_every_kind_in_the_same_order() {
+    let folder = crate::tests::Folder::new("paint-every-kind");
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let file = folder.path("red-blue.png");
+    std::fs::write(&file, crate::drawing_pictures::tests::red_blue()).unwrap();
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    run(&mut s, "drawing.title_block.logo", json!({"cell": "legal_owner", "file": file}));
+    let image = id_in(run(&mut s, "drawing.image.add", json!({"sheet": ids::encode(sheet), "file": file, "rect_mm": [10, 20, 35, 33]})), "image");
+    // The sheet's note is added first, so its id doesn't put it last.
+    let general =
+        id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": [20, 40], "content": "General"})), "note");
+    let dimension = top_edge(&mut s, front);
+    let on_front =
+        id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(front)}, "at": [0, -20], "content": "Front"})), "note");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "shaded"}}));
+
+    let mut views = [front, top];
+    views.sort_unstable();
+    let mut annotations = [(dimension, ObjectKind::Dimension), (on_front, ObjectKind::Note)];
+    annotations.sort_by_key(|(id, _)| *id);
+    let mut expected: Vec<(u64, ObjectKind)> = border(&s, sheet).iter().map(|g| (g.object, g.kind)).collect();
+    expected.push((image, ObjectKind::SheetImage));
+    expected.extend(views.map(|view| (view, ObjectKind::View)));
+    expected.extend(annotations);
+    expected.extend([(general, ObjectKind::Note), (sheet, ObjectKind::TitleBlock)]);
+    let built = built(&s, sheet);
+    assert_eq!(built.scene.groups.iter().map(|g| (g.object, g.kind)).collect::<Vec<_>>(), expected);
+    let pictures = |group: &Group| group.items.iter().filter(|item| matches!(item, Item::Picture(_))).count();
+    let block = built.scene.groups.last().unwrap();
+    assert!(views.iter().all(|view| pictures(group_of(&built.scene, *view)) > 0) && pictures(block) == 1, "pictures inside their groups");
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built.scene));
+}
+
+/// Groups paint by their band, not by when they join (#4890): a sheet's note that joins before a
+/// view's dimension and note still paints after them, so the scene is `build`'s, byte for byte, and
+/// the sheet's objects are listed in the same order, as `hit` reads them.
+#[test]
+fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let dimension = top_edge(&mut s, front);
+    let on_front =
+        id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(front)}, "at": [0, -20], "content": "Front"})), "note");
+    let note = id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": [20, 40], "content": "General"})), "note");
+    let d = s.drawing("test").unwrap().clone();
+    let (record, on) = (sheet_of(&d, sheet).unwrap(), views_on(&d, sheet).unwrap());
+    let shown = crate::drawing_view::shown(&s);
+    let lettering = Lettering::of(&s, &d);
+    let (text, _) = block_text(record, &lettering, &[], true).unwrap();
+    let (notes, _) = sheet_notes(&s, &d, sheet, &lettering, true);
+    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &shown, *id, view)));
+    let mut assembly = assemble(record, d.projection, &text, &[], &[], drawn).unwrap();
+    let frames: BTreeMap<_, _> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
+    let line_group = |view: u64| on.iter().find(|(id, ..)| *id == view).map(|(_, v, _)| v.line_group.value);
+    let wanted = dimensions_on(&d, on.iter().map(|(id, ..)| *id));
+    let dimensions = draw_dimensions(&s, &d, &wanted, |view| Some((*frames.get(&view)?, line_group(view)?)), true);
+    // The other way round from `build`: the sheet's note joins first.
+    assembly.add_sheet_notes(&notes);
+    assembly.add_dimensions(dimensions.iter());
+    let (scene, _, objects, ..) = assembly.finish().unwrap();
+    let mut view_annotations = [dimension, on_front];
+    view_annotations.sort_unstable();
+    let ours = |object: &u64| [dimension, on_front, note].contains(object);
+    let painted: Vec<u64> = scene.groups.iter().map(|g| g.object).filter(ours).collect();
+    assert_eq!(painted, [view_annotations[0], view_annotations[1], note]);
+    assert_eq!(objects.iter().map(|o| o.object).filter(ours).collect::<Vec<_>>(), painted, "objects in paint order");
+    let built = built(&s, sheet);
+    assert_eq!((bytes(&scene), &objects), (bytes(&built.scene), &built.objects));
+}
+
 /// Moving a view moves its dimensions, the same bytes moved, with no projection and no new read. An
 /// edit of one dimension reads that one alone, and projects nothing.
 #[test]
@@ -2797,6 +2927,53 @@ fn an_uncaptured_move_is_drawn_where_the_design_places_the_part() {
     let captured = settled(&mut s, sheet);
     assert_ne!(bytes(&captured.scene), bytes(&placed.scene));
     assert_eq!(bytes(&captured.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// A dimension's layout with an occurrence move not captured yet is where the sheet draws it: the
+/// block's front bottom edge, with the cube moved 30 up and not captured. The design still places the
+/// cube on the block, so the front view's outline is still x 0 to 100 and z 0 to 30, its middle
+/// (50, 15) on (150, 150) at 1:2: the edge at y 150 - 15 / 2 = 142.5, from x 150 - 25 = 125 to 175,
+/// and its line 10 below, at 132.5, the extension lines from the gap below the edge (141.5) to the
+/// overshoot past the line (130.5). Inspect's layout is the one it had before the move, and its tips,
+/// extension lines and text's first corner are the built sheet's, exactly. (Moved and captured, the
+/// cube would reach z 60 and move the view's middle to z 30.)
+#[test]
+fn a_dimensions_layout_with_a_move_not_captured_is_where_the_sheet_draws_it() {
+    let (mut s, sheet, cube) = cube_on_block();
+    let front = s.drawing("test").unwrap().views.iter().find(|v| matches!(v.kind, ViewKind::Base { .. })).unwrap().id;
+    let id = front_edge(&mut s, front);
+    let layout = |s: &mut Session| run(s, "drawing.dimension.inspect", json!({"dimension": ids::encode(id)}))["layout"].clone();
+    let before = layout(&mut s);
+    in_the_model(&mut s, "occurrence.move", json!({"occurrence": cube, "translate": [0, 0, 30], "capture": false}));
+    assert_eq!(s.pending_moves.len(), 1);
+    let now = layout(&mut s);
+    assert_eq!(now, before, "as before the move");
+
+    let point = |v: &Value| Vec2::new(v[0].as_f64().unwrap(), v[1].as_f64().unwrap());
+    let line = |v: &Value| v.as_array().unwrap().iter().map(point).collect::<Vec<Vec2>>();
+    let tips: Vec<Vec2> = now["arrows"].as_array().unwrap().iter().map(|arrow| point(&arrow["tip"])).collect();
+    let near = |a: &[Vec2], b: &[Vec2]| a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.dist(*q) < 1e-9);
+    assert!(near(&tips, &[Vec2::new(125.0, 132.5), Vec2::new(175.0, 132.5)]), "{now}");
+    // In the order the edge's ends are read, whichever that is.
+    let extensions: Vec<Vec<Vec2>> = now["extension_lines"].as_array().unwrap().iter().map(line).collect();
+    let left = [Vec2::new(125.0, 141.5), Vec2::new(125.0, 130.5)];
+    assert!(extensions.len() == 2 && extensions.iter().any(|extension| near(extension, &left)), "{now}");
+
+    let built = built(&s, sheet);
+    let group = group_of(&built.scene, id);
+    let (mut strokes, mut drawn_tips, mut origins): (Vec<Vec<Vec2>>, _, _) = (Vec::new(), Vec::new(), Vec::new());
+    for item in &group.items {
+        match item {
+            Item::Stroke { path, .. } => strokes.push(path.iter().map(|seg| seg.start()).chain(path.last().map(|seg| seg.end())).collect()),
+            Item::Fill { region } => drawn_tips.push(region.outer.segs[0].start()),
+            Item::Text(text) => origins.push(text.origin),
+            Item::Picture(_) => {}
+        }
+    }
+    assert_eq!(tips, drawn_tips);
+    assert!(extensions.iter().all(|extension| strokes.contains(extension)), "{extensions:?} {strokes:?}");
+    let firsts: Vec<Vec2> = now["text_boxes"].as_array().unwrap().iter().map(|corners| point(&corners[0])).collect();
+    assert_eq!(firsts, origins);
 }
 
 /// Seeded mixes of edits, undos, redos, steps and jobs begun, run, cancelled and taken in any

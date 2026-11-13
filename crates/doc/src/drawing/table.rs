@@ -127,6 +127,7 @@ impl PartsList {
             fold: self.fold,
             mass: false,
             purchased_contents: self.purchased_contents,
+            suppressed_parts: false,
         }
     }
 
