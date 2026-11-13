@@ -1,6 +1,6 @@
 //! Semantic dimension annotations and text formatting, independent of layout, UI language and saved data.
 
-use crate::display_units::{DecimalMarker, NumberFormat, Shown, format_number, format_value, grouped_digits};
+use crate::display_units::{DecimalMarker, MAX_DECIMALS, NumberFormat, Shown, format_number, format_value, grouped_digits};
 use crate::{DocError, Result, expr};
 
 /// Deviations are offsets from the unrounded nominal, in internal units (mm or rad).
@@ -26,10 +26,14 @@ pub enum TolerancePresentation {
     Limits,
 }
 
+/// A dimension's role and its frame. Auxiliary and exact roles refuse tolerances.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
+    /// A regular, unframed dimension.
     Normal,
+    /// An auxiliary dimension, shown in parentheses.
     Auxiliary,
+    /// An exact dimension, shown in a box.
     Exact,
 }
 
@@ -189,9 +193,11 @@ pub struct DimensionValue {
 pub struct DimensionStyle {
     pub unit: String,
     pub number: NumberFormat,
+    /// Decimal places of the displayed unit; for degree/minute angles, places of a minute.
     pub decimals: u8,
-    /// Maximum precision of both stacked values. Trailing-zero suppression removes
-    /// only shared zeros, so their decimal places match (except an unsigned zero deviation).
+    /// Maximum precision of both stacked values, in the displayed unit (minutes for
+    /// degree/minute angles). Trailing-zero suppression removes only shared zeros,
+    /// so their decimal places match (except an unsigned zero deviation).
     pub tolerance_decimals: u8,
     pub repeat: Repeat,
 }
@@ -254,14 +260,22 @@ impl DimensionText {
 }
 
 /// Format a dimension without changing its value or dropping incompatible annotations.
+///
+/// # Errors
+///
+/// Returns [`DocError::Invalid`] for non-finite or out-of-range display values, a precision
+/// over eight places, a count outside 1 to 10,000, an incompatible role and tolerance,
+/// an invalid tolerance or fit code, or an unknown or wrong-kind unit. When limits are
+/// displayed, they are computed from the unrounded nominal and deviations and must also
+/// fit the number formatter's display range.
 pub fn format_dimension(value: &DimensionValue, style: &DimensionStyle) -> Result<DimensionText> {
     if !value.nominal.is_finite() {
         return Err(DocError::Invalid("dimension nominal must be finite".into()));
     }
-    if style.decimals > 8 {
+    if style.decimals > MAX_DECIMALS {
         return Err(DocError::Invalid("dimension decimals must be at most 8".into()));
     }
-    if style.tolerance_decimals > 8 {
+    if style.tolerance_decimals > MAX_DECIMALS {
         return Err(DocError::Invalid("dimension tolerance_decimals must be at most 8".into()));
     }
     if !(1..=10_000).contains(&value.count) {
