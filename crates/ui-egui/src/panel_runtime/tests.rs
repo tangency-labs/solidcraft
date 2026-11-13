@@ -7,6 +7,7 @@ use super::*;
 fn surface_test_palette(dark: bool) -> solidcraft_theme::Tokens {
     let mut tokens = if dark { solidcraft_theme::Tokens::dark() } else { solidcraft_theme::Tokens::light() };
     tokens.panel = if dark { egui::Color32::BLACK } else { egui::Color32::WHITE };
+    tokens.toolbar = tokens.panel;
     let ink = if dark { egui::Color32::WHITE } else { egui::Color32::BLACK };
     tokens.text = ink;
     tokens.text_dim = ink;
@@ -59,7 +60,7 @@ fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
                 let style = HostSurfaceStyle::capture(&ctx, false, Some(requested), None);
                 let appearance = style.appearance(PanelSurface::Translucent, floating);
                 let palette = style.palette(appearance);
-                match &appearance.contrast {
+                match appearance.contrast.as_ref().unwrap() {
                     ContrastOutcome::Readable { effective_background_alpha } => {
                         assert!(!impossible, "a shipped unreadable authored pair cannot be reported compliant: {name}");
                         assert!(*effective_background_alpha >= requested);
@@ -99,7 +100,7 @@ fn captured_panel_surfaces_protect_all_inks_at_requested_translucencies() {
             let style = HostSurfaceStyle::capture(&ctx, false, Some(opacity), None);
             for floating in [false, true] {
                 let appearance = style.appearance(PanelSurface::Translucent, floating);
-                let ContrastOutcome::Readable { effective_background_alpha } = appearance.contrast else {
+                let Some(ContrastOutcome::Readable { effective_background_alpha }) = appearance.contrast else {
                     panic!("valid theme must remain authored")
                 };
                 assert!(effective_background_alpha >= opacity);
@@ -172,7 +173,7 @@ fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
         let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
         let style = HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
         let appearance = style.appearance(PanelSurface::Translucent, false);
-        assert!(matches!(appearance.contrast, ContrastOutcome::Readable { .. }));
+        assert!(matches!(appearance.contrast, Some(ContrastOutcome::Readable { .. })));
         for viewport in [0, 1, 64, 117, 192, 254, 255] {
             for linear in [false, true] {
                 let background = physical(appearance.fill, Color32::from_gray(viewport), linear, 0.0);
@@ -226,7 +227,7 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
         } else {
             ContrastFailure::UnreadableAtFullOpacity
         };
-        assert_eq!(appearance.contrast, ContrastOutcome::RetainReadableFallback { reason: expected });
+        assert_eq!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { reason: expected }));
         assert_eq!(appearance.fill.a(), 255);
         assert!(solidcraft_theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
         assert_eq!(style.palette(appearance).space_4, tokens.space_4, "fallback does not change layout metrics");
@@ -238,12 +239,12 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
 #[test]
 fn panel_surface_capture_matches_shared_frames_and_respects_accessibility() {
     let ctx = egui::Context::default();
-    let tokens = surface_test_palette(false);
+    let mut tokens = surface_test_palette(false);
+    tokens.toolbar = egui::Color32::from_rgba_unmultiplied(220, 230, 240, 180);
     let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     let style = HostSurfaceStyle::capture(&ctx, false, None, None);
     for floating in [false, true] {
-        let requested = crate::ui_kit::panel_host_frame(&ctx, floating).fill;
-        assert!(style.appearance(PanelSurface::Translucent, floating).fill.a() >= requested.a());
+        assert_eq!(style.appearance(PanelSurface::Translucent, floating).fill, tokens.toolbar);
     }
     assert_eq!(HostSurfaceStyle::capture(&ctx, false, None, Some(&style)), style);
     let forced = HostSurfaceStyle::capture(&ctx, true, Some(0.0), Some(&style));
@@ -12494,7 +12495,7 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         for card in &painted.sections {
             let appearance = captured_style.appearance(card.surface, card.peek || card.zone == Zone::Floating);
             assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
-            assert_eq!(card.contrast.as_ref(), Some(&appearance.contrast));
+            assert_eq!(card.contrast, appearance.contrast);
             assert_eq!(card.paint_alpha, Some(255), "Classic's default opaque policy is preserved");
         }
         let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
@@ -12546,7 +12547,7 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         for card in &styled.sections {
             let appearance = styled_policy.surfaces.as_ref().unwrap().appearance(card.surface, card.peek || card.zone == Zone::Floating);
             assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
-            assert_eq!(card.contrast.as_ref(), Some(&appearance.contrast));
+            assert_eq!(card.contrast, appearance.contrast);
         }
         assert_eq!(styled.render_domain, reference.render_domain);
         assert_eq!(styled.controls, reference.controls, "appearance leaves all pointer bounds and identities intact");
@@ -13247,6 +13248,9 @@ fn production_browser_and_history_mount_existing_content_once_and_preserve_combi
     for combined in [false, true] {
         let h = production_content_harness(combined, false);
         let frame = h.app.universal_panel_frame().expect("real content uses the shared host");
+        for card in &frame.layout.sections {
+            assert_eq!(card.surface, PanelSurface::Translucent, "production panels follow the ribbon in every in-workspace zone");
+        }
         assert!(frame.layout.sections.iter().any(|card| card.instance == id("browser")));
         assert_eq!(frame.layout.sections.iter().any(|card| card.instance == id("history")), !combined);
         let rows = crate::browser::drawn_rows();

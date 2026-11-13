@@ -23,7 +23,7 @@ pub fn panel_host_container(ctx: &egui::Context, floating: bool) -> Container {
 
 /// The same adaptive frame supplies both paint and the content's safe clip.
 pub fn panel_host_frame(ctx: &egui::Context, floating: bool) -> egui::Frame {
-    panel_host_container(ctx, floating).frame(ctx, Tokens::get().panel, crate::frame::Side::Left).inner_margin(0).outer_margin(0)
+    panel_host_container(ctx, floating).frame(ctx, Tokens::get().toolbar, crate::frame::Side::Left).inner_margin(0).outer_margin(0)
 }
 
 pub fn panel_host_surface<R>(

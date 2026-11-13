@@ -1376,7 +1376,7 @@ fn append_section(
     let paint_alpha = appearance
         .map(|appearance| appearance.fill.a())
         .or_else(|| policy.surface_alpha.map(|alpha| if floating { alpha.floating } else { alpha.docked }));
-    let contrast = appearance.map(|appearance| appearance.contrast.clone());
+    let contrast = appearance.and_then(|appearance| appearance.contrast.clone());
     out.sections.push(HostSection {
         contrast,
         paint_alpha,
