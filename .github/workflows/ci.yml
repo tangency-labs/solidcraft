@@ -112,7 +112,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.deps == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ vars.CI_RUNNER && 60 || 20 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@1.98.0
@@ -439,7 +439,7 @@ jobs:
     name: Format and repository checks
     if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
-    timeout-minutes: 25
+    timeout-minutes: ${{ vars.CI_RUNNER && 75 || 25 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@1.98.0
@@ -501,7 +501,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.quick == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
@@ -519,7 +519,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.native == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@1.98.0
@@ -548,7 +548,7 @@ jobs:
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.native == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     # Fork builds start from main's cache, read-only; give them room to finish and upload.
-    timeout-minutes: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 60 || 45 }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 60 || 45) }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -615,7 +615,7 @@ jobs:
     # after them. nextest hands tests to its threads as they free up, the slowest first (priority
     # in .config/nextest.toml), so they start at once and no core idles at the end.
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-32vcpu-ubuntu-2404' }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     env:
       # Pictures (snapshots, screenshots, ui.render, the viewport's offscreen tests) are drawn on
       # the GPU. The runner has none: Mesa's lavapipe (software Vulkan) draws them, and a test that
@@ -750,7 +750,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.gpu == 'true' }}
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -854,7 +854,7 @@ jobs:
     needs: build-tests
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
-    timeout-minutes: 55
+    timeout-minutes: ${{ vars.CI_RUNNER && 165 || 55 }}
     strategy:
       fail-fast: false
       matrix:
@@ -869,7 +869,7 @@ jobs:
           name: nextest-archive
       - name: Run one shard of the matrix
         # A step limit below the job's, so the outcomes so far are still uploaded.
-        timeout-minutes: 45
+        timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
         env:
           SHARDS: 16
           SHARD: ${{ matrix.shard }}
@@ -896,7 +896,7 @@ jobs:
     needs: build-tests
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -918,7 +918,7 @@ jobs:
     needs: build-tests
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -942,7 +942,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.doctests == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -1007,7 +1007,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.oracle == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -1065,7 +1065,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.windows == 'true'
     runs-on: ${{ vars.CI_RUNNER_WINDOWS || 'blacksmith-8vcpu-windows-2025' }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ vars.CI_RUNNER_WINDOWS && 135 || 45 }}
     env:
       WGPU_BACKEND: dx12
       WGPU_DX12_COMPILER: fxc
@@ -1099,8 +1099,8 @@ jobs:
     name: Windows app build
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    runs-on: blacksmith-8vcpu-windows-2025
-    timeout-minutes: 45
+    runs-on: ${{ vars.CI_RUNNER_WINDOWS || 'blacksmith-8vcpu-windows-2025' }}
+    timeout-minutes: ${{ vars.CI_RUNNER_WINDOWS && 135 || 45 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@1.98.0
@@ -1279,7 +1279,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.cross_compile) || needs.changes.outputs.wasm == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@1.98.0
@@ -1305,7 +1305,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.solidcore == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     env:
       CARGO_INCREMENTAL: 0
     steps:
@@ -1332,7 +1332,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.solidcore == 'true'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     strategy:
       fail-fast: false
       matrix:
@@ -1529,7 +1529,7 @@ jobs:
     name: Compile RISC-V (manual)
     if: github.event_name == 'workflow_dispatch' && inputs.cross_compile
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check out craft-fonts
@@ -1582,7 +1582,7 @@ jobs:
     needs: [dependency-advisories, changes, checks, ci, build-tests, action-matrix, action-matrix-determinism, property-tests]
     if: always() && github.event_name == 'schedule'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
-    timeout-minutes: 5
+    timeout-minutes: ${{ vars.CI_RUNNER && 15 || 5 }}
     permissions:
       issues: write
     steps:
