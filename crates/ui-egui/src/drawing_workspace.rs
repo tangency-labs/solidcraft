@@ -106,7 +106,38 @@ pub(crate) fn left_inset(app: &SolveApp) -> f32 {
 
 /// Reuse Browser's existing content-hugging host and resize seam, with Drawing contents.
 pub(crate) fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::text(ui, solidcraft_ui_text::tr_label("No drawing objects"), ui_kit::Text::Note("drawing_objects"));
+    if let Ok(drawing) = app.session.drawing("drawing.inspect") {
+        for sheet in &drawing.sheets {
+            let id = ui.make_persistent_id(("drawing_browser_sheet", app.session.uid, drawing.id, sheet.id));
+            let mut open = ui.ctx().data(|data| data.get_temp::<bool>(id)).unwrap_or(true);
+            let row =
+                ui_kit::tree_row(ui, id, &ui_kit::Row { fold: Some(open), icon: "ws_drawing", label: &sheet.name, name: true, ..Default::default() });
+            if row.fold {
+                open = !open;
+                ui.ctx().data_mut(|data| data.insert_temp(id, open));
+            }
+            if open {
+                let objects = drawing.on_sheet(sheet.id);
+                for (kind, ids) in [
+                    ("view", objects.views),
+                    ("dimension", objects.dimensions),
+                    ("balloon", objects.balloons),
+                    ("note", objects.notes),
+                    ("table", objects.tables),
+                    ("image", objects.images),
+                    ("revision_tag", objects.tags),
+                ] {
+                    for (index, object) in ids.into_iter().enumerate() {
+                        let key = format!("ui.drawing_browser_{kind}");
+                        let label = solidcraft_ui_text::format(&key, &[("number", &(index + 1).to_string())]);
+                        ui_kit::tree_row(ui, id.with((kind, object)), &ui_kit::Row { depth: 1, label: &label, name: true, ..Default::default() });
+                    }
+                }
+            }
+        }
+    } else {
+        ui_kit::text(ui, solidcraft_ui_text::tr_label("No drawing objects"), ui_kit::Text::Note("drawing_objects"));
+    }
     ui.add_space(Tokens::get().space_8);
     ui_kit::text(ui, solidcraft_ui_text::tr_label("Source design"), ui_kit::Text::Heading("drawing_source"));
     ui.label(&app.session.doc.name);
@@ -486,6 +517,23 @@ fn panel_body(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn browser_lists_sheets_of_the_open_drawing() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        h.app.run("drawing.sheet.add", serde_json::json!({"name":"Inspection sheet"})).unwrap();
+        h.frames(4);
+        assert!(h.widget("Inspection sheet").is_some());
+
+        h.app.run("drawing.close", serde_json::json!({})).unwrap();
+        h.frames(2);
+        assert!(h.widget("Inspection sheet").is_none());
+    }
 
     #[test]
     fn workspace_and_options_leave_source_and_camera_unchanged() {

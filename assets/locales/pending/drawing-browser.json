@@ -1,0 +1,57 @@
+{
+  "en": {
+    "ui.drawing_browser_count_one": "{count} object",
+    "ui.drawing_browser_count_other": "{count} objects",
+    "ui.drawing_browser_view": "View {number}",
+    "ui.drawing_browser_dimension": "Dimension {number}",
+    "ui.drawing_browser_balloon": "Balloon {number}",
+    "ui.drawing_browser_note": "Note {number}",
+    "ui.drawing_browser_table": "Table {number}",
+    "ui.drawing_browser_image": "Image {number}",
+    "ui.drawing_browser_revision_tag": "Revision tag {number}"
+  },
+  "de": {
+    "ui.drawing_browser_count_one": "{count} Objekt",
+    "ui.drawing_browser_count_other": "{count} Objekte",
+    "ui.drawing_browser_view": "Ansicht {number}",
+    "ui.drawing_browser_dimension": "Bemaßung {number}",
+    "ui.drawing_browser_balloon": "Positionsnummer {number}",
+    "ui.drawing_browser_note": "Notiz {number}",
+    "ui.drawing_browser_table": "Tabelle {number}",
+    "ui.drawing_browser_image": "Bild {number}",
+    "ui.drawing_browser_revision_tag": "Revisionszeichen {number}"
+  },
+  "ja": {
+    "ui.drawing_browser_count_one": "{count} 個のオブジェクト",
+    "ui.drawing_browser_count_other": "{count} 個のオブジェクト",
+    "ui.drawing_browser_view": "ビュー {number}",
+    "ui.drawing_browser_dimension": "寸法 {number}",
+    "ui.drawing_browser_balloon": "バルーン {number}",
+    "ui.drawing_browser_note": "注記 {number}",
+    "ui.drawing_browser_table": "表 {number}",
+    "ui.drawing_browser_image": "画像 {number}",
+    "ui.drawing_browser_revision_tag": "改訂記号 {number}"
+  },
+  "ko": {
+    "ui.drawing_browser_count_one": "객체 {count}개",
+    "ui.drawing_browser_count_other": "객체 {count}개",
+    "ui.drawing_browser_view": "뷰 {number}",
+    "ui.drawing_browser_dimension": "치수 {number}",
+    "ui.drawing_browser_balloon": "풍선 {number}",
+    "ui.drawing_browser_note": "주석 {number}",
+    "ui.drawing_browser_table": "표 {number}",
+    "ui.drawing_browser_image": "이미지 {number}",
+    "ui.drawing_browser_revision_tag": "개정 기호 {number}"
+  },
+  "zh": {
+    "ui.drawing_browser_count_one": "{count} 个对象",
+    "ui.drawing_browser_count_other": "{count} 个对象",
+    "ui.drawing_browser_view": "视图 {number}",
+    "ui.drawing_browser_dimension": "尺寸 {number}",
+    "ui.drawing_browser_balloon": "序号气泡 {number}",
+    "ui.drawing_browser_note": "注释 {number}",
+    "ui.drawing_browser_table": "表格 {number}",
+    "ui.drawing_browser_image": "图像 {number}",
+    "ui.drawing_browser_revision_tag": "修订标记 {number}"
+  }
+}
