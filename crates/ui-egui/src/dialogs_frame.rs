@@ -171,9 +171,13 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
         Some(Kind::Frame(m)) => m.picked_tubes.len(),
         _ => return Vec::new(),
     };
+    vec![crate::context_menu::act("ui.removeTubes", &remove_tubes_label(n), "delete").key("Del").on(n > 0)]
+}
+
+/// "Remove Tube", or "Remove N Tubes" for `n` of them.
+pub(crate) fn remove_tubes_label(n: usize) -> String {
     let key = if n == 1 { "frame.remove_tubes_one" } else { "frame.remove_tubes_other" };
-    let label = solidcraft_ui_text::format(key, &[("count", &n.to_string())]);
-    vec![crate::context_menu::act("ui.removeTubes", &label, "delete").key("Del").on(n > 0)]
+    solidcraft_ui_text::format(key, &[("count", &n.to_string())])
 }
 
 /// Remove Tube on the picked tubes (the menu's item, the Delete key). False with none picked.

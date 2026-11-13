@@ -296,6 +296,27 @@ fn body_feature(app: &SolveApp, body: &str) -> Option<u64> {
     crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature)
 }
 
+/// Remove Tube ("Remove N Tubes") when every one of `bodies` is a member of one Frame Member.
+fn remove_tube_item(app: &SolveApp, bodies: &[String]) -> Option<Item> {
+    if bodies.len() > solidcraft_engine::doc::frame::MAX_MEMBERS {
+        return None;
+    }
+    let id = body_feature(app, bodies.first()?)?;
+    let f = app.session.doc.feature(id)?;
+    let st = app.session.model.state_before(id);
+    // ponytail: the feature's member ids are listed again for each body, each frame the menu is
+    // open; list them once if a large selection of members makes the menu slow.
+    let members = bodies
+        .iter()
+        .map(|b| {
+            let line = solidcraft_engine::doc::frame::member_of_body(&st, f, b).ok()??;
+            (body_feature(app, b)? == id).then(|| json!({ "feature": id, "line": line }))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let label = crate::dialogs_frame::remove_tubes_label(members.len());
+    Some(cmd(app, "frame.remove_member", &label).with(json!({ "members": members })))
+}
+
 /// Bodies in a component and its subcomponents.
 pub fn component_bodies(app: &SolveApp, id: u64) -> Vec<String> {
     let doc = &app.session.doc;
@@ -801,6 +822,12 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         && let Some(at) = v.iter().position(|i| i.id == "ui.rename")
     {
         v.insert(at + 1, act("ui.rename", "Rename Selected Bodies", "rename").key("F2").with(json!({ "bodies": list })));
+    }
+    // Beside Remove, which adds a step hiding the bodies: this takes them out of their Frame Member.
+    if let Some(item) = remove_tube_item(app, bodies)
+        && let Some(at) = v.iter().position(|i| i.id == "solid.remove")
+    {
+        v.insert(at + 1, item.on(!locked));
     }
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
@@ -3609,6 +3636,124 @@ mod tests {
             let c = radial_center(at, screen);
             assert!(screen.contains_rect(Rect::from_center_size(c, vec2(2.0 * RX, 2.0 * RY))));
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Remove Tube on a frame member's menu (#15705)
+
+    use crate::scenario::Harness;
+
+    /// A Frame Member `Rail` of 40 mm tubes on the four lines of a 600 × 400 rectangle on XY, a
+    /// second one `Post` on a 3D line, and a box `Box` away from both.
+    fn framed() -> Harness {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3});
+        for (id, p) in [
+            ("sketch.create", json!({"plane": "XY", "name": "Frame"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]})),
+            ("sketch.finish", json!({})),
+            ("frame.member", json!({"sketch": "Frame", "name": "Rail", "body_name": "Rail", "profile": tube})),
+            ("sketch.create", json!({"plane": "XY", "name": "Post path"})),
+            ("sketch.options", json!({"sketch_3d": true})),
+            ("sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 500]]})),
+            ("sketch.finish", json!({})),
+            ("frame.member", json!({"sketch": "Post path", "name": "Post", "body_name": "Post", "profile": tube})),
+            ("solid.box", json!({"length": 100, "width": 100, "height": 100, "center": [1000, 1000, 50], "operation": "new", "body_name": "Box"})),
+        ] {
+            h.app.run(id, p).unwrap();
+        }
+        h
+    }
+
+    /// Feature `name`'s id and the bodies it made.
+    fn made_by(h: &Harness, name: &str) -> (u64, Vec<String>) {
+        let id = h.app.session.doc.find_feature(name).unwrap().id;
+        let world = crate::open_meshing::session_world(&h.app.session);
+        (id, world.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect())
+    }
+
+    /// The member (line) id the Frame Member keeps for `body`.
+    fn line_of(h: &Harness, feature: u64, body: &str) -> String {
+        let FeatureKind::FrameMember { names, .. } = &h.app.session.doc.feature(feature).unwrap().kind else { panic!("not a Frame Member") };
+        names.iter().find(|(_, b)| *b == body).map(|(line, _)| line.clone()).unwrap()
+    }
+
+    fn select_bodies(h: &mut Harness, bodies: &[&str]) {
+        h.app.session.selection = bodies.iter().map(|b| Sel::Body { name: (*b).into() }).collect();
+    }
+
+    fn remove_tube(menu: &[Item]) -> Option<&Item> {
+        menu.iter().find(|i| i.id == "frame.remove_member")
+    }
+
+    #[test]
+    fn a_member_body_has_remove_tube_in_the_viewport_and_browser_menus() {
+        let mut h = framed();
+        let (rail, bodies) = made_by(&h, "Rail");
+        assert_eq!(bodies.len(), 4, "{bodies:?}");
+        let body = bodies[1].clone();
+        let want = json!({"members": [{"feature": rail, "line": line_of(&h, rail, &body)}]});
+        select_bodies(&mut h, &[&body]);
+        let viewport = items(&h.app, &Target::Viewport);
+        let browser = items(&h.app, &Target::Body { name: body.clone() });
+        for (menu, what) in [(&viewport, "viewport"), (&browser, "browser")] {
+            let item = remove_tube(menu).unwrap_or_else(|| panic!("the {what} menu offers Remove Tube"));
+            assert_eq!(item.label, "Remove Tube", "{what}");
+            assert_eq!(item.icon, "delete", "{what}");
+            assert!(item.enabled, "{what}");
+            assert_eq!(item.params, Some(want.clone()), "{what}");
+            // Beside Remove, which stays: it hides the body in a step of its own.
+            let at = menu.iter().position(|i| i.id == "solid.remove").unwrap_or_else(|| panic!("{what} keeps Remove"));
+            assert_eq!(menu.get(at + 1).map(|i| i.id.as_str()), Some("frame.remove_member"), "{what}");
+        }
+    }
+
+    #[test]
+    fn remove_tube_from_the_menu_takes_out_that_member_in_one_undo_step() {
+        let mut h = framed();
+        let (rail, bodies) = made_by(&h, "Rail");
+        let body = bodies[2].clone();
+        select_bodies(&mut h, &[&body]);
+        let item = remove_tube(&items(&h.app, &Target::Viewport)).cloned().unwrap();
+        let undo = h.app.session.undo.len();
+        run_item(&mut h.app, &item, egui::pos2(0.0, 0.0));
+        let (_, after) = made_by(&h, "Rail");
+        assert_eq!(after.len(), 3, "{after:?} {:?}", h.app.status);
+        assert!(!after.contains(&body), "{body} is gone: {after:?}");
+        assert!(bodies.iter().filter(|b| **b != body).all(|b| after.contains(b)), "the others keep their names: {after:?}");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(made_by(&h, "Rail"), (rail, bodies), "undo puts it back");
+    }
+
+    #[test]
+    fn two_selected_members_say_remove_2_tubes() {
+        let mut h = framed();
+        let (rail, bodies) = made_by(&h, "Rail");
+        select_bodies(&mut h, &[&bodies[0], &bodies[3]]);
+        let item = remove_tube(&items(&h.app, &Target::Viewport)).cloned().unwrap();
+        assert_eq!(item.label, "Remove 2 Tubes");
+        let members: Vec<Value> = [&bodies[0], &bodies[3]].iter().map(|b| json!({"feature": rail, "line": line_of(&h, rail, b)})).collect();
+        assert_eq!(item.params, Some(json!({ "members": members })));
+        run_item(&mut h.app, &item, egui::pos2(0.0, 0.0));
+        assert_eq!(made_by(&h, "Rail").1, vec![bodies[1].clone(), bodies[2].clone()], "{:?}", h.app.status);
+    }
+
+    #[test]
+    fn a_plain_body_has_no_remove_tube() {
+        let mut h = framed();
+        let (_, rails) = made_by(&h, "Rail");
+        let (_, posts) = made_by(&h, "Post");
+        assert_eq!(posts.len(), 1, "{posts:?}");
+        select_bodies(&mut h, &["Box"]);
+        assert!(remove_tube(&items(&h.app, &Target::Viewport)).is_none(), "a plain body");
+        assert!(remove_tube(&items(&h.app, &Target::Body { name: "Box".into() })).is_none(), "a plain body in the Browser");
+        assert!(items(&h.app, &Target::Viewport).iter().any(|i| i.id == "solid.remove"), "Remove stays");
+        select_bodies(&mut h, &[&rails[0], "Box"]);
+        assert!(remove_tube(&items(&h.app, &Target::Viewport)).is_none(), "a member with a plain body");
+        select_bodies(&mut h, &[&rails[0], &posts[0]]);
+        assert!(remove_tube(&items(&h.app, &Target::Viewport)).is_none(), "members of two Frame Members");
     }
 }
 
