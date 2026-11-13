@@ -2197,6 +2197,12 @@ pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
         start_rename(app, RenameWhat::Group(g), at);
         return true;
     }
+    // A clicked History folder too, as a double-click on it does: folders are not in the
+    // selection either (#16213).
+    if let ([], [g]) = (app.session.selection.as_slice(), app.tree.picked_timeline_groups.as_slice()) {
+        start_rename(app, RenameWhat::TimelineGroup(*g), at);
+        return true;
+    }
     let what = match (app.session.selection.as_slice(), app.tree.picked_components.as_slice(), app.tree.picked_canvases.as_slice()) {
         ([Sel::Body { name }], [], []) => RenameWhat::Body(name.clone()),
         // F2 on several selected bodies renames them all, numbered after the first (#12341).
