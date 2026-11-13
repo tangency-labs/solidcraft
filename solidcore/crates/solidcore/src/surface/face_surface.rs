@@ -385,6 +385,9 @@ fn square_to(x: Vec3, y: Vec3) -> Option<Vec3> {
 ///   record takes them on a face that carries its form.
 /// - **Ball patch:** its sphere's label on its net, certified on it
 ///   ([`BallPatch::create_certified`]); a net the certificate refuses goes as its NURBS.
+/// - **Retained screw:** its definition and net over the box's turns alone
+///   ([`ProceduralSweep::to_record_over`](crate::surface::procedural_sweep::ProceduralSweep::to_record_over)),
+///   in the same parameters.
 /// - **B-spline, revolution, extrusion, procedural blend:** its NURBS (a procedural blend's
 ///   net, until the record has its kind).
 ///
@@ -408,7 +411,9 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
         .filter(|sweep| sweep.definition().screw().is_some())
     {
         return Ok(RecordFace {
-            surface: Record::ProceduralSweep(Box::new(sweep.definition().to_record(sweep.net())?)),
+            surface: Record::ProceduralSweep(Box::new(
+                sweep.definition().to_record_over(sweep.net(), uv_domain)?,
+            )),
             nurbs: None,
             domain: box_,
             scale: [1.0, 1.0],

@@ -560,8 +560,8 @@ fn is_cone_ruling(cos: &crate::curve::crv_on_surf::CrvOnSurf) -> bool {
 }
 
 /// The record of the curve on the retained screw `surface` along `uv_curve` over the edge
-/// interval `[lo, hi]` (its parameter, which the UV curve's is): the screw as its definition's
-/// record over `uv_domain`, the UV curve as its spline over its own interval.
+/// interval `[lo, hi]` (its parameter, which the UV curve's is): the whole screw as its
+/// definition's record with `uv_domain` its box, the UV curve as its spline over its own interval.
 fn on_screw(
     k: &Kernel,
     surface: &crate::surface::surface::p2::Surface,
@@ -570,10 +570,16 @@ fn on_screw(
     [lo, hi]: [f64; 2],
 ) -> Result<RecordCurve> {
     let bad = |reason: &'static str| SolidError::invalid_input(OP_BACK, reason);
-    let face = crate::surface::face_surface::record_face(k, surface, uv_domain)?;
-    if face.scale != [1.0, 1.0] {
-        return Err(bad("curve owner requires a non-identity UV map"));
-    }
+    // The owner is the whole wall, not restricted to the curve's box as a face's is: the
+    // record shares one owner among every edge on the wall.
+    let sweep = surface
+        .retained_screw()
+        .ok_or_else(|| bad("a curve owner is a retained screw"))?;
+    let owner = sweep.definition().to_record(sweep.net())?;
+    let domain = [
+        [uv_domain.u_min(), uv_domain.u_max()],
+        [uv_domain.v_min(), uv_domain.v_max()],
+    ];
     let uv_interval = uv_curve.natural_interval();
     // An interval past the UV curve's ends by the rounding of the kernel's parameter
     // ends on them, as a spline's does on its knots.
@@ -593,9 +599,9 @@ fn on_screw(
     )?;
     Ok(RecordCurve {
         curve: Record::OnSurface {
-            surface: Box::new(face.surface),
+            surface: Box::new(crate::eval::Surface::ProceduralSweep(Box::new(owner))),
             uv_curve,
-            domain: face.domain,
+            domain,
         },
         nurbs: None,
         interval: [lo, hi],
