@@ -551,6 +551,32 @@ fn a_closed_strokes_dashes_run_round_its_corners() {
     assert!(dark(5.0, 12.0) && !dark(5.0, 6.0));
 }
 
+#[test]
+fn weld_identification_renders_end_dashes_and_a_real_gap_in_png() {
+    use solidcraft_geom::weld::{Convention, IdentificationLine, Kind, Style, Weld, WeldSide};
+    let weld = Weld {
+        arrow_side: Some(WeldSide { kind: Kind::Fillet, size: None, length_mm: None, intermittent: None, contour: None }),
+        other_side: None,
+        all_round: false,
+        field: false,
+        tail: None,
+    };
+    let drawing = weld
+        .draw(
+            Convention::Iso2553_2019A { identification: IdentificationLine::Above },
+            Style { height_mm: 1.0, width_mm: 0.2 },
+            |value| Ok((value.to_string(), value)),
+            |text, h| text.len() as f64 * h,
+        )
+        .unwrap();
+    let carrier = drawing.items.into_iter().find(|item| matches!(item, Item::Stroke { pattern: Some(_), .. })).unwrap();
+    let (data, _) = bytes(&scene(p(10.0, 6.0), vec![carrier]), RGB_254);
+    let image = read(&data);
+    for (x, expected) in [(10, [0, 0, 0]), (20, [255, 255, 255]), (35, [0, 0, 0]), (50, [255, 255, 255]), (60, [0, 0, 0]), (80, [255, 255, 255])] {
+        assert_eq!(image.at(x, 40), expected, "column {x}, on the reference line");
+    }
+}
+
 /// A line that falls in a gap draws nothing; one past tiny-skia's million dashes is refused, not
 /// drawn solid or left out; the dashes' points count against the sheet's.
 #[test]
