@@ -619,15 +619,16 @@ fn a_draft_moves_a_face() {
 
 /// The tip cut off a triangular prism, drafted about a plane 100 mm off so that the whole face goes
 /// out past where its neighbours meet: its edges vanish, `SM_ERR_OFFSET_EDGE_VANISHES` in SMLib,
-/// which the capi's `status` answers as `SMLIB_ERR_UNSUPPORTED`.
+/// refused with that reason (#13989), not as not supported.
 #[test]
-fn a_draft_past_the_neighbours_meeting_is_unsupported() {
+fn a_draft_past_the_neighbours_meeting_is_refused_as_an_edge_that_vanishes() {
     use crate::sweeps::{Curve, DraftCorner};
     let p = [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [11.0, 18.0, 0.0], [9.0, 18.0, 0.0]];
     let profile: Vec<Curve> = (0..4).map(|i| Curve::Line { start: p[i], end: p[(i + 1) % 4] }).collect();
     let prism = super::sweep::extrude(&profile, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
     let (tip, z, origin, angle) = ([[10.0, 18.0, 5.0]], [0.0, 0.0, 1.0], [0.0, 0.0, -100.0], (-2f64).to_radians());
-    assert_eq!(draft(&prism, &tip, TOL, origin, z, z, angle).err(), Some(Error::Unsupported));
+    let vanishes = solidcore_ops::Error::OffsetRefused { face: None, why: solidcore_ops::OffsetRefusal::EdgeVanishes };
+    assert_eq!(draft(&prism, &tip, TOL, origin, z, z, angle).err(), Some(Error::Refused(vanishes)));
 }
 
 /// A flat L of two faces thickened by 2 with mitred walls: 2 x 10 x (20 + 22).
