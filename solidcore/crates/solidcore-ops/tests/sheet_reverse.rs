@@ -13,7 +13,7 @@
 use solidcore_ops::face_surface::FaceSurface;
 use solidcore_ops::surface::{reverse_sheet, ruled};
 use solidcore_ops::{make_box, Body, Error};
-use solidcore_record::brep::{Brep, Curve, Loop, Shell};
+use solidcore_record::brep::{Brep, Curve, Shell};
 
 /// A bumped sheet: the ruled sheet between two cubics.
 fn sheet() -> Brep {
@@ -55,52 +55,37 @@ fn shell_normal(r: &Brep, face: u32, uv: [f64; 2]) -> [f64; 3] {
 }
 
 #[test]
-fn turned_over_each_face_s_normal_is_the_other_way_at_the_same_point() {
+fn turned_over_each_face_s_forward_and_shell_normal_are_negated() {
     let before = sheet();
     let after = reverse_sheet(&before).unwrap();
-    // Each face keeps its surface and domain; each loop runs the other way round: its edges in
-    // reverse order (as a cycle, from wherever it starts), each used the other way.
-    assert_eq!(after.faces.len(), before.faces.len());
-    for (fb, fa) in before.faces.iter().zip(&after.faces) {
-        assert_eq!(
-            (&fa.surface, &fa.nurbs, fa.domain),
-            (&fb.surface, &fb.nurbs, fb.domain),
-            "the surface and domain are kept"
-        );
-        assert_eq!(fa.loops.len(), fb.loops.len());
-        for (lb, la) in fb.loops.iter().zip(&fa.loops) {
-            let (Loop::Edges { edges: eb }, Loop::Edges { edges: ea }) = (lb, la) else {
-                assert_eq!(lb, la, "a vertex loop is kept");
-                continue;
-            };
-            let was: Vec<(u32, bool)> = eb.iter().map(|e| (e.edge, e.forward)).collect();
-            let back: Vec<(u32, bool)> = ea.iter().rev().map(|e| (e.edge, !e.forward)).collect();
-            let same_cycle = (0..was.len().max(1)).any(|k| {
-                let mut turned = back.clone();
-                let by = k.min(turned.len());
-                turned.rotate_left(by);
-                turned == was
-            });
-            assert!(
-                same_cycle,
-                "the loop runs the other way: {was:?} then {back:?}"
-            );
-        }
-    }
-    assert_eq!(after.edges.len(), before.edges.len(), "the edges are kept");
+    assert_eq!(
+        after.faces, before.faces,
+        "each face's surface, domain and loops are kept"
+    );
+    assert_eq!(after.edges, before.edges, "the edges are kept");
     let (b, a) = (sides(&before), sides(&after));
+    assert!(!b.is_empty());
     assert_eq!(b.len(), a.len());
     for ((fb, wb), (fa, wa)) in b.iter().zip(&a) {
         assert_eq!(fb, fa);
-        assert_eq!(*wa, !*wb, "face {fb}");
-    }
-    let uv = {
-        let d = before.faces[0].domain;
-        [0.3 * d[0][0] + 0.7 * d[0][1], 0.6 * d[1][0] + 0.4 * d[1][1]]
-    };
-    let (nb, na) = (shell_normal(&before, 0, uv), shell_normal(&after, 0, uv));
-    for k in 0..3 {
-        assert!((nb[k] + na[k]).abs() < 1e-12, "{nb:?} {na:?}");
+        assert_eq!(*wa, !*wb, "face {fb}'s forward is negated");
+        let d = before.faces[*fb as usize].domain;
+        for (s, t) in [(0.3, 0.6), (0.5, 0.5), (0.8, 0.1)] {
+            let uv = [
+                (1.0 - s) * d[0][0] + s * d[0][1],
+                (1.0 - t) * d[1][0] + t * d[1][1],
+            ];
+            let (nb, na) = (
+                shell_normal(&before, *fb, uv),
+                shell_normal(&after, *fb, uv),
+            );
+            for k in 0..3 {
+                assert!(
+                    (nb[k] + na[k]).abs() < 1e-12,
+                    "face {fb}'s shell normal at {uv:?} is negated: {nb:?} then {na:?}"
+                );
+            }
+        }
     }
 }
 
