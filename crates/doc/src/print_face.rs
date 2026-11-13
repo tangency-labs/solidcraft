@@ -78,21 +78,8 @@ impl Document {
                 return Err(DocError::Invalid("the print face's pieces no longer lie on one plane".into()));
             }
         }
-        // The surface's own orientation is how the kernel built it, so the side the material is
-        // on is taken from the face's triangles, which point out of the body.
-        let mesh = body.mesh();
-        let mut area = Vec3::ZERO;
-        for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-            if let (true, Some([a, b, c])) = (indices.contains(&(*f as usize)), mesh.tri(t)) {
-                area += (b - a).cross(c - a);
-            }
-        }
         let normal = plane.normal().normalized().ok_or_else(|| DocError::Invalid("the print face's plane is degenerate".into()))?;
-        let outward = area.dot(normal);
-        if !(outward.abs() > 0.) {
-            return Err(DocError::Invalid("the print face has no surface to lie on".into()));
-        }
-        Ok(PrintFace { index: first, point: plane.origin, normal: if outward < 0. { -normal } else { normal } })
+        Ok(PrintFace { index: first, point: plane.origin, normal })
     }
 }
 

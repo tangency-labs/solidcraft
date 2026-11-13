@@ -127,6 +127,7 @@ impl MovePreview {
             sketches: Vec::new(),
             applied: None,
             stopped: None,
+            placed: None,
             tapered: Vec::new(),
             replaced: if copy { Vec::new() } else { bodies },
             error: None,
@@ -176,7 +177,7 @@ mod tests {
 
     fn colors(app: &SolveApp) -> Colors {
         let _ = app;
-        Colors::from_tokens(&crate::theme::Tokens::get())
+        Colors::from_tokens(&solidcraft_theme::Tokens::get())
     }
 
     fn near(a: Vec3, b: Vec3) -> bool {

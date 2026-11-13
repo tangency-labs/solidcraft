@@ -1,0 +1,2151 @@
+{
+  "areas": {
+    "assemblies": {
+      "cases": 26,
+      "chain": {
+        "1": 3,
+        "2": 3,
+        "3": 2,
+        "4": 2
+      },
+      "expressible": 0,
+      "not_expressible": 16,
+      "operation_expressible": 10,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 11,
+        "refused or failed in SolidCraft, not in a kernel operation": 5
+      },
+      "ungraded": {
+        "results": 19
+      }
+    },
+    "booleans": {
+      "cases": 130,
+      "chain": {
+        "1": 9,
+        "12": 1,
+        "121": 1,
+        "13": 2,
+        "14": 2,
+        "16": 3,
+        "17": 1,
+        "193": 1,
+        "28": 1,
+        "3": 3,
+        "31": 1,
+        "4": 3,
+        "5": 1,
+        "6": 1,
+        "61": 1,
+        "7": 77,
+        "76": 1,
+        "8": 6,
+        "9": 3
+      },
+      "expressible": 115,
+      "not_expressible": 12,
+      "operation_expressible": 118,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 10,
+        "refused or failed in SolidCraft, not in a kernel operation": 2
+      },
+      "ungraded": {
+        "edges": 1,
+        "faces": 2,
+        "vertices": 1
+      }
+    },
+    "construction": {
+      "cases": 32,
+      "chain": {
+        "1": 4
+      },
+      "expressible": 0,
+      "not_expressible": 28,
+      "operation_expressible": 4,
+      "reasons": {
+        "no kernel operation makes the result": 12,
+        "refused or failed in SolidCraft, not in a kernel operation": 16
+      },
+      "ungraded": {
+        "construction": 16
+      }
+    },
+    "continuity": {
+      "cases": 13,
+      "chain": {
+        "1": 5,
+        "2": 6,
+        "4": 2
+      },
+      "expressible": 0,
+      "not_expressible": 0,
+      "operation_expressible": 13,
+      "reasons": {},
+      "ungraded": {
+        "continuity": 13
+      }
+    },
+    "crashes": {
+      "cases": 12,
+      "chain": {
+        "112": 1,
+        "271": 1,
+        "7": 7
+      },
+      "expressible": 9,
+      "not_expressible": 3,
+      "operation_expressible": 9,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 2,
+        "refused or failed in SolidCraft, not in a kernel operation": 1
+      },
+      "ungraded": {}
+    },
+    "fillets": {
+      "cases": 275,
+      "chain": {
+        "1": 10,
+        "13": 4,
+        "2": 6,
+        "4": 236,
+        "7": 2,
+        "8": 1
+      },
+      "expressible": 52,
+      "not_expressible": 16,
+      "operation_expressible": 259,
+      "reasons": {
+        "SolidCraft has no command for it yet": 2,
+        "refused or failed in SolidCraft, not in a kernel operation": 14
+      },
+      "ungraded": {
+        "continuity": 204,
+        "faces": 2,
+        "refusal \"angle\"": 1,
+        "refusal \"continues tangentially\"": 3,
+        "refusal \"larger than the faces beside its edges allow\"": 1,
+        "refusal \"meets a corner of this kind\"": 1,
+        "refusal \"the largest radius that fits is 3\"": 1,
+        "refusal \"the largest radius that fits is 4\"": 1,
+        "refusal \"the largest radius that fits is 7.5 mm\"": 1,
+        "watertight": 9
+      }
+    },
+    "frames": {
+      "cases": 6,
+      "chain": {
+        "1": 4,
+        "2": 1
+      },
+      "expressible": 5,
+      "not_expressible": 1,
+      "operation_expressible": 5,
+      "reasons": {
+        "refused or failed in SolidCraft, not in a kernel operation": 1
+      },
+      "ungraded": {}
+    },
+    "history": {
+      "cases": 30,
+      "chain": {
+        "1": 3,
+        "4": 2,
+        "7": 7
+      },
+      "expressible": 8,
+      "not_expressible": 18,
+      "operation_expressible": 12,
+      "reasons": {
+        "no kernel operation makes the result": 2,
+        "refused or failed in SolidCraft, not in a kernel operation": 16
+      },
+      "ungraded": {
+        "results": 6
+      }
+    },
+    "import": {
+      "cases": 33,
+      "chain": {
+        "1": 4,
+        "14": 1,
+        "7": 1
+      },
+      "expressible": 4,
+      "not_expressible": 27,
+      "operation_expressible": 6,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 26,
+        "refused or failed in SolidCraft, not in a kernel operation": 1
+      },
+      "ungraded": {
+        "results": 2
+      }
+    },
+    "inspect": {
+      "cases": 17,
+      "chain": {
+        "1": 2,
+        "2": 7,
+        "4": 1
+      },
+      "expressible": 0,
+      "not_expressible": 7,
+      "operation_expressible": 10,
+      "reasons": {
+        "no kernel operation makes the result": 2,
+        "refused or failed in SolidCraft, not in a kernel operation": 5
+      },
+      "ungraded": {
+        "results": 12
+      }
+    },
+    "ladder/01-primitives": {
+      "cases": 6,
+      "chain": {
+        "1": 6
+      },
+      "expressible": 6,
+      "not_expressible": 0,
+      "operation_expressible": 6,
+      "reasons": {},
+      "ungraded": {}
+    },
+    "ladder/02-booleans": {
+      "cases": 25,
+      "chain": {
+        "2": 1,
+        "7": 22
+      },
+      "expressible": 21,
+      "not_expressible": 2,
+      "operation_expressible": 23,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 2
+      },
+      "ungraded": {
+        "faces": 2
+      }
+    },
+    "ladder/03-analytic-profiles": {
+      "cases": 10,
+      "chain": {
+        "1": 9,
+        "7": 1
+      },
+      "expressible": 9,
+      "not_expressible": 0,
+      "operation_expressible": 10,
+      "reasons": {},
+      "ungraded": {
+        "faces": 1
+      }
+    },
+    "ladder/04-spline-profiles": {
+      "cases": 12,
+      "chain": {
+        "1": 9,
+        "7": 3
+      },
+      "expressible": 12,
+      "not_expressible": 0,
+      "operation_expressible": 12,
+      "reasons": {},
+      "ungraded": {}
+    },
+    "ladder/05-holes-and-taps": {
+      "cases": 17,
+      "chain": {
+        "7": 17
+      },
+      "expressible": 17,
+      "not_expressible": 0,
+      "operation_expressible": 17,
+      "reasons": {},
+      "ungraded": {}
+    },
+    "ladder/06-threads": {
+      "cases": 30,
+      "chain": {
+        "7": 28
+      },
+      "expressible": 28,
+      "not_expressible": 2,
+      "operation_expressible": 28,
+      "reasons": {
+        "refused or failed in SolidCraft, not in a kernel operation": 2
+      },
+      "ungraded": {}
+    },
+    "ladder/07-fillets": {
+      "cases": 21,
+      "chain": {
+        "2": 2,
+        "4": 17
+      },
+      "expressible": 16,
+      "not_expressible": 2,
+      "operation_expressible": 19,
+      "reasons": {
+        "refused or failed in SolidCraft, not in a kernel operation": 2
+      },
+      "ungraded": {
+        "continuity": 2,
+        "refusal \"the fillet is larger than the faces beside its edges allow\"": 1
+      }
+    },
+    "ladder/08-chamfers": {
+      "cases": 8,
+      "chain": {
+        "4": 8
+      },
+      "expressible": 8,
+      "not_expressible": 0,
+      "operation_expressible": 8,
+      "reasons": {},
+      "ungraded": {}
+    },
+    "ladder/09-shells-and-offsets": {
+      "cases": 15,
+      "chain": {
+        "4": 13,
+        "7": 2
+      },
+      "expressible": 15,
+      "not_expressible": 0,
+      "operation_expressible": 15,
+      "reasons": {},
+      "ungraded": {}
+    },
+    "ladder/10-patterns-and-mirrors": {
+      "cases": 8,
+      "chain": {
+        "7": 6
+      },
+      "expressible": 6,
+      "not_expressible": 2,
+      "operation_expressible": 6,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 2
+      },
+      "ungraded": {}
+    },
+    "ladder/11-cumulative-parts": {
+      "cases": 4,
+      "chain": {
+        "4": 1,
+        "7": 3
+      },
+      "expressible": 4,
+      "not_expressible": 0,
+      "operation_expressible": 4,
+      "reasons": {},
+      "ungraded": {}
+    },
+    "ladder/12-sheet-metal": {
+      "cases": 14,
+      "chain": {
+        "1": 1
+      },
+      "expressible": 1,
+      "not_expressible": 13,
+      "operation_expressible": 1,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 13
+      },
+      "ungraded": {
+        "faces": 3,
+        "flat_pattern": 1
+      }
+    },
+    "plastic": {
+      "cases": 17,
+      "chain": {
+        "1": 1,
+        "19": 1,
+        "7": 8
+      },
+      "expressible": 8,
+      "not_expressible": 7,
+      "operation_expressible": 10,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 1,
+        "refused or failed in SolidCraft, not in a kernel operation": 6
+      },
+      "ungraded": {
+        "results": 2
+      }
+    },
+    "sheet-metal": {
+      "cases": 78,
+      "chain": {
+        "1": 10,
+        "4": 1,
+        "7": 1
+      },
+      "expressible": 12,
+      "not_expressible": 66,
+      "operation_expressible": 12,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 57,
+        "refused or failed in SolidCraft, not in a kernel operation": 9
+      },
+      "ungraded": {
+        "faces": 3,
+        "files": 6,
+        "results": 6
+      }
+    },
+    "shell": {
+      "cases": 37,
+      "chain": {
+        "11": 1,
+        "4": 30,
+      "5": 1,
+        "7": 2,
+        "8": 1
+      },
+      "expressible": 33,
+      "not_expressible": 2,
+      "operation_expressible": 34,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 2
+      },
+      "ungraded": {
+        "refusal \"shell": 1
+      }
+    },
+    "solids": {
+      "cases": 10,
+      "chain": {
+        "2": 1,
+        "3": 1,
+        "4": 2
+      },
+      "expressible": 4,
+      "not_expressible": 6,
+      "operation_expressible": 4,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 4,
+        "refused or failed in SolidCraft, not in a kernel operation": 2
+      },
+      "ungraded": {}
+    },
+    "surfaces": {
+      "cases": 62,
+      "chain": {
+        "1": 8,
+        "2": 24,
+        "4": 8
+      },
+      "expressible": 29,
+      "not_expressible": 22,
+      "operation_expressible": 40,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 11,
+        "refused or failed in SolidCraft, not in a kernel operation": 11
+      },
+      "ungraded": {
+        "continuity": 9,
+        "faces": 2
+      }
+    },
+    "sweeps": {
+      "cases": 95,
+      "chain": {
+        "1": 34,
+        "10": 2,
+        "109": 1,
+        "13": 1,
+        "14": 1,
+        "2": 3,
+        "25": 1,
+        "28": 1,
+        "7": 42,
+        "8": 2
+      },
+      "expressible": 87,
+      "not_expressible": 7,
+      "operation_expressible": 88,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 3,
+        "refused or failed in SolidCraft, not in a kernel operation": 4
+      },
+      "ungraded": {
+        "faces": 1
+      }
+    },
+    "tessellation": {
+      "cases": 13,
+      "chain": {
+        "1": 2,
+        "11": 1,
+        "13": 1,
+        "7": 8
+      },
+      "expressible": 9,
+      "not_expressible": 1,
+      "operation_expressible": 12,
+      "reasons": {
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 1
+      },
+      "ungraded": {
+        "watertight": 3
+      }
+    },
+    "threads": {
+      "cases": 31,
+      "chain": {
+        "4": 1,
+        "7": 23
+      },
+      "expressible": 24,
+      "not_expressible": 7,
+      "operation_expressible": 24,
+      "reasons": {
+        "refused or failed in SolidCraft, not in a kernel operation": 7
+      },
+      "ungraded": {}
+    }
+  },
+  "fixes": "fixes.json",
+  "not_expressible": [
+    {
+      "case": "assemblies/cov-browser-reparent-placement-and-body-into-a-turned-part",
+      "why": [
+        "body \"Cube\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-component-copy-bodies-from-a-turned-part",
+      "why": [
+        "body \"ArmBox (2)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"ArmBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-component-extract-linked-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 9 (component.extract): invalid parameters for `component.extract`: Arm is linked to a design file already"
+      ]
+    },
+    {
+      "case": "assemblies/cov-component-extract-moved-in-bodies-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 8 (component.extract): invalid parameters for `component.extract`: BodyTransfer2 moves bodies into or out of Arm"
+      ]
+    },
+    {
+      "case": "assemblies/cov-component-from-bodies-unknown-body-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (component.from_bodies): invalid parameters for `component.from_bodies`: no body `Nope`"
+      ]
+    },
+    {
+      "case": "assemblies/cov-component-insert-design-hand-written",
+      "why": [
+        "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-component-insert-design-twice-reused",
+      "why": [
+        "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Plate (plate:2)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-component-move-sketches-to-parts-face-sketch-goes-to-its-part",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-contact-check-lists-the-overlap",
+      "why": [
+        "body \"ArmBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-explode-create-automatic-scale-2",
+      "why": [
+        "body \"BaseBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"ArmBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-inspect-clearance-turned-occurrence",
+      "why": [
+        "body \"ArmBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-joint-delete-link",
+      "why": [
+        "body \"ArmBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-joint-two-origins-on-one-part-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 8 (joint.create): invalid parameters for `joint.create`: a joint needs two different occurrences: both origins are on one component; give each part a component of its own first (component.from_bodies)"
+      ]
+    },
+    {
+      "case": "assemblies/cov-motion-crank-slider-drive-at-90",
+      "why": [
+        "body \"CrankBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"RodBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"SliderBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-occurrence-align-side-face-onto-a-top-face",
+      "why": [
+        "body \"PegBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "assemblies/cov-occurrence-drag-grounded-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 8 (occurrence.drag): invalid parameters for `occurrence.drag`: Base:1 is grounded"
+      ]
+    },
+    {
+      "case": "booleans/168-rim-touching-coin-along-a-circle-only",
+      "why": [
+        "body \"Coin\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Coin (1)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "booleans/1927-delete-pocket-face-restores-plate",
+      "why": [
+        "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "booleans/3383-combine-tool-into-rotated-occurrence",
+      "why": [
+        "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "booleans/3612-circular-pattern-of-spoke-tangent-to-hub",
+      "why": [
+        "body \"Wheel\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "booleans/3782-emboss-on-cylinder-pick-on-far-half",
+      "why": [
+        "body \"Cyl\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "booleans/3816-circular-pattern-of-body-about-offset-axis",
+      "why": [
+        "body \"Part (2)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Part (3)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Part (4)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Part (5)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Part (6)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Part (7)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Part (8)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Part (9)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "booleans/5295-intersect-bar-with-two-mirrored-outlines",
+      "why": [
+        "body \"Bar (1)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Bar\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "booleans/cov-boundary-fill-point-outside-every-tool-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.boundary_fill): the point Position(Vec3 { x: 50.0, y: 50.0, z: 5.0 }) is outside every tool: no enclosed cell there"
+      ]
+    },
+    {
+      "case": "booleans/cov-pattern-path-bodies-turn-along-an-arc",
+      "why": [
+        "body \"Key (2)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Key (3)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "booleans/cov-pattern-path-past-the-end-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 6 (solid.pattern.path): the instances run past the end of the path (80.000 mm long)"
+      ]
+    },
+    {
+      "case": "booleans/cov-project-face-loop-then-extrude",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "booleans/cov-project-sphere-silhouette-then-extrude",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "construction/cov-axis-edge-refuses-a-circular-edge",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.axis.edge): the edge is not straight"
+      ]
+    },
+    {
+      "case": "construction/cov-axis-normal-to-a-cylinder-refuses-a-point-on-its-axis",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.axis.normal_to_face): the point is on the face's axis"
+      ]
+    },
+    {
+      "case": "construction/cov-axis-through-cylinder-refuses-a-flat-face",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.axis.through_cylinder): the face is not a cylinder, cone or torus"
+      ]
+    },
+    {
+      "case": "construction/cov-axis-two-planes-refuses-parallel-planes",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.axis.two_planes): the planes are parallel"
+      ]
+    },
+    {
+      "case": "construction/cov-axis-two-planes-slanted",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-plane-at-angle-about-its-own-normal",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-plane-at-angle-xy-about-x-30",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-plane-axis-point-refuses-a-point-on-the-axis",
+      "why": [
+        "no kernel operation ran before the failure: step 1 (construct.plane.axis_point): the point is on the axis: pick a point off the axis to define a unique plane"
+      ]
+    },
+    {
+      "case": "construction/cov-plane-midplane-of-a-plane-with-itself",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-plane-perpendicular-refuses-a-line-square-to-the-plane",
+      "why": [
+        "no kernel operation ran before the failure: step 1 (construct.plane.perpendicular): the line is square to the plane: every plane through it is perpendicular; pick a line in or along the plane"
+      ]
+    },
+    {
+      "case": "construction/cov-plane-perpendicular-through-a-diagonal-axis",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-plane-tangent-refuses-a-point-on-the-axis",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.plane.tangent): the point is on the face's axis"
+      ]
+    },
+    {
+      "case": "construction/cov-plane-three-points-refuses-collinear-points",
+      "why": [
+        "no kernel operation ran before the failure: step 1 (construct.plane.three_points): the three points are on one line"
+      ]
+    },
+    {
+      "case": "construction/cov-plane-three-points-slanted",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-plane-two-edges-refuses-skew-edges",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.plane.two_edges): the edges are not in one plane"
+      ]
+    },
+    {
+      "case": "construction/cov-point-along-path-a-third-of-an-arc",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-point-along-path-middle-of-a-symmetric-spline",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-point-along-path-past-the-end",
+      "why": [
+        "no kernel operation ran before the failure: step 4 (construct.point.along_path): invalid input: t is 1.5: a point along a path is 0 (its start) to 1 (its end) of the way along it"
+      ]
+    },
+    {
+      "case": "construction/cov-point-along-path-quarter-of-a-line",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-point-center-of-a-sketch-arc",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-point-center-refuses-a-flat-face",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.point.center): the face is not a sphere or torus"
+      ]
+    },
+    {
+      "case": "construction/cov-point-edge-plane-refuses-a-parallel-edge",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.point.edge_plane): the edge is parallel to the plane"
+      ]
+    },
+    {
+      "case": "construction/cov-point-three-planes-refuses-planes-through-one-line",
+      "why": [
+        "no kernel operation ran before the failure: step 1 (construct.point.three_planes): the planes don't meet in a point"
+      ]
+    },
+    {
+      "case": "construction/cov-point-three-planes-refuses-two-parallel",
+      "why": [
+        "no kernel operation ran before the failure: step 1 (construct.point.three_planes): two of the planes are parallel"
+      ]
+    },
+    {
+      "case": "construction/cov-point-three-planes-slanted",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-point-two-edges-refuses-parallel-edges",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.point.two_edges): the edges are parallel"
+      ]
+    },
+    {
+      "case": "construction/cov-point-vertex-of-a-construction-point",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "construction/cov-point-vertex-refuses-with-no-body",
+      "why": [
+        "no kernel operation ran before the failure: step 1 (construct.point.vertex): there is no vertex"
+      ]
+    },
+    {
+      "case": "crashes/3685-delete-fillet-face-beside-seam",
+      "why": [
+        "body \"B\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "crashes/4547-join-revolved-rings-touching-along-a-circle",
+      "why": [
+        "body \"RingB\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "crashes/5022-snap-fit-near-zero-thickness",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (plastic.snap_fit): the snap fit's thickness must be at least 0.01 mm (got 1e-9 mm)"
+      ]
+    },
+    {
+      "case": "fillets/1668-fillet-outer-top-edge-of-thin-wall-r7-past-inside-corner",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.fillet): not supported yet: the round of radius 7 mm on the edge at (0.000, 32.000, 42.000) would cut through the material behind it into the hollow at (0.000, 30.000, 40.000) and open the part; the largest radius that fits is 6.828 mm"
+      ]
+    },
+    {
+      "case": "fillets/2852-fillet-outer-round-r30-past-inner-round-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 4 (solid.fillet): not supported yet: the round of radius 30 mm on the edge at (0.000, 10.000, 50.000) would cut through the material behind it into the hollow at (7.393, 10.000, 42.607) and open the part; the largest radius that fits is 25.24 mm"
+      ]
+    },
+    {
+      "case": "fillets/3435-fillet-larger-than-top-ring",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow, at the edge at (-5.725, -4.028, 48.200): the blend runs off a face into the material; the largest radius that fits is 4.3 mm"
+      ]
+    },
+    {
+      "case": "fillets/477-fillet-cube-corner-rounds-as-wide-as-faces-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow, at the edge at (10.000, 0.000, 0.000): its corners take the whole of the edge; the largest radius that fits is 19.99 mm"
+      ]
+    },
+    {
+      "case": "fillets/783-fillet-pick-far-from-any-edge-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.fillet): invalid parameters for `solid.fillet`: no edge at [10, -15, 10]: the nearest edge is 15.000 mm away"
+      ]
+    },
+    {
+      "case": "fillets/896-fillet-smooth-seam-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.fillet): invalid input: the edge at (20.000, 3.000, 20.000) is smooth: its faces meet tangentially, so there is nothing to round"
+      ]
+    },
+    {
+      "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",
+      "why": [
+        "SolidCraft has no command for it yet: solid.fillet builds `corner: g2` with `fit: exact` only"
+      ]
+    },
+    {
+      "case": "fillets/9-fillet-corner-curvature-with-taper-fit",
+      "why": [
+        "SolidCraft has no command for it yet: solid.fillet builds `corner: g2` with `fit: exact` only"
+      ]
+    },
+    {
+      "case": "fillets/9-fillet-corner-setback-1-5-not-past-r2-curvature",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.fillet): invalid input: the setback must be more than the radius (2 mm) at the corner (60.000, 40.000, 20.000): the rounds' contact lines meet 2 mm from it along its edges, and the corner's patch starts past that"
+      ]
+    },
+    {
+      "case": "fillets/9-fillet-corner-setback-1-5-not-past-r2-rolling",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.fillet): invalid input: the setback must be more than the radius (2 mm) at the corner (60.000, 40.000, 20.000): the rounds' contact lines meet 2 mm from it along its edges, and the corner's patch starts past that"
+      ]
+    },
+    {
+      "case": "fillets/9-fillet-corner-setback-2-not-past-r2-curvature",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.fillet): invalid input: the setback must be more than the radius (2 mm) at the corner (60.000, 40.000, 20.000): the rounds' contact lines meet 2 mm from it along its edges, and the corner's patch starts past that"
+      ]
+    },
+    {
+      "case": "fillets/9-fillet-corner-setback-2-not-past-r2-rolling",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.fillet): invalid input: the setback must be more than the radius (2 mm) at the corner (60.000, 40.000, 20.000): the rounds' contact lines meet 2 mm from it along its edges, and the corner's patch starts past that"
+      ]
+    },
+    {
+      "case": "fillets/cov-fillet-g2-five-edge-apex-corner",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 12 (solid.fillet): invalid input: the setback must be more than 3.5056 mm at the corner (-0.000, 0.000, 30.000): the rounds' contact lines meet 3.5056 mm from it along its edges, and the corner's patch starts past that"
+      ]
+    },
+    {
+      "case": "fillets/cov-fillet-g2-four-edge-apex-corner",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3.9027 mm from it along its edges, and the corner's patch starts past that"
+      ]
+    },
+    {
+      "case": "fillets/every-box-corner-three-edges-r3-curvature-setback-3-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.fillet): invalid input: the setback must be more than the radius (3 mm) at the corner (40.000, 30.000, 20.000): the rounds' contact lines meet 3 mm from it along its edges, and the corner's patch starts past that"
+      ]
+    },
+    {
+      "case": "fillets/every-l-bracket-inside-bend-r36-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow, at the edge at (5.000, 10.000, 5.000): a contact line leaves the face it rolls on; the largest radius that fits is 35 mm"
+      ]
+    },
+    {
+      "case": "frames/cov-frame-member-tube-wall-too-thick-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 4 (frame.member): invalid parameters for `frame.member`: profile `wall` (20) must be less than half the smaller side (20)"
+      ]
+    },
+    {
+      "case": "history/cov-config-activate-a-row-that-fails-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 7 (config.activate): invalid parameters for `config.activate`: configuration `Zero` would fail to rebuild: Block: invalid input: box needs a positive size in x, y and z; Hole: Hole: the reference `F1:+z` no longer exists as it was picked; reselect it"
+      ]
+    },
+    {
+      "case": "history/cov-config-activate-unknown-row-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 6 (config.activate): invalid parameters for `config.activate`: unknown configuration `Nope`"
+      ]
+    },
+    {
+      "case": "history/cov-config-column-unknown-parameter-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 6 (config.column): invalid parameters for `config.column`: no parameter `Depth`"
+      ]
+    },
+    {
+      "case": "history/cov-config-configure-unknown-feature-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 6 (config.configure): invalid parameters for `config.configure`: no feature `Nope`"
+      ]
+    },
+    {
+      "case": "history/cov-config-row-unknown-column-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 6 (config.row): invalid parameters for `config.row`: `Depth` is not a column (config.column adds one)"
+      ]
+    },
+    {
+      "case": "history/cov-config-rule-range-refuses-a-row",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 7 (config.rule): invalid parameters for `config.rule`: row `Long`: invalid parameters for `config.activate`: configuration rules: rule `Range` restricts the final value"
+      ]
+    },
+    {
+      "case": "history/cov-parameters-cyclic-expression-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 4 (parameters.change): expression: circular reference: A \u2192 B \u2192 A"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-compute-all-counts-failing-features",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-delete-the-body-its-features-need",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-edit-unknown-field-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (timeline.edit): invalid parameters for `timeline.edit`: unknown field `radus`; FilletFeature has `body`, `edges`, `radius` (timeline.inspect shows them with their values)"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-group-non-contiguous-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 7 (timeline.group): invalid parameters for `timeline.group`: timeline folder `Split` must contain one contiguous run of features"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-move-many-folder-into-itself-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 7 (timeline.move_many): invalid parameters for `timeline.move_many`: a folder cannot be moved into itself or one of its descendants"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-move-to-group-non-contiguous-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 8 (timeline.move_to_group): invalid parameters for `timeline.move_to_group`: timeline folder `R` must contain one contiguous run of features"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-reorder-cut-before-its-sketch-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 6 (timeline.reorder): invalid parameters for `timeline.reorder`: moving Notch there breaks Notch (unknown sketch 2 (it must come earlier in the timeline))"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-reorder-many-sketch-after-its-cut-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 7 (timeline.reorder_many): invalid parameters for `timeline.reorder_many`: moving the selected features there breaks Notch (unknown sketch 2 (it must come earlier in the timeline))"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-roll-to-negative-position-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (timeline.roll_to): invalid parameters for `timeline.roll_to`: `position` -1 is negative: it counts the features to keep active, 0 to 2 (or \"end\")"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-suppress-unknown-feature-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (timeline.suppress): invalid parameters for `timeline.suppress`: no feature `Nope`"
+      ]
+    },
+    {
+      "case": "history/cov-timeline-ungroup-unknown-folder-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (timeline.ungroup): invalid parameters for `timeline.ungroup`: no timeline folder 99"
+      ]
+    },
+    {
+      "case": "import/1721-closed-bspline-tube-face",
+      "why": [
+        "body \"cylinder_nurbs\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/2043-outer-bound-opposing-surface-sense",
+      "why": [
+        "body \"block\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/258-cone-point-vertex",
+      "why": [
+        "body \"cone_point_vertex\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/258-cone-to-point",
+      "why": [
+        "body \"cone_point\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/258-tiny-pin",
+      "why": [
+        "body \"tiny_pin\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3098-bspline-edges-over-tiny-knot-span",
+      "why": [
+        "body \"block\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3208-extruded-ellipse-face-over-parameter-seam",
+      "why": [
+        "body \"segment\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3352-vertex-off-its-edge-curve",
+      "why": [
+        "body \"panel\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3359-iges-trim-pieces-written-end-to-start",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3730-void-oriented-shell-false",
+      "why": [
+        "body \"Hollow\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3806-iges-revolved-arc-spherical-cap-dome",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3845-iges-trim-pieces-miss-by-a-gap",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3880-cylinder-seam-edge",
+      "why": [
+        "body \"cylinder_seam\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3880-nurbs-hemisphere-dome",
+      "why": [
+        "body \"dome_nurbs\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3886-iges-bspline-curve-over-tiny-knot-span",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3912-iges-hole-trim-first-piece-reversed",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3913-iges-trim-curve-first-piece-reversed",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3963-closed-spline-edge-vertex-past-start",
+      "why": [
+        "body \"square\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/3972-iges-two-separate-closed-boxes",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Body1 2\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/4005-cylinder-written-as-near-zero-cone",
+      "why": [
+        "body \"pin\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/4006-plane-written-as-cone-of-nearly-right-angle",
+      "why": [
+        "body \"plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/4438-step-whole-torus-round-trip",
+      "why": [
+        "body \"Torus\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/4598-step-moved-cross-bored-rod-round-trip",
+      "why": [
+        "body \"Rod\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/5193-step-turned-pin-with-flats-round-trip",
+      "why": [
+        "body \"Pin\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/cov-export-step-box-round-trip",
+      "why": [
+        "body \"Block\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "import/cov-print-face-refuses-a-curved-face",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (body.print_face): invalid parameters for `body.print_face`: only a flat face can be the print face"
+      ]
+    },
+    {
+      "case": "import/cov-step-horn-torus-quarter-round-trip",
+      "why": [
+        "body \"Horn\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "inspect/cov-center-of-mass-refuses-an-unknown-body",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.center_of_mass): invalid parameters for `inspect.center_of_mass`: no such bodies"
+      ]
+    },
+    {
+      "case": "inspect/cov-compare-refuses-a-tolerance-out-of-range",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (inspect.compare): invalid parameters for `inspect.compare`: `tolerance` must be a number from 0.001 to 10"
+      ]
+    },
+    {
+      "case": "inspect/cov-continuity-refuses-too-few-samples",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.continuity): invalid parameters for `inspect.continuity`: `samples` must be 3\u2026257 stations along each edge"
+      ]
+    },
+    {
+      "case": "inspect/cov-curvature-comb-circle-and-line",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "inspect/cov-curvature-comb-refuses-nothing-picked",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.curvature_comb): invalid parameters for `inspect.curvature_comb`: give `curves`, `edges` or `faces`"
+      ]
+    },
+    {
+      "case": "inspect/cov-isocurve-refuses-zero-curves",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.isocurve): invalid parameters for `inspect.isocurve`: `count` must be a whole number of curves each way, 1\u2026100"
+      ]
+    },
+    {
+      "case": "inspect/cov-minimum-radius-of-an-ellipse",
+      "why": [
+        "the case ends with no body"
+      ]
+    },
+    {
+      "case": "ladder/02-booleans/016-v-groove-pinches-bottom-to-line",
+      "why": [
+        "body \"Part\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Part (1)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/02-booleans/017-cylinder-tangent-top-and-bottom",
+      "why": [
+        "body \"Part\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Part (1)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/06-threads/029-external-tr20x4-chamfer-needs-depth",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.thread): ISO 4753's chamfered end is for ISO metric threads: give a trapezoidal thread its chamfer depth (its root is 2.25 mm deep)"
+      ]
+    },
+    {
+      "case": "ladder/06-threads/030-square-thread-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.thread): invalid parameters for `solid.thread`: no current standard defines a square thread (ISO, ASME and DIN have none; Machinery's Handbook gives only historical proportions): use trapezoidal (ISO 2904) or acme (ASME B1.5)"
+      ]
+    },
+    {
+      "case": "ladder/07-fillets/016-corner-three-sequential-r5-r3-r7",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 4 (solid.fillet): invalid parameters for `solid.fillet`: [60, 40, 8] is where 2 edges meet: give a point along one edge, such as its midpoint"
+      ]
+    },
+    {
+      "case": "ladder/07-fillets/018-corner-three-sequential-r5-r3-r2",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 4 (solid.fillet): invalid parameters for `solid.fillet`: [60, 40, 8] is where 2 edges meet: give a point along one edge, such as its midpoint"
+      ]
+    },
+    {
+      "case": "ladder/10-patterns-and-mirrors/003-overlapping-pattern-leaves-core",
+      "why": [
+        "body \"Part (1)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Part\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/10-patterns-and-mirrors/007-pattern-bodies",
+      "why": [
+        "body \"Pin (2)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Pin (3)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Pin (4)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/001-base-flange",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/002-edge-flange-90",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/003-four-flanges-90-closed-corners",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/004-four-flanges-72-leaning-out",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/005-four-flanges-108-leaning-in",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/006-corner-relief-round",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/007-corner-relief-rectangular",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/008-corner-relief-tear",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/009-hem-on-the-back-edge",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/010-fold-90",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/012-fold-refolded",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/013-flat-pattern",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "ladder/12-sheet-metal/014-bracket",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "plastic/cov-boss-draft-closing-before-its-top-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (plastic.boss): the draft closes the boss before its top"
+      ]
+    },
+    {
+      "case": "plastic/cov-lip-inside-on-a-shelled-box",
+      "why": [
+        "body \"Case\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "plastic/cov-lip-on-a-face-without-an-opening-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (plastic.lip): pick the rim face of a shelled body (a face with an inner and an outer edge)"
+      ]
+    },
+    {
+      "case": "plastic/cov-plastic-assign-unknown-rule-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (plastic.assign_rule): invalid parameters for `plastic.assign_rule`: no plastic rule `Nope` (plastic.rules lists them)"
+      ]
+    },
+    {
+      "case": "plastic/cov-plastic-manage-rules-from-an-unknown-rule-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 1 (plastic.manage_rules): invalid parameters for `plastic.manage_rules`: no plastic rule `No Such Rule` to start from"
+      ]
+    },
+    {
+      "case": "plastic/cov-rest-wall-as-thick-as-half-its-width-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (plastic.rest): the rest's wall must be thinner than half its width"
+      ]
+    },
+    {
+      "case": "plastic/cov-snap-fit-catch-as-long-as-its-arm-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (plastic.snap_fit): the snap fit's catch must be shorter than its arm"
+      ]
+    },
+    {
+      "case": "sheet-metal/1040-convert-a-1200-mm-strip-1-mm-thick",
+      "why": [
+        "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1040-convert-a-990-mm-strip-keeps-its-1-mm-hole",
+      "why": [
+        "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1092-convert-a-channel-with-its-bends-modelled",
+      "why": [
+        "body \"Channel\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1092-convert-an-L-with-a-modelled-bend-to-the-rules-radius",
+      "why": [
+        "body \"Angle\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1092-convert-an-engraved-plate",
+      "why": [
+        "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1095-refold-a-cutout-with-a-corner-on-the-sheets-edge-at-a-bend",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1280-hole-square-to-a-45-degree-flange",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1285-convert-a-bracket-whose-wall-covers-part-of-an-edge",
+      "why": [
+        "body \"Bracket\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1295-a-slot-across-a-flange-leaves-the-rest-of-it-as-a-loose-piece",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1311-inside-flange-on-a-plate-turned-62-degrees",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1797-tray-with-torn-corners-at-72-degrees-folded",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/1979-every-cut-after-a-cut-machines-the-sheet",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/262-fold-a-tab-just-inside-its-root",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/262-fold-at-a-tab-root-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 6 (sheet.fold): the bend zone (1.810 mm wide) reaches a corner of the sheet's outline at (100.000, 50.000, 0.800): move the fold line at least 0.905 mm toward the side that folds or 0.905 mm toward the side that stays"
+      ]
+    },
+    {
+      "case": "sheet-metal/264-fold-one-of-two-collinear-tabs",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/264-one-fold-across-two-collinear-tabs",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/296-hole-in-a-base-with-two-adjacent-edge-flanges",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/3078-flange-on-the-side-edge-of-a-flange",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/3234-edge-flange-on-the-bend-line-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 7 (sheet.flange): that edge is the bend line of a flange; pick a free edge of the sheet"
+      ]
+    },
+    {
+      "case": "sheet-metal/3316-convert-a-plate-keeps-its-place",
+      "why": [
+        "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/3324-flat-pattern-refused-after-a-fillet-on-the-sheet",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 7 (sheet.flat_pattern): not supported yet: the flat pattern of `Body1` can't include Fillet1, which changed the body after its sheet metal features, so the flat pattern, DXF and bend table would not match the part; remove or suppress Fillet1, or make that shape with sheet metal features"
+      ]
+    },
+    {
+      "case": "sheet-metal/3417-rhombus-with-a-flange-on-each-edge-and-square-reliefs",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/405-tray-with-72-degree-flanges-folded",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/416-round-hole-and-slanted-slot-across-a-bend",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/4328-convert-l-section-with-modelled-bend",
+      "why": [
+        "body \"Angle\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/436-edge-flanges-at-105-and-120-degrees-on-opposite-edges",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/436-edge-flanges-with-their-own-height-on-opposite-edges",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/514-refold-an-L-bracket-after-unfolding-it",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/529-a-hundred-slots-and-four-folds",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/5306-flange-on-notch-edge-not-outer-edge",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/541-box-cut-straight-through-a-flat-sheet",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/542-round-hole-in-a-flat-sheet-and-its-flat-pattern",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/560-hole-through-a-sheet-metal-base",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/570-flange-refuses-thickness-it-would-ignore",
+      "why": [
+        "no kernel operation ran before the failure: step 4 (sheet.flange): invalid parameters for `sheet.flange`: `thickness` is not a sheet.flange parameter: the sheet metal rule sets it. Make a rule with sheet.manage_rules {name, thickness, \u2026} and pass its name as `rule`"
+      ]
+    },
+    {
+      "case": "sheet-metal/601-return-lip-on-a-flanges-far-edge",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/634-flange-beside-the-leg-of-an-L-folded",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/638-fold-both-collinear-tabs-one-after-the-other",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/639-fold-tab-on-inside-edge-of-an-L-blank",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/659-ellipse-cutout-across-a-bend",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/659-ellipse-cutout-in-a-flat-sheet",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/685-fold-with-the-fixed-point-on-the-top-face",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/702-flange-along-what-a-cutout-leaves",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/723-tray-with-torn-corners-folded",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/725-convert-a-shelled-tray-and-unfold-it",
+      "why": [
+        "body \"Tray\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/774-convert-a-plate-with-nine-round-holes",
+      "why": [
+        "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/978-edge-flange-beside-a-ledge-as-tall-as-its-setback",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-export-bend-table-csv-flange-and-hem",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-export-bend-table-json-one-flange",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-export-bend-table-unknown-format-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 7 (sheet.export_bend_table): invalid parameters for `sheet.export_bend_table`: `format` must be csv or json"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-export-dxf-ellipse-as-arcs",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-export-dxf-ellipse-exact",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-export-dxf-flange-and-hole",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-export-dxf-without-a-sheet-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (sheet.export_dxf): invalid parameters for `sheet.export_dxf`: there is no sheet metal body: start one with Flange > Base, or turn a plate into sheet metal with Convert to Sheet Metal (pick its large flat face)"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-flange-four-edges-leaning-in-108-closed",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-hem-closed-on-a-bottom-edge",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-hem-closed-on-a-top-edge",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-hem-on-a-flanges-far-edge",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-hem-open-with-a-gap-flipped",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-hem-shorter-than-its-bend-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 6 (sheet.hem): the hem is shorter than its bend"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-path-flange-one-line-down-at-45-degrees",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-path-flange-straight-on-from-the-sheet-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 9 (sheet.path_flange): line 1 of the path flange's path runs straight on from the sheet or back over it: each line must turn"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-path-flange-wall-and-an-outward-lip",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-perforate-keeps-clear-of-a-bend-zone",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-perforate-pitch-no-larger-than-the-hole-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 6 (sheet.perforate): perforation needs diameter > 0, pitch > diameter and margin >= 0 (diameter 2, pitch 2, margin 1)"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-perforate-square-field-on-a-plate",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sheet-metal/cov-perforate-staggered-field-on-a-plate",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "shell/5182-delete-chamfered-hole-of-block",
+      "why": [
+        "body \"Block\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "shell/5368-delete-rounds-of-block-top-edges",
+      "why": [
+        "body \"Block\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "solids/cov-align-bottom-face-onto-top-face",
+      "why": [
+        "body \"Block\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "solids/cov-align-face-onto-offset-plane",
+      "why": [
+        "body \"Post\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "solids/cov-cone-frustum-along-x",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "solids/cov-cone-full-apex-negative-height",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "solids/cov-cone-zero-height-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 1 (solid.cone): the cone's height must not be zero"
+      ]
+    },
+    {
+      "case": "solids/cov-scale-zero-factor-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.scale): scale factors must be positive"
+      ]
+    },
+    {
+      "case": "surfaces/cov-blend-from-edges-that-do-not-chain-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 9 (surface.blend): invalid input: the picked edges do not run on from one another"
+      ]
+    },
+    {
+      "case": "surfaces/cov-boundary-five-curves-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 4 (surface.boundary): invalid parameters for `surface.boundary`: `curves` must list 2 to 4 sketch curves in loop order (or give a network as `u` and `v`)"
+      ]
+    },
+    {
+      "case": "surfaces/cov-boundary-four-lines-flat-square",
+      "why": [
+        "body \"Patch\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-boundary-network-of-four-lines-hyperbolic-paraboloid",
+      "why": [
+        "body \"Saddle\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-boundary-three-lines-triangle",
+      "why": [
+        "body \"Patch\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-extend-square-sheet-edge-natural",
+      "why": [
+        "body \"Sheet\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-extend-tangent-to-bounds-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 5 (surface.extend): invalid parameters for `surface.extend`: only a natural extension goes back to the surface's bounds"
+      ]
+    },
+    {
+      "case": "surfaces/cov-fair-flat-patch-stays-flat",
+      "why": [
+        "body \"Patch\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-fair-zero-strength-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 5 (surface.fair): invalid parameters for `surface.fair`: `strength` must be greater than 0 and at most 1 (the whole fairing step)"
+      ]
+    },
+    {
+      "case": "surfaces/cov-match-a-solid-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 6 (surface.match): invalid input: match rebuilds a surface body: this one is closed"
+      ]
+    },
+    {
+      "case": "surfaces/cov-offset-tolerance-out-of-range-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (surface.offset): invalid input: the offset tolerance must be 0.000001\u202610 mm"
+      ]
+    },
+    {
+      "case": "surfaces/cov-patch-sketch-region-with-a-hole",
+      "why": [
+        "body \"Holed\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-reverse-normal-of-a-solid-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (surface.reverse_normal): invalid input: a solid's faces face out: unstitch it into surfaces first"
+      ]
+    },
+    {
+      "case": "surfaces/cov-ruled-zero-distance-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 2 (surface.ruled): invalid input: the ruled surface distance must be positive and finite"
+      ]
+    },
+    {
+      "case": "surfaces/cov-trim-keep-with-without-with-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 5 (surface.trim): invalid parameters for `surface.trim`: `keep_with`, `stitch` and `extend` belong to a mutual trim (`with`)"
+      ]
+    },
+    {
+      "case": "surfaces/cov-trim-sheet-by-a-circle-keeps-the-outside",
+      "why": [
+        "body \"Sheet\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-trim-square-sheet-by-a-plane",
+      "why": [
+        "body \"Sheet\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-unstitch-box-every-face",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Body2\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Body3\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Body4\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Body5\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Body6\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-unstitch-box-top-only",
+      "why": [
+        "body \"Box\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Top\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-unstitch-cylinder-caps-and-side",
+      "why": [
+        "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Body2\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Body3\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "surfaces/cov-unstitch-one-face-sheet-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 5 (surface.unstitch): invalid input: the body has one face: nothing to unstitch"
+      ]
+    },
+    {
+      "case": "surfaces/cov-untrim-face-without-holes-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 5 (surface.untrim): invalid input: the face has no holes to remove (restore its outer boundary instead)"
+      ]
+    },
+    {
+      "case": "sweeps/2183-revolve-profile-crosses-the-axis-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 4 (solid.revolve): invalid input: the profile crosses the revolve axis"
+      ]
+    },
+    {
+      "case": "sweeps/2607-revolve-axis-outside-the-sketch-plane-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 4 (solid.revolve): the Y axis does not lie in the sketch plane"
+      ]
+    },
+    {
+      "case": "sweeps/2667-sweep-hostile-end-scale-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 7 (solid.sweep): invalid parameters for `solid.sweep`: `scale` (the end scale) must be between 0.01 and 100"
+      ]
+    },
+    {
+      "case": "sweeps/2947-revolve-300-degrees-intersected-by-a-plate",
+      "why": [
+        "body \"Ring\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Ring (1)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sweeps/3412-loft-sections-in-one-plane-refused",
+      "why": [
+        "no kernel operation ran before the failure: step 7 (solid.loft): invalid input: loft sections 1 and 2 lie in the same plane (no volume between them)"
+      ]
+    },
+    {
+      "case": "sweeps/96-loft-cut-box-sections-pad-first",
+      "why": [
+        "body \"Basin\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Basin (1)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "sweeps/96-loft-cut-box-sections-top-first",
+      "why": [
+        "body \"Basin\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+        "body \"Basin (1)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "tessellation/2069-chamfered-ring-notch-moved-far",
+      "why": [
+        "body \"Ring\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+      ]
+    },
+    {
+      "case": "threads/1443-m5x0.7-thread-in-5mm-hole",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.thread): this 5 mm hole is too wide for a modelled M5x0.7 thread: it would cut 0.00 mm of the thread's 0.38 mm depth; drill 4.3 mm for M5x0.7, or thread this hole M6"
+      ]
+    },
+    {
+      "case": "threads/2152-m3x0.2-thread-in-3mm-hole",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.thread): this 3 mm hole is too wide for a modelled M3x0.2 thread: it would cut 0.00 mm of the thread's 0.11 mm depth; drill 2.8 mm for M3x0.2, or thread this hole M4"
+      ]
+    },
+    {
+      "case": "threads/2369-m8-thread-in-6.3mm-hole-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.thread): this 6.3 mm hole is too narrow for a modelled M8 thread (its teeth would fill the hole); drill 6.8 mm for M8"
+      ]
+    },
+    {
+      "case": "threads/2705-m14-thread-on-14.6mm-shaft-refused",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.thread): this 14.6 mm shaft is too thick for a modelled M14 thread; make the shaft 14 mm for M14"
+      ]
+    },
+    {
+      "case": "threads/2969-m48x0.75-thread-in-48mm-hole",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.thread): this 48 mm hole is too wide for a modelled M48x0.75 thread: it would cut 0.00 mm of the thread's 0.41 mm depth; drill 47.25 mm for M48x0.75, or thread this hole M56"
+      ]
+    },
+    {
+      "case": "threads/3366-m20-thread-in-20mm-hole",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.thread): this 20 mm hole is too wide for a modelled M20 thread: it would cut 0.00 mm of the thread's 1.35 mm depth; drill 17.5 mm for M20, or thread this hole M22"
+      ]
+    },
+    {
+      "case": "threads/995-m5-thread-in-5mm-hole",
+      "why": [
+        "the failure is SolidCraft's, not a kernel operation's: step 3 (solid.thread): this 5 mm hole is too wide for a modelled M5 thread: it would cut 0.00 mm of the thread's 0.43 mm depth; drill 4.2 mm for M5, or thread this hole M6"
+      ]
+    }
+  ],
+  "solidcore": "8ddce901671f1cebd9214a31d21895d725e886c8",
+  "solidcraft": "7b0906b918e5402d81c55f8669dc9fe5f1825249"
+}

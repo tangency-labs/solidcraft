@@ -283,7 +283,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         let (r, u, _) = app.cam.basis();
         let tip = origin + vec2((d.dot(r) * 17.0) as f32, -(d.dot(u) * 17.0) as f32) * scale;
         painter.line_segment([origin, tip], Stroke::new(1.5, color));
-        painter.text(tip, Align2::CENTER_CENTER, label, FontId::proportional(crate::theme::Tokens::get().font_triad), color);
+        painter.text(tip, Align2::CENTER_CENTER, label, FontId::proportional(solidcraft_theme::Tokens::get().font_triad), color);
     }
 }
 
@@ -346,7 +346,7 @@ mod tests {
     use super::*;
     #[cfg(test)]
     use crate::icons::navigation::{LABEL_PIXELS, face_text};
-    use solidcraft_engine::render::{StandardView, UpAxis};
+    use solidcraft_viewport::{StandardView, UpAxis};
 
     fn paint_frame(ctx: &egui::Context, paint: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
         let mut output = ctx.run_ui(egui::RawInput::default(), paint);

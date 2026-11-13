@@ -1,54 +1,81 @@
 //! More sketch constraints (curvature, polygon), constraint glyph anchors and snapping
 //! inference for interactive tools.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
-use super::sketch::{add_c, constraint_result, dof_now, edit, listed, redundancy, residual_of};
+use super::sketch::{add_c, dof_now, edit, keep_redundant, listed, redundancy, residual_of};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list, vec2};
-use crate::schema::sketch_constraints::{ToggleDiameterParams, ToggleDiameterResult};
+use crate::schema::sketch_constraints::{
+    AutoConstrainDatumParams, AutoConstrainParams, AutoConstrainResult, ConstrainerParams, ConstrainerResult, ConstraintAdded, CurvatureParams,
+    FinishAutoConstrainParams, Glyph, GlyphsParams, GlyphsResult, PolygonParams, PolygonResult, Snap, SnapParams, SnapResult, ToggleDiameterParams,
+    ToggleDiameterResult, ToggleDrivenParams, ToggleDrivenResult,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const TOGGLE_DIAMETER_CONTRACT: TypedContract<ToggleDiameterParams> = TypedContract::new();
+const CURVATURE_CONTRACT: TypedContract<CurvatureParams> = TypedContract::new();
+const POLYGON_CONTRACT: TypedContract<PolygonParams> = TypedContract::new();
+const AUTO_CONSTRAIN_CONTRACT: TypedContract<AutoConstrainParams> = TypedContract::new();
+const AUTO_CONSTRAIN_DATUM_CONTRACT: TypedContract<AutoConstrainDatumParams> = TypedContract::new();
+const FINISH_AUTO_CONSTRAIN_CONTRACT: TypedContract<FinishAutoConstrainParams> = TypedContract::new();
+const CONSTRAINER_CONTRACT: TypedContract<ConstrainerParams> = TypedContract::new();
+const TOGGLE_DRIVEN_CONTRACT: TypedContract<ToggleDrivenParams> = TypedContract::new();
+const GLYPHS_CONTRACT: TypedContract<GlyphsParams> = TypedContract::new();
+const SNAP_CONTRACT: TypedContract<SnapParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.constraint.curvature", "Curvature", c_smooth)
+    CommandSpec::new("sketch.constraint.curvature", "Curvature", crate::checked!("sketch.constraint.curvature", c_smooth))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_smooth")
         .enabled(in_sketch)
+        .contract(&CURVATURE_CONTRACT)
+        .output(output_schema_for::<ConstraintAdded>)
         .params("a, b: two curves sharing an end point (curvature continuous, G2)"),
-    CommandSpec::new("sketch.constraint.polygon", "Polygon", c_polygon)
+    CommandSpec::new("sketch.constraint.polygon", "Polygon", crate::checked!("sketch.constraint.polygon", c_polygon))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_polygon")
         .enabled(in_sketch)
+        .contract(&POLYGON_CONTRACT)
+        .output(output_schema_for::<PolygonResult>)
         .params("lines: [line ids] of a closed chain: equal sides with every corner on one circle (a regular polygon)"),
-    CommandSpec::new("sketch.auto_constrain", "AutoConstrain", auto_constrain)
+    CommandSpec::new("sketch.auto_constrain", "AutoConstrain", crate::checked!("sketch.auto_constrain", auto_constrain))
         .at("SKETCH", "CONSTRAINTS")
         .icon("auto_constrain")
         .enabled(in_sketch)
+        .contract(&AUTO_CONSTRAIN_CONTRACT)
+        .output(output_schema_for::<AutoConstrainResult>)
         .params("tolerance?: mm (default 0.01), angle_tolerance?: deg (default 1), dimensions?: bool (default true): infer constraints, then dimension until fully constrained"),
-    CommandSpec::new("sketch.auto_constrain_from_datum", "AutoConstrain from Datum", auto_constrain_datum)
+    CommandSpec::new("sketch.auto_constrain_from_datum", "AutoConstrain from Datum", crate::checked!("sketch.auto_constrain_from_datum", auto_constrain_datum))
         .at("SKETCH", "CONSTRAINTS")
         .icon("auto_constrain")
         .enabled(in_sketch)
+        .contract(&AUTO_CONSTRAIN_DATUM_CONTRACT)
+        .output(output_schema_for::<AutoConstrainResult>)
         .params("datum: point ref (default origin); like AutoConstrain with positions measured from the datum"),
-    CommandSpec::new("sketch.finish_auto_constrain", "Finish with AutoConstrain", auto_constrain_finish)
+    CommandSpec::new("sketch.finish_auto_constrain", "Finish with AutoConstrain", crate::checked!("sketch.finish_auto_constrain", auto_constrain_finish))
         .at("SKETCH", "FINISH SKETCH")
         .icon("finish")
         .enabled(in_sketch)
+        .contract(&FINISH_AUTO_CONSTRAIN_CONTRACT)
+        .output(output_schema_for::<AutoConstrainResult>)
         .params("like AutoConstrain, then Finish Sketch"),
-    CommandSpec::new("sketch.constrainer", "Sketch Constrainer", smart_constrain)
+    CommandSpec::new("sketch.constrainer", "Sketch Constrainer", crate::checked!("sketch.constrainer", smart_constrain))
         .at("SKETCH", "CREATE")
         .icon("constrainer")
         .enabled(in_sketch)
+        .contract(&CONSTRAINER_CONTRACT)
+        .output(output_schema_for::<ConstrainerResult>)
         .params("entities: [one or two sketch entity ids]: applies the constraint the geometry nearly has (horizontal/vertical, parallel, perpendicular, collinear, coincident, concentric, equal, tangent)"),
-    CommandSpec::new("sketch.toggle_driven", "Toggle Driven Dimension", toggle_driven).icon("dimension")
+    CommandSpec::new("sketch.toggle_driven", "Toggle Driven Dimension", crate::checked!("sketch.toggle_driven", toggle_driven)).icon("dimension")
         .enabled(in_sketch)
+        .contract(&TOGGLE_DRIVEN_CONTRACT)
+        .output(output_schema_for::<ToggleDrivenResult>)
         .params("constraint: dimension id, driven?: bool (default toggles); a driving dimension gets a parameter with its current value"),
     CommandSpec::new("sketch.toggle_diameter", "Toggle Radius / Diameter", crate::checked!("sketch.toggle_diameter", toggle_diameter))
         .icon("dimension")
@@ -56,13 +83,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TOGGLE_DIAMETER_CONTRACT)
         .output(output_schema_for::<ToggleDiameterResult>)
         .params("constraint: a circle's or an arc's radius or diameter dimension id; diameter?: bool (default: the other one); sketch?: id|name (default: the one being edited). The circle stays the same size: its parameter is halved or doubled (a plain value is rewritten, an expression becomes `(e) / 2` or `2 * (e)`); refused when anything else uses that parameter"),
-    CommandSpec::new("sketch.glyphs", "Constraint Glyphs", glyphs).icon("eye")
+    CommandSpec::new("sketch.glyphs", "Constraint Glyphs", crate::checked!("sketch.glyphs", glyphs)).icon("eye")
         .enabled(in_sketch)
-        .noundo()
+        .noundo().read_only()
+        .contract(&GLYPHS_CONTRACT)
+        .output(output_schema_for::<GlyphsResult>)
         .params("sketch?: id|name: every constraint with where to draw its glyph (sketch coordinates)"),
-    CommandSpec::new("sketch.snap", "Snap Inference", snap).icon("snap")
+    CommandSpec::new("sketch.snap", "Snap Inference", crate::checked!("sketch.snap", snap)).icon("snap")
         .enabled(in_sketch)
-        .noundo()
+        .noundo().read_only()
+        .contract(&SNAP_CONTRACT)
+        .output(output_schema_for::<SnapResult>)
         .params("at: [x,y], from?: [x,y] (previous click), radius?: mm (snap distance, default 1): what a click there would snap to and infer"),
 ];
 
@@ -78,7 +109,26 @@ fn c_smooth(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(id)
     })?;
     let by = redundancy(s, p, cmd, before, &info, residual, &id)?;
-    constraint_result(p, cmd, id, info, by, Value::Null)
+    let (redundant, determined_by) = redundant_part(p, cmd, by)?;
+    reply(cmd, ConstraintAdded { constraint: id, sketch: info, redundant, determined_by, created: None, param_warnings: Vec::new() })
+}
+
+/// A command's reply as JSON: they build their replies from the types their output schemas
+/// describe, so the two can't drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// What a new constraint's reply says of redundancy: whether it is, and by which constraints. A
+/// redundant one is refused when the call asked for `if_redundant: "refuse"`.
+fn redundant_part(p: &Value, cmd: &str, by: Option<Vec<String>>) -> Result<(bool, Option<Vec<String>>)> {
+    match by {
+        Some(by) => {
+            keep_redundant(p, cmd, &by)?;
+            Ok((true, Some(by)))
+        }
+        None => Ok((false, None)),
+    }
 }
 
 fn curve(sk: &Sketch, v: Option<&Value>, cmd: &str) -> Result<usize> {
@@ -126,7 +176,7 @@ fn c_polygon(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(cons)
     })?;
-    Ok(json!({"constraints": out, "sketch": info}))
+    reply(cmd, PolygonResult { constraints: out, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 /// Most constraints AutoConstrain tries.
@@ -273,7 +323,7 @@ fn auto(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         // its freedom whenever they change constraints; no separate initial solve is needed.
         Ok(run_auto(sk, doc, p, datum, rep.dof))
     })?;
-    Ok(json!({"added": added, "dof": dof, "sketch": info}))
+    reply(cmd, AutoConstrainResult { added, dof, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn auto_constrain(s: &mut Session, p: &Value) -> Result<Value> {
@@ -375,7 +425,19 @@ fn smart_constrain(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(id)
     })?;
     let by = redundancy(s, p, cmd, before, &info, residual, &id)?;
-    constraint_result(p, cmd, id, info, by, json!({"type": name}))
+    let (redundant, determined_by) = redundant_part(p, cmd, by)?;
+    reply(
+        cmd,
+        ConstrainerResult {
+            constraint: id,
+            sketch: info,
+            redundant,
+            determined_by,
+            kind: name.to_string(),
+            created: None,
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
@@ -417,7 +479,7 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.doc_mut().prune_model_params();
-    Ok(json!({"constraint": cid, "driven": driven, "sketch": info}))
+    reply(cmd, ToggleDrivenResult { constraint: cid, driven, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn toggle_diameter(s: &mut Session, p: &Value) -> Result<Value> {
@@ -528,26 +590,32 @@ fn glyphs(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
     let failing = &ss.report.failing;
-    let list: Vec<Value> = ss
+    let glyphs: Vec<Glyph> = ss
         .sketch
         .constraints
         .iter()
-        .map(|c| {
-            json!({
-                "id": c.id,
-                "name": c.kind.name(),
-                "dimension": c.kind.is_dimension(),
-                "driven": c.driven,
-                "value": c.kind.value(),
-                "param": c.param,
-                "at": anchor(&ss.sketch, &c.kind),
-                "failing": failing.contains(&c.id),
-                // Implied by the others (it removes no freedom) but holding: shown dimmed.
-                "redundant": ss.report.redundant.contains(&c.id),
-            })
+        .map(|c| Glyph {
+            id: c.id.clone(),
+            name: c.kind.name().to_string(),
+            dimension: c.kind.is_dimension(),
+            driven: c.driven,
+            value: c.kind.value(),
+            param: c.param.clone(),
+            at: anchor(&ss.sketch, &c.kind).map(|a| [a.x, a.y]),
+            failing: failing.contains(&c.id),
+            // Implied by the others (it removes no freedom) but holding: shown dimmed.
+            redundant: ss.report.redundant.contains(&c.id),
         })
         .collect();
-    Ok(json!({"sketch": id, "glyphs": list, "dof": ss.report.dof, "fully_constrained": ss.report.fully_constrained(), "conflicts": failing}))
+    let result = GlyphsResult {
+        sketch: id,
+        glyphs,
+        dof: ss.report.dof,
+        fully_constrained: ss.report.fully_constrained(),
+        conflicts: failing.clone(),
+        param_warnings: Vec::new(),
+    };
+    reply("sketch.glyphs", result)
 }
 
 /// Snap inference for a click at `at`: the nearest sketch point (coincident), the midpoint of a
@@ -562,12 +630,12 @@ fn snap(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch is not evaluated".into()))?;
     let sk = &ss.sketch;
-    let mut out: Vec<(f64, Value)> = Vec::new();
+    let mut out: Vec<(f64, Snap)> = Vec::new();
     // Points (end points, centres, the origin).
     for q in &sk.points {
         let d = q.pos.dist(at);
         if d <= r {
-            out.push((d * 0.5, json!({"type": "coincident", "point": q.id, "at": q.pos})));
+            out.push((d * 0.5, Snap::Coincident { point: q.id.clone(), at: [q.pos.x, q.pos.y] }));
         }
     }
     for (i, c) in sk.curves.iter().enumerate() {
@@ -577,13 +645,13 @@ fn snap(s: &mut Session, p: &Value) -> Result<Value> {
             let m = (pa + pb) * 0.5;
             let d = m.dist(at);
             if d <= r {
-                out.push((d * 0.6, json!({"type": "midpoint", "curve": c.id, "at": m})));
+                out.push((d * 0.6, Snap::Midpoint { curve: c.id.clone(), at: [m.x, m.y] }));
             }
         }
         if let Some(sh) = sk.shape(i) {
             let q = sh.project(at);
             if sh.dist(at) <= r && q.dist(at) <= r {
-                out.push((sh.dist(at) + r * 0.5, json!({"type": "on_curve", "curve": c.id, "at": q})));
+                out.push((sh.dist(at) + r * 0.5, Snap::OnCurve { curve: c.id.clone(), at: [q.x, q.y] }));
             }
         }
     }
@@ -591,15 +659,15 @@ fn snap(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(f) = from {
         let d = at - f;
         if d.y.abs() <= r && d.x.abs() > r {
-            out.push((d.y.abs() + r, json!({"type": "horizontal", "at": [at.x, f.y]})));
+            out.push((d.y.abs() + r, Snap::Horizontal { at: [at.x, f.y] }));
         }
         if d.x.abs() <= r && d.y.abs() > r {
-            out.push((d.x.abs() + r, json!({"type": "vertical", "at": [f.x, at.y]})));
+            out.push((d.x.abs() + r, Snap::Vertical { at: [f.x, at.y] }));
         }
     }
     out.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let list: Vec<Value> = out.into_iter().take(8).map(|x| x.1).collect();
-    Ok(json!({"snaps": list}))
+    let snaps: Vec<Snap> = out.into_iter().take(8).map(|x| x.1).collect();
+    reply(cmd, SnapResult { snaps, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

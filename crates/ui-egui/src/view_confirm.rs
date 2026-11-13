@@ -10,8 +10,8 @@ use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Rect, Sense, vec2};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit::{Action, Container, Surface};
+use solidcraft_theme::Tokens;
 
 /// Each target's side: large enough to hit without aiming.
 const TARGET: f32 = 40.0;
@@ -114,7 +114,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
             crate::icons::paint_icon(ui.painter(), at.shrink(t.space_6), choice.icon, if choice.enabled { 1.0 } else { 0.35 });
-            let label = crate::i18n::tr_label(choice.label);
+            let label = solidcraft_ui_text::tr_label(choice.label);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, choice.enabled, label));
             if !host || painted {
                 crate::scenario::publish_target(choice.key, at);

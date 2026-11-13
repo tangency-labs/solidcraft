@@ -1,0 +1,5 @@
+Updates: WR-575
+
+#### WR-575 (update, 2026-10-31). A kept end span never fails check test #15
+
+`Kernel::fixes.bspline_trim_keeps_rational_end_spans` kept every short end span of a rational trimmed curve, including spans so short that their control points lie within the pole tolerance (`SM_ZONE_TOL_3D / 10`, 1e-6) of `SmBSplineCurve` check test #15 ("Bad Repeated CPts"): a radius 16 half circle trimmed 1e-8 from its middle knot kept a span whose three control points are about 2e-7 apart, and failed the check (#2090). Under the same flag such a span is no longer kept: the trim ends at the interior knot instead (the trim interval is updated to it), so the curve stays exactly on its conic and its end moves by less than the pole tolerance. Spans longer than the pole tolerance (the 1e-7 trim of #1529) are kept as before. The fork (tangency-labs/smlib 26cc451) still has no rational-span rule; the threshold is the check's. Regression test: `nurbs::b_spline_curve_n_lib::tests::issue_2090_kept_rational_end_span_passes_check_test_15`.

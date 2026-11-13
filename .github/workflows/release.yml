@@ -8,6 +8,9 @@
 # The macOS app is signed and notarized when the APPLE_* secrets exist. The Windows binaries and
 # MSI are Authenticode-signed through SignPath Foundation when the SIGNPATH_API_TOKEN secret exists
 # (see the windows job). Nothing else is signed yet.
+# Runners: Blacksmith (blacksmith-<N>vcpu-<os>), as CI uses, except the `version` and `windows`
+# jobs, which stay GitHub-hosted: SignPath Foundation only signs a request when every job leading
+# up to it ran on a GitHub-hosted runner.
 #
 #   Linux x86_64, aarch64   AppImage (+ .zsync), .deb, .rpm, .flatpak, .snap, .tar.gz packaging/linux
 #   Arch Linux x86_64, aarch64  .pkg.tar.zst, repackaged from the .tar.gz         the arch job
@@ -114,40 +117,18 @@ jobs:
           { echo "version=$VERSION"; echo "date=$(date -u +%Y-%m-%d)"; echo "prerelease=$pre"; } >>"$GITHUB_OUTPUT"
           echo "### SolidCraft v$VERSION (\`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
 
-  # The app icon in every size, drawn by solidcraft-cli (no image files are committed), for the
-  # Windows jobs: the ARM64 build is cross-compiled and can't run there to draw its own.
-  icons:
-    needs: version
-    if: needs.version.outputs.build == 'true'
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: release-icons
-      - run: cargo build --release --locked -p solidcraft-cli
-      - run: |
-          . packaging/env.sh
-          make_icons target/release/solidcraft-cli icons
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: icons
-          path: icons
-          if-no-files-found: error
-
   linux:
     name: Linux ${{ matrix.arch }}
     needs: version
     if: needs.version.outputs.build == 'true'
-    # The oldest GitHub-hosted image, so the binaries only need glibc >= 2.35.
+    # Ubuntu 22.04, the oldest image, so the binaries only need glibc >= 2.35.
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: ubuntu-22.04, deb: amd64 }
-          - { arch: aarch64, runner: ubuntu-22.04-arm, deb: arm64 }
+          - { arch: x86_64, runner: blacksmith-16vcpu-ubuntu-2204, deb: amd64 }
+          - { arch: aarch64, runner: blacksmith-16vcpu-ubuntu-2204-arm, deb: arm64 }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -161,7 +142,7 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/nfpm.deb" \
             "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_${{ matrix.deb }}.deb"
           sudo dpkg -i "$RUNNER_TEMP/nfpm.deb"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-linux-${{ matrix.arch }}
@@ -203,8 +184,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: ubuntu-24.04 }
-          - { arch: aarch64, runner: ubuntu-24.04-arm }
+          - { arch: x86_64, runner: blacksmith-4vcpu-ubuntu-2404 }
+          - { arch: aarch64, runner: blacksmith-4vcpu-ubuntu-2404-arm }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -233,7 +214,7 @@ jobs:
     needs: [version, linux]
     if: needs.version.outputs.build == 'true'
     # makepkg only repackages the tarball's prebuilt binaries, so both architectures build here.
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     # A pre-release or nightly without an Arch package is still worth having; a stable release isn't.
     continue-on-error: ${{ contains(needs.version.outputs.version, '-') }}
     strategy:
@@ -303,8 +284,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: ubuntu-24.04 }
-          - { arch: aarch64, runner: ubuntu-24.04-arm }
+          - { arch: x86_64, runner: blacksmith-4vcpu-ubuntu-2404 }
+          - { arch: aarch64, runner: blacksmith-4vcpu-ubuntu-2404-arm }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -349,8 +330,8 @@ jobs:
     name: FreeBSD x86_64
     needs: version
     if: needs.version.outputs.build == 'true'
-    # GitHub has no FreeBSD runners: build in a FreeBSD 14.3 VM.
-    runs-on: ubuntu-latest
+    # There are no FreeBSD runners: build in a FreeBSD 14.3 VM (Blacksmith's x64 runners have KVM).
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 180
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
@@ -363,20 +344,20 @@ jobs:
         with:
           release: "14.3"
           usesh: true
-          cpu: 4
-          mem: 12288
+          cpu: 14
+          mem: 40960
           # Passed into the VM by name; never templated into the script below.
           envs: "SOLIDCRAFT_VERSION SOLIDCRAFT_BUILD_DATE"
           prepare: |
             pkg install -y bash git curl pkgconf libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.98.0
           run: |
             set -e
             . "$HOME/.cargo/env"
             git config --global --add safe.directory "$PWD"
-            # Build outside the checkout so only dist/ is copied back out of the VM. 4 jobs: more
-            # runs the VM out of memory.
-            export CARGO_TARGET_DIR=/var/tmp/solidcraft-target CARGO_BUILD_JOBS=4
+            # Build outside the checkout so only dist/ is copied back out of the VM. About 3 GB of
+            # VM memory per job: 4 jobs in 12 GB was the most that fit before.
+            export CARGO_TARGET_DIR=/var/tmp/solidcraft-target CARGO_BUILD_JOBS=12
             bash packaging/freebsd/package.sh
             tar -tzf dist/release/solidcraft-*-freebsd-x86_64.tar.gz \
               | grep -E '/bin/solidcraft$|/bin/solidcraft-cli$|/share/applications/io\.tangencylabs\.solidcraft\.desktop$|/share/doc/solidcraft/THIRD-PARTY-LICENSES\.txt$'
@@ -388,11 +369,12 @@ jobs:
 
   # The two halves of the universal binary build in parallel on their own runners (each alone
   # took about half of the old single job's 45 minutes); `macos` below joins and packages them.
+  # Blacksmith's macOS runners are Apple silicon: the x86_64 half is cross-compiled.
   macos-build:
     name: macOS build ${{ matrix.arch }}
     needs: version
     if: needs.version.outputs.build == 'true'
-    runs-on: macos-15
+    runs-on: blacksmith-12vcpu-macos-15
     strategy:
       fail-fast: false
       matrix:
@@ -404,7 +386,7 @@ jobs:
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -426,7 +408,7 @@ jobs:
     name: macOS universal
     needs: [version, macos-build]
     if: needs.version.outputs.build == 'true'
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -466,10 +448,11 @@ jobs:
 
   windows:
     name: Windows ${{ matrix.arch }}
-    needs: [version, icons]
+    needs: version
     if: needs.version.outputs.build == 'true'
-    # Must stay a GitHub-hosted runner, like every job before it: SignPath's open-source policy
-    # only signs builds whose jobs all ran on GitHub-hosted runners.
+    # Must stay a GitHub-hosted runner, like the `version` job before it: SignPath's open-source
+    # policy only signs requests whose jobs leading up to them all ran on GitHub-hosted runners.
+    # The installer icon is the committed assets/icons/app/windows/exports/solidcraft.ico.
     runs-on: windows-latest
     # actions: read lets the SignPath action read this job's details and fetch the uploaded
     # artifact with GITHUB_TOKEN (the workflow default above grants contents: read only).
@@ -498,11 +481,7 @@ jobs:
       SIGNPATH_PROJECT_SLUG: solidcraft
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: icons
-          path: icons
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -516,8 +495,6 @@ jobs:
       - name: Build and package (msi, portable zip)
         if: env.SIGN_WINDOWS != 'true'
         shell: pwsh
-        env:
-          SOLIDCRAFT_ICONS: ${{ github.workspace }}/icons
         run: ./packaging/windows/package.ps1 -Arch ${{ matrix.arch }}
 
       # ---- signed path ---------------------------------------------------------------------------
@@ -531,8 +508,6 @@ jobs:
       - name: Build and stage the binaries for signing
         if: env.SIGN_WINDOWS == 'true'
         shell: pwsh
-        env:
-          SOLIDCRAFT_ICONS: ${{ github.workspace }}/icons
         run: ./packaging/windows/package.ps1 -Arch ${{ matrix.arch }} -Phase stage
       - name: Upload the unsigned binaries
         id: unsigned-exes
@@ -576,8 +551,6 @@ jobs:
       - name: Package the signed binaries (msi, portable zip)
         if: env.SIGN_WINDOWS == 'true'
         shell: pwsh
-        env:
-          SOLIDCRAFT_ICONS: ${{ github.workspace }}/icons
         run: ./packaging/windows/package.ps1 -Arch ${{ matrix.arch }} -Phase package
       - name: Upload the unsigned MSI
         id: unsigned-msi
@@ -627,13 +600,13 @@ jobs:
     name: Web (wasm)
     needs: version
     if: needs.version.outputs.build == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       TRUNK_VERSION: 0.21.14
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -656,7 +629,7 @@ jobs:
     needs: [version, linux, flatpak, arch, snap, freebsd, macos, windows, web]
     # Not for the release gate (packages_only): it builds and checks the packages, nothing more.
     if: needs.version.outputs.build == 'true' && !inputs.packages_only
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: write
     env:
@@ -725,10 +698,16 @@ jobs:
         run: |
           tag="v$VERSION"
           sha256sum --check SHA256SUMS.txt
+          # Generated notes start at the newest published release, pre-releases included. Left
+          # to GitHub they start at the Latest stable one, and the list outgrows the 125,000
+          # characters a release body may have.
+          start=()
+          prev="$(gh release list --exclude-drafts --limit 30 --json tagName,publishedAt --jq 'sort_by(.publishedAt) | last | .tagName // empty')"
+          if [ -n "$prev" ]; then start=(--notes-start-tag "$prev"); fi
           # Stage all packages before publishing. Published tags are never replaced.
           gh release create "$tag" --draft --prerelease --latest=false \
             --title "SolidCraft v$VERSION (nightly)" --target "$GITHUB_SHA" \
-            --notes-file ../notes.md --generate-notes -- *
+            --notes-file ../notes.md --generate-notes "${start[@]}" -- *
           gh release edit "$tag" --draft=false --prerelease --latest=false
           echo "### Published nightly: $tag (\`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
       - name: Create or update the draft release
@@ -760,8 +739,13 @@ jobs:
               --target "$GITHUB_SHA" --prerelease="$PRERELEASE"
             gh release upload "$tag" --clobber -- *
           else
+            # As for nightlies: start the generated notes at the newest published release.
+            start=()
+            prev="$(gh release list --exclude-drafts --limit 30 --json tagName,publishedAt --jq 'sort_by(.publishedAt) | last | .tagName // empty')"
+            if [ -n "$prev" ]; then start=(--notes-start-tag "$prev"); fi
             gh release create "$tag" --draft --title "SolidCraft v$VERSION" \
-              --target "$GITHUB_SHA" --notes-file ../notes.md --generate-notes "${pre[@]}" -- *
+              --target "$GITHUB_SHA" --notes-file ../notes.md --generate-notes "${start[@]}" \
+              "${pre[@]}" -- *
           fi
           {
             echo "Draft **SolidCraft v$VERSION** at \`${GITHUB_SHA::9}\`:"

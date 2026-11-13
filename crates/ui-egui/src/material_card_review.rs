@@ -2,7 +2,8 @@
 use serde_json::{Value, json};
 use solidcraft_engine::doc::physical_material::{Family, MaterialCard, PropertyData, admit_card};
 
-use crate::{SolveApp, i18n::tr, ui_kit};
+use crate::{SolveApp, ui_kit};
+use solidcraft_ui_text::tr;
 
 const MAX_BYTES: usize = 256 * 1024;
 const KINDS: &[&str] = &[
@@ -55,8 +56,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let palette = app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive());
-    let side =
-        if palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx) { crate::frame::Side::Left } else { crate::frame::Side::Right };
+    let side = crate::shell::floating_editor_side(app, palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx));
     let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
     let docked = egui::pos2(side.anchor_x(viewport), top);
     let title = tr("ui.material_review.title");
@@ -73,8 +73,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     )
     .wide();
     let panel = if side == crate::frame::Side::Left {
-        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));
-        panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
+        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - solidcraft_theme::Tokens::get().space_8).max(0.0));
+        panel.width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min(available))
     } else {
         panel
     };

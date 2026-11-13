@@ -1,0 +1,4815 @@
+{
+ "cases": [
+  {
+   "name": "fitcrv_seg0_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -11.0,
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       1.5,
+       0.0
+      ],
+      [
+       -11.0,
+       5.0,
+       0.0
+      ],
+      [
+       0.5,
+       2.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg0_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -11.0,
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       1.5,
+       0.0
+      ],
+      [
+       -11.0,
+       5.0,
+       0.0
+      ],
+      [
+       0.5,
+       2.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg0_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -11.0,
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       1.5,
+       0.0
+      ],
+      [
+       -11.0,
+       5.0,
+       0.0
+      ],
+      [
+       0.5,
+       2.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg0_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -11.0,
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       1.5,
+       0.0
+      ],
+      [
+       -11.0,
+       5.0,
+       0.0
+      ],
+      [
+       0.5,
+       2.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg0_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -11.0,
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       1.5,
+       0.0
+      ],
+      [
+       -11.0,
+       5.0,
+       0.0
+      ],
+      [
+       0.5,
+       2.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "fitcrv_seg1_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -11.0,
+       5.0,
+       0.0
+      ],
+      [
+       0.5,
+       2.5,
+       0.0
+      ],
+      [
+       -10.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg1_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -11.0,
+       5.0,
+       0.0
+      ],
+      [
+       0.5,
+       2.5,
+       0.0
+      ],
+      [
+       -10.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg1_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -11.0,
+       5.0,
+       0.0
+      ],
+      [
+       0.5,
+       2.5,
+       0.0
+      ],
+      [
+       -10.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg1_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -11.0,
+       5.0,
+       0.0
+      ],
+      [
+       0.5,
+       2.5,
+       0.0
+      ],
+      [
+       -10.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg1_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -11.0,
+       5.0,
+       0.0
+      ],
+      [
+       0.5,
+       2.5,
+       0.0
+      ],
+      [
+       -10.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "fitcrv_seg2_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -10.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       -0.5,
+       0.0
+      ],
+      [
+       -6.0,
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg2_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -10.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       -0.5,
+       0.0
+      ],
+      [
+       -6.0,
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg2_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -10.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       -0.5,
+       0.0
+      ],
+      [
+       -6.0,
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg2_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -10.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       -0.5,
+       0.0
+      ],
+      [
+       -6.0,
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg2_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -10.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       -0.5,
+       0.0
+      ],
+      [
+       -6.0,
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "fitcrv_seg3_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -6.0,
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ],
+      [
+       -2.0,
+       7.0,
+       0.0
+      ],
+      [
+       4.0,
+       1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg3_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -6.0,
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ],
+      [
+       -2.0,
+       7.0,
+       0.0
+      ],
+      [
+       4.0,
+       1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg3_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -6.0,
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ],
+      [
+       -2.0,
+       7.0,
+       0.0
+      ],
+      [
+       4.0,
+       1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg3_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -6.0,
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ],
+      [
+       -2.0,
+       7.0,
+       0.0
+      ],
+      [
+       4.0,
+       1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg3_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -6.0,
+       4.0,
+       0.0
+      ],
+      [
+       4.0,
+       0.0,
+       0.0
+      ],
+      [
+       -2.0,
+       7.0,
+       0.0
+      ],
+      [
+       4.0,
+       1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "fitcrv_seg4_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -2.0,
+       7.0,
+       0.0
+      ],
+      [
+       4.0,
+       1.0,
+       0.0
+      ],
+      [
+       2.0,
+       6.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg4_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -2.0,
+       7.0,
+       0.0
+      ],
+      [
+       4.0,
+       1.0,
+       0.0
+      ],
+      [
+       2.0,
+       6.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg4_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -2.0,
+       7.0,
+       0.0
+      ],
+      [
+       4.0,
+       1.0,
+       0.0
+      ],
+      [
+       2.0,
+       6.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg4_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -2.0,
+       7.0,
+       0.0
+      ],
+      [
+       4.0,
+       1.0,
+       0.0
+      ],
+      [
+       2.0,
+       6.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg4_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       -2.0,
+       7.0,
+       0.0
+      ],
+      [
+       4.0,
+       1.0,
+       0.0
+      ],
+      [
+       2.0,
+       6.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "fitcrv_seg5_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       2.0,
+       6.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ],
+      [
+       4.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg5_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       2.0,
+       6.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ],
+      [
+       4.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg5_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       2.0,
+       6.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ],
+      [
+       4.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg5_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       2.0,
+       6.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ],
+      [
+       4.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg5_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       2.0,
+       6.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ],
+      [
+       4.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "fitcrv_seg6_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       4.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.5,
+       0.0
+      ],
+      [
+       6.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg6_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       4.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.5,
+       0.0
+      ],
+      [
+       6.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg6_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       4.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.5,
+       0.0
+      ],
+      [
+       6.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg6_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       4.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.5,
+       0.0
+      ],
+      [
+       6.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg6_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       4.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       0.5,
+       0.0
+      ],
+      [
+       6.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "fitcrv_seg7_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       6.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       1.0,
+       0.0
+      ],
+      [
+       9.0,
+       8.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg7_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       6.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       1.0,
+       0.0
+      ],
+      [
+       9.0,
+       8.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg7_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       6.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       1.0,
+       0.0
+      ],
+      [
+       9.0,
+       8.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg7_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       6.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       1.0,
+       0.0
+      ],
+      [
+       9.0,
+       8.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg7_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       6.0,
+       7.0,
+       0.0
+      ],
+      [
+       2.5,
+       1.0,
+       0.0
+      ],
+      [
+       9.0,
+       8.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "fitcrv_seg8_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       9.0,
+       8.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ],
+      [
+       12.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       -2.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg8_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       9.0,
+       8.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ],
+      [
+       12.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       -2.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg8_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       9.0,
+       8.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ],
+      [
+       12.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       -2.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg8_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       9.0,
+       8.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ],
+      [
+       12.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       -2.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg8_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       9.0,
+       8.0,
+       0.0
+      ],
+      [
+       3.0,
+       -0.5,
+       0.0
+      ],
+      [
+       12.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       -2.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "fitcrv_seg9_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       12.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       -2.0,
+       0.0
+      ],
+      [
+       13.0,
+       4.0,
+       0.0
+      ],
+      [
+       0.5,
+       -2.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg9_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       12.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       -2.0,
+       0.0
+      ],
+      [
+       13.0,
+       4.0,
+       0.0
+      ],
+      [
+       0.5,
+       -2.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg9_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       12.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       -2.0,
+       0.0
+      ],
+      [
+       13.0,
+       4.0,
+       0.0
+      ],
+      [
+       0.5,
+       -2.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg9_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       12.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       -2.0,
+       0.0
+      ],
+      [
+       13.0,
+       4.0,
+       0.0
+      ],
+      [
+       0.5,
+       -2.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg9_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       12.0,
+       6.0,
+       0.0
+      ],
+      [
+       2.0,
+       -2.0,
+       0.0
+      ],
+      [
+       13.0,
+       4.0,
+       0.0
+      ],
+      [
+       0.5,
+       -2.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "fitcrv_seg10_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       13.0,
+       4.0,
+       0.0
+      ],
+      [
+       0.5,
+       -2.0,
+       0.0
+      ],
+      [
+       13.0,
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       -1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg10_eval3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       13.0,
+       4.0,
+       0.0
+      ],
+      [
+       0.5,
+       -2.0,
+       0.0
+      ],
+      [
+       13.0,
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       -1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "fitcrv_seg10_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       13.0,
+       4.0,
+       0.0
+      ],
+      [
+       0.5,
+       -2.0,
+       0.0
+      ],
+      [
+       13.0,
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       -1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.7
+   }
+  },
+  {
+   "name": "fitcrv_seg10_chord",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       13.0,
+       4.0,
+       0.0
+      ],
+      [
+       0.5,
+       -2.0,
+       0.0
+      ],
+      [
+       13.0,
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       -1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "fitcrv_seg10_bbox",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (tests/prog_test/src/smCurveTest.cpp curve fitting inputs)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       13.0,
+       4.0,
+       0.0
+      ],
+      [
+       0.5,
+       -2.0,
+       0.0
+      ],
+      [
+       13.0,
+       2.0,
+       0.0
+      ],
+      [
+       0.0,
+       -1.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.0_n1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.0,
+    "n": 1,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.0_n2",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.0_exact",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.0,
+    "n": 1,
+    "flags": 0
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.25_n1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 1,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.25_n2",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.25_exact",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.25,
+    "n": 1,
+    "flags": 0
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.5_n1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.5,
+    "n": 1,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.5_n2",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.5_exact",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.5,
+    "n": 1,
+    "flags": 0
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.75_n1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.75,
+    "n": 1,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.75_n2",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.75,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_zero_ends_t0.75_exact",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.75,
+    "n": 1,
+    "flags": 0
+   }
+  },
+  {
+   "name": "edge_zero_ends_t1.0_n1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 1.0,
+    "n": 1,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_zero_ends_t1.0_n2",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_zero_ends_t1.0_exact",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       1,
+       1,
+       0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 1.0,
+    "n": 1,
+    "flags": 0
+   }
+  },
+  {
+   "name": "edge_all_zero_eval",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.3,
+    "n": 1,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_all_zero_chord",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "edge_all_zero_bbox",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "edge_all_zero_bbox_preset",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      [
+       0.0,
+       0.0,
+       0.0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 31,
+    "w": [
+     1,
+     2,
+     3,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_closed_chord",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       -3,
+       0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "edge_closed_bbox",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       0,
+       -3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "edge_line_bbox",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       1,
+       1
+      ],
+      [
+       2,
+       2,
+       2
+      ],
+      [
+       1,
+       1,
+       1
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 7
+   }
+  },
+  {
+   "name": "edge_line_chord",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "chord",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       1,
+       1
+      ],
+      [
+       2,
+       2,
+       2
+      ],
+      [
+       1,
+       1,
+       1
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "edge_line_pseudo_preset",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "bbox",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       1,
+       1
+      ],
+      [
+       2,
+       2,
+       2
+      ],
+      [
+       1,
+       1,
+       1
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 10,
+    "w": [
+     5,
+     -1,
+     2,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_eval_n0",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.6,
+    "n": 0,
+    "flags": 3
+   }
+  },
+  {
+   "name": "edge_eval_n1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.6,
+    "n": 1,
+    "flags": 3
+   }
+  },
+  {
+   "name": "edge_eval_n2",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.6,
+    "n": 2,
+    "flags": 3
+   }
+  },
+  {
+   "name": "edge_eval_n3",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.6,
+    "n": 3,
+    "flags": 3
+   }
+  },
+  {
+   "name": "edge_eval_n4",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.6,
+    "n": 4,
+    "flags": 3
+   }
+  },
+  {
+   "name": "edge_eval_n5",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.6,
+    "n": 5,
+    "flags": 3
+   }
+  },
+  {
+   "name": "edge_eval_n6",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.6,
+    "n": 6,
+    "flags": 3
+   }
+  },
+  {
+   "name": "edge_eval_n7",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.6,
+    "n": 7,
+    "flags": 3
+   }
+  },
+  {
+   "name": "edge_eval_n8",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.6,
+    "n": 8,
+    "flags": 3
+   }
+  },
+  {
+   "name": "edge_eval_outside",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": -2.5,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_knots_f0_0_1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 0,
+    "w": [
+     0,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f0_0.5_2",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 0,
+    "w": [
+     0.5,
+     2,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f0_-1_0.5",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 0,
+    "w": [
+     -1,
+     0.5,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f0_0.2_0.8",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 0,
+    "w": [
+     0.2,
+     0.8,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f0_1_1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 0,
+    "w": [
+     1,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f0_0_0",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 0,
+    "w": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f1_0_1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 1,
+    "w": [
+     0,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f1_0.5_2",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 1,
+    "w": [
+     0.5,
+     2,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f1_-1_0.5",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 1,
+    "w": [
+     -1,
+     0.5,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f1_0.2_0.8",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 1,
+    "w": [
+     0.2,
+     0.8,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f1_1_1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 1,
+    "w": [
+     1,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f1_0_0",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 1,
+    "w": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f2_0_1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 2,
+    "w": [
+     0,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f2_0.5_2",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 2,
+    "w": [
+     0.5,
+     2,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f2_-1_0.5",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 2,
+    "w": [
+     -1,
+     0.5,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f2_0.2_0.8",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 2,
+    "w": [
+     0.2,
+     0.8,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f2_1_1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 2,
+    "w": [
+     1,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f2_0_0",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 2,
+    "w": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f3_0_1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 3,
+    "w": [
+     0,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f3_0.5_2",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 3,
+    "w": [
+     0.5,
+     2,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f3_-1_0.5",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 3,
+    "w": [
+     -1,
+     0.5,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f3_0.2_0.8",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 3,
+    "w": [
+     0.2,
+     0.8,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f3_1_1",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 3,
+    "w": [
+     1,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_knots_f3_0_0",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 3,
+    "w": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_continuities",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "continuities",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.01
+   }
+  },
+  {
+   "name": "edge_type_strings",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "type_strings",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "edge_is_kind_of_self",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "is_kind_of",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "n": 14034
+   }
+  },
+  {
+   "name": "edge_is_kind_of_curve",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "is_kind_of",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "n": 14001
+   }
+  },
+  {
+   "name": "edge_eq_self",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "flags": 1
+   }
+  },
+  {
+   "name": "edge_eq_same",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "b": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "edge_eq_dim",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "b": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 2
+    }
+   }
+  },
+  {
+   "name": "edge_eq_near",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "b": {
+     "kind": "3d",
+     "v": [
+      [
+       1e-13,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "edge_eq_far",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:207 (SmHermiteCurve(P0, D0, P1, D1) between marching points)",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "b": {
+     "kind": "3d",
+     "v": [
+      [
+       1e-09,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "uv_2d_state",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:167 (UV Hermite)",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "2d_default",
+     "v": [
+      [
+       0.25,
+       0.5,
+       7
+      ],
+      [
+       0.1,
+       -0.2,
+       9
+      ],
+      [
+       0.4,
+       0.75,
+       -3
+      ],
+      [
+       0.3,
+       0.1,
+       5
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "uv_2d_eval",
+   "upstream_ref": "source/SMLib/src/SmFilletIntersector.cpp:167 (UV Hermite)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "kind": "2d_default",
+     "v": [
+      [
+       0.25,
+       0.5,
+       7
+      ],
+      [
+       0.1,
+       -0.2,
+       9
+      ],
+      [
+       0.4,
+       0.75,
+       -3
+      ],
+      [
+       0.3,
+       0.1,
+       5
+      ]
+     ],
+     "dim": 3
+    },
+    "t": 0.4,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "uv_2d_dim3",
+   "upstream_ref": "source/SMLib/src/SmFilletGeom.cpp:10244",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "kind": "2d",
+     "v": [
+      [
+       0.25,
+       0.5,
+       7
+      ],
+      [
+       0.1,
+       -0.2,
+       9
+      ],
+      [
+       0.4,
+       0.75,
+       -3
+      ],
+      [
+       0.3,
+       0.1,
+       5
+      ]
+     ],
+     "dim": 3
+    }
+   }
+  },
+  {
+   "name": "db_ascii_full",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:708 (WriteToDB ASCII layout)",
+   "inputs": {
+    "op": "read_db",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "data": "1.5 -2 3 SmHermiteCurve Initial point        \n0.25 0 1e-3 SmHermiteCurve Initial direction    \n4 5 6 SmHermiteCurve Final point          \n-1 -1 -1 SmHermiteCurve Final direction      \n7 8 9 SmHermiteCurve C of power basis eqn \n1e300 -1e-300 0 SmHermiteCurve D of power basis eqn \n"
+   }
+  },
+  {
+   "name": "db_ascii_no_trailing_newline",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:708 (WriteToDB ASCII layout)",
+   "inputs": {
+    "op": "read_db",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "data": "1.5 -2 3 SmHermiteCurve Initial point        \n0.25 0 1e-3 SmHermiteCurve Initial direction    \n4 5 6 SmHermiteCurve Final point          \n-1 -1 -1 SmHermiteCurve Final direction      \n7 8 9 SmHermiteCurve C of power basis eqn \n1e300 -1e-300 0 SmHermiteCurve D of power basis eqn "
+   }
+  },
+  {
+   "name": "db_ascii_truncated",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:708 (WriteToDB ASCII layout)",
+   "inputs": {
+    "op": "read_db",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "data": "1.5 -2 3 SmHermiteCurve Initial point        \n0.25 0 1e-3 SmHermiteCurve Initial direction    \n4 5 6 SmHermiteCurve Final point          \n1 2"
+   }
+  },
+  {
+   "name": "db_ascii_garbage",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:708 (WriteToDB ASCII layout)",
+   "inputs": {
+    "op": "read_db",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "data": "1.5 -2 3 SmHermiteCurve Initial point        \n0.25 0 1e-3 SmHermiteCurve Initial direction    \nx 5 6\n-1 -1 -1 SmHermiteCurve Final direction      \n7 8 9 SmHermiteCurve C of power basis eqn \n1e300 -1e-300 0 SmHermiteCurve D of power basis eqn \n"
+   }
+  },
+  {
+   "name": "db_ascii_empty",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:708 (WriteToDB ASCII layout)",
+   "inputs": {
+    "op": "read_db",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "data": ""
+   }
+  },
+  {
+   "name": "db_binary_full",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:708 (WriteToDB ASCII layout)",
+   "inputs": {
+    "op": "read_db",
+    "a": {
+     "kind": "3d",
+     "v": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       3,
+       0,
+       0
+      ],
+      [
+       3,
+       3,
+       0
+      ],
+      [
+       0,
+       3,
+       0
+      ]
+     ],
+     "dim": 3
+    },
+    "data": "1.5 -2 3 0.25 0 1e-3 4 5 6 -1 -1 -1 7 8 9 1e300 -1e-300 0",
+    "binary": true
+   }
+  }
+ ]
+}

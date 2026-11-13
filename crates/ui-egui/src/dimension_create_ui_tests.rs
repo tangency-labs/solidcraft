@@ -394,7 +394,7 @@ fn the_sketch_page_switches_dimension_values_to_a_window() {
     let mut h = Harness::new();
     h.call("ui.prefs", json!({"open": "Sketch"}));
     h.frames(4);
-    let handle = format!("dialog:{}:{}", crate::i18n::tr("prefs.dimension_values"), crate::i18n::tr("prefs.dimension_values_window"));
+    let handle = format!("dialog:{}:{}", solidcraft_ui_text::tr("prefs.dimension_values"), solidcraft_ui_text::tr("prefs.dimension_values_window"));
     crate::prefs::reveal_preference(&mut h, &handle);
     h.step(&json!({"click":{"handle": handle}})).unwrap();
     h.frames(2);
@@ -576,6 +576,35 @@ fn the_first_dimension_scales_the_drawing_unless_the_preference_is_off() {
         // On: 20 × 10 scales to side × side / 2. Off: only the side changes, side × 10.
         let want: f64 = if scales { side * side / 2. } else { side * 10. };
         assert!((area - want).abs() < 1e-6 * want.max(1.), "scales: {scales}, side {side}, area {area}");
+    }
+}
+
+/// #11043: a rectangle drawn away from the origin keeps its middle when the first dimension
+/// scales it; the Sketch preference scales it about the origin, as before.
+#[test]
+fn the_first_dimension_scales_a_free_drawing_about_its_middle_unless_the_preference_says_origin() {
+    for about_origin in [false, true] {
+        let mut h = Harness::new();
+        crate::dim_view::cancel();
+        assert!(!h.app.preferences.first_dimension_scales_about_origin, "off by default (#11043)");
+        h.app.preferences.first_dimension_scales_about_origin = about_origin;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[20,10],"p1":[40,20]})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.;
+        h.app.cam.target = solidcore_record::Vec3::new(30., 15., 0.);
+        h.settle();
+        place(&mut h, &[[30., 10.]], [30., 5.]);
+        type_value(&mut h, "40 mm");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let corners: Vec<_> = sketch.points.iter().filter(|p| !p.fixed).map(|p| p.pos).collect();
+        assert_eq!(corners.len(), 4);
+        let middle = corners.iter().fold(solidcore_record::Vec2::ZERO, |m, &p| m + p * 0.25);
+        // Scaled 2×: about (30, 15) the middle stays; about the origin it doubles.
+        let want = if about_origin { solidcore_record::Vec2::new(60., 30.) } else { solidcore_record::Vec2::new(30., 15.) };
+        assert!(middle.dist(want) < 1e-6, "about origin {about_origin}: middle {middle:?}");
     }
 }
 
@@ -1267,7 +1296,7 @@ fn point_drawn(h: &mut Harness, world: [f64; 2]) -> bool {
 
 /// Is a sketch curve's hover highlight painted this frame?
 fn hover_painted(h: &Harness) -> bool {
-    let col = egui::epaint::ColorMode::Solid(crate::theme::Tokens::get().hover_profile_edge);
+    let col = egui::epaint::ColorMode::Solid(solidcraft_theme::Tokens::get().hover_profile_edge);
     h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.stroke.width == 3.0 && p.stroke.color == col))
 }
 
@@ -1819,6 +1848,41 @@ fn shown_dimensions() -> (Harness, u64) {
     (h, sketch)
 }
 
+/// The painted model-view text of the dimension driven by `param`.
+fn model_text_shape(h: &Harness, param: &str) -> egui::epaint::TextShape {
+    let sk = h
+        .app
+        .session
+        .world_state()
+        .unwrap()
+        .sketch(h.app.session.doc.features.iter().find(|f| f.name.starts_with("Sketch")).unwrap().id)
+        .unwrap()
+        .sketch
+        .clone();
+    let id = sk.constraints.iter().find(|c| c.param.as_deref() == Some(param)).unwrap().id.clone();
+    let (_, _, centre) = crate::dim_view::model_drawn().into_iter().find(|(_, d, _)| *d == id).expect("the dimension is shown in the model view");
+    h.shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 2.0 => Some(t.clone()),
+            _ => None,
+        })
+        .expect("the dimension's value is painted")
+}
+
+/// The painted model-view text of the shown dimension with this constraint `id` in `sketch`.
+fn model_text_shape_of(h: &Harness, sketch: u64, id: &str) -> egui::epaint::TextShape {
+    let (_, _, centre) =
+        crate::dim_view::model_drawn().into_iter().find(|(s, d, _)| *s == sketch && d == id).expect("the dimension is shown in the model view");
+    h.shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 2.0 => Some(t.clone()),
+            _ => None,
+        })
+        .expect("the dimension's value is painted")
+}
+
 /// The model view's text of the dimension driven by `param` (screen).
 fn model_text(h: &Harness, param: &str) -> [f32; 2] {
     let sk = h
@@ -1863,6 +1927,78 @@ fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();
     assert!((plate_max(&h)[1] - 10.0).abs() < 1e-6, "undo restores it");
+}
+
+/// A sketch seen nearly edge-on, with one of its directions pointing at the eye, keeps its
+/// dimensions near the sketch: shown on a finished sketch (Show Dimensions) and on the sketch
+/// being edited. The text sizes in millimetres came from that foreshortened direction alone, so
+/// the extension lines ran far across the window and over the panels (#14826).
+#[test]
+fn a_sketch_seen_edge_on_keeps_its_dimension_lines_near_it() {
+    fn points(s: &egui::Shape, colour: egui::Color32, out: &mut Vec<egui::Pos2>) {
+        match s {
+            egui::Shape::LineSegment { points, stroke } if stroke.color == colour => out.extend(points),
+            egui::Shape::Path(p) if p.stroke.color == egui::epaint::ColorMode::Solid(colour) => out.extend(&p.points),
+            egui::Shape::Vec(v) => v.iter().for_each(|s| points(s, colour, out)),
+            _ => {}
+        }
+    }
+    let (mut h, sketch) = shown_dimensions();
+    // The sketch's x direction at the eye: level with the sketch, and the reporter's 1° above it.
+    h.app.cam.yaw = -std::f64::consts::FRAC_PI_2;
+    for editing in [false, true] {
+        if editing {
+            h.app.run("sketch.edit", json!({"sketch":sketch})).unwrap();
+        }
+        for pitch in [0.0, 0.017_454_589_843_749_955] {
+            h.app.cam.pitch = pitch;
+            h.settle();
+            h.frames(2);
+            let view = h.app.viewport.rect.expect("the viewport is laid out");
+            let mut drawn = Vec::new();
+            h.shapes.iter().for_each(|s| points(&s.shape, solidcraft_theme::Tokens::get().dimension, &mut drawn));
+            assert!(!drawn.is_empty(), "the dimensions are drawn (editing: {editing}, pitch {pitch})");
+            let far = drawn.iter().filter(|p| !view.expand(50.0).contains(**p)).collect::<Vec<_>>();
+            assert!(far.is_empty(), "dimension lines run out of the view {view:?} (editing: {editing}, pitch {pitch}): {far:?}");
+        }
+    }
+}
+
+/// A dimension is still sized, from the direction that does reach the screen, when one of the
+/// sketch's x and y directions does not project (for example it ends behind the eye).
+#[test]
+fn a_dimension_is_sized_from_whichever_direction_reaches_the_screen() {
+    use crate::dim_view::mm_per_pixel;
+    use solidcore_record::Vec2;
+    let at = Vec2::new(3.0, 4.0);
+    // 1 mm along x is 4 px, 1 mm along y is 2 px.
+    let screen = |p: Vec2| egui::Pos2::new(4.0 * p.x as f32, 2.0 * p.y as f32);
+    assert_eq!(mm_per_pixel(|p| Some(screen(p)), at), Some(0.25), "the longer direction sizes it");
+    let only_x = |p: Vec2| (p.y == at.y).then(|| screen(p));
+    assert_eq!(mm_per_pixel(only_x, at), Some(0.25), "y does not project: x alone sizes it");
+    let only_y = |p: Vec2| (p.x == at.x).then(|| screen(p));
+    assert_eq!(mm_per_pixel(only_y, at), Some(0.5), "x does not project: y alone sizes it");
+    let neither = |p: Vec2| (p.x == at.x && p.y == at.y).then(|| screen(p));
+    assert_eq!(mm_per_pixel(neither, at), None, "no direction projects: no size");
+    assert_eq!(mm_per_pixel(|_| None, at), None, "the point itself does not project");
+}
+
+/// #14121: Show Dimensions follows the same text size and colour preferences as the open sketch.
+#[test]
+fn shown_dimensions_follow_the_dimension_text_size_and_colour() {
+    let (mut h, _) = shown_dimensions();
+    let before = model_text_shape(&h, "d1");
+    let custom = egui::Color32::from_rgb(0x12, 0x34, 0x56);
+    h.call("ui.prefs", json!({"dimension_text_scale":2.0,"dimension_colour":[0x12,0x34,0x56]}));
+    h.frames(2);
+    let after = model_text_shape(&h, "d1");
+    assert!(
+        (after.galley.size().y - before.galley.size().y * 2.0).abs() <= 2.0,
+        "the shown dimension's text height {} doubles to {}",
+        before.galley.size().y,
+        after.galley.size().y
+    );
+    assert_eq!(after.fallback_color, custom, "the shown dimension's value takes the custom colour");
 }
 
 #[test]
@@ -1970,8 +2106,9 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
 /// the parameter name kept as typed.
 #[test]
 fn the_status_after_a_dimension_is_in_the_interface_language() {
-    let pl = crate::i18n::Locale::for_language("pl");
-    let en = crate::i18n::Locale::for_language("en");
+    crate::i18n::install();
+    let pl = solidcraft_ui_text::Locale::for_language("pl");
+    let en = solidcraft_ui_text::Locale::for_language("en");
     let status = |h: &Harness| h.app.status.as_ref().map(|s| (s.0.clone(), s.2));
     let polish = |mut h: Harness| {
         h.app.preferences.language = "pl".into();
@@ -2061,7 +2198,7 @@ fn a_typed_value_hides_the_curvature_combs() {
     let id = solved(&h).curves[0].id.clone();
     h.app.run("inspect.curvature_comb", json!({"curves":[id]})).unwrap();
     h.step(&json!({"start":"sketch.dimension"})).unwrap();
-    let teeth = egui::epaint::Stroke::new(1.0, crate::theme::Tokens::get().comb_teeth);
+    let teeth = egui::epaint::Stroke::new(1.0, solidcraft_theme::Tokens::get().comb_teeth);
     let comb_drawn = |h: &Harness| h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if *stroke == teeth));
     h.frames(1);
     assert!(comb_drawn(&h), "the comb is drawn");
@@ -2135,6 +2272,96 @@ fn a_line_is_dimensioned_against_the_sketch_x_axis() {
             assert!((b.y - 12.0).abs() < 1e-6, "the end is 12 from x: {b:?}");
         }
     }
+}
+
+/// #14231: while a dimension is placed its value follows the pointer, and the pointer ring,
+/// drawn after it, sat on the number. The ring is left out on the value and kept elsewhere.
+#[test]
+fn the_pointer_ring_stays_off_the_value_being_placed() {
+    let mut h = line([20., 0.]);
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.step(&json!({"move":{"world":[10,6,0]}})).unwrap();
+    h.settle();
+    let value = crate::dim_view::draft_text().expect("the value being placed is drawn");
+    let pointer = h.ctx.input(|i| i.pointer.hover_pos()).expect("the pointer is over the view");
+    assert!(value.contains(pointer), "the value follows the pointer: {value:?} {pointer:?}");
+    let tool = h.app.tool.as_ref().expect("the Dimension tool");
+    assert!(!crate::tools::pointer_ring_shown(tool, pointer), "no ring on the value");
+    assert!(!crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(4.0, 0.0)), "nor one that would touch it");
+    assert!(crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(20.0, 0.0)), "the ring elsewhere");
+}
+
+/// #14121: a shown dimension whose constraint fails takes the established conflict colour; a
+/// satisfied shown dimension keeps the preference colour.
+#[test]
+fn shown_dimensions_in_a_conflict_take_the_conflict_colour() {
+    crate::dim_view::cancel();
+    let mut h = Harness::new();
+    // A conflict colour nothing else in a sketch uses, so the assertions cannot pass by accident.
+    h.call(
+        "ui.prefs",
+        json!({"theme_import": {"format":"solidcraft-theme/1","name":"Conflict marker","base":"light","colors":{"sketch_conflict":"#12ab34"}}}),
+    );
+    h.frame();
+    let conflict = solidcraft_theme::Tokens::get().sketch_conflict;
+    let custom = egui::Color32::from_rgb(0x12, 0x34, 0x56);
+    h.call("ui.prefs", json!({"dimension_colour":[0x12,0x34,0x56]}));
+    h.frames(2);
+
+    // `w` places a guide line; the Reach sketch ends a 12 mm line on it. Moving the guide out of
+    // reach makes the Reach sketch's length dimension fail.
+    h.app.run("parameters.add", json!({"name": "w", "expression": "10 mm"})).unwrap();
+    let guide = h.app.run("sketch.create", json!({"plane": "XY", "name": "Guide"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points": [[10, -30], [10, 30]], "ids": ["guide"], "connect": false})).unwrap();
+    h.app.run("sketch.constraint.horizontal_vertical", json!({"line": "guide", "mode": "vertical"})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities": ["origin", "guide.start"], "type": "horizontal", "value": "w"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let reach = h.app.run("sketch.create", json!({"plane": "XY", "name": "Reach"})).unwrap()["sketch"].as_u64().unwrap();
+    let projected = h.app.run("sketch.project", json!({"refs": [{"sketch": "Guide", "curve": "guide"}]})).unwrap()["links"][0]["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let line = h.app.run("sketch.line", json!({"points": [[0, 0], [10, -(44.0_f64).sqrt()]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.dimension", json!({"entities": [line], "value": 12})).unwrap();
+    h.app.run("sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": projected})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("parameters.change", json!({"name": "w", "expression": "20 mm"})).unwrap();
+    h.settle();
+    assert!(!crate::open_meshing::session_world(&h.app.session).sketch(reach).unwrap().report.ok(), "the conflict is real");
+
+    for id in [guide, reach] {
+        crate::browser::set_sketch_visible(&mut h.app, id, true);
+        h.app.session.visibility.shown_dimensions.push(id);
+    }
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.cam.distance = 80.0;
+    h.app.cam.target = solidcore_record::Vec3::new(10.0, 0.0, 0.0);
+    h.settle();
+
+    let failing = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let ss = st.sketch(reach).unwrap();
+        ss.sketch.constraints.iter().find(|c| c.kind.is_dimension() && ss.report.failing.contains(&c.id)).map(|c| c.id.clone())
+    }
+    .expect("a failing dimension is shown");
+    assert_eq!(model_text_shape_of(&h, reach, &failing).fallback_color, conflict, "the failing shown dimension takes the conflict colour");
+
+    // The Guide's satisfied dimension keeps the custom preference colour.
+    let satisfied = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let ss = st.sketch(guide).unwrap();
+        ss.sketch.constraints.iter().find(|c| c.kind.is_dimension() && !ss.report.failing.contains(&c.id)).map(|c| c.id.clone())
+    }
+    .expect("a satisfied shown dimension is drawn");
+    assert_eq!(model_text_shape_of(&h, guide, &satisfied).fallback_color, custom, "a satisfied shown dimension keeps the preference colour");
+
+    // With the Sketch preference off, the failing dimension keeps its old error red.
+    h.app.preferences.sketch_conflict_colour = false;
+    h.settle();
+    assert_eq!(model_text_shape_of(&h, reach, &failing).fallback_color, solidcraft_theme::Tokens::get().error);
+    h.call("ui.prefs", json!({"theme": "dark"}));
+    h.frame();
 }
 
 fn corner_sketch() -> Harness {

@@ -120,3 +120,19 @@ fn loft_regions_refuse_ambiguous_hole_pairings_in_any_draw_order() {
         }
     }
 }
+
+/// #13331: a loft between two parallel squares has planar sides, each joining two parallel
+/// lines: a tapered square duct (the reporter's hopper) and a square prism alike. The skin
+/// gave B-spline walls, which count as "other" and which Convert to Sheet Metal refuses.
+#[test]
+fn a_loft_between_parallel_squares_has_planar_sides() {
+    for top in [100.0, 55.0] {
+        let secs =
+            [(Plane::XY, Region2 { outer: square(55.0), holes: vec![] }), (Plane::XY.offset(120.0), Region2 { outer: square(top), holes: vec![] })];
+        let body = loft_regions(&secs).unwrap();
+        let (a, b) = (110.0f64 * 110.0, (2.0 * top) * (2.0 * top));
+        check(&body, 120.0 / 3.0 * (a + b + (a * b).sqrt()), 1e-6);
+        let types = measure(&body).unwrap().merged.face_types;
+        assert_eq!(types.get("plane"), Some(&6), "top {top}: {types:?}");
+    }
+}

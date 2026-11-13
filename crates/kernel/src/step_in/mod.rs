@@ -1,24 +1,33 @@
 //! STEP import (ISO 10303-21 files, AP203/AP214/AP242 geometry).
 //!
 //! Our own reader, written from the public standards: [`p21`] parses the exchange structure,
-//! [`solidcraft_step::topology`] reads each solid into its schema 4 record, which SMLib takes
+//! [`solidcore_step::topology`] reads each solid into its schema 4 record, which SMLib takes
 //! as the body ([`parallel`]), and this module walks the product structure (products, shape
 //! representations, assemblies with their placements, units, colours). STEP files are
 //! untrusted: every count and nesting depth is capped, and what cannot be read becomes a
 //! warning rather than a failure wherever the rest of the file is still usable.
 
-pub(crate) mod p21;
+pub mod p21;
 mod parallel;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_step::read::R;
+use solidcore_step::read::R;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
 use p21::{Entity, Exchange, Param};
+
+/// The representation the file's unlisted topology is read as, under an id the reader keeps for
+/// it (it is used only when the file's representations hold nothing to read).
+const UNLISTED: u64 = u64::MAX;
+/// Whether an item of representation `rep` is read as a body: a solid or surface model, and in
+/// the file's unlisted topology ([`UNLISTED`]) a shell or face on its own too.
+fn body_item(rep: u64, name: &str) -> bool {
+    solidcore_step::topology::is_solid_item(name) || (rep == UNLISTED && solidcore_step::topology::is_body_item(name))
+}
 
 /// Deepest assembly nesting followed.
 const MAX_ASSEMBLY_DEPTH: usize = 32;
@@ -175,13 +184,13 @@ struct Batch {
 
 /// The units of a representation context (GLOBAL_UNIT_ASSIGNED_CONTEXT) and its distance
 /// uncertainty (mm) as the file states it.
-type Units = solidcraft_step::units::Context;
+type Units = solidcore_step::units::Context;
 
-/// Units of a representation context, read by [`solidcraft_step::units::context`] (millimetres
+/// Units of a representation context, read by [`solidcore_step::units::context`] (millimetres
 /// and radians when the file names none).
 fn context_units(ex: &Exchange, ctx: Option<u64>, cache: &mut HashMap<u64, Units>) -> Units {
     let Some(id) = ctx else { return Units::default() };
-    *cache.entry(id).or_insert_with(|| solidcraft_step::units::context(ex, id))
+    *cache.entry(id).or_insert_with(|| solidcore_step::units::context(ex, id))
 }
 
 /// Items and context of a representation entity.
@@ -251,7 +260,7 @@ fn translation(t: [f64; 3]) -> M4 {
 }
 
 /// The matrix of an AXIS2_PLACEMENT: its frame's axes and origin.
-fn frame_matrix(p: &solidcraft_step::geom::Placement) -> M4 {
+fn frame_matrix(p: &solidcore_step::geom::Placement) -> M4 {
     let (x, y, z, o) = (p.ref_direction, p.y(), p.axis, p.origin);
     [[x[0], x[1], x[2], 0.0], [y[0], y[1], y[2], 0.0], [z[0], z[1], z[2], 0.0], [o[0], o[1], o[2], 1.0]]
 }
@@ -272,6 +281,9 @@ struct Reader {
     placements: HashMap<u64, u64>,
     /// Styled item → colour.
     colors: HashMap<u64, [f32; 3]>,
+    /// Styled item → its colour's name in the file (`COLOUR_RGB`'s name, or a pre-defined
+    /// colour's), when the file names it.
+    color_names: HashMap<u64, String>,
     /// Opacity of styled items with a transparency (1 = opaque).
     opacity: HashMap<u64, f32>,
     /// Items that gave no part: reported once when the file could not be read, else (the
@@ -328,6 +340,7 @@ impl Reader {
             children: HashMap::new(),
             placements: HashMap::new(),
             colors: HashMap::new(),
+            color_names: HashMap::new(),
             opacity: HashMap::new(),
             unreadable: HashMap::new(),
             once: HashSet::new(),
@@ -446,8 +459,13 @@ impl Reader {
                 }
                 "STYLED_ITEM" | "OVER_RIDING_STYLED_ITEM" => {
                     if let Some(item) = rf(2)
-                        && let Some(c) = self.find_colour(p.get(1))
+                        && let Some((c, name)) = self.find_colour(p.get(1))
                     {
+                        if !self.colors.contains_key(&item)
+                            && let Some(name) = name
+                        {
+                            self.color_names.insert(item, name);
+                        }
                         self.colors.entry(item).or_insert(c);
                         if let Some(t) = self.find_transparency(p.get(1)) {
                             self.opacity.entry(item).or_insert((1.0 - t).clamp(0.0, 1.0));
@@ -549,7 +567,8 @@ impl Reader {
         None
     }
 
-    fn find_colour(&self, styles: Option<&Param>) -> Option<[f32; 3]> {
+    /// The surface colour a style list gives, with its name in the file when it has one.
+    fn find_colour(&self, styles: Option<&Param>) -> Option<([f32; 3], Option<String>)> {
         let mut queue: Vec<u64> = styles?.as_list()?.iter().filter_map(Param::as_ref_id).collect();
         let mut seen = HashSet::new();
         while let Some(id) = queue.pop() {
@@ -557,22 +576,47 @@ impl Reader {
                 continue;
             }
             let e = self.ex.get(id)?;
+            // A curve or point style colours the edges or points of the item, not its surface, and
+            // a surface style's boundary, silhouette or grid lines are curves drawn on it: their
+            // colour must not become the solid's (#12291).
+            if matches!(
+                e.name(),
+                "CURVE_STYLE"
+                    | "CURVE_STYLE_RENDERING"
+                    | "POINT_STYLE"
+                    | "SYMBOL_STYLE"
+                    | "TEXT_STYLE"
+                    | "NULL_STYLE"
+                    | "SURFACE_STYLE_BOUNDARY"
+                    | "SURFACE_STYLE_SILHOUETTE"
+                    | "SURFACE_STYLE_SEGMENTATION_CURVE"
+                    | "SURFACE_STYLE_CONTROL_GRID"
+                    | "SURFACE_STYLE_PARAMETER_LINE"
+            ) {
+                continue;
+            }
             if e.name() == "COLOUR_RGB" {
                 let p = e.params();
                 let c = |i: usize| p.get(i).and_then(Param::as_f64).map(|x| x.clamp(0.0, 1.0) as f32);
-                return Some([c(1)?, c(2)?, c(3)?]);
+                let name = p.first().and_then(Param::as_str).and_then(crate::body::colour_name);
+                return Some(([c(1)?, c(2)?, c(3)?], name));
             }
             if e.name() == "DRAUGHTING_PRE_DEFINED_COLOUR" {
-                return Some(match e.params().first().and_then(Param::as_str).unwrap_or("") {
-                    "red" => [1.0, 0.0, 0.0],
-                    "green" => [0.0, 1.0, 0.0],
-                    "blue" => [0.0, 0.0, 1.0],
-                    "yellow" => [1.0, 1.0, 0.0],
-                    "magenta" => [1.0, 0.0, 1.0],
-                    "cyan" => [0.0, 1.0, 1.0],
-                    "black" => [0.0, 0.0, 0.0],
-                    _ => [1.0, 1.0, 1.0],
-                });
+                let named = e.params().first().and_then(Param::as_str).unwrap_or("");
+                let name = crate::body::colour_name(named);
+                return Some((
+                    match named {
+                        "red" => [1.0, 0.0, 0.0],
+                        "green" => [0.0, 1.0, 0.0],
+                        "blue" => [0.0, 0.0, 1.0],
+                        "yellow" => [1.0, 1.0, 0.0],
+                        "magenta" => [1.0, 0.0, 1.0],
+                        "cyan" => [0.0, 1.0, 1.0],
+                        "black" => [0.0, 0.0, 0.0],
+                        _ => [1.0, 1.0, 1.0],
+                    },
+                    name,
+                ));
             }
             fn walk(p: &Param, out: &mut Vec<u64>, depth: usize) {
                 match p {
@@ -600,7 +644,7 @@ impl Reader {
     /// omitted axis is the global one, an omitted scale 1, an omitted second or third scale the
     /// first).
     fn placement_matrix(&mut self, item: u64, u: Units) -> R<M4> {
-        let reader = solidcraft_step::read::Reader::new(&self.ex, u.units);
+        let reader = solidcore_step::read::Reader::new(&self.ex, u.units);
         let e = self.ex.get(item).ok_or_else(|| format!("missing entity #{item}"))?;
         if matches!(e.name(), "CARTESIAN_TRANSFORMATION_OPERATOR_3D" | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM") {
             let p = e.params();
@@ -688,18 +732,12 @@ impl Reader {
             }
             let Some(e) = self.ex.get(item) else { continue };
             match e.name() {
-                "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL" => {
+                name if body_item(rep, name) => {
                     // Only batch consecutive solids: mapped items must retain traversal and
                     // first-use unit/cache order. Bound temporary geometry independently of file size.
                     let mut batch = vec![item];
                     let capacity = MAX_BODIES.saturating_sub(self.bodies_so_far()).min(64);
-                    while batch.len() < capacity
-                        && items.peek().is_some_and(|id| {
-                            self.ex.get(*id).is_some_and(|e| {
-                                matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL")
-                            })
-                        })
-                    {
+                    while batch.len() < capacity && items.peek().is_some_and(|id| self.ex.get(*id).is_some_and(|e| body_item(rep, e.name()))) {
                         if let Some(next) = items.next() {
                             batch.push(next);
                         }
@@ -718,9 +756,14 @@ impl Reader {
                         // The node lists the planned solids (a surface model's closed shells
                         // beside its sheet are solids of their own, in the model's colour); each
                         // becomes a body index once converted.
-                        for piece in solidcraft_step::topology::items(&self.ex, item) {
+                        for piece in solidcore_step::topology::items(&self.ex, item) {
                             if piece != item {
                                 if let Some(c) = self.colors.get(&item).copied() {
+                                    if !self.colors.contains_key(&piece)
+                                        && let Some(name) = self.color_names.get(&item).cloned()
+                                    {
+                                        self.color_names.insert(piece, name);
+                                    }
                                     self.colors.entry(piece).or_insert(c);
                                 }
                                 if let Some(o) = self.opacity.get(&item).copied() {
@@ -877,16 +920,26 @@ impl Reader {
                         *slot = Some(self.bodies.len());
                     }
                     let color = self.colors.get(&item).copied();
-                    // See-through bodies and faces with colours of their own.
+                    // See-through bodies and faces with colours of their own, and the names the
+                    // file gives those colours.
                     let faces = face_origin
                         .iter()
                         .enumerate()
                         .filter_map(|(i, f)| {
                             let c = self.colors.get(f)?;
-                            Some(crate::FacePaint { face: i, color: *c, opacity: self.opacity.get(f).copied().unwrap_or(1.0) })
+                            Some(crate::FacePaint {
+                                face: i,
+                                color: *c,
+                                opacity: self.opacity.get(f).copied().unwrap_or(1.0),
+                                name: self.color_names.get(f).cloned(),
+                            })
                         })
                         .collect();
-                    let paint = crate::Paint { opacity: self.opacity.get(&item).copied().unwrap_or(1.0), faces };
+                    let paint = crate::Paint {
+                        opacity: self.opacity.get(&item).copied().unwrap_or(1.0),
+                        faces,
+                        name: color.and_then(|_| self.color_names.get(&item).cloned()),
+                    };
                     let body = body.with_color(color).with_paint(Some(paint));
                     let identities = face_origin
                         .iter()
@@ -1079,12 +1132,12 @@ impl Reader {
 /// Faces whose boundary runs the wrong way round their normal, as a strict reader sees them:
 /// each face's normal is its surface's own parametric normal (∂S/∂u × ∂S/∂v, ISO 10303-42),
 /// reversed when `same_sense` is false, and the outer loop must run counter-clockwise seen from
-/// that side. These are the faces the STEP reader turns over ([`solidcraft_step::topology`]),
+/// that side. These are the faces the STEP reader turns over ([`solidcore_step::topology`]),
 /// numbered as the solid's body numbers them. Returns one message per bad face; an error when
 /// the file does not parse or has no solid the reader can read.
 pub fn step_orientation_errors(text: &str) -> std::result::Result<Vec<String>, String> {
     let ex = p21::parse(text)?;
-    let read = solidcraft_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
     if read.solids.is_empty() {
         return Err(read.failures.first().map_or_else(|| "the file has no solids".into(), |f| format!("solid #{}: {}", f.item, f.message)));
     }
@@ -1283,10 +1336,7 @@ impl StepReading {
             .iter()
             .flat_map(|(r, (items, _))| items.iter().map(move |i| (*r, *i)))
             .filter(|(_, i)| !rd.used_items.contains(i))
-            .filter(|(_, i)| {
-                ex.get(*i)
-                    .is_some_and(|e| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL"))
-            })
+            .filter(|(_, i)| ex.get(*i).is_some_and(|e| solidcore_step::topology::is_solid_item(e.name())))
             .map(|(r, _)| r)
             .collect();
         loose.sort();
@@ -1299,6 +1349,25 @@ impl StepReading {
                 rd.rep_bodies(r, &identity, &[], "Import", None, &mut bodies, 0);
             }
             tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
+        }
+        // Topology outside every representation (bare geometry files, or ones whose topology no
+        // representation lists): its unlisted solids, shells and faces, read in the file's one
+        // representation context where it has exactly one.
+        if rd.plan.is_empty() {
+            let roots = solidcore_step::topology::roots(&ex);
+            if !roots.is_empty() {
+                let mut contexts = ex.entities.iter().filter(|(_, e)| e.has("GEOMETRIC_REPRESENTATION_CONTEXT")).map(|(id, _)| *id);
+                let context = match (contexts.next(), contexts.next()) {
+                    (Some(c), None) => Some(c),
+                    _ => None,
+                };
+                rd.reps.insert(UNLISTED, (roots, context));
+                let mut bodies = Vec::new();
+                rd.node_items = rd.used_items.clone();
+                rd.visits = 0;
+                rd.rep_bodies(UNLISTED, &identity, &[], "Import", None, &mut bodies, 0);
+                tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
+            }
         }
         let single = workers <= 1;
         Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single })

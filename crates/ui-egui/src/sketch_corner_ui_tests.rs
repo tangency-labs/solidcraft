@@ -796,6 +796,25 @@ fn trim_hover_shows_the_piece_a_click_takes_away() {
     assert!(trim_hover_piece(&h.app, sid, &line).is_none(), "only Trim shows a piece");
 }
 
+/// #14227: a spline crossed by two lines shows the piece between them too, not the whole curve.
+#[test]
+fn trim_hover_shows_the_piece_a_click_takes_away_on_a_spline() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let spline = h.app.run("sketch.spline.fit_point", json!({"points": [[0,0],[5,0],[30,0]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.line", json!({"points": [[10,-5],[10,20]], "connect": false})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[20,-5],[20,20]], "connect": false})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.step(&json!({"start":"sketch.trim"})).unwrap();
+    h.step(&json!({"move":{"world":[15,0,0]}})).unwrap();
+    assert!(matches!(&h.app.viewport.hover, Some(crate::viewport::Hit::SketchCurve { id, .. }) if *id == spline), "{:?}", h.app.viewport.hover);
+    let piece = trim_hover_piece(&h.app, sid, &spline).unwrap();
+    let ends = [piece[0], piece[piece.len() - 1]];
+    assert!(ends.iter().any(|p| (p.x - 10.0).abs() < 1e-6) && ends.iter().any(|p| (p.x - 20.0).abs() < 1e-6), "{ends:?}");
+    assert!(piece.iter().all(|p| p.x > 10.0 - 1e-6 && p.x < 20.0 + 1e-6), "{piece:?}");
+}
+
 /// Trim's hover keeps the cuts of the curve under the cursor while the sketch is unchanged and
 /// Extend's preview while the cursor stays nearer one end: the piece follows the cursor along the
 /// line, and a curve added in the way moves the piece's end and the extension's stop with it.
@@ -978,6 +997,29 @@ fn a_point_clicked_on_a_line_midpoint_is_held_there() {
     let sk = &state.sketch(sid).unwrap().sketch;
     let held = sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Midpoint { .. }));
     assert!(held, "no MidPoint constraint: {:?}", sk.constraints.iter().map(|c| &c.kind).collect::<Vec<_>>());
+}
+
+/// #15387: the Point tool clicked on the crossing of two lines makes a point held on both lines
+/// (`PointOnCurve` on each), not a free point that happens to sit at their intersection.
+#[test]
+fn a_point_clicked_on_a_line_crossing_is_held_on_both() {
+    use solidcraft_engine::sketch::ConstraintKind;
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,20]],"ids":["a"],"infer":false})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,20],[20,0]],"ids":["b"],"infer":false})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.point"})).unwrap();
+    h.step(&json!({"click":{"world":[10, 10, 0]}})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(sid).unwrap().sketch;
+    let p = sk.points.len() - 1;
+    for line in ["a", "b"] {
+        let c = sk.curve_index(line).unwrap();
+        let held = sk.constraints.iter().any(|k| k.kind == ConstraintKind::PointOnCurve { p, c });
+        assert!(held, "not held on {line}: {:?}", sk.constraints.iter().map(|k| &k.kind).collect::<Vec<_>>());
+    }
 }
 
 /// #7299: the centre circle tool, its centre snapped to a rectangle's corner, ties the circle
