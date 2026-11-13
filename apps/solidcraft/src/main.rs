@@ -223,6 +223,13 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
         }
+        // The system asked the app to stop (shutdown, SIGTERM): close as a forced quit does,
+        // keeping unsaved changes for recovery, since nobody is there to answer "save changes?".
+        // Before the starting page returns, so a signal during the setup closes the app too.
+        #[cfg(unix)]
+        if system_quit::requested() {
+            self.solve.quit_requested = true;
+        }
         // The window shows with its first frame: the starting page, before the slow setup.
         let mut setup = std::mem::take(&mut self.setup);
         let starting = setup.logic(self, ctx);
@@ -308,12 +315,6 @@ impl eframe::App for App {
         }
         // Every frame, so switching the bridge off reaches the reader while a picker is open too.
         self.nav_bridge.tick(&mut self.solve, ctx);
-        // The system asked the app to stop (shutdown, SIGTERM): close as a forced quit does,
-        // keeping unsaved changes for recovery, since nobody is there to answer "save changes?".
-        #[cfg(unix)]
-        if system_quit::requested() {
-            self.solve.quit_requested = true;
-        }
         if self.solve.quit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
