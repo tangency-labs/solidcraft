@@ -337,8 +337,8 @@ pub enum EdgeRelief {
 }
 
 /// The relief of the straight edge `edge` between the planar faces `walls`, or why none. The
-/// cylinder runs the edge's length, and on past an end by the bit's radius where that end is
-/// open: `ends[0]` (at the start) and `ends[1]` (at the end) are the outward normals of the other
+/// cylinder runs the edge's length, and on past an end where that end is open (see
+/// [`extension`]): `ends[0]` (at the start) and `ends[1]` (at the end) are the outward normals of the other
 /// faces at that end (`None` for one that is not planar), and an end is open when it has such
 /// faces and every one is planar and faces on the way the edge runs past it (the top of a pocket,
 /// the faces a slot runs through). A pocket's floor faces back along the edge (blind), so the
@@ -362,9 +362,16 @@ pub fn edge_relief(
     let [wa, wb] = walls;
     let lengths = [wall_length(wa.sides)?, wall_length(wb.sides)?];
     let [at_start, at_end] = ends;
+    // The relief's section, a circle of radius r about a centre r (r + gap for a minimal one)
+    // from the edge line, lies within this of it.
+    let reach = o.radius
+        + match o.style {
+            Style::Minimal { gap } => o.radius + gap,
+            Style::Normal | Style::TBone { .. } => o.radius,
+        };
     let extend = [
-        extension(edge.end, edge.start, at_start, o.radius)?,
-        extension(edge.start, edge.end, at_end, o.radius)?,
+        extension(edge.end, edge.start, at_start, o.radius, reach)?,
+        extension(edge.start, edge.end, at_end, o.radius, reach)?,
     ];
     Ok(
         match relief_cylinder(edge, directions, lengths, extend, &o)? {
@@ -458,33 +465,44 @@ fn wall_length(sides: &[Edge]) -> Result<f64> {
 
 /// How far a relief runs past the end `here` of an edge whose other end is `there`, `faces` the
 /// outward normals of the faces at `here` other than the walls (`None` for one that is not
-/// planar): `radius` when there is one and every one faces on along the edge (open), else 0
-/// (blind, such as a pocket's floor).
+/// planar), for a relief whose section lies within `reach` of the edge line: 0 unless there is a
+/// face and every one is open (see [`end_slope`]; a pocket's floor is blind). Past an open end, a
+/// face tilted `β` from square to the edge falls back towards the material by `reach · tan β` at
+/// `reach` from the edge line, so the relief runs `radius` beyond the steepest face's fall: its
+/// cap clears every end face by at least `radius` along the edge, and a square end gets `radius`.
 ///
 /// # Errors
-/// As [`end_is_open`].
-fn extension(there: Point3, here: Point3, faces: &[Option<Vec3>], radius: f64) -> Result<f64> {
-    let mut any = false;
+/// As [`end_slope`].
+fn extension(
+    there: Point3,
+    here: Point3,
+    faces: &[Option<Vec3>],
+    radius: f64,
+    reach: f64,
+) -> Result<f64> {
+    let mut steepest: Option<f64> = None;
     for outward in faces {
         let Some(outward) = outward else {
             return Ok(0.0);
         };
-        if !end_is_open(there, here, *outward)? {
+        let Some(slope) = end_slope(there, here, *outward)? else {
             return Ok(0.0);
-        }
-        any = true;
+        };
+        steepest = Some(steepest.map_or(slope, |s| s.max(slope)));
     }
-    Ok(if any { radius } else { 0.0 })
+    Ok(steepest.map_or(0.0, |slope| radius + reach * slope))
 }
 
-/// Whether the end `here` of a straight edge (its other end `there`) is open: the face there,
-/// with outward normal `outward`, faces on the way the edge runs past `here`, so a relief may run
-/// on through empty space; a pocket's floor faces back along the edge (blind).
+/// Whether the end `here` of a straight edge (its other end `there`) is open, and how steep its
+/// face is: the face there, with outward normal `outward`, is open when it faces on the way the
+/// edge runs past `here`, so a relief may run on through empty space (a pocket's floor faces back
+/// along the edge: blind, `None`). For an open face, `tan β`, `β` its tilt from square to the
+/// edge: how far the face falls back along the edge per unit of distance from the edge line.
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for a point or vector that is not finite, a zero-length edge or
 /// a zero normal.
-fn end_is_open(there: Point3, here: Point3, outward: Vec3) -> Result<bool> {
+fn end_slope(there: Point3, here: Point3, outward: Vec3) -> Result<Option<f64>> {
     let along = here - there;
     if !(along.is_finite() && outward.is_finite()) {
         return Err(invalid("points and normals must be finite"));
@@ -492,7 +510,11 @@ fn end_is_open(there: Point3, here: Point3, outward: Vec3) -> Result<bool> {
     let (Ok(d), Ok(n)) = (along.unitize(), outward.unitize()) else {
         return Err(invalid("a vector of zero length"));
     };
-    Ok(d.dot(n) > STRAIGHT)
+    let rise = d.dot(n);
+    if rise <= STRAIGHT {
+        return Ok(None);
+    }
+    Ok(Some((n - d * rise).length() / rise))
 }
 
 /// The relief cylinder of the inside `edge` with walls in directions `walls` (from

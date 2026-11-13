@@ -396,8 +396,8 @@ fn hostile_options_and_points_are_refused() {
         &opts(Style::Normal)
     )
     .is_err());
-    assert!(end_is_open(Vec3::ZERO, Vec3::ZERO, Vec3::Z).is_err());
-    assert!(end_is_open(Vec3::ZERO, Vec3::Z, Vec3::ZERO).is_err());
+    assert!(end_slope(Vec3::ZERO, Vec3::ZERO, Vec3::Z).is_err());
+    assert!(end_slope(Vec3::ZERO, Vec3::Z, Vec3::ZERO).is_err());
     assert!(up.lean(Vec3::ZERO).is_err());
     assert!(up.lean(Vec3::new(f64::NAN, 0.0, 1.0)).is_err());
     assert!(edge(Vec3::Z, Vec3::Z).lean(Vec3::Z).is_err());
@@ -488,13 +488,61 @@ fn a_relief_cylinder_runs_the_edge_and_its_extensions() {
 }
 
 #[test]
+fn a_relief_clears_a_sloped_open_end() {
+    // A square corner up the z axis, walls +x and +y, under a top face that falls back over the
+    // relief (outward normal (-1, -1, 1)): 54.7° from square, tan β = √2. The relief's section
+    // reaches 2 r from the edge line; every point of its cap lies on the open side of the top.
+    let (floor, top) = (Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 6.0));
+    let n = Vec3::new(-1.0, -1.0, 1.0);
+    let faces = [Some(n)];
+    let e = extension(floor, top, &faces, R, 2.0 * R).unwrap();
+    assert!(close(e, R + 2.0 * R * 2.0_f64.sqrt(), 1e-12));
+    let c = relief_cylinder(
+        &edge(floor, top),
+        [Vec3::X, Vec3::Y],
+        [1.0; 2],
+        [0.0, e],
+        &opts(Style::Normal),
+    )
+    .unwrap()
+    .unwrap();
+    let cap = c.base + c.axis * c.height;
+    for k in 0..64 {
+        let phi = f64::from(k) * PI / 32.0;
+        let p = cap + Vec3::new(phi.cos(), phi.sin(), 0.0) * R;
+        assert!((p - top).dot(n) >= 0.0, "{phi}");
+    }
+    // No face at the end: blind. A square top: the radius.
+    assert!(close(
+        extension(floor, top, &faces[..0], R, 2.0 * R).unwrap(),
+        0.0,
+        0.0
+    ));
+    assert!(close(
+        extension(floor, top, &[Some(Vec3::Z)], R, 2.0 * R).unwrap(),
+        R,
+        1e-12
+    ));
+}
+
+#[test]
 fn ends_axes_and_planes() {
     // A floor facing up at the bottom of an edge running up: blind; the top face: open.
     let (top, floor) = (Vec3::new(0.0, 0.0, 10.0), Vec3::new(0.0, 0.0, 4.0));
-    assert!(!end_is_open(top, floor, Vec3::Z).unwrap());
-    assert!(end_is_open(floor, top, Vec3::Z).unwrap());
-    assert!(end_is_open(top, Vec3::Z, Vec3::new(0.0, 0.3, -1.0)).unwrap());
-    assert!(!end_is_open(floor, top, Vec3::X).unwrap());
+    assert!(end_slope(top, floor, Vec3::Z).unwrap().is_none());
+    assert!(close(
+        end_slope(floor, top, Vec3::Z).unwrap().unwrap(),
+        0.0,
+        1e-12
+    ));
+    assert!(close(
+        end_slope(top, Vec3::Z, Vec3::new(0.0, 0.3, -1.0))
+            .unwrap()
+            .unwrap(),
+        0.3,
+        1e-12
+    ));
+    assert!(end_slope(floor, top, Vec3::X).unwrap().is_none());
     // An edge along the axis either way leans 0 from it; one off by 0.01 leans that much.
     assert!(
         edge(Vec3::ZERO, Vec3::new(0.0, 0.0, -2.0))
