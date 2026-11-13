@@ -1,8 +1,6 @@
 //! Snapping a field to the lattice: each straight edge moves onto the nearest lattice line of
 //! its direction on the solid side, so fields shrink and keep-outs grow, never the other way.
 
-use std::f64::consts::PI;
-
 use crate::math::Vec2;
 
 use super::vec::{ring_next, ring_prev};
@@ -23,40 +21,49 @@ fn direction(a: Vec2, b: Vec2) -> f64 {
     (b.y - a.y).atan2(b.x - a.x)
 }
 
-/// Merges consecutive segments that run the same way on the same line, and drops tiny ones.
-fn merge_collinear(segs: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, Vec2)> {
-    let mut segs: Vec<(Vec2, Vec2)> = segs
-        .into_iter()
-        .filter(|&(a, b)| a.distance(b) > EPS)
-        .collect();
-    let mut changed = true;
-    while changed && segs.len() > 2 {
-        changed = false;
-        let n = segs.len();
-        for k in 0..n {
-            let (Some(&(aa, ab)), Some(&(ba, bb))) = (segs.get(ring_prev(k, n)), segs.get(k))
-            else {
+/// Whether the shared vertex of two consecutive segments can go: the second runs on the same way
+/// and the vertex lies on the straight line between the far ends, to within [`EPS`]. A position
+/// test, not an angle: on a very long edge a tiny angle is a visible step.
+fn removable(first: (Vec2, Vec2), second: (Vec2, Vec2)) -> bool {
+    let (start, vertex, end) = (first.0, second.0, second.1);
+    let span = end - start;
+    let len = span.length();
+    if len <= EPS || (first.1 - first.0).dot(second.1 - second.0) <= 0.0 {
+        return false;
+    }
+    (span.x * (vertex.y - start.y) - span.y * (vertex.x - start.x)).abs() / len <= EPS
+}
+
+/// Merges consecutive segments that run the same way on the same line, and drops tiny ones, in
+/// one pass round the ring (a run that wraps from the last segment to the first included).
+pub(super) fn merge_collinear(segs: Vec<(Vec2, Vec2)>) -> Vec<(Vec2, Vec2)> {
+    let mut out: Vec<(Vec2, Vec2)> = Vec::new();
+    for seg in segs.into_iter().filter(|&(a, b)| a.distance(b) > EPS) {
+        out.push(seg);
+        while out.len() >= 2 {
+            let (Some(&last), Some(&before)) = (out.last(), out.get(out.len() - 2)) else {
                 break;
             };
-            let dd = (direction(ba, bb) - direction(aa, ab) + PI).rem_euclid(2.0 * PI) - PI;
-            if dd.abs() < 1e-9 {
-                let merged = (aa, bb);
-                let mut out = Vec::new();
-                if k == 0 {
-                    out.push(merged);
-                    out.extend(segs.iter().skip(1).take(n.saturating_sub(2)).copied());
-                } else {
-                    out.extend(segs.iter().take(k - 1).copied());
-                    out.push(merged);
-                    out.extend(segs.iter().skip(k + 1).copied());
-                }
-                segs = out;
-                changed = true;
+            if !removable(before, last) {
                 break;
             }
+            out.truncate(out.len() - 2);
+            out.push((before.0, last.1));
         }
     }
-    segs
+    while out.len() > 2 {
+        let (Some(&last), Some(&first)) = (out.last(), out.first()) else {
+            break;
+        };
+        if !removable(last, first) {
+            break;
+        }
+        out.pop();
+        if let Some(slot) = out.first_mut() {
+            *slot = (last.0, first.1);
+        }
+    }
+    out
 }
 
 fn segments_meet(p0: Vec2, p1: Vec2, q0: Vec2, q1: Vec2) -> bool {
@@ -104,22 +111,8 @@ fn simple(poly: &[Vec2]) -> bool {
 fn snapped_vertices(mut lines: Vec<Line>) -> Result<Vec<Vec2>, &'static str> {
     const COLLAPSED: &str = "collapses when snapped";
     loop {
-        // Neighbours on the same line become one edge.
-        let mut merged = true;
-        while merged && lines.len() > 2 {
-            merged = false;
-            let n = lines.len();
-            for k in 0..n {
-                let (Some(a), Some(b)) = (lines.get(ring_prev(k, n)), lines.get(k)) else {
-                    break;
-                };
-                if a.k == b.k && (a.c - b.c).abs() <= EPS {
-                    lines = without(lines, k);
-                    merged = true;
-                    break;
-                }
-            }
-        }
+        // Neighbours on the same line become one edge, in one pass round the ring.
+        lines = merge_same_line(lines);
         if lines.len() < 3 {
             return Err(COLLAPSED);
         }
@@ -154,6 +147,26 @@ fn snapped_vertices(mut lines: Vec<Line>) -> Result<Vec<Vec2>, &'static str> {
             }
         }
     }
+}
+
+/// Runs of neighbouring lines that are one line (the same lattice direction and offset) as one,
+/// a run that wraps round the ring included.
+fn merge_same_line(lines: Vec<Line>) -> Vec<Line> {
+    let same = |a: &Line, b: &Line| a.k == b.k && (a.c - b.c).abs() <= EPS;
+    let mut out: Vec<Line> = Vec::new();
+    for line in lines {
+        if out.last().is_some_and(|last| same(last, &line)) {
+            continue;
+        }
+        out.push(line);
+    }
+    while out.len() > 2 {
+        if !matches!((out.first(), out.last()), (Some(f), Some(l)) if same(l, f)) {
+            break;
+        }
+        out.pop();
+    }
+    out
 }
 
 /// `items` without the one at `k`.

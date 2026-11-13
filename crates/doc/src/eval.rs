@@ -9416,7 +9416,13 @@ fn eval_feature(
         }
         FeatureKind::CellGrid { targets, .. } => {
             let tools = cell_grid::tools(doc, vals, f, st, warning)?;
-            apply_traced(doc, st, f, tools, Operation::Cut, &crate::plain(targets))
+            // A grid beside the body, or cut the wrong way, changes nothing: say so, as a cut does.
+            let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
+            apply_traced(doc, st, f, tools, Operation::Cut, &crate::plain(targets))?;
+            if !before.is_empty() && st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body)) {
+                append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the depth".into());
+            }
+            Ok(())
         }
         FeatureKind::Hole { thread, thread_depth, diameter, hand, modeled, ease_out, depth, to, .. } => {
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;

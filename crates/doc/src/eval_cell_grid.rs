@@ -40,9 +40,10 @@ pub(crate) fn tools(
     else {
         return Err(DocError::Invalid("not a cell grid".into()));
     };
-    // Sheet metal cuts become cut-outs of the flat pattern, which a grid of cells cannot be.
-    let sheet = if targets.is_empty() { !st.sheets.is_empty() } else { targets.iter().any(|t| st.sheets.iter().any(|sheet| &sheet.body == t)) };
-    if sheet {
+    // Sheet metal cuts become cut-outs of the flat pattern, which a grid of cells cannot be. Only
+    // the bodies the cut reaches count: its targets, else its participants, else its component.
+    let (_, scope) = boolean_scope(st, f, &crate::plain(targets));
+    if st.sheets.iter().any(|sheet| scope.contains(&sheet.body)) {
         return Err(DocError::Invalid("not supported yet: a cell grid cannot cut sheet metal; use sheet.perforate".into()));
     }
     let ss = constructor_profile_in_frame(
@@ -64,11 +65,7 @@ pub(crate) fn tools(
     };
     // The anchor is a point of the component's space: its place in the sketch's plane.
     let anchor = match anchor {
-        Some(p) => {
-            let p = point(vals, p)?;
-            let d = p - ss.plane.origin;
-            Vec2::new(d.dot(ss.plane.x), d.dot(ss.plane.y))
-        }
+        Some(p) => ss.plane.to_local(point(vals, p)?),
         None => Vec2::new(0.0, 0.0),
     };
     let spec = CellGridSpec {
@@ -104,7 +101,7 @@ pub(crate) fn tools(
     // How far the cells go, measured where the targets are shown.
     let shown = targets_as_shown(st, f, &crate::plain(targets))?;
     let reach = if *through_all {
-        through_all_distance(&shown, &ss.plane, &crate::plain(targets))?
+        exact_reach(&shown, &ss.plane, &scope)?
     } else {
         let e = depth.as_ref().ok_or_else(|| DocError::Invalid("a cell grid needs a `depth` or `through_all`".into()))?;
         val(vals, e, Kind::Length)?
@@ -112,9 +109,12 @@ pub(crate) fn tools(
     if !(reach.is_finite() && reach > 0.0) {
         return Err(DocError::Invalid(format!("the depth of a cell grid must be more than 0, not {reach}")));
     }
+    // A through-all reach is the distance to cover on each side of the plane, so a symmetric cut
+    // takes all of it each way; an entered depth is the total, shared by the two sides.
     let (lo, hi) = match direction {
         crate::Direction::Positive => (0.0, reach),
         crate::Direction::Negative => (-reach, 0.0),
+        crate::Direction::Symmetric if *through_all => (-reach, reach),
         crate::Direction::Symmetric => (-reach / 2.0, reach / 2.0),
     };
     extrude_within_reach([lo, hi])?;
@@ -134,4 +134,28 @@ pub(crate) fn tools(
         }
     }
     Ok(tools)
+}
+
+/// How far from the sketch plane the bodies named in `scope` reach, with a margin: the distance a
+/// through-all cell must go on either side to leave nothing. From each body's exact bounds, not
+/// from its display mesh.
+fn exact_reach(st: &ModelState, plane: &Plane, scope: &[String]) -> Result<f64> {
+    let mut far: f64 = 0.0;
+    let mut any = false;
+    for b in st.bodies.iter().filter(|b| scope.contains(&b.name)) {
+        let bb = b.body.exact_bounds()?;
+        any = true;
+        for i in 0..8 {
+            let p = Vec3::new(
+                if i & 1 == 0 { bb.min.x } else { bb.max.x },
+                if i & 2 == 0 { bb.min.y } else { bb.max.y },
+                if i & 4 == 0 { bb.min.z } else { bb.max.z },
+            );
+            far = far.max(plane.height(p).abs());
+        }
+    }
+    if !any {
+        return Err(DocError::Invalid("through all needs a body to cut".into()));
+    }
+    Ok(far * 1.02 + 1.0)
 }

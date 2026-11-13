@@ -296,9 +296,23 @@ impl GridCell {
                 .first()
                 .map(|s| s.point_at(0.5))
                 .ok_or_else(|| CellGridError::Field("a cell's hole is empty".into()))?;
-            let owner = regions
-                .iter_mut()
-                .find(|r| r.outer.holds(probe) == Some(true))
+            // The innermost outer loop that holds it: an island inside a hole has holes of its
+            // own, and they lie inside the outer loops around it as well.
+            let mut owner: Option<(f64, &mut Region2)> = None;
+            for r in &mut regions {
+                if r.outer.holds(probe) != Some(true) {
+                    continue;
+                }
+                let area = r
+                    .outer
+                    .signed_area()
+                    .map_err(|e| CellGridError::Field(format!("a cell's loop has no area: {e}")))?
+                    .value;
+                if owner.as_ref().is_none_or(|(best, _)| area < *best) {
+                    owner = Some((area, r));
+                }
+            }
+            let (_, owner) = owner
                 .ok_or_else(|| CellGridError::Field("a cell's hole lies in no loop".into()))?;
             owner.holes.push(hole.clone());
         }
@@ -552,23 +566,21 @@ fn lattice_loops(
                 _ => {
                     curved = true;
                     flattened = true;
-                    let pts = flatten(seg, FLATTEN_TOL);
-                    if pts.len() > MAX_PRIMS {
-                        return Err(wrong("has a curve too complex to follow"));
-                    }
+                    let pts = flatten(seg, FLATTEN_TOL)
+                        .ok_or_else(|| wrong("has a curve too complex to follow"))?;
                     prims.extend(
                         pts.windows(2)
                             .filter_map(|w| Some(Prim::line(*w.first()?, *w.get(1)?))),
                     );
                 }
             }
-            total += prims.len();
-            if prims.len() > MAX_PRIMS || total > MAX_PRIMS * 2 {
+            if total + prims.len() > MAX_PRIMS {
                 return Err(CellGridError::Field(format!(
                     "more than {MAX_PRIMS} boundary pieces"
                 )));
             }
         }
+        total += prims.len();
         if !lp.is_closed(OPEN_TOL) {
             return Err(wrong("is not closed"));
         }
@@ -587,7 +599,7 @@ fn lattice_loops(
 /// Checks a segment read from outside before anything evaluates it: every stored coordinate
 /// finite and at most `max_abs` in size (a Bézier's unused slots too), a radius in
 /// 1e-12..=`max_abs`, an arc's start within ±1e6 radians and its absolute sweep 1e-12 to one turn
-/// (with 1e-12 radians of allowance), a conic weight in 1e-12..=1e12, a Bézier degree of 4 to
+/// (with 1e-12 radians of allowance), a conic weight in 1e-12..=1e12, a Bézier degree of 1 to
 /// [`MAX_BEZIER_DEGREE`], controls not all at one point, and finite ends.
 fn check_seg(seg: &Seg2, max_abs: f64) -> Result<(), &'static str> {
     const MIN_POSITIVE: f64 = 1e-12;
@@ -646,7 +658,7 @@ fn check_seg(seg: &Seg2, max_abs: f64) -> Result<(), &'static str> {
         }
         Seg2::Bezier { n, ref p } => {
             require(
-                (4..=MAX_BEZIER_DEGREE).contains(&usize::from(n)),
+                (1..=MAX_BEZIER_DEGREE).contains(&usize::from(n)),
                 "Bezier degree",
             )?;
             coordinates(&mut p.iter().flat_map(|q| [q.x, q.y]))?;
@@ -659,30 +671,42 @@ fn check_seg(seg: &Seg2, max_abs: f64) -> Result<(), &'static str> {
     )
 }
 
+/// The most pieces a curve is cut into.
+const MAX_FLATTEN_PIECES: usize = 4096;
+
 /// A curve that is neither a line nor an arc as a polyline (both end points included) with at
 /// most about `tol` chord error: the pieces' count from the second differences of the controls
-/// (chord error of `n` pieces is at most the largest second difference over `8 n^2`).
-fn flatten(seg: &Seg2, tol: f64) -> Vec<Vec2> {
+/// (chord error of `n` pieces is at most the largest second difference over `8 n^2`). `None` when
+/// that takes more than [`MAX_FLATTEN_PIECES`] pieces: the curve is then too complex to follow
+/// within `tol`.
+fn flatten(seg: &Seg2, tol: f64) -> Option<Vec<Vec2>> {
     let tol = tol.max(1e-9);
-    let pieces = |bow: f64| ((bow / (8.0 * tol)).sqrt().ceil() as usize).clamp(2, 4096);
+    let pieces = |bow: f64| {
+        let n = (bow / (8.0 * tol)).sqrt().ceil();
+        if n.is_finite() && n <= MAX_FLATTEN_PIECES as f64 {
+            Some((n as usize).max(2))
+        } else {
+            None
+        }
+    };
     let n = match *seg {
         Seg2::Cubic { p0, p1, p2, p3 } => pieces(
             (p0 - p1 * 2.0 + p2)
                 .length()
                 .max((p1 - p2 * 2.0 + p3).length())
                 * 6.0,
-        ),
-        Seg2::Conic { a, apex, b, w } => pieces((a - apex * 2.0 + b).length() * 2.0 * w.max(1.0)),
+        )?,
+        Seg2::Conic { a, apex, b, w } => pieces((a - apex * 2.0 + b).length() * 2.0 * w.max(1.0))?,
         Seg2::Bezier { n, ref p } => {
             let c = p.get(..=usize::from(n)).unwrap_or(&[]);
             let d2 = c.windows(3).map(|w| match w {
                 [a, b, c] => (*a - *b * 2.0 + *c).length(),
                 _ => 0.0,
             });
-            pieces(d2.fold(0.0, f64::max) * f64::from(n) * (f64::from(n) - 1.0))
+            pieces(d2.fold(0.0, f64::max) * f64::from(n) * (f64::from(n) - 1.0))?
         }
-        Seg2::Line { a, b } => return vec![a, b],
+        Seg2::Line { a, b } => return Some(vec![a, b]),
         Seg2::Arc { .. } => 8,
     };
-    (0..=n).map(|i| seg.point_at(i as f64 / n as f64)).collect()
+    Some((0..=n).map(|i| seg.point_at(i as f64 / n as f64)).collect())
 }

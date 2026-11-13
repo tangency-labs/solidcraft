@@ -55,9 +55,9 @@ pub enum CellClipParam {
 
 /// Fill the closed profiles of a sketch with cells of one shape and cut them out of the bodies:
 /// vents, speaker grilles, weight-saving pockets. A profile's outer loop is the field to fill;
-/// a loop inside it is a keep-out that no cell crosses. The cells are cut in one operation, at
-/// most 10,000 of them; a sheet metal body is refused (use `sheet.perforate`). The faces cut
-/// have no stable names yet.
+/// a loop inside it is a keep-out that no cell crosses. The cells are cut in one operation, a few
+/// hundred at most (the command help names the limit); a sheet metal body is refused (use
+/// `sheet.perforate`). The faces cut have no stable names yet.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CellGridParams {

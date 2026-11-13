@@ -1775,3 +1775,199 @@ fn a_cells_regions_put_each_hole_in_the_outer_loop_that_holds_it() {
         assert_eq!(loops, c.loops.len());
     }
 }
+
+#[test]
+fn a_hole_of_an_island_belongs_to_the_island_not_to_the_outer_loop_around_it() {
+    // An opening of four loops: the outer one, a hole in it, an island in the hole, and a hole
+    // in the island. The last lies inside both outer loops.
+    let reverse = |l: Loop2| {
+        polygon(
+            &l.segs
+                .iter()
+                .rev()
+                .map(|s| (s.end().x, s.end().y))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let cell = GridCell {
+        i: 0,
+        j: 0,
+        kind: CellKind::Free,
+        center: v(0.0, 0.0),
+        loops: vec![
+            rect(-10.0, -10.0, 10.0, 10.0),
+            reverse(rect(-8.0, -8.0, 8.0, 8.0)),
+            rect(-6.0, -6.0, 6.0, 6.0),
+            reverse(rect(-1.0, -1.0, 1.0, 1.0)),
+        ],
+        area: 0.0,
+    };
+    let regions = cell.regions().unwrap();
+    assert_eq!(regions.len(), 2);
+    let sizes: Vec<(f64, usize)> = regions
+        .iter()
+        .map(|r| (r.outer.segs[0].start().x.abs(), r.holes.len()))
+        .collect();
+    assert!(
+        sizes.contains(&(10.0, 1)) && sizes.contains(&(6.0, 1)),
+        "{sizes:?}"
+    );
+}
+
+#[test]
+fn a_loop_of_many_pieces_is_counted_once() {
+    // A 632-sided polygon: 632 pieces, not the 200,028 a running count of the loop's own prefix gave.
+    let n = 632;
+    let pts: Vec<(f64, f64)> = (0..n)
+        .map(|k| {
+            let a = 2.0 * PI * f64::from(k) / f64::from(n);
+            (50.0 * a.cos(), 50.0 * a.sin())
+        })
+        .collect();
+    let p = run(
+        &[polygon(&pts)],
+        &with_clip(CellShape::Hexagon, Clip::Whole),
+    );
+    assert!(!p.cells.is_empty());
+}
+
+#[test]
+fn a_curve_that_needs_more_than_the_piece_cap_is_refused() {
+    // A cubic whose control points are far apart cannot be followed to within the tolerance in 4096 pieces.
+    let big = 1.0e7;
+    let field = Loop2 {
+        segs: vec![
+            Seg2::Cubic {
+                p0: v(0.0, 0.0),
+                p1: v(big, big),
+                p2: v(-big, big),
+                p3: v(10.0, 0.0),
+            },
+            Seg2::Line {
+                a: v(10.0, 0.0),
+                b: v(0.0, 0.0),
+            },
+        ],
+    };
+    let e = plan(&[field], &spec(CellShape::Hexagon))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("too complex"), "{e}");
+}
+
+#[test]
+fn a_bezier_of_degree_two_is_a_curve_like_any_other() {
+    let mut p = [v(0.0, 0.0); crate::prism::profile::MAX_BEZIER_CTRL];
+    p[1] = v(10.0, 8.0);
+    p[2] = v(20.0, 0.0);
+    let field = Loop2 {
+        segs: vec![
+            Seg2::Bezier { n: 2, p },
+            Seg2::Line {
+                a: v(20.0, 0.0),
+                b: v(0.0, 0.0),
+            },
+        ],
+    };
+    assert!(plan(&[field], &with_clip(CellShape::Circle, Clip::Free)).is_ok());
+}
+
+#[test]
+fn polygon_cells_keep_the_web_to_every_neighbour_on_both_grids() {
+    // The cells of a polygon are wider than their inscribed diameter (a triangle's circle is half
+    // its corners' reach), so the pitch grows with the outline: no two cells come nearer than the web.
+    for grid in [DotGrid::Square, DotGrid::Hexagonal] {
+        for sides in [3u32, 5, 6, 8] {
+            let s = CellGridSpec {
+                shape: CellShape::Polygon,
+                sides,
+                dot_grid: grid,
+                clip: Clip::Whole,
+                ..spec(CellShape::Polygon)
+            };
+            let p = run(&[rect(-40.0, -40.0, 40.0, 40.0)], &s);
+            let polys: Vec<Vec<Vec2>> = p
+                .cells
+                .iter()
+                .map(|c| {
+                    c.loops
+                        .iter()
+                        .flat_map(|l| l.segs.iter().map(Seg2::start))
+                        .collect()
+                })
+                .collect();
+            let edge_distance = |q: Vec2, a: Vec2, b: Vec2| {
+                let d = b - a;
+                let t = ((q - a).dot(d) / d.dot(d)).clamp(0.0, 1.0);
+                q.distance(a + d * t)
+            };
+            for (n, a) in polys.iter().enumerate() {
+                for b in polys.iter().skip(n + 1) {
+                    for &q in a {
+                        for m in 0..b.len() {
+                            let gap = edge_distance(q, b[m], b[(m + 1) % b.len()]);
+                            assert!(gap >= W - 1e-9, "{sides} sides on {grid:?}: {gap} < {W}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_small_loop_far_from_the_origin_keeps_its_area() {
+    let far = 1.0e8;
+    let lp = frame_rect(far, far, far + 1.0, far + 1.0);
+    assert!(
+        (lp.signed_area() - 1.0).abs() < 1e-6,
+        "{}",
+        lp.signed_area()
+    );
+}
+
+#[test]
+fn a_long_straight_boundary_of_many_collinear_pieces_snaps_to_the_same_cells() {
+    let n = 20_000;
+    let width = 600.0;
+    let mut pts = vec![(0.0, 0.0)];
+    pts.extend((1..n).map(|k| (width * f64::from(k) / f64::from(n), 0.0)));
+    pts.extend([(width, 0.0), (width, 60.0), (0.0, 60.0)]);
+    let many = run(&[polygon(&pts)], &with_clip(CellShape::Hexagon, Clip::Snap));
+    let plain = run(
+        &[rect(0.0, 0.0, width, 60.0)],
+        &with_clip(CellShape::Hexagon, Clip::Snap),
+    );
+    assert_eq!(counts(&many), counts(&plain));
+    assert!((many.open_area - plain.open_area).abs() < 1e-6);
+}
+
+#[test]
+fn a_tiny_step_on_a_very_long_edge_is_not_merged_away() {
+    // The vertex a hundredth of a millimetre off the line of a 50 km edge is a turn of under a
+    // nanoradian each side, but it is still a corner.
+    let ring = vec![
+        (v(0.0, 0.0), v(2.5e7, 0.01)),
+        (v(2.5e7, 0.01), v(5.0e7, 0.0)),
+        (v(5.0e7, 0.0), v(5.0e7, 100.0)),
+        (v(5.0e7, 100.0), v(0.0, 100.0)),
+        (v(0.0, 100.0), v(0.0, 0.0)),
+    ];
+    assert_eq!(snap::merge_collinear(ring).len(), 5);
+    let straight = vec![
+        (v(0.0, 0.0), v(25.0, 0.0)),
+        (v(25.0, 0.0), v(50.0, 0.0)),
+        (v(50.0, 0.0), v(50.0, 10.0)),
+        (v(50.0, 10.0), v(0.0, 10.0)),
+        (v(0.0, 10.0), v(0.0, 0.0)),
+    ];
+    assert_eq!(snap::merge_collinear(straight).len(), 4);
+}
+
+#[test]
+fn a_triangle_grid_works_at_the_extreme_indices() {
+    let lat = lattice(CellShape::Triangle);
+    // Neither the centre nor the key adds the indices.
+    let _ = lat.center(i64::MAX, 1);
+    assert!(lat.key(i64::MAX, 1) <= 1);
+}

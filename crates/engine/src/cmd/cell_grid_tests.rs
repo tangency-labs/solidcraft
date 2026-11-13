@@ -125,6 +125,63 @@ fn the_command_help_reads_the_real_cap_and_names_the_diamond_layout() {
 }
 
 #[test]
+fn a_symmetric_through_all_cut_goes_all_the_way_through_on_both_sides() {
+    // The sketch is on the plate's bottom face: the whole thickness lies on one side of it, so a
+    // reach halved between the two sides would stop short of the top.
+    let mut s = plate(62.0, 10.0);
+    cut(&mut s, json!({"through_all": true, "direction": "symmetric"})).unwrap();
+    assert!((volume(&s) - (62.0 * 62.0 * 10.0 - 25.0 * 100.0 * 10.0)).abs() < 1e-6, "{}", volume(&s));
+}
+
+#[test]
+fn every_body_as_the_target_is_reached_by_a_through_all_cut() {
+    let mut s = plate(62.0, 3.0);
+    cut(&mut s, json!({"through_all": true, "targets": ["*"]})).unwrap();
+    assert!((volume(&s) - (62.0 * 62.0 * 3.0 - 25.0 * 100.0 * 3.0)).abs() < 1e-6, "{}", volume(&s));
+}
+
+#[test]
+fn a_grid_that_cuts_nothing_says_so() {
+    // The field is a sketch 10 mm above the plate and the cells run up from it, away from the plate.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "Field"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let r = cut(&mut s, json!({"depth": 2})).unwrap();
+    assert!(r["warning"].as_str().is_some_and(|w| w.contains("removes no material")), "{r}");
+    assert!((volume(&s) - 62.0 * 62.0 * 3.0).abs() < 1e-6);
+    // Cut down to the plate, the same grid takes material and says nothing of the kind.
+    let r = cut(&mut s, json!({"depth": 10 + 2, "direction": "negative"})).unwrap();
+    assert!(r["warning"].as_str().is_none_or(|w| !w.contains("removes no material")), "{r}");
+    assert!(volume(&s) < 62.0 * 62.0 * 3.0 - 1.0);
+}
+
+#[test]
+fn a_bare_size_in_an_inch_design_is_checked_as_inches() {
+    // 0.0001 in is 0.00254 mm: over the least size, so it is no longer refused for its size.
+    let mut s = plate(62.0, 3.0);
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let e = cut(&mut s, json!({"through_all": true, "size": "0.0001", "web": "0.0001"})).unwrap_err().to_string();
+    assert!(!e.contains("must be at least"), "{e}");
+    // The same bare number in a millimetre design is.
+    let mut t = plate(62.0, 3.0);
+    let e = cut(&mut t, json!({"through_all": true, "size": "0.0001"})).unwrap_err().to_string();
+    assert!(e.contains("must be at least"), "{e}");
+}
+
+#[test]
+fn only_the_bodies_the_grid_reaches_decide_whether_it_meets_sheet_metal() {
+    let mut s = plate(62.0, 3.0);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Flat"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [162, 62]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Flat"}));
+    assert!(cut(&mut s, json!({"through_all": true})).is_err(), "no targets: every body is in reach");
+    cut(&mut s, json!({"through_all": true, "targets": ["Plate"]})).unwrap();
+}
+
+#[test]
 fn the_grid_is_rebuilt_when_the_sketch_changes() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"}));

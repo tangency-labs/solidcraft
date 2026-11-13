@@ -71,9 +71,11 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.cell_grid", "Cel
 fn size_param(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<solidcraft_doc::Expr> {
     let e = req_expr(cmd, p, key)?;
     check_expr(s, &e, Kind::Length, cmd, key)?;
-    let v = s.doc.eval(&e, Kind::Length).map_err(|err| bad(cmd, format!("{key}: {err}")))?;
+    // A bare number means the design's unit: the minimum is checked on the length it will be.
+    let typed: solidcraft_doc::Expr = s.doc.with_design_unit(&e, Kind::Length).into();
+    let v = s.doc.eval(&typed, Kind::Length).map_err(|err| bad(cmd, format!("{key}: {err}")))?;
     if !(v.is_finite() && v >= CELL_GRID_MIN_SIZE) {
-        return Err(bad(cmd, format!("`{key}` must be at least {CELL_GRID_MIN_SIZE} mm, not {v}")));
+        return Err(bad(cmd, format!("`{key}` must be at least {CELL_GRID_MIN_SIZE} mm, not {v} mm")));
     }
     Ok(e)
 }

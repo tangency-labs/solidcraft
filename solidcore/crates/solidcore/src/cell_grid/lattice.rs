@@ -14,7 +14,7 @@
 //! The dot lattices (circles and regular polygons on a hexagonal or square grid of centres)
 //! don't tile, have no lattice lines and never snap.
 
-use std::f64::consts::{FRAC_PI_3, FRAC_PI_4, FRAC_PI_6, PI, SQRT_2};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, FRAC_PI_6, PI, SQRT_2};
 
 use crate::math::Vec2;
 
@@ -43,6 +43,39 @@ pub(crate) fn regular_polygon(r_in: f64, n: usize) -> Vec<Vec2> {
             Vec2::new(rc * a.cos(), rc * a.sin())
         })
         .collect()
+}
+
+/// The distance between neighbouring centres of a grid of translated copies of `poly` that keeps
+/// them at least `web` apart. Two copies a distance `d` apart along a unit direction `u` are
+/// separated along `u` by `d` less the polygon's width along `u`, and a gap along one direction
+/// is a gap in distance, so `d` is at least that width plus `web`: for each direction a
+/// neighbour lies in (the grid's lines, and the diagonals of a square grid, a `sqrt 2` farther).
+/// An odd-sided or vertex-first polygon is wider than its inscribed diameter, so its pitch is
+/// larger than inscribed diameter plus web.
+fn polygon_pitch(poly: &[Vec2], grid: DotGrid, web: f64) -> f64 {
+    let width = |angle: f64| {
+        let u = Vec2::new(angle.cos(), angle.sin());
+        let (lo, hi) = poly.iter().fold((f64::MAX, f64::MIN), |(lo, hi), q| {
+            let t = q.dot(u);
+            (lo.min(t), hi.max(t))
+        });
+        hi - lo
+    };
+    let dirs: &[(f64, f64)] = match grid {
+        // Neighbours at 90, 30 and -30 degrees (the lattice vectors are `p (0, 1)`, `p (sqrt 3 /
+        // 2, 1/2)` and `p (sqrt 3 / 2, -1/2)`), all `p` away.
+        DotGrid::Hexagonal => &[(FRAC_PI_2, 1.0), (FRAC_PI_6, 1.0), (-FRAC_PI_6, 1.0)],
+        // Neighbours along both axes `p` away, and along both diagonals `p sqrt 2` away.
+        DotGrid::Square => &[
+            (0.0, 1.0),
+            (FRAC_PI_2, 1.0),
+            (FRAC_PI_4, SQRT_2),
+            (-FRAC_PI_4, SQRT_2),
+        ],
+    };
+    dirs.iter()
+        .map(|&(a, reach)| (width(a) + web) / reach)
+        .fold(0.0, f64::max)
 }
 
 /// How a piece of a cell is named by what it is, for the counts and for tests.
@@ -131,7 +164,7 @@ impl Lattice {
         sides: u32,
     ) -> Result<Lattice, CellGridError> {
         let (s, w) = (size, web);
-        let p = s + w;
+        let mut p = s + w;
         let r_in = s / 2.0;
         let (kind, step, ndir, cell_area, round, outlines): (
             Kind,
@@ -212,6 +245,9 @@ impl Lattice {
                     (poly, area, false)
                 };
                 let rc = poly.iter().map(|q| q.length()).fold(0.0, f64::max);
+                if !round {
+                    p = polygon_pitch(&poly, grid, w);
+                }
                 (
                     Kind::Dot { grid, rc },
                     FRAC_PI_6,
@@ -268,7 +304,7 @@ impl Lattice {
             Kind::Hex { h, .. } => Vec2::new(fi * h, fi * self.p / 2.0 + fj * self.p),
             Kind::Triangle { rt, l, ht, .. } => Vec2::new(
                 fi * l / 2.0,
-                fj * ht + if ((i + j) & 1) == 1 { rt } else { 0.0 },
+                fj * ht + if ((i ^ j) & 1) == 1 { rt } else { 0.0 },
             ),
             Kind::Square
             | Kind::Dot {
@@ -285,7 +321,7 @@ impl Lattice {
     /// Which outline cell `(i, j)` uses (cells differ only by orientation, as triangles do).
     pub fn key(&self, i: i64, j: i64) -> usize {
         match self.kind {
-            Kind::Triangle { .. } => ((i + j) & 1) as usize,
+            Kind::Triangle { .. } => ((i ^ j) & 1) as usize,
             _ => 0,
         }
     }

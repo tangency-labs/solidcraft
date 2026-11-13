@@ -119,12 +119,16 @@ pub(crate) fn dedupe(poly: Vec<Vec2>) -> Vec<Vec2> {
 }
 
 /// Area of the counter-clockwise polygon.
+///
+/// Summed about the first corner: about the origin, a small loop far from it loses its area to
+/// cancellation.
 pub(crate) fn poly_area(poly: &[Vec2]) -> f64 {
     let n = poly.len();
+    let o = poly.first().copied().unwrap_or(Vec2::new(0.0, 0.0));
     let mut a = 0.0;
     for k in 0..n {
         if let (Some(&p), Some(&q)) = (poly.get(k), poly.get(ring_next(k, n))) {
-            a += cross2(p, q);
+            a += cross2(p - o, q - o);
         }
     }
     0.5 * a
@@ -133,9 +137,11 @@ pub(crate) fn poly_area(poly: &[Vec2]) -> f64 {
 /// Centroid of the polygon (the mean of the corners when it has no area).
 pub(crate) fn poly_centroid(poly: &[Vec2]) -> Vec2 {
     let n = poly.len();
+    let o = poly.first().copied().unwrap_or(Vec2::new(0.0, 0.0));
     let (mut a, mut cx, mut cy) = (0.0, 0.0, 0.0);
     for k in 0..n {
-        if let (Some(&p), Some(&q)) = (poly.get(k), poly.get(ring_next(k, n))) {
+        if let (Some(&p0), Some(&q0)) = (poly.get(k), poly.get(ring_next(k, n))) {
+            let (p, q) = (p0 - o, q0 - o);
             let w = cross2(p, q);
             a += w;
             cx += (p.x + q.x) * w;
@@ -149,7 +155,7 @@ pub(crate) fn poly_centroid(poly: &[Vec2]) -> Vec2 {
             poly.iter().map(|p| p.y).sum::<f64>() / m,
         );
     }
-    Vec2::new(cx / (3.0 * a), cy / (3.0 * a))
+    o + Vec2::new(cx / (3.0 * a), cy / (3.0 * a))
 }
 
 /// The point where the lines `n1 . x = c1` and `n2 . x = c2` meet (`None` when parallel).
@@ -473,13 +479,14 @@ impl Prim {
         }
     }
 
-    /// This piece's term of the loop's signed area.
-    pub fn area_term(&self) -> f64 {
+    /// This piece's term of the loop's signed area, taken about `o` (any point of the loop: the
+    /// sum is the same, but about a far origin a small loop's terms cancel to nothing).
+    pub fn area_term(&self, o: Vec2) -> f64 {
         match *self {
-            Prim::Line { a, b, .. } => 0.5 * cross2(a, b),
+            Prim::Line { a, b, .. } => 0.5 * cross2(a - o, b - o),
             Prim::Arc {
                 r, sweep, p0, p1, ..
-            } => 0.5 * cross2(p0, p1) + 0.5 * r * r * (sweep - sweep.sin()),
+            } => 0.5 * cross2(p0 - o, p1 - o) + 0.5 * r * r * (sweep - sweep.sin()),
         }
     }
 
@@ -724,7 +731,8 @@ impl Loop {
     }
 
     pub fn signed_area(&self) -> f64 {
-        self.prims.iter().map(Prim::area_term).sum()
+        let o = self.prims.first().map_or(Vec2::new(0.0, 0.0), Prim::start);
+        self.prims.iter().map(|p| p.area_term(o)).sum()
     }
 
     pub fn reversed(&self) -> Loop {
