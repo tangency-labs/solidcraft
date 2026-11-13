@@ -9,6 +9,10 @@
 //! The rounded box is the core 24 x 14 x 4 grown by 3; its closed shell's cavity is
 //! the same core grown by 1. Open at the top, the cavity also takes the 24 x 14 x 2
 //! slab between the cavity's flat top (z = 8) and the removed top face (z = 10).
+//!
+//! tangency-labs/solidcraft#15108 is the same family at r5 on a 40 x 30 x 20 box: its open
+//! shell failed only with the box centred on `y = 0` (the ball extension's farthest-point
+//! angle, `surface::extend::ball`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -21,10 +25,14 @@ mod offset_fixture;
 
 use core::f64::consts::PI;
 
-use offset_fixture::{planar_faces_at, report, shell, volume};
+use offset_fixture::{api_shell, planar_faces_at, report, shell, volume};
 use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
+use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::create_box;
+use solidcore::query::api_queries::brep_is_manifold_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, Kernel};
 
 /// The core `a x b x c` grown by `r` (Minkowski sum with a ball).
@@ -119,5 +127,77 @@ fn issue_460_closed_shell_by_round_set() {
         }
         let result = shell(&mut k, b, -2.0, &[]);
         let _ = report(&k, &format!("issue_460 closed, {set}"), result, None, 0.0);
+    }
+}
+
+/// tangency-labs/solidcraft#15108: a 40 x 30 x 20 box centred at `c`, all twelve edges
+/// rounded r5 and shelled 2 inward with the top open, with the options SolidCraft's
+/// `smlib_shell` passes and SolidCraft's fix set: every opt-in fix but the two its backend
+/// holds back (`fixes()` less `HELD_BACK` in SolidCraft's `crates/smlib/src/core.rs`;
+/// mirrored here, as solidcore cannot depend on the app). Returns the shell's volume.
+fn shell_15108(c: [f64; 3]) -> f64 {
+    let mut fixes = UpstreamFixes::all();
+    fixes.fillet_refuse_rounds_breaking_through = false;
+    fixes.fillet_round_ends_on_outline = false;
+    let mut k = Kernel {
+        fixes,
+        ..Kernel::default()
+    };
+    let corner = Point3::new(c[0] - 20.0, c[1] - 15.0, c[2] - 10.0);
+    let mut b = create_box(&mut k, corner, 40.0, 30.0, 20.0).unwrap();
+    let edges: Vec<_> = b.edges().ids().collect();
+    fillet_edges(&mut k, &mut b, &edges, 5.0, 1, 1, 1.0).unwrap();
+    let top = planar_faces_at(&k, &b, 2, c[2] + 10.0);
+    assert_eq!(top.len(), 1, "the top face");
+    let options = ShellOptions {
+        offset: OffsetOptions {
+            distance: -2.0,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+        create_offset_solid: true,
+        merge_sheet_side_walls: true,
+    };
+    let mut r = api_shell(&mut k, &mut b, options, &top)
+        .unwrap_or_else(|e| panic!("centre {c:?}: the shell fails: {e:?}"));
+    solidcore::topology::integrity::check(&r).unwrap();
+    assert!(brep_is_manifold_solid(&r).unwrap(), "centre {c:?}");
+    // the check SolidCraft runs on every result (`CheckLevel::All`)
+    let check = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
+    assert!(
+        check.is_valid(),
+        "centre {c:?}: {:?}",
+        check.failures().collect::<Vec<_>>()
+    );
+    volume(&k, &mut r).unwrap()
+}
+
+/// #15108: the shell builds wherever the box sits. Centred on `y = 0` its corner balls'
+/// poles are normal to their third sides' planes, and the ball extension took the
+/// farthest point of that side from a direction that was all rounding (a half turn,
+/// refused as "not a triangle under a half turn"); shifted, it built. Each position gives
+/// the closed form: the r5 rounded box less its cavity, the core 30 x 20 x 10 grown by 3,
+/// less the 30 x 20 x 2 slab the open top adds to it (to the volume integrator's 1e-6),
+/// and the two positions agree far tighter.
+#[test]
+fn issue_15108_open_shell_of_a_rounded_box_is_independent_of_position() {
+    let want =
+        grown_box(30.0, 20.0, 10.0, 5.0) - grown_box(30.0, 20.0, 10.0, 3.0) - 30.0 * 20.0 * 2.0;
+    let shifted = shell_15108([20.0, 15.0, 10.0]);
+    for c in [
+        [0.0, 0.0, 0.0],
+        [20.0, 0.0, 10.0],
+        [0.1, 0.0, 0.0],
+        [20.0, 15.0, 10.0],
+    ] {
+        let got = shell_15108(c);
+        assert!(
+            (got - want).abs() <= 1e-6 * want,
+            "centre {c:?}: {got} vs {want}"
+        );
+        assert!(
+            (got - shifted).abs() <= 1e-9 * shifted,
+            "centre {c:?}: {got} vs {shifted} at [20, 15, 10]"
+        );
     }
 }
