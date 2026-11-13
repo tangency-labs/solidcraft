@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the root circle of a cylindrical boss on a plate rounded r2 (a concave torus)",
+ "source": "analytic",
+ "method": "plate 60x40x10 with a boss R8 x 10 on its top at (30, 20): V0 = 24000 + 640 pi = 26010.6193. The concave root (rho = 8, z = 10) rounded r2 adds the spandrel (1-pi/4) r^2 = 0.858407 outside the boss, its first moment about the wall r^3 (5/6-pi/4) = 0.383481, revolved once (Pappus): 2 pi (8 A + M) = 45.5577. V = 26056.1770. Faces 9.",
+ "body_count": 1,
+ "volume_mm3": 26056.177042153293,
+ "faces": 9,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

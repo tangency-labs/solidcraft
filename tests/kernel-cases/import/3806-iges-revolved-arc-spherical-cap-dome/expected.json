@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3806",
+  "tangency-labs/solidcraft#3813"
+ ],
+ "what": "a dome: an IGES surface of revolution (120) of a 60-to-90 degree circular arc (100) of radius 50 centred on the axis, trimmed by a circle at the rim, over a flat base disc; the cap must be 50 mm across and 6.7 mm tall, not a whole sphere",
+ "source": "analytic",
+ "method": "spherical cap R=50 from polar angle 30 deg: rim radius 25, h = R - R cos30 = 6.69873; V = pi h^2 (3R - h)/3 = 6733.8522; A = 2 pi R h + pi 25^2 = 4067.9634; 2 faces; bbox z from 43.3013 to 50",
+ "body_count": 1,
+ "volume_mm3": 6733.8522,
+ "area_mm2": 4067.9634,
+ "faces": 2,
+ "bbox": {
+  "min": [
+   -24.999999999999996,
+   -24.999999999999996,
+   43.3013
+  ],
+  "max": [
+   24.999999999999996,
+   24.999999999999996,
+   50.0
+  ]
+ }
+}

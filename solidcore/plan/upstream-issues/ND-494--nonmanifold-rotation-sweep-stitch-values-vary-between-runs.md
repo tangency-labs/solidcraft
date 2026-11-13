@@ -1,0 +1,15 @@
+#### ND-494. A non-manifold body's rotational sweep with stitching gives slightly different values from run to run
+- **Severity:** Nondeterminism
+- **Area:** Sweeps (topology sweep)
+- **Location:** `source/SMLib/src/SmTopologySweep.cpp` (`DoSweep` with `bSweepWholeBrep`, `:628`) on a non-manifold body. Its step 6 copies the wire edges and shell vertices into a separate B-rep, sweeps them in a nested `DoSweep`, then unions them in by `ManifoldBoolean`. The statement whose order varies is not traced. The values move with the process's heap layout (the run alone, or in a `--jobs` group), as in the pointer-keyed iteration of ND-2 and ND-258.
+- **What happens:** the same inputs give values that differ in the last bits from one run of the C++ to the next. The case still compares equal to the port within the 1e-9 gate.
+- **Trigger:** `sweep.topology_sweep` fixture case `nm_test_rotation_y_30_stitch` (`fixtures/sweep.topology_sweep/nonmanifold_body.json`: `tests/prog_test/src/smSweepTest.cpp` `my_create_test_brep` / `my_sweep_demo` case 8, a rotation of 30 degrees about y with stitching).
+- **How found:** the unit's `max_rel_err` changed between runs of one main commit while its pass counts did not (693 of 703 passed, 0 failed, every run).
+  - On 9dde25e97b, three runs alone gave 2.578e-15, 3.621e-14 and 2.578e-15, and two runs in a `--jobs 4` group gave 1.776e-15 and 2.578e-15.
+  - Three more two-sided runs with per-case digests (`DIFFTEST_RUST_DIGEST`) followed.
+- **Confirmed:** in those three two-sided runs on 9dde25e97b:
+  - The port's per-case digests are identical in all three, and two Rust-only `--digest-dir` runs match as well, so the port is deterministic.
+  - The C++ digest of `nm_test_rotation_y_30_stitch` is `132eac7d630490f3` in runs 1 and 3 and `48952100a9db1777` in run 2. Its `max_rel_err` against the port is 3.197e-15, 5.940e-16 and 3.197e-15; every other case's C++ digest is the same in all three runs.
+  - The earlier runs' larger `max_rel_err` (3.621e-14) is the unit's maximum, recorded without per-case data.
+  - The values themselves are not recorded: the report keeps each case's largest relative error, and the digest only a hash of the outputs.
+- **Rust port:** deterministic (`BTreeMap`s and arena order); the port has nothing to change. The 1e-9 gate holds against every C++ outcome seen.

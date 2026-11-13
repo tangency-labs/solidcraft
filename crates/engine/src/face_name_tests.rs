@@ -4,7 +4,8 @@
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -43,8 +44,8 @@ fn top_and_hole_names(s: &mut Session) -> (String, Vec<String>) {
 }
 
 /// A 60 x 40 x 10 plate with a hole of radius 5: its top face is a rectangle with a hole in it,
-/// whose centroid (the plate's middle, (30, 20, 10)) is in the hole; the hole's wall is two half
-/// cylinders, whose centroids are inside the cylinder, 2r/π from its axis.
+/// whose centroid (the plate's middle, (30, 20, 10)) is in the hole; the hole's wall is one
+/// whole cylinder (SMLib's, closed on its seam), whose centroid is on its axis, halfway up.
 #[test]
 fn model_faces_gives_a_point_on_each_face_and_the_hole_axis_and_radius() {
     let mut s = Session::default();
@@ -61,10 +62,10 @@ fn model_faces_gives_a_point_on_each_face_and_the_hole_axis_and_radius() {
             Some(c) => {
                 let radial = (at.x - 30.0).hypot(at.y - 20.0);
                 assert!((radial - 5.0).abs() < 1e-9 && at.z > 0.0 && at.z < 10.0, "{at:?}");
-                // The centroid of a half cylinder's wall is 2r/π = 3.18 from the axis, not on the wall.
+                // The centroid of a whole cylinder's wall is on its axis, not on the wall.
                 let centroid = vec(&f["centroid"]);
                 let inside = (centroid.x - 30.0).hypot(centroid.y - 20.0);
-                assert!((2.5..4.0).contains(&inside), "the centroid of a half cylinder is inside it: {inside}");
+                assert!(inside < 1e-9 && (centroid.z - 5.0).abs() < 1e-9, "the centroid of the hole's wall is on its axis: {centroid:?}");
                 // The hole's axis: the line through (30, 20) along z, its radius 5.
                 let (origin, axis) = (vec(&c["origin"]), vec(&c["axis"]));
                 assert!((origin.x - 30.0).abs() < 1e-9 && (origin.y - 20.0).abs() < 1e-9, "{origin:?}");
@@ -122,10 +123,11 @@ fn convert_to_sheet_metal_takes_the_plates_face_by_name() {
         let span = at.iter().cloned().fold(f64::MIN, f64::max) - at.iter().cloned().fold(f64::MAX, f64::min);
         assert!(span > 9.8 && span < 10.0 + 1e-6, "{span}");
     }
-    // The plate is still 100 x 60 x 2.5 less the hole: 15000 - π·5²·2.5 = 14803.65 mm³ for a round hole, a little more
-    // (less than 2% of the hole's 196.35 mm³) for a polygon inside the circle.
+    // The plate is still 100 x 60 x 2.5 less the hole, which is round: 15000 - π·5²·2.5 =
+    // 14803.65 mm³, within the measure's accuracy (SMLib's mass properties come within 2e-7 of
+    // a closed form).
     let (v, round) = (volume(&mut s, "Plate"), 15000.0 - 25.0 * PI * 2.5);
-    assert!(v >= round - 1e-6 && v - round < 0.02 * 25.0 * PI * 2.5, "{v}");
+    assert!((v - round).abs() < 2e-7 * round, "{v} vs {round}");
 }
 
 /// Shell, draft and offset face share the parser of Delete Face.
@@ -207,8 +209,8 @@ fn offset_face_takes_the_face_by_name() {
     assert!((volume(&mut s, "Tray") - 100.0 * 60.0 * 35.0).abs() < 1e-6, "{}", volume(&mut s, "Tray"));
 }
 
-/// A cylinder of radius 10 and height 20 has a side of two half cylinders, each of which
-/// `model.faces` describes (its axis and radius); drafting them 5 degrees from the base plane makes
+/// A cylinder of radius 10 and height 20 has one side face (SMLib's, closed on its seam), which
+/// `model.faces` describes (its axis and radius); drafting it 5 degrees from the base plane makes
 /// a frustum of radius 10 at the base and 10 - 20 tan 5 degrees at the top.
 #[test]
 fn draft_takes_a_cylinders_side_by_name() {
@@ -216,7 +218,7 @@ fn draft_takes_a_cylinders_side_by_name() {
     run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Pin"}));
     let all = faces(&mut s, "Pin");
     let sides: Vec<&Value> = all.iter().filter(|f| f.get("cylinder").is_some()).collect();
-    assert_eq!(sides.len(), 2, "two half cylinders: {all:?}");
+    assert_eq!(sides.len(), 1, "one side: {all:?}");
     for side in &sides {
         assert!((side["cylinder"]["radius"].as_f64().unwrap_or(f64::NAN) - 10.0).abs() < 1e-9, "{side}");
     }
@@ -239,4 +241,191 @@ fn replace_face_takes_the_face_by_name() {
     run(&mut s, "solid.replace_face", json!({"faces": [top_a], "target_face": on_b, "body": "A"}));
     // A's top moves up to B's, 15 high: 10 x 10 x 15.
     assert!((volume(&mut s, "A") - 1500.0).abs() < 1e-6, "{}", volume(&mut s, "A"));
+}
+
+/// A face name on two bodies, each with one such face (two bodies one extrude made, the pieces of
+/// a split body), is not a split face: a hole placed on one of them gives no warning (#10699).
+#[test]
+fn a_face_name_on_two_bodies_is_no_split_face() {
+    let said = |s: &Session, feature: &str| {
+        let r = s.model.result(s.doc.find_feature(feature).unwrap().id).unwrap();
+        format!("{}{}", r.error.clone().unwrap_or_default(), r.warning.clone().unwrap_or_default())
+    };
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [14, 0], "p1": [24, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "operation": "new"}));
+    run(&mut s, "solid.hole", json!({"position": [5, 5, 10], "diameter": 5, "depth": 5, "name": "Hole1"}));
+    assert_eq!(said(&s, "Hole1"), "");
+    assert!((volume(&mut s, "Body1") - (1000.0 - PI * 2.5 * 2.5 * 5.0)).abs() < 0.1);
+    assert!((volume(&mut s, "Body2") - 1000.0).abs() < 1e-6);
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    run(&mut s, "solid.split_body", json!({"body": "Body1", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    run(&mut s, "solid.hole", json!({"position": [30, 10, 10], "diameter": 5, "name": "Hole1", "targets": ["Body1"]}));
+    assert_eq!(said(&s, "Hole1"), "");
+}
+
+/// A plate with a round wall on each long side, and a tall tab with a curved notch joined to its
+/// far end, 12 mm from those walls: this join reports no history, and the bigger body meshes the
+/// walls differently. Returns the plate's and the tab's feature ids.
+fn plate_and_notched_tab(s: &mut Session) -> (Option<u64>, Option<u64>) {
+    let reach = 57.0_f64.sqrt(); // Where a circle of radius 11 meets y = ±8.
+    run(s, "sketch.create", json!({"plane": "XY"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [-20, -8], "p1": [20, 8]}));
+    run(s, "sketch.arc.three_point", json!({"start": [-reach, 8], "end": [reach, 8], "through": [0, 11]}));
+    run(s, "sketch.arc.three_point", json!({"start": [-reach, -8], "end": [reach, -8], "through": [0, -11]}));
+    run(s, "sketch.finish", json!({}));
+    let plate = run(s, "solid.extrude", json!({"distance": 10, "name": "Plate"}))["feature"].as_u64();
+    run(s, "sketch.create", json!({"plane": {"face": [20, 0, 5]}, "project_edges": false}));
+    run(s, "sketch.line", json!({"points": [[-8, -5], [8, -5], [8, 23], [-8, 23], [-8, -5]]}));
+    run(s, "sketch.circle.center", json!({"center": [0, 23], "radius": 8.0667}));
+    run(s, "sketch.finish", json!({}));
+    let tab =
+        run(s, "solid.extrude", json!({"distance": 10, "operation": "join", "name": "Tab", "profiles": [{"point": [0, -3]}]}))["feature"].as_u64();
+    (plate, tab)
+}
+
+/// The round walls stay the plate's whole, and an edge picked on one stores no trace of the tab.
+#[test]
+fn a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone() {
+    let mut s = Session::default();
+    let (plate, tab) = plate_and_notched_tab(&mut s);
+    let tab_name = format!("F{}", tab.unwrap_or_default());
+    let made_by = |face: &Value| face["name"].as_str().and_then(solidcraft_doc::persistent_name::made_by);
+    let all = faces(&mut s, "Body1");
+    let round: Vec<&Value> = all.iter().filter(|f| f.get("plane_normal").is_none_or(Value::is_null)).collect();
+    let walls: Vec<&&Value> = round.iter().filter(|f| vec(&f["point"]).x < 15.0).collect();
+    assert_eq!(walls.len(), 2, "{all:?}");
+    for wall in walls {
+        assert_eq!(made_by(wall), plate, "{wall}");
+        assert!(wall["name"].as_str().is_some_and(|name| !name.contains(&tab_name)), "{wall}");
+    }
+    assert!(round.iter().filter(|f| vec(&f["point"]).x > 20.0).all(|notch| made_by(notch) == tab), "{all:?}");
+
+    let volume_before = volume(&mut s, "Body1");
+    run(&mut s, "solid.fillet", json!({"edges": [[0, -11, 10]], "radius": 1, "name": "Round"}));
+    assert!(volume(&mut s, "Body1") < volume_before);
+    let filleted = volume(&mut s, "Body1");
+    let filleted_faces = faces(&mut s, "Body1");
+    let round_id = s.doc.features.iter().position(|f| f.name == "Round").unwrap();
+    assert!(s.doc.features[round_id].edge_names.iter().all(|name| !name.contains(&tab_name)), "{:?}", s.doc.features[round_id].edge_names);
+
+    // A design saved while the wall was named after the tab still finds its edge.
+    let mut saved = (*s.doc).clone();
+    saved.features[round_id].edge_names = vec![format!("F2:top|{tab_name}:side:l4#[F2:side:l1]")];
+    let mut reopened = Session::opened_at(saved.clone(), None, None);
+    let result = reopened.model.result(reopened.doc.features[round_id].id).unwrap();
+    assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
+    assert!((volume(&mut reopened, "Body1") - filleted).abs() < 1e-6);
+    // The same edge: the plate is symmetric, so the volume alone would take a round on a mirrored
+    // edge as well. Every face of the body filleted fresh is there, where it was.
+    let reopened_faces = faces(&mut reopened, "Body1");
+    assert_eq!(reopened_faces.len(), filleted_faces.len(), "{reopened_faces:?}");
+    for face in &filleted_faces {
+        assert!(reopened_faces.iter().any(|f| vec(&f["point"]).dist(vec(&face["point"])) < 1e-6), "{face} is not in {reopened_faces:?}");
+    }
+
+    // Only the point says which edge that old name meant, and only among the edges of the face the
+    // name still finds. Each of these still asks for the edge again: a point on the wall but on no
+    // edge; the corner where the wall's top edge meets the plate's straight side; a face of a
+    // feature that made nothing on the body (removed, not renamed); the plate's bottom, which the
+    // wall's top edge does not bound.
+    let on_edge = Vec3::new(0.0, -11.0, 10.0);
+    for (name, at) in [
+        (format!("F2:top|{tab_name}:side:l4#[F2:side:l1]"), Vec3::new(0.0, -11.0, 5.0)),
+        (format!("F2:top|{tab_name}:side:l4#[F2:side:l1]"), Vec3::new(57.0_f64.sqrt(), -8.0, 10.0)),
+        ("F2:top|F99:side:l4#[F2:side:l1]".to_string(), on_edge),
+        (format!("F2:start|{tab_name}:side:l4#[F2:side:l1]"), on_edge),
+    ] {
+        let mut off = saved.clone();
+        off.features[round_id].edge_names = vec![name.clone()];
+        if let solidcraft_doc::FeatureKind::Fillet { edges, .. } = &mut off.features[round_id].kind {
+            edges[0].0 = at;
+        }
+        let reopened = Session::opened_at(off, None, None);
+        let result = reopened.model.result(reopened.doc.features[round_id].id).unwrap();
+        assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{name} at {at:?}: {:?}", result.error);
+    }
+}
+
+/// A 40 x 20 x 10 plate with a bar joined across its top from x = `x0` to `x1` (y -5…25, 5 high),
+/// splitting the top into two faces of one stem, told apart by their neighbours, and a chamfer on
+/// the plate's front top edge left of the bar, picked at (5, 0, 10). Returns the chamfer's index.
+fn plate_split_by_a_bar(s: &mut Session, x0: f64, x1: f64) -> usize {
+    run(s, "sketch.create", json!({"plane": "XY"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 10, "name": "Plate"}));
+    run(s, "sketch.create", json!({"plane": {"face": [x0 / 2.0, 10, 10]}, "project_edges": false}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [x0, -5], "p1": [x1, 25]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 5, "operation": "join", "name": "Bar"}));
+    run(s, "solid.chamfer", json!({"edges": [[5, 0, 10]], "distance": 1, "name": "Bevel"}));
+    s.doc.features.iter().position(|f| f.name == "Bevel").unwrap()
+}
+
+/// A design saved with the plate's top named after other neighbours than it has now (a later
+/// join, or another build, named the walls around it otherwise), on a body with two top faces of
+/// that stem: no face answers to the name exactly, and the saved pick decides, on the one edge
+/// between the front side and a top face whose exact curve it lies on.
+#[test]
+fn a_chamfer_saved_under_a_top_faces_old_neighbours_is_found_at_its_pick() {
+    let mut s = Session::default();
+    let bevel = plate_split_by_a_bar(&mut s, 15.0, 25.0);
+    let tops: Vec<String> =
+        faces(&mut s, "Body1").iter().filter_map(|f| f["name"].as_str().map(str::to_string)).filter(|n| n.starts_with("F2:top#[")).collect();
+    assert_eq!(tops.len(), 2, "{tops:?}");
+    let picked = s.doc.features[bevel].edge_names.clone();
+    assert_eq!(picked, vec!["F2:side:l1|F2:top#[F2:side:l4,F4:side:l4]".to_string()]);
+    let (chamfered, chamfered_faces) = (volume(&mut s, "Body1"), faces(&mut s, "Body1"));
+
+    // F4:side:l1 (the bar's far wall) bounds neither top face: the name answers to both by stem only.
+    let stale = "F2:side:l1|F2:top#[F2:side:l4,F4:side:l1]";
+    let mut saved = (*s.doc).clone();
+    saved.features[bevel].edge_names = vec![stale.to_string()];
+    let mut reopened = Session::opened_at(saved.clone(), None, None);
+    let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
+    assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
+    assert!((volume(&mut reopened, "Body1") - chamfered).abs() < 1e-6);
+    // The same edge, not the one right of the bar (the plate is symmetric about it).
+    let reopened_faces = faces(&mut reopened, "Body1");
+    assert_eq!(reopened_faces.len(), chamfered_faces.len(), "{reopened_faces:?}");
+    for face in &chamfered_faces {
+        assert!(reopened_faces.iter().any(|f| vec(&f["point"]).dist(vec(&face["point"])) < 1e-6), "{face} is not in {reopened_faces:?}");
+    }
+
+    // Right of the bar is the other candidate's; on the front side below the edge, or on the bar's
+    // edge between the two, is no candidate's: the point lies on exactly one there, or none.
+    for (at, finds) in [(Vec3::new(35.0, 0.0, 10.0), true), (Vec3::new(5.0, 0.0, 5.0), false), (Vec3::new(20.0, 0.0, 10.0), false)] {
+        let mut off = saved.clone();
+        if let solidcraft_doc::FeatureKind::Chamfer { edges, .. } = &mut off.features[bevel].kind {
+            edges[0].0 = at;
+        }
+        let reopened = Session::opened_at(off, None, None);
+        let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
+        if finds {
+            assert!(result.error.is_none(), "{at:?}: {:?}", result.error);
+        } else {
+            assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{at:?}: {:?}", result.error);
+        }
+    }
+}
+
+/// With a bar 0.1 mm wide, the two edges between the front side and the top faces end within a
+/// pick's reach of one point between them: the point lies on both, and the name asks again.
+#[test]
+fn a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again() {
+    let mut s = Session::default();
+    let bevel = plate_split_by_a_bar(&mut s, 20.0, 20.1);
+    let mut saved = (*s.doc).clone();
+    saved.features[bevel].edge_names = vec!["F2:side:l1|F2:top#[F2:side:l4,F4:side:l1]".to_string()];
+    if let solidcraft_doc::FeatureKind::Chamfer { edges, .. } = &mut saved.features[bevel].kind {
+        edges[0].0 = Vec3::new(20.05, 0.0, 10.0);
+    }
+    let reopened = Session::opened_at(saved, None, None);
+    let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
+    assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
 }

@@ -1,0 +1,8 @@
+{"commands": [
+  {"command": "sketch.create", "params": {"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Section"}},
+  {"command": "sketch.line", "params": {"closed": true, "infer": false, "connect": false, "points": [[0, 0], [40, 0], [70, 40], [64, 40], [34, 6], [0, 6]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.revolve", "params": {"sketch": "Section", "axis": "Z", "operation": "new", "body_name": "Bowl"}},
+  {"command": "solid.cylinder", "params": {"radius": 320, "height": 200, "base": [-100, 0, 356], "axis": "X", "body_name": "Cutter"}},
+  {"command": "solid.combine", "params": {"target": "Bowl", "tools": ["Cutter"], "operation": "cut"}}
+]}

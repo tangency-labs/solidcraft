@@ -1,0 +1,9268 @@
+{
+ "cases": [
+  {
+   "name": "degen_sliver_w1e-05_s1_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          1e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w1e-05_s1_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          1e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w1e-05_s1_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -6.442176872376911e-06,
+          7.648421872844886e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.7648421872844885,
+          0.644217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.7648357451076161,
+          0.6442253356595639,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w1e-05_s1_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -6.442176872376911e-06,
+          7.648421872844886e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.7648421872844885,
+          0.644217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.7648357451076161,
+          0.6442253356595639,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w1e-05_s10_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          10.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          10.0,
+          1e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w1e-05_s10_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          10.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          10.0,
+          1e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w1e-05_s10_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -6.442176872376911e-06,
+          7.648421872844886e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          7.648421872844885,
+          6.44217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          7.648415430668013,
+          6.442184520798783,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w1e-05_s10_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -6.442176872376911e-06,
+          7.648421872844886e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          7.648421872844885,
+          6.44217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          7.648415430668013,
+          6.442184520798783,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w2e-05_s1_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          2e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          2e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w2e-05_s1_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          2e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          2e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w2e-05_s1_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.2884353744753822e-05,
+          1.529684374568977e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.7648421872844885,
+          0.644217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.7648293029307437,
+          0.6442329840814367,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w2e-05_s1_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.2884353744753822e-05,
+          1.529684374568977e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.7648421872844885,
+          0.644217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.7648293029307437,
+          0.6442329840814367,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w2e-05_s10_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          2e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          10.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          10.0,
+          2e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w2e-05_s10_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          2e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          10.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          10.0,
+          2e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w2e-05_s10_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.2884353744753822e-05,
+          1.529684374568977e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          7.648421872844885,
+          6.44217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          7.64840898849114,
+          6.442192169220656,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w2e-05_s10_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.2884353744753822e-05,
+          1.529684374568977e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          7.648421872844885,
+          6.44217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          7.64840898849114,
+          6.442192169220656,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w5e-06_s1_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          5e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          5e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w5e-06_s1_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          5e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          5e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w5e-06_s1_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -3.2210884361884555e-06,
+          3.824210936422443e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.7648421872844885,
+          0.644217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.7648389661960523,
+          0.6442215114486275,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w5e-06_s1_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -3.2210884361884555e-06,
+          3.824210936422443e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.7648421872844885,
+          0.644217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.7648389661960523,
+          0.6442215114486275,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w5e-06_s10_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          5e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          10.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          10.0,
+          5e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w5e-06_s10_a0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          5e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          10.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          10.0,
+          5e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_sliver_w5e-06_s10_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -3.2210884361884555e-06,
+          3.824210936422443e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          7.648421872844885,
+          6.44217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          7.648418651756449,
+          6.4421806965878465,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_sliver_w5e-06_s10_a0.7",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -3.2210884361884555e-06,
+          3.824210936422443e-06,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          7.648421872844885,
+          6.44217687237691,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          7.648418651756449,
+          6.4421806965878465,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_curved_sliver",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.3,
+          0.1,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.30001,
+          0.1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          2.0,
+          1.2,
+          0.2,
+          -1.7976931348623157e+308
+         ],
+         [
+          2.0,
+          1.20001,
+          0.2,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 2,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_props_curved_sliver",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "oob": false,
+       "form": 0,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1e-05,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.3,
+          0.1,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.30001,
+          0.1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          2.0,
+          1.2,
+          0.2,
+          -1.7976931348623157e+308
+         ],
+         [
+          2.0,
+          1.20001,
+          0.2,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 2,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_edge_props"
+     },
+     {
+      "step": "cache_vertex_props"
+     },
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_sphere_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_sphere_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_sphere_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_sphere_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_sphere_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_sphere_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_sphere_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_sphere_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_sphere_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_sphere_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_sphere_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_sphere_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_sphere_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_sphere_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_sphere_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_sphere_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 0
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_plane_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_plane_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_plane_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_plane_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_plane_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_plane_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_plane_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_plane_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_plane_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_plane_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_plane_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_plane_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_plane_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_plane_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_plane_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_plane_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 1
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_torus_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_torus_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_torus_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_torus_r2_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": false,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_torus_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_torus_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_torus_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_torus_r0.05_swap0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": false,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_torus_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_torus_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_torus_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_torus_r2_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 2.0,
+     "swap": true,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "degen_vertex_loop_torus_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "seed_degen_vertex_loop_torus_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "seed_degen_faces"
+     },
+     {
+      "step": "fix_degen_faces"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_vertex_loop_torus_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_vertex_loop_torus_r0.05_swap1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "single_vertex_sphere",
+     "radius": 0.05,
+     "swap": true,
+     "surface": 2
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_1_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_1_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_1_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_1_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r1_0.5_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r1_0.5_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r1_0.5_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r1_0.5_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h1_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h25_s60_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h1_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h25_s60_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 60.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h1_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h25_s90_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h1_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h25_s90_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 90.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h1_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h25_s120_q0",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h1_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 1.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "move_seam_seam_cone_r0.02_0.03_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_move_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_r0.02_0.03_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_r0.02_0.03_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "heal_seam_cone_r0.02_0.03_h25_s120_q1",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      0.02,
+      0.03
+     ],
+     "height": 25.0,
+     "angles": [
+      45.0,
+      135.0
+     ],
+     "seam": 120.0,
+     "quintic": true
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "heal_targets",
+      "op": 0,
+      "make": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_wide_10_350",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      10.0,
+      350.0
+     ],
+     "seam": 180.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_wide_10_350",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      10.0,
+      350.0
+     ],
+     "seam": 180.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_edges_seam_cone_wide_200_340",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      200.0,
+      340.0
+     ],
+     "seam": 270.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_edges_at_seam"
+     }
+    ]
+   }
+  },
+  {
+   "name": "split_face_seam_cone_wide_200_340",
+   "inputs": {
+    "case": "heal",
+    "brep": {
+     "kind": "seam_cone",
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "height": 1.0,
+     "angles": [
+      200.0,
+      340.0
+     ],
+     "seam": 270.0,
+     "quintic": false
+    },
+    "init_gaps": false,
+    "targets": {
+     "v": "all",
+     "e": "all",
+     "f": "all"
+    },
+    "steps": [
+     {
+      "step": "cache_face_props_gaps"
+     },
+     {
+      "step": "set_done_heal_op",
+      "op": 5
+     },
+     {
+      "step": "cache_face_props_stage2"
+     },
+     {
+      "step": "fix_split_face_at_seams"
+     }
+    ]
+   }
+  }
+ ]
+}

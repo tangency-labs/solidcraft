@@ -30,7 +30,7 @@
       # `xvfb-run` on a machine with no display at all.
       runtimeLibs =
         pkgs:
-        pkgs.lib.optionals pkgs.stdenv.isLinux (
+        pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (
           (with pkgs; [
             wayland
             libxkbcommon
@@ -51,21 +51,21 @@
         );
       # macOS needs none of the above: winit talks to AppKit, wgpu renders through Metal, and the
       # OS ships its GPU drivers, so the darwin package and shells skip the wrapper and paths.
-      driverLibDir = pkgs: if pkgs.stdenv.isLinux then "/run/opengl-driver/lib" else "";
-      driverShareDir = pkgs: if pkgs.stdenv.isLinux then "/run/opengl-driver/share" else "";
+      driverLibDir = pkgs: if pkgs.stdenv.hostPlatform.isLinux then "/run/opengl-driver/lib" else "";
+      driverShareDir = pkgs: if pkgs.stdenv.hostPlatform.isLinux then "/run/opengl-driver/share" else "";
       libraryPath =
         pkgs:
-        if pkgs.stdenv.isLinux then "${pkgs.lib.makeLibraryPath (runtimeLibs pkgs)}:${driverLibDir pkgs}" else "";
+        if pkgs.stdenv.hostPlatform.isLinux then "${pkgs.lib.makeLibraryPath (runtimeLibs pkgs)}:${driverLibDir pkgs}" else "";
 
       shellHook = pkgs: ''
-        ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+        ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
           if [ ! -d ${driverLibDir pkgs} ]; then
             echo "SolidCraft: ${driverLibDir pkgs} is missing — on NixOS enable hardware.graphics; on other distributions use a matching nixGL driver wrapper." >&2
           fi
         ''}
         command -v cc >/dev/null || echo "solidcraft: no C linker on PATH, cargo cannot link — use nix develop .#rust" >&2
         echo "solidcraft: cargo run --release -p solidcraft -- --sample"
-        ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+        ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
           export XDG_DATA_DIRS="${driverShareDir pkgs}:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
         ''}
       '';
@@ -112,7 +112,10 @@
           version = (pkgs.lib.importTOML ./Cargo.toml).workspace.package.version;
           src = self;
 
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+          };
+
           # The CLI draws the same packaging icons as the other Linux distributions.
           cargoBuildFlags = [
             "-p"
@@ -134,24 +137,27 @@
           buildInputs = runtimeLibs pkgs;
 
           postInstall = ''
-            ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
-              install -Dm644 assets/platforms/linux/ai.storyteller.solidcraft.desktop \
-                $out/share/applications/ai.storyteller.solidcraft.desktop
-              install -Dm644 assets/platforms/linux/ai.storyteller.solidcraft.mime.xml \
-                $out/share/mime/packages/ai.storyteller.solidcraft.xml
+            ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+              install -Dm644 assets/platforms/linux/io.tangencylabs.solidcraft.desktop \
+                $out/share/applications/io.tangencylabs.solidcraft.desktop
+              install -Dm644 assets/platforms/linux/io.tangencylabs.solidcraft.mime.xml \
+                $out/share/mime/packages/io.tangencylabs.solidcraft.xml
               for size in 16 24 32 48 64 128 256 512; do
-                icon=$out/share/icons/hicolor/''${size}x''${size}/apps/ai.storyteller.solidcraft.png
+                icon=$out/share/icons/hicolor/''${size}x''${size}/apps/io.tangencylabs.solidcraft.png
                 mkdir -p "$(dirname "$icon")"
-                cp assets/icons/app/linux/exports/hicolor/''${size}x''${size}/apps/ai.storyteller.solidcraft.png "$icon" >/dev/null
+                cp assets/icons/app/linux/exports/hicolor/''${size}x''${size}/apps/io.tangencylabs.solidcraft.png "$icon" >/dev/null
               done
             ''}
           '';
 
           # Linux only: the app reaches the window through dlopen'd libraries, so the packaged
-          # binary needs the same LD_LIBRARY_PATH the shell exports. macOS needs no wrapper.
-          postFixup = pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+          # binary needs the same LD_LIBRARY_PATH the shell exports. File dialogs go through the
+          # desktop portal and fall back to zenity without one (#2177), so zenity comes along,
+          # after the system's own on PATH. macOS needs no wrapper.
+          postFixup = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
             wrapProgram $out/bin/solidcraft \
               --prefix LD_LIBRARY_PATH : "${libraryPath pkgs}" \
+              --suffix PATH : "${pkgs.lib.makeBinPath [ pkgs.zenity ]}" \
               --set-default XDG_DATA_DIRS /usr/local/share:/usr/share \
               --prefix XDG_DATA_DIRS : "$out/share:${driverShareDir pkgs}"
           '';

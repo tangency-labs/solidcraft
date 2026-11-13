@@ -12,7 +12,6 @@ not (
     (package(solidcraft-engine) & (
         test(=tests::hostile_params_never_panic)
         | test(/^tests::robustness::/)
-        | test(/^tests::robustness_goldens::seed_/)
         | test(=pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen)
         | test(=pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs)
         | test(=cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall)
@@ -34,6 +33,12 @@ slow-timeout = { period = "60s" }
 [profile.ci.junit]
 path = "junit.xml"
 
+# Bound the whole test process, including Vulkan host initialization and teardown.
+# Cold runs can warm multiple pipelines before the first image starts rendering.
+[[profile.ci.overrides]]
+filter = "package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host)"
+slow-timeout = { period = "60s", terminate-after = 20 }
+
 # The action matrix sample runs its designs in parallel workers (ACTION_MATRIX_JOBS, set to match in
 # ci.yml). Its workers reserve that many of nextest's threads, so the cores are not oversubscribed
 # (a pi-case hole that takes 8 s alone went past the matrix's 90 s action limit when they were),
@@ -44,13 +49,12 @@ threads-required = 12
 priority = 100
 
 # The slowest tests start first, so a shard does not end with one of them running alone on a
-# core while the others sit idle (seed_81 alone takes about 20 minutes under CI load). Medians
-# from the CI test timings (the junit artifacts), slowest first; a test over ~100 s belongs here.
+# core while the others sit idle. Medians from the CI test timings (the junit artifacts), slowest
+# first; a test over ~100 s belongs here (the medians of 24 full runs added the last ones, #14362).
 [[profile.ci.overrides]]
 filter = """
 (package(solidcraft-engine) & (
-    test(/^tests::robustness_goldens::seed_(81|45|20|24|95|02|57|40|18|48|32|46|85|61)$/)
-    | test(/^tests::robustness::/)
+    test(/^tests::robustness::/)
     | test(=tests::hostile_params_never_panic)
     | test(=cmd::clearance::tests::distances_are_exact_on_edges_and_curved_faces)
     | test(=cmd::clipboard::tests::a_pasted_coil_joins_the_pasted_body)
@@ -58,6 +62,11 @@ filter = """
     | test(=tests::flush_join_loft::a_flange_flush_with_the_end_of_a_bent_tapered_tube_joins)
     | test(=cmd::sheet::tests::perforated_sheet_takes_a_thousand_round_holes)
     | test(=boolean_regression_tests::joined_loft_frames_plan_their_display_at_every_quality)
+    | test(=tests::join_onto_a_finely_faceted_import)
+    | test(=tests::chord_and_variable_fillets)
+    | test(=cmd::joints::tests::motion_sweep::find_limits_sees_arms_meet_behind_pins_already_in_each_other)
+    | test(=thread_tests::a_multi_start_thread_takes_the_volume_of_one_start)
+    | test(=thread_tests::a_thread_reaches_a_flat_shoulder_at_every_angle_and_leaves_it_whole)
 ))
 | (package(solidcraft-engine) & (binary(atomic_commands) | binary(step_export_regressions)))
 | (package(solidcraft-kernel) & (
@@ -66,9 +75,23 @@ filter = """
     | test(=tspline::tests::hostile_tsplines_never_panic)
     | test(=fill::tests::regular_rims_of_three_to_eight_sides_fill_with_one_face_and_close_the_cup)
     | test(/^issue_788_tests::equal_bores_crossing_/)
+    | test(=blend_variable::tests::variable_radius_on_a_box_edge)
+    | test(=tests::measure_of_a_body_with_many_faces)
+    | test(=modify_history_tests::fillet_variable_and_chord)
+    | test(=sweep_rails_tests::a_parallel_rail_along_a_curved_path_keeps_the_section)
+    | test(=corner_g2::tests::a_box_with_every_edge_rounded_has_eight_g2_corners)
+    | test(=corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box)
+    | test(=blend_corner::tests::issue1557_connected_rounds_keep_their_radii)
+))
+| (package(solidcraft-cli) & binary(naming_corpus) & test(=corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone))
+| (package(solidcraft-ui-egui) & (
+    test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host)
+    | test(=preselect_tests::variable_fillet_round_trip)
+    | test(=dialogs::dense::tests::a_saved_smooth_patch_reopens_with_its_setback)
+    | test(=dialogs::dense::tests::no_reachable_fillet_option_state_is_refused_for_its_options)
 ))
 """
-priority = 100
+priority = 99
 
 # Each nextest test has its own process/device. Concurrent cold lavapipe path
 # compiles contend for CPU and can exhaust the 600 s pipeline setup budget.
@@ -92,14 +115,13 @@ threads-required = "num-cpus"
 priority = 100
 
 [[profile.local-ci.overrides]]
-filter = "(package(solidcraft-engine) & test(=tests::robustness_goldens::seed_81)) | (package(solidcraft-kernel) & test(=tspline::tests::hostile_tsplines_never_panic))"
+filter = "package(solidcraft-kernel) & test(=tspline::tests::hostile_tsplines_never_panic)"
 priority = 99
 
 [[profile.local-ci.overrides]]
 filter = """
 (package(solidcraft-engine) & (
-    test(/^tests::robustness_goldens::seed_(81|45|20|24|95|02|57|40|18|48|32|46|85|61)$/)
-    | test(/^tests::robustness::/)
+    test(/^tests::robustness::/)
     | test(=tests::hostile_params_never_panic)
     | test(=cmd::clearance::tests::distances_are_exact_on_edges_and_curved_faces)
     | test(=cmd::clipboard::tests::a_pasted_coil_joins_the_pasted_body)
@@ -125,5 +147,12 @@ max-threads = 1
 
 [[profile.local-ci.overrides]]
 platform = "cfg(windows)"
-filter = "package(solidcraft-gpu) | package(solidcraft) | (package(solidcraft-ui-egui) & test(/(offscreen|gpu)/))"
+# Viewport tests also open real devices when their names do not contain "gpu".
+filter = """
+package(solidcraft-gpu) | package(solidcraft) | (package(solidcraft-ui-egui) & (
+    test(/(offscreen|gpu)/)
+    | test(/^viewport::tests::/)
+    | test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host)
+))
+"""
 test-group = "windows-gpu"

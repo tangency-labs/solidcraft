@@ -1,0 +1,31 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     60,
+     0,
+     0
+    ],
+    "radius": 5,
+    "height": 10,
+    "body_name": "Cyl",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "construct.axis.through_cylinder",
+   "params": {
+    "face": {
+     "face": [
+      65,
+      0,
+      5
+     ]
+    },
+    "name": "A"
+   }
+  }
+ ]
+}

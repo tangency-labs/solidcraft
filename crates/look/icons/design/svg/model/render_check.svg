@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Check render — verify the request is ready, without rendering</title>
+  <path d="M9 12L45 12A5 5 0 0 1 50 17L50 43A5 5 0 0 1 45 48L9 48A5 5 0 0 1 4 43L4 17A5 5 0 0 1 9 12Z" fill="#e2e8ef"/>
+  <defs><clipPath id="pic1"><path d="M9 12L45 12A5 5 0 0 1 50 17L50 43A5 5 0 0 1 45 48L9 48A5 5 0 0 1 4 43L4 17A5 5 0 0 1 9 12Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#pic1)">
+  <path d="M4 40.8L17.8 27.12L30.68 38.64L38.04 32.88L50 42.96L50 48L4 48Z" fill="#8e9faf"/>
+  </g>
+  <circle cx="36.2" cy="22.8" r="4.2" fill="#8e9faf"/>
+  <path d="M9 12L45 12A5 5 0 0 1 50 17L50 43A5 5 0 0 1 45 48L9 48A5 5 0 0 1 4 43L4 17A5 5 0 0 1 9 12Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="47.5" cy="47.5" r="14" fill="#ffffff"/>
+  <circle cx="47.5" cy="47.5" r="12" fill="#236ead"/>
+  <path d="M41.9 47.7L45.9 51.9L53.3 43.1" fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-TOOLS = Path(__file__).resolve().parents[2] / 'assets/icons/ui/design/tools'
+TOOLS = Path(__file__).resolve().parents[2] / 'crates/look/icons/design/tools'
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="20" fill="currentColor"/></svg>'
 
 
@@ -24,7 +24,7 @@ SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="3
 def review_fixture():
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
-        design = root / 'assets/icons/ui/design'
+        design = root / 'crates/look/icons/design'
         shutil.copytree(TOOLS, design / 'tools')
         (design / 'svg/model').mkdir(parents=True)
         (design / 'svg/model/box.svg').write_text(SVG, encoding='utf-8')
@@ -295,6 +295,21 @@ class IconReviewTest(unittest.TestCase):
             post(get('/api/review'), final=['box'])
             self.assertIn('box', get('/api/review')['final'])
             self.assertNotEqual(old_hash, json.loads((design / 'review.json').read_text(encoding='utf-8'))['final']['box'])
+
+    def test_a_same_size_edit_with_the_same_timestamp_still_changes_the_revision(self):
+        # CI VMs can stamp two quick same-size writes with one modification time; the stale page
+        # must still be refused (it once accepted changed art there).
+        with review_fixture() as (root, design, get, post):
+            box = design / 'svg/model/box.svg'
+            box.write_text(SVG.replace('r="20"', 'r="18"'), encoding='utf-8')
+            stamp = box.stat().st_mtime_ns
+            changed = get('/api/review')
+            box.write_text(SVG.replace('r="20"', 'r="17"'), encoding='utf-8')
+            os.utime(box, ns=(stamp, stamp))
+            self.assertNotEqual(changed['rev'], get('/api/review')['rev'])
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                post(changed, final=['box'])
+            self.assertEqual(error.exception.code, 400)
 
     def test_missing_art_is_visible_but_cannot_be_accepted(self):
         with review_fixture() as (root, design, get, post):

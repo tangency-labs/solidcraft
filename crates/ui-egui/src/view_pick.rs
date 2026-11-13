@@ -12,13 +12,15 @@
 //! `pixels_per_point`, offset by the viewport rect); `model` pixels are pixels of a
 //! `ui.render` of the same size, so an agent can render, look, and pick without a window.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{apply_point, is_identity};
-use solidcraft_engine::geom::{Mesh, Vec3};
+use solidcraft_engine::geom::Mesh;
 
 use crate::SolveApp;
 
@@ -128,11 +130,11 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     // What the viewport shows now, and what a pick may not answer for.
     let st = crate::open_meshing::shown_world(app);
     let bounds = crate::viewport::body_bounds(app, &st);
-    let active_bodies = app.session.active_occurrence_path.as_ref().and_then(|q| app.session.occurrence_bodies(q, true).ok());
+    let active_bodies = crate::viewport::active_body_names(app);
     let replaced: &[String] = app.preview.effective_replaced();
     let section = crate::viewport::section_plane(app);
     let wireframe = app.ui.visual_style == 2;
-    let slack = crate::viewport::scene_radius(app) * 0.02;
+    let slack = crate::viewport::scene_pick_slack(app);
     let occ = occurrence_map(app);
     let comps = component_names(app);
 
@@ -150,9 +152,22 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             .and_then(|(so, sn)| section_cap(app, &st, &bounds, input, so, sn, kept.first().map(|c| c.t), include_ghosted, replaced, &active_bodies));
         let face_t = kept.first().map(|c| c.t).or(cap.as_ref().map(|(t, _, _)| *t));
         let (edge, vertex) = match (edges_on, input.pixel) {
-            (true, Some(pos)) => {
-                near_edges(app, &st, &bounds, &proj, input, pos, face_t, edge_px, &active_bodies, replaced, include_ghosted, wireframe, slack)
-            }
+            (true, Some(pos)) => near_edges(
+                app,
+                &st,
+                &bounds,
+                &proj,
+                input,
+                pos,
+                face_t,
+                edge_px,
+                &active_bodies,
+                replaced,
+                include_ghosted,
+                wireframe,
+                slack,
+                section,
+            ),
             _ => (None, None),
         };
         hits.push(match (all, cap, kept) {
@@ -200,13 +215,13 @@ fn face_candidates(
     st: &solidcraft_engine::doc::ModelState,
     bounds: &[(String, solidcraft_engine::geom::Aabb3)],
     input: &Input,
-    active_bodies: &Option<Vec<String>>,
+    active_bodies: &Option<crate::viewport::ActiveBodyNames>,
     replaced: &[String],
     include_ghosted: bool,
 ) -> Vec<Cand> {
     let mut out = Vec::new();
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
             continue;
         }
         let ghosted = crate::viewport::body_faded(app, b, active_bodies);
@@ -297,7 +312,7 @@ fn section_cap(
     first_kept: Option<f64>,
     include_ghosted: bool,
     replaced: &[String],
-    active_bodies: &Option<Vec<String>>,
+    active_bodies: &Option<crate::viewport::ActiveBodyNames>,
 ) -> Option<(f64, String, Vec3)> {
     let den = sn.dot(input.d);
     if den.abs() < 1e-12 {
@@ -325,11 +340,11 @@ pub(crate) fn body_cut_at(
     t_cap: f64,
     include_ghosted: bool,
     replaced: &[String],
-    active_bodies: &Option<Vec<String>>,
+    active_bodies: &Option<crate::viewport::ActiveBodyNames>,
 ) -> Option<String> {
     let walk_eps = 1e-6 * (1.0 + crate::viewport::scene_radius(app));
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
             continue;
         }
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
@@ -377,27 +392,36 @@ fn near_edges(
     pos: Pos2,
     face_t: Option<f64>,
     edge_px: f32,
-    active_bodies: &Option<Vec<String>>,
+    active_bodies: &Option<crate::viewport::ActiveBodyNames>,
     replaced: &[String],
     include_ghosted: bool,
     wireframe: bool,
     slack: f64,
+    section: Option<(Vec3, Vec3)>,
 ) -> (Option<EdgeHit>, Option<VertexHit>) {
     let reach = crate::pick_index::reach(proj, pos, edge_px.max(6.0));
-    let visible = |p: Vec3| wireframe || face_t.is_none_or(|t| (p - input.o).dot(input.d) <= t + slack);
+    // The section removes a half-space and nothing there is drawn, so the mouse picker skips
+    // edges and vertices in it; a pick must not answer with what the user cannot see (#10704,
+    // the same `kept` test `viewport::pick` applies).
+    let kept = |p: Vec3| section.is_none_or(|(so, sn)| sn.dot(p) <= sn.dot(so) + SECTION_EPS);
+    // `slack` is the body's own: what counts as lying on the face in front depends on how
+    // coarsely that body is meshed, never on where the camera stands.
+    let visible = |p: Vec3, slack: f64| kept(p) && (wireframe || face_t.is_none_or(|t| (p - input.o).dot(input.d) <= t + slack));
     let mut best_e: Option<EdgeHit> = None;
     let mut best_v: Option<VertexHit> = None;
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
             continue;
         }
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
             continue;
         }
-        if let Some((_, bb)) = bounds.get(i)
-            && crate::viewport::screen_box(proj, bb, edge_px).is_some_and(|r| !r.contains(pos))
-        {
-            continue;
+        let mut body_slack = slack;
+        if let Some((_, bb)) = bounds.get(i) {
+            if crate::viewport::screen_box(proj, bb, edge_px).is_some_and(|r| !r.contains(pos)) {
+                continue;
+            }
+            body_slack = crate::viewport::pick_slack(bb.diagonal());
         }
         let (m, place) = b.mesh_in_place();
         let Some((lo, ld)) = crate::viewport::local_ray(&place, input.o, input.d) else { continue };
@@ -415,7 +439,7 @@ fn near_edges(
                 for v in [e.first(), e.last()].into_iter().flatten().map(|v| at(*v)) {
                     if let Some(sp) = proj.to_screen(v) {
                         let dd = sp.distance(pos);
-                        if dd <= edge_px + 1.0 && visible(v) && best_v.as_ref().is_none_or(|x| dd < x.dist_px) {
+                        if dd <= edge_px + 1.0 && visible(v, body_slack) && best_v.as_ref().is_none_or(|x| dd < x.dist_px) {
                             best_v = Some(VertexHit { dist_px: dd, point: v });
                         }
                     }
@@ -425,7 +449,7 @@ fn near_edges(
             let (Some(a), Some(c)) = (proj.to_screen(p0), proj.to_screen(p1)) else { continue };
             let dd = crate::viewport::seg_dist(pos, a, c);
             if dd <= edge_px
-                && visible(crate::viewport::ray_segment_closest(input.o, input.d, p0, p1))
+                && visible(crate::viewport::ray_segment_closest(input.o, input.d, p0, p1), body_slack)
                 && best_e.as_ref().is_none_or(|x| dd < x.dist_px)
             {
                 let k = seg_param(pos, a, c);

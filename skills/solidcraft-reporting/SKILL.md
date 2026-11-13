@@ -13,14 +13,14 @@ Written against SolidCraft 0.18.2. Report what you observed, never a guessed cau
 - **Version and OS.** Help → About in the app, `solidcraft --version` or `solidcraft-cli --version`; the MCP server reports its version in `initialize` (`serverInfo.version`). Note whether the user built from source.
 - **What the user did**, in order, what they expected and what happened instead.
 - **The exact error text**, copied, not paraphrased: a failed `execute` or `batch` step's `failed.error`, the timeline feature's `error` in `inspect_design {"measure":false,"sketches":false}`, or the message in the app.
-- **If the app closed or froze:** `crash_reports {}` first. A matching report has the version, the command that crashed, the commands before it and a replay. `solidcraft-cli crashes replay <id>` checks that it still happens. Its `design.solidcraft` is the user's design: see Privacy.
+- **If the app closed or froze:** `crash_reports {}` first. A matching report has the version, the command that crashed, the commands before it and a replay. `solidcraft-cli crashes replay <id>` checks that it still happens. Its `design.sc` is the user's design: see Privacy.
 
 ## 2. Reproduce in a fresh design
 Start from nothing, so the report does not depend on the user's file.
 - **Headless:** write the steps as a command script `{"commands":[...]}` and run `solidcraft-cli run repro.json`. A failing feature fails the run and names the feature. This never touches the design open in the app.
 - **Over MCP:** `new_design {}`, then the steps in one `batch {"commands":[...],"rollback":false}`. With `rollback: false` the steps before the failure stay, so you can inspect the state it failed in. When the server is bridged to the app and the open design is `dirty`, ask before `new_design`.
 - Find commands and parameters with `list_commands {"filter":"fillet"}` and `describe_command {"id":"solid.fillet"}`, not the unfiltered catalog.
-- **Only in the user's design:** `solidcraft-cli script design.solidcraft --out repro.json` writes its history as a command script. `solidcraft-cli eval repro.json` replays it and prints the measurements; `solidcraft-cli run repro.json` stops at the first failing feature. If the script rebuilds without the problem, say so in the report: it then depends on something the history does not hold (an import, a file the design links to).
+- **Only in the user's design:** `solidcraft-cli script design.sc --out repro.json` writes its history as a command script. `solidcraft-cli eval repro.json` replays it and prints the measurements; `solidcraft-cli run repro.json` stops at the first failing feature. If the script rebuilds without the problem, say so in the report: it then depends on something the history does not hold (an import, a file the design links to).
 - **Interactive only** (a dialog, a pick, a drag, the viewport): write the clicks as numbered app steps. A script cannot show those.
 - Check that it fails the same way twice. A problem that comes and goes is still worth reporting; say how often it happened.
 
@@ -40,9 +40,9 @@ Shrink while the same failure, with the same message, still happens. Re-run afte
 - Re-run the final minimal script from scratch once more. Its output goes into the report as it is.
 
 ## 5. Privacy
-- Never attach, upload or quote the user's design, a crash report's `design.solidcraft`, or file contents without asking. The minimal synthetic script is the default attachment.
-- GitHub does not accept `.solidcraft` attachments. A design the user agrees to share goes up as a `.zip`: a `.solidcraft` file is a ZIP already, so copy or rename it to `name.solidcraft.zip`, or zip it. SolidCraft opens either kind of `.zip`.
-- Strip home folders, user names, part and project names and file paths from messages and logs (`/home/alice/clients/acme/bracket.solidcraft` → `bracket.solidcraft`).
+- Never attach, upload or quote the user's design, a crash report's `design.sc`, or file contents without asking. The minimal synthetic script is the default attachment.
+- GitHub does not accept `.sc` attachments. A design the user agrees to share goes up as a `.zip`: a `.sc` file is a ZIP already, so copy or rename it to `name.sc.zip`, or zip it. SolidCraft opens either kind of `.zip`.
+- Strip home folders, user names, part and project names and file paths from messages and logs (`/home/alice/clients/acme/bracket.sc` → `bracket.sc`).
 - Check screenshots for other windows, file names and anything personal.
 
 ## 6. Search, then write

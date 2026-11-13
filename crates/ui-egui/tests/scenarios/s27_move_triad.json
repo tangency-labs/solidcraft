@@ -13,7 +13,7 @@
   {"expect": {"errors": 0, "dialog": null, "bbox": {"body": "Body1", "min": [20, 0, 0], "max": [40, 30, 10]}}},
   {"start": "solid.move"},
   {"click": {"world": [30, 15, 10]}},
-  {"drag": [{"gizmo": "rz", "turn": 60}, {"gizmo": "rz", "turn": 150}], "steps": 12},
+  {"drag": [{"gizmo": "rz", "turn": 200}, {"gizmo": "rz", "turn": 290}], "steps": 12},
   {"key": "Enter"},
   {"expect": {"errors": 0, "dialog": null, "bbox": {"body": "Body1", "min": [15, 5, 0], "max": [45, 25, 10]}}},
   {"shot": "s27_move_triad"}

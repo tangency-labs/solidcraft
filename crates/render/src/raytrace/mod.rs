@@ -5,15 +5,25 @@
 //! or third-party ray-tracer implementation is used. See `docs/render-raytrace-core.md`.
 
 use crate::job::CancelToken;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
+mod aging;
 mod anisotropic_faces;
 pub mod area;
+mod box_certificate;
 mod bvh;
+mod celestial;
+mod denoise;
 pub mod dielectric;
 pub mod emission;
+mod glass_mesh;
+mod glass_volume;
 pub mod image;
+mod indirect;
+pub(crate) mod legacy_certificates;
 pub mod lighting;
+mod origin;
 pub mod prepared;
 mod progressive;
 pub mod punctual;
@@ -66,6 +76,8 @@ fn check_cancel(cancel: &CancelToken) -> Result<()> {
 pub struct WorkBudget {
     limit: u64,
     used: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    shared: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
 }
 
 impl WorkBudget {
@@ -73,7 +85,12 @@ impl WorkBudget {
         if limit == 0 || limit > crate::job::MAX_CPU_WORK {
             return Err(TraceError::InvalidInput("work limit outside 1..=MAX_WORK"));
         }
-        Ok(Self { limit, used: 0 })
+        Ok(Self {
+            limit,
+            used: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            shared: None,
+        })
     }
     pub fn used(&self) -> u64 {
         self.used
@@ -81,13 +98,37 @@ impl WorkBudget {
     pub fn remaining(&self) -> u64 {
         self.limit - self.used
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn parallel_reset(&mut self, limit: u64, ledger: &std::sync::Arc<std::sync::atomic::AtomicU64>) {
+        self.limit = limit;
+        self.used = 0;
+        self.shared = Some(ledger.clone());
+    }
     fn tick(&mut self, cancel: &CancelToken) -> Result<()> {
         self.charge(1, cancel)
     }
 
     fn charge(&mut self, units: u64, cancel: &CancelToken) -> Result<()> {
         check_cancel(cancel)?;
-        self.used = self.used.checked_add(units).filter(|used| *used <= self.limit).ok_or(TraceError::WorkLimit)?;
+        let used = self.used.checked_add(units).filter(|used| *used <= self.limit).ok_or(TraceError::WorkLimit)?;
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(shared) = &self.shared {
+            use std::sync::atomic::Ordering;
+            // Reserve from one image-owned ledger without depending on the
+            // newer atomic update naming; Rust 1.95 and wasm stay supported.
+            let mut remaining = shared.load(Ordering::Relaxed);
+            loop {
+                let next = remaining.checked_sub(units).ok_or(TraceError::WorkLimit)?;
+                match shared.compare_exchange_weak(remaining, next, Ordering::Relaxed, Ordering::Relaxed) {
+                    Ok(_) => break,
+                    Err(current) => {
+                        check_cancel(cancel)?;
+                        remaining = current;
+                    }
+                }
+            }
+        }
+        self.used = used;
         Ok(())
     }
 }
@@ -271,7 +312,7 @@ impl Triangle {
             let z = component(delta, kz);
             [component(delta, kx) - sx * z, component(delta, ky) - sy * z, z / dominant]
         });
-        let [[ax, ay, az], [bx, by, bz], [cx, cy, cz]] = projected;
+        let [[ax, ay, _], [bx, by, _], [cx, cy, _]] = projected;
         let weights = [bx * cy - by * cx, cx * ay - cy * ax, ax * by - ay * bx];
         let [u, v, w] = weights;
         if (u < 0.0 || v < 0.0 || w < 0.0) && (u > 0.0 || v > 0.0 || w > 0.0) {
@@ -282,12 +323,12 @@ impl Triangle {
             return None;
         }
         let barycentric = weights.map(|value| value / determinant);
-        let [u, v, w] = barycentric;
-        // Divide before multiplying by depth: very small triangle areas need not
-        // underflow their otherwise well-represented hit distance.
-        // An exact coordinate plane has a direct depth equation. Summing
-        // depths along another dominant ray axis can cancel large tangential
-        // terms into a false positive. No interval or edge policy changes.
+        // Solve depth from the geometric plane, independently of the closed-edge
+        // shear weights. Weighted depths along another ray axis can cancel large
+        // tangential terms into a positive self-hit, even for an outward ray.
+        // This also matters for evaluated CAD faces that differ from a coordinate
+        // plane by a few ULPs; they must not rely on the exact-axis shortcut.
+        // Exact coordinate planes retain their direct interval arithmetic.
         let axis_plane = (0..3).find_map(|axis| {
             let [a, b, c] = self.vertices.map(|point| component(point, axis));
             (a == b && b == c).then_some((axis, a))
@@ -295,7 +336,7 @@ impl Triangle {
         let distance = if let Some((axis, coordinate)) = axis_plane {
             (coordinate - component(ray.origin, axis)) / component(d, axis)
         } else {
-            u * az + v * bz + w * cz
+            normal.dot(self.vertices[0] - ray.origin) / normal.dot(d)
         };
         if !distance.is_finite() || distance < ray.min || distance > ray.max {
             return None;

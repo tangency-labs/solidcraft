@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#271",
+  "tangency-labs/solidcraft#286",
+  "tangency-labs/solidcraft#299"
+ ],
+ "what": "a loft cut limited by targets to one body while a second body lies inside the loft",
+ "source": "analytic",
+ "method": "loft of the 20 x 20 square at z = -1 to the 30 x 30 square at z = 25 (side s(z) = 20 + 10 (z+1)/26). Target (40 x 40 x 10) loses the slice z in [0,10]: integral of s^2 dz = (s(10)^3 - s(0)^3)/(3 k), k = 10/26. Bystander (6^3 = 216) is not a target and survives whole: V = 16000 - removed + 216; two bodies.",
+ "body_count": 2,
+ "volume_mm3": 11227.341222879684
+}

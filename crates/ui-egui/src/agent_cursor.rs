@@ -19,16 +19,19 @@
 //! settings on the navigation bar, or `ui.agent_cursor {show, speed, follow_camera}`); a call
 //! with `"animate": false` skips it.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use egui::{Pos2, Stroke, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
 
 use crate::SolveApp;
 use crate::control::ControlResponse;
+use crate::control_job::Ticket;
 
 /// How fast the pointer moves: 1× to 5×, or Instant (no animation: the command runs at once
 /// and the pointer jumps to where it acted, with a click ripple). Saved and sent as a number,
@@ -108,7 +111,7 @@ pub fn speed_slider(ui: &mut egui::Ui, speed: &mut Speed) -> egui::Response {
         1.0..=5.5,
         crate::ui_kit::Slider {
             step: Some(0.5),
-            format: |v| if v > 5.25 { crate::i18n::tr_label("Instant").into() } else { Speed::Times(v).label() },
+            format: |v| if v > 5.25 { solidcraft_ui_text::tr_label("Instant").into() } else { format!("{v:.2}x") },
             ..Default::default()
         },
     );
@@ -132,8 +135,9 @@ pub struct Job {
     method: String,
     params: Value,
     reply: Sender<ControlResponse>,
-    /// Screen position and registry label, kept together even when several commands share a panel.
-    stops: VecDeque<(Pos2, &'static str)>,
+    /// Screen position, registry label and, for a pick on the model, its place in the world; kept
+    /// together even when several commands share a panel.
+    stops: VecDeque<(Pos2, &'static str, Option<Vec3>)>,
     chat_turn: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Seconds per glide and per click for this request (within [`TIME_BUDGET`] in all).
     glide: f64,
@@ -146,17 +150,21 @@ pub struct Job {
     /// The command computing ahead off the window thread while the pointer glides (#1989): at
     /// its last stop the pointer waits for it, then the command runs and finds it in the cache.
     ahead: Option<crate::control_job::Ahead>,
+    /// Its client may cancel it until it runs (`control.cancel`).
+    ticket: Arc<Ticket>,
 }
 
 /// The pointer's state.
 #[derive(Default)]
 pub struct AgentCursor {
     pub pos: Option<Pos2>,
+    /// The pick on the model the pointer rests on: it follows the pick when the view turns.
+    anchor: Option<Vec3>,
     job: Option<Job>,
     /// Click ripples: where and when.
     ripples: Vec<(Pos2, f64)>,
     /// The view before a followed sketch (restored when it finishes).
-    saved_view: Option<solidcraft_engine::render::Camera>,
+    saved_view: Option<solidcraft_viewport::Camera>,
 }
 
 impl AgentCursor {
@@ -167,8 +175,13 @@ impl AgentCursor {
 
     /// Since when the pointer has waited at its last stop for its command to compute (ms), and
     /// the command.
-    pub fn computing(&self) -> Option<(f64, &str)> {
-        self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| (a.started, a.label.as_str()))
+    pub fn computing(&self) -> Option<(f64, String)> {
+        self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| (a.started, a.steps.shown()))
+    }
+
+    /// The steps of the command [`Self::computing`] reports.
+    pub(crate) fn computing_steps(&self) -> Option<std::sync::Arc<crate::control_job::Steps>> {
+        self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| a.steps.clone())
     }
 
     /// Follow the pointer input an agent sends itself (`ui.move`, `ui.click`, `ui.drag`,
@@ -179,6 +192,7 @@ impl AgentCursor {
             return;
         }
         self.pos = Some(at);
+        self.anchor = None;
         if press {
             self.ripples.push((at, now));
         }
@@ -188,6 +202,7 @@ impl AgentCursor {
     pub(crate) fn stop(&mut self) -> Option<(Sender<ControlResponse>, String)> {
         self.computing()?;
         let job = self.job.take()?;
+        job.ticket.stop();
         Some((job.reply, job.ahead.map(|a| a.label).unwrap_or_default()))
     }
 }
@@ -241,12 +256,13 @@ fn button(command: &str) -> Option<Pos2> {
 }
 
 /// Where the pointer goes for a command: its toolbar button (or its panel), then its picks on
-/// screen, at most [`MAX_PICK_STOPS`] of them.
-pub fn stops(app: &SolveApp, command: &str, params: &Value) -> Vec<Pos2> {
-    let mut out: Vec<Pos2> = button(command).into_iter().collect();
+/// screen, at most [`MAX_PICK_STOPS`] of them (each with its place in the world).
+pub fn stops(app: &SolveApp, command: &str, params: &Value) -> Vec<(Pos2, Option<Vec3>)> {
+    let mut out: Vec<_> = button(command).into_iter().map(|p| (p, None)).collect();
     let Some(rect) = app.viewport.rect else { return out };
     let proj = crate::viewport::projection(app, rect);
-    let on_screen: Vec<Pos2> = picks(app, command, params).into_iter().filter_map(|w| proj.to_screen(w).filter(|p| rect.contains(*p))).collect();
+    let on_screen: Vec<_> =
+        picks(app, command, params).into_iter().filter_map(|w| proj.to_screen(w).filter(|p| rect.contains(*p)).map(|p| (p, Some(w)))).collect();
     out.extend(summarise(&on_screen, MAX_PICK_STOPS));
     out
 }
@@ -271,6 +287,9 @@ fn batch_targets(steps: &[Value]) -> Vec<(Pos2, &'static str)> {
 /// The places a command's parameters pick, in the world: [x, y, z] points (faces, edges,
 /// vertices, positions), active-sketch [x, y] points, and a new sketch's plane.
 pub fn picks(app: &SolveApp, command: &str, params: &Value) -> Vec<Vec3> {
+    if solidcraft_engine::panels::commands::is_command(command) {
+        return Vec::new();
+    }
     let id = solidcraft_engine::find_command(command).map_or(command, |c| c.id);
     let mut out = Vec::new();
     if id == "sketch.create"
@@ -279,7 +298,7 @@ pub fn picks(app: &SolveApp, command: &str, params: &Value) -> Vec<Vec3> {
     {
         out.push((q[0] + q[1] + q[2] + q[3]) / 4.0);
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let sketch = app.session.active_sketch.and_then(|s| st.sketch(s)).map(|ss| ss.plane);
     walk(params, None, &mut |key, v| {
         let num = |i: usize| v.get(i).and_then(Value::as_f64).filter(|x| x.is_finite());
@@ -332,6 +351,7 @@ fn walk<'a>(v: &'a Value, key: Option<&'a str>, f: &mut dyn FnMut(Option<&'a str
 /// back when it should simply run.
 pub fn intercept(app: &mut SolveApp, req: &crate::control::ControlRequest) -> bool {
     let (method, params, reply) = (req.method.as_str(), &req.params, &req.reply);
+    let ticket = &req.ticket;
     let s = app.ui.agent_cursor;
     if !s.show || params.get("animate").and_then(Value::as_bool) == Some(false) {
         return false;
@@ -339,21 +359,28 @@ pub fn intercept(app: &mut SolveApp, req: &crate::control::ControlRequest) -> bo
     let stops: VecDeque<_> = match method {
         "engine.execute" | "command" => {
             let Some(cmd) = params.get("command").or(params.get("id")).and_then(Value::as_str) else { return false };
+            // External code is handed to the dedicated transaction worker, never replayed by the cursor.
+            if cmd.eq_ignore_ascii_case("plugin.run") {
+                return false;
+            }
             let inner = params.get("params").cloned().unwrap_or(json!({}));
             let label = solidcraft_engine::find_command(cmd).map_or("", |c| c.label);
-            stops(app, cmd, &inner).into_iter().map(|at| (at, label)).collect()
+            stops(app, cmd, &inner).into_iter().map(|(at, world)| (at, label, world)).collect()
         }
         // A batch is acted out as one request; one the app refuses is answered at once.
         "engine.batch" => match params.get("commands").and_then(Value::as_array) {
-            Some(steps) if crate::control::batch_refusal(steps).is_none() => batch_targets(steps).into(),
+            Some(steps) if crate::control::batch_refusal(steps).is_none() => {
+                batch_targets(steps).into_iter().map(|(at, label)| (at, label, None)).collect()
+            }
             _ => return false,
         },
         _ => return false,
     };
     if s.speed == Speed::Instant {
         // No animation: the command runs now; the pointer jumps to where it acted.
-        if let Some((last, _)) = stops.back() {
+        if let Some((last, _, world)) = stops.back() {
             app.agent.pos = Some(*last);
+            app.agent.anchor = *world;
             app.agent.ripples.push((*last, app.now));
         }
         return false;
@@ -363,7 +390,8 @@ pub fn intercept(app: &mut SolveApp, req: &crate::control::ControlRequest) -> bo
     }
     let from = app.cursor_start();
     // Computed ahead (a command or a batch's steps) while the pointer glides (#1989).
-    let ahead = crate::control_job::Ahead::begin(app, method, params);
+    let ahead = crate::control_job::Ahead::begin(app, method, params, ticket);
+    ticket.computing(false);
     let (glide, click) = leg_times(s.speed, stops.len());
     app.agent.job = Some(Job {
         method: method.to_string(),
@@ -377,6 +405,7 @@ pub fn intercept(app: &mut SolveApp, req: &crate::control::ControlRequest) -> bo
         started: app.now,
         clicked: false,
         ahead,
+        ticket: ticket.clone(),
     });
     true
 }
@@ -393,6 +422,12 @@ fn ease(t: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Where the viewport draws a world point now, if it is projectable and inside the viewport.
+fn on_screen(app: &SolveApp, w: Vec3) -> Option<Pos2> {
+    let rect = app.viewport.rect?;
+    crate::viewport::projection(app, rect).to_screen(w).filter(|p| rect.contains(*p))
+}
+
 /// Move the pointer along; when the last stop is clicked, run the held request and reply.
 pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
     let now = app.now;
@@ -400,17 +435,44 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.agent.ripples.is_empty() {
         ctx.request_repaint();
     }
-    let Some(job) = app.agent.job.as_mut() else { return };
+    // The pick the pointer rests on or glides to, where the view draws it now (else it keeps its
+    // last place).
+    let held = match app.agent.job.as_ref().and_then(|j| j.stops.front()) {
+        Some(stop) => stop.2,
+        None => app.agent.anchor,
+    };
+    let held = held.and_then(|w| on_screen(app, w));
+    let Some(job) = app.agent.job.as_mut() else {
+        if let Some(p) = held {
+            app.agent.pos = Some(p);
+        }
+        return;
+    };
+    if let (Some(p), Some(stop)) = (held, job.stops.front_mut()) {
+        stop.0 = p;
+    }
     if crate::control::chat_turn_cancelled(job.chat_turn.as_deref()) {
         if let Some(job) = app.agent.job.take() {
             let _ = job.reply.send(crate::control::cancelled_chat_response());
         }
         return;
     }
+    // Cancelled by its client before it ran: requests behind it go on.
+    if job.ticket.is_cancelled() {
+        if let Some(job) = app.agent.job.take() {
+            let _ = job.reply.send(crate::control_job::stopped_reply(&command_label(&job), false));
+        }
+        ctx.request_repaint();
+        return;
+    }
     let (glide, click) = (job.glide, job.click);
     ctx.request_repaint();
-    let Some(&(to, _)) = job.stops.front() else {
-        if job.ahead.as_ref().is_none_or(crate::control_job::Ahead::finished) {
+    let Some(&(to, _, world)) = job.stops.front() else {
+        // Waiting for the command to compute: the pointer stays on its pick.
+        if let Some(p) = held {
+            app.agent.pos = Some(p);
+        }
+        if ahead_is_in(app) {
             finish(app, ctx);
         }
         return;
@@ -419,6 +481,7 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
     if !job.clicked {
         let e = ease(t) as f32;
         app.agent.pos = Some(job.from + (to - job.from) * e);
+        app.agent.anchor = None;
         if t >= 1.0 {
             job.clicked = true;
             job.started = now;
@@ -426,15 +489,45 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
         }
         return;
     }
+    app.agent.pos = Some(to);
     if now - job.started >= click {
         job.stops.pop_front();
+        // The pointer rests here once the request is done.
+        app.agent.anchor = world;
         job.from = to;
         job.started = now;
         job.clicked = false;
-        if job.stops.is_empty() && job.ahead.as_ref().is_none_or(crate::control_job::Ahead::finished) {
+        if job.stops.is_empty() && ahead_is_in(app) {
             finish(app, ctx);
         }
     }
+}
+
+/// The command a held request runs, as the toolbar names it (or its method).
+fn command_label(job: &Job) -> String {
+    match &job.ahead {
+        Some(a) => a.label.clone(),
+        None => job.params.get("command").or(job.params.get("id")).and_then(Value::as_str).unwrap_or(&job.method).chars().take(128).collect(),
+    }
+}
+
+/// The held request's evaluation ahead is in, for the design as it is now. One a person's edit
+/// went past is computed again off the window thread (as for a [`crate::control_job::ControlJob`]),
+/// so the run for real finds everything computed.
+fn ahead_is_in(app: &mut SolveApp) -> bool {
+    let Some(job) = app.agent.job.as_ref() else { return false };
+    let Some(ahead) = job.ahead.as_ref() else { return true };
+    if !ahead.finished() {
+        return false;
+    }
+    if !ahead.stale(app) {
+        return true;
+    }
+    let Some(again) = ahead.restart(app, &job.params, &job.ticket) else { return true };
+    if let Some(job) = app.agent.job.as_mut() {
+        job.ahead = Some(again);
+    }
+    false
 }
 
 /// Run the held request now (as a call without animation) and send its reply.
@@ -442,6 +535,10 @@ fn finish(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(job) = app.agent.job.take() else { return };
     if crate::control::chat_turn_cancelled(job.chat_turn.as_deref()) {
         let _ = job.reply.send(crate::control::cancelled_chat_response());
+        return;
+    }
+    if !job.ticket.back() {
+        let _ = job.reply.send(crate::control_job::stopped_reply(&command_label(&job), false));
         return;
     }
     let mut params = job.params;
@@ -452,7 +549,8 @@ fn finish(app: &mut SolveApp, ctx: &egui::Context) {
     if follow && id == "sketch.create" {
         app.agent.saved_view = Some(app.cam);
     }
-    let (req, _rx) = crate::control::ControlRequest::new(job.method, params);
+    let (mut req, _rx) = crate::control::ControlRequest::new(job.method, params);
+    req.chat_turn = job.chat_turn;
     // What was computed ahead while the pointer glided is found rather than computed again here.
     let out = app.run_with_kept(job.ahead.map(|a| a.kept), |app| match crate::control::handle(app, ctx, &req) {
         crate::control::Outcome::Done(v) => v,
@@ -472,7 +570,7 @@ fn finish(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// The pointer's colour: a violet no part of the UI uses.
-use crate::icons::pointer::agent;
+use solidcraft_look::pointer::agent;
 
 /// Draw the pointer, its "Agent" tag and the click ripples over everything.
 pub fn paint(app: &SolveApp, ctx: &egui::Context) {
@@ -480,25 +578,26 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(p) = app.agent.pos else { return };
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::new("sc_agent_cursor")));
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::unique("sc_agent_cursor")));
     for (at, t0) in &app.agent.ripples {
         let k = ((app.now - t0) / 0.6).clamp(0.0, 1.0) as f32;
         painter.circle_stroke(*at, 6.0 + 22.0 * k, Stroke::new(3.0 * (1.0 - k) + 0.5, agent().gamma_multiply(1.0 - k)));
     }
-    crate::icons::pointer::paint(&painter, p);
-    if let Some((_, label)) = app.agent.job.as_ref().and_then(|job| job.stops.front()).filter(|(_, label)| !label.is_empty()) {
+    solidcraft_look::pointer::paint(&painter, p);
+    if let Some((_, label, _)) = app.agent.job.as_ref().and_then(|job| job.stops.front()).filter(|(_, label, _)| !label.is_empty()) {
         use crate::ui_kit::{Container, Surface};
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         Container::new(ctx, Surface::Popup)
-            .area(egui::Id::new("sc_agent_command"))
+            .area(egui::Id::unique("sc_agent_command"))
             .order(egui::Order::Debug)
             .fixed_pos(p + vec2(15.0, 42.0))
             .constrain(true)
             .interactable(false)
             .fade_in(false)
             .show(ctx, |ui| {
-                Container::popup_frame(ui.style()).fill(t.overlay).show(ui, |ui| {
-                    ui.label(egui::RichText::new(crate::i18n::tr_label(label)).size(t.font_label).color(t.text));
+                let frame = Container::popup_frame(ui.style()).fill(t.overlay);
+                Container::show_backing(ui, frame, |ui| {
+                    ui.label(egui::RichText::new(solidcraft_ui_text::tr_label(label)).size(t.font_label).color(t.text));
                 });
             });
     }
@@ -539,10 +638,10 @@ mod tests {
         let at = Vec3::new(20.0, 15.0, 20.0);
         let s = stops(&a, "solid.hole", &json!({"position": [20, 15, 20], "diameter": 5}));
         let want = proj.to_screen(at).unwrap();
-        assert!(s.iter().any(|p| p.distance(want) < 0.01), "{s:?} vs {want:?}");
+        assert!(s.iter().any(|(p, _)| p.distance(want) < 0.01), "{s:?} vs {want:?}");
         assert!(rect.contains(want));
         // Off-screen places are skipped rather than pointed at outside the view.
-        assert!(stops(&a, "solid.hole", &json!({"position": [1e6, 0, 0]})).iter().all(|p| rect.contains(*p)));
+        assert!(stops(&a, "solid.hole", &json!({"position": [1e6, 0, 0]})).iter().all(|(p, _)| rect.contains(*p)));
     }
 
     /// A ring of points around the box's top, `n` of them, in active-sketch coordinates.
@@ -566,7 +665,7 @@ mod tests {
         let s = stops(&a, "sketch.line", &p);
         assert!(s.len() >= MAX_PICK_STOPS && s.len() <= 1 + MAX_PICK_STOPS, "{s:?}");
         // Few points are all visited.
-        assert_eq!(stops(&a, "sketch.line", &json!({"points": ring(2)})).iter().filter(|p| a.viewport.rect.unwrap().contains(**p)).count(), 2);
+        assert_eq!(stops(&a, "sketch.line", &json!({"points": ring(2)})).iter().filter(|(p, _)| a.viewport.rect.unwrap().contains(*p)).count(), 2);
         assert_eq!(summarise(&[1, 2, 3, 4, 5, 6, 7], 3), vec![1, 4, 7]);
         assert_eq!(summarise(&[1, 2], 3), vec![1, 2]);
         assert_eq!(summarise(&[1, 2, 3], 1), vec![1]);
@@ -628,7 +727,7 @@ mod tests {
         assert!(h.app.dialog.is_none(), "programmatic commands do not open interactive tools");
         h.frames(120);
         assert_eq!(rx.try_recv().unwrap()["ok"], true);
-        assert_eq!(h.app.session.world_state().bodies.len(), 1);
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 1);
         assert!(!h.app.agent.busy());
         assert!(h.widget("Box").is_none(), "the command label ends with the animation");
     }
@@ -684,6 +783,56 @@ mod tests {
         h.call("ui.drag", json!({"x0": 600, "y0": 300, "x1": 700, "y1": 360, "steps": 4}));
         h.frames(8);
         assert_eq!(h.app.agent.pos, Some(pos2(700.0, 360.0)));
+    }
+
+    /// Acts out a command, then turns the view and draws a frame.
+    fn rest_then_turn_view(h: &mut crate::scenario::Harness, params: Value) -> (Pos2, Pos2) {
+        let (req, rx) = crate::control::ControlRequest::new("engine.execute", params);
+        assert!(intercept(&mut h.app, &req));
+        h.frames(120);
+        assert_eq!(rx.try_recv().unwrap()["ok"], true);
+        let before = h.app.agent.pos.unwrap();
+        h.app.cam.orbit(150.0, 40.0);
+        h.frames(2);
+        (before, h.app.agent.pos.unwrap())
+    }
+
+    #[test]
+    fn the_pointer_stays_on_its_pick_when_the_view_turns() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.agent_cursor", json!({"show": true, "speed": 1}));
+        let at = Vec3::new(10.0, 10.0, 10.0);
+        let sphere = json!({"command": "solid.sphere", "params": {"center": [10, 10, 10], "radius": 3}});
+        let (before, after) = rest_then_turn_view(&mut h, sphere);
+        let rect = h.app.viewport.rect.unwrap();
+        let want = crate::viewport::projection(&h.app, rect).to_screen(at).unwrap();
+        assert!(after.distance(want) < 0.01, "{after:?} vs {want:?}");
+        assert!(after.distance(before) > 1.0, "the view turned, so the pick moved: {before:?} -> {after:?}");
+
+        // Turned while the pointer is still on its way, it arrives where the view now draws the pick.
+        let at = Vec3::new(12.0, 8.0, 10.0);
+        let (req, rx) =
+            crate::control::ControlRequest::new("engine.execute", json!({"command": "solid.sphere", "params": {"center": [12, 8, 10], "radius": 3}}));
+        assert!(intercept(&mut h.app, &req));
+        h.frames(3);
+        assert!(rx.try_recv().is_err(), "still on its way");
+        h.app.cam.orbit(40.0, 10.0);
+        h.frames(120);
+        assert_eq!(rx.try_recv().unwrap()["ok"], true);
+        let want = crate::viewport::projection(&h.app, rect).to_screen(at).unwrap();
+        assert!(rect.contains(want), "the pick is still in the view: {want:?}");
+        let arrived = h.app.agent.pos.unwrap();
+        assert!(arrived.distance(want) < 0.01, "{arrived:?} vs {want:?}");
+
+        // On a toolbar button (no pick) it stays at the button.
+        let box_params = json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}});
+        let (before, after) = rest_then_turn_view(&mut h, box_params);
+        assert_eq!(before, after);
+        // Pointer input the agent sends itself clears the anchor.
+        h.call("ui.move", json!({"x": 420, "y": 380}));
+        h.app.cam.orbit(50.0, 0.0);
+        h.frames(2);
+        assert_eq!(h.app.agent.pos, Some(pos2(420.0, 380.0)));
     }
 
     #[test]

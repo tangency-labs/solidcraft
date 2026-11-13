@@ -27,8 +27,9 @@ use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Sense, Shape, Str
 use serde::{Deserialize, Serialize};
 
 use crate::SolveApp;
-use crate::context_menu::{Item, act, cmd};
-use crate::theme::Tokens;
+use crate::context_menu::{act, cmd};
+use crate::ui_kit::Item;
+use solidcraft_theme::Tokens;
 
 /// Most tools one ring may hold.
 pub(crate) const MAX_TOOLS: usize = 12;
@@ -69,7 +70,16 @@ const SURFACE: [&str; 8] = ["repeat", "delete", "surface.extrude", "surface.loft
 const SHEET_METAL: [&str; 8] = ["repeat", "delete", "sheet.flange", "sheet.hem", "sketch.create", "sheet.fold", "undo", "sheet.flat_pattern"];
 const PLASTIC: [&str; 8] = ["repeat", "delete", "plastic.boss", "plastic.lip", "sketch.create", "plastic.snap_fit", "undo", "plastic.rest"];
 const MESH: [&str; 8] = ["repeat", "delete", "file.save_mesh", "inspect.measure", "inspect.section", "solid.move", "undo", "inspect.interference"];
-const RENDER: [&str; 8] = ["render.start", "render.scene", "ui.fit", "ui.home", "ui.workspace.design", "repeat", "undo", "ui.clear"];
+const RENDER: [&str; 8] = [
+    "render.start",
+    "appearance.assign",
+    "render.lights.add",
+    "render.settings.set",
+    "render.camera.fit",
+    "render.compare",
+    "ui.workspace.design",
+    "undo",
+];
 
 impl Studio {
     pub(crate) const ALL: [Studio; 7] =
@@ -134,13 +144,17 @@ impl Studio {
 /// Tools that are not commands: what they are called in a list of tools.
 const SPECIALS: [(&str, &str); 3] = [("repeat", "Repeat"), ("delete", "Delete"), ("undo", "Undo")];
 /// View actions (`ui.*`): id, label, icon.
-const ACTIONS: [(&str, &str, &str); 5] = [
+const ACTIONS: [(&str, &str, &str); 6] = [
     ("ui.fit", "Fit", "fit"),
     ("ui.home", "Home View", "home"),
+    ("ui.lookAt", "Look At", "lookat"),
     ("ui.finishSketch", "Finish Sketch", "finish"),
     ("ui.workspace.design", "Design Workspace", "box"),
     ("ui.clear", "Clear Selection", ""),
 ];
+
+/// The standard views: commands on no toolbar tab that a ring can hold all the same.
+const VIEWS: [&str; 7] = ["view.front", "view.back", "view.left", "view.right", "view.top", "view.bottom", "view.isometric"];
 
 /// A command's label without its shortcut hint: `Line (L)` is `Line`.
 fn short(label: &str) -> &str {
@@ -167,6 +181,17 @@ pub(crate) fn item(app: &SolveApp, id: &str) -> Option<Item> {
         }),
         "delete" => Some(act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty())),
         "undo" => Some(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty())),
+        _ if crate::render_workspace::active(app)
+            && matches!(id, "appearance.assign" | "render.settings.set" | "render.camera.fit" | "render.compare") =>
+        {
+            let key = match id {
+                "appearance.assign" => "render.radial_assign",
+                "render.settings.set" => "render.radial_save",
+                "render.camera.fit" => "render.radial_fit",
+                _ => "render.radial_compare",
+            };
+            Some(cmd(app, id, app.tr(key)))
+        }
         _ => match ACTIONS.iter().find(|(i, _, _)| *i == id) {
             Some((i, label, icon)) => Some(act(i, label, icon)),
             None => solidcraft_engine::find_command(id).map(|spec| cmd(app, spec.id, short(spec.label))),
@@ -174,11 +199,12 @@ pub(crate) fn item(app: &SolveApp, id: &str) -> Option<Item> {
     }
 }
 
-/// Every tool a ring can hold, as (id, label): the specials and view actions, then the commands
-/// that sit on the toolbar.
+/// Every tool a ring can hold, as (id, label): the specials and view actions, the standard views,
+/// then the commands that sit on the toolbar.
 pub(crate) fn catalog() -> Vec<(String, String)> {
     let mut v: Vec<(String, String)> = SPECIALS.iter().map(|(i, l)| ((*i).to_string(), (*l).to_string())).collect();
     v.extend(ACTIONS.iter().map(|(i, l, _)| ((*i).to_string(), (*l).to_string())));
+    v.extend(VIEWS.iter().filter_map(|id| Some(((*id).to_string(), label_of(id)?))));
     for spec in solidcraft_engine::command_specs() {
         if !spec.tab.is_empty() && spec.planned.is_none() && !v.iter().any(|(i, _)| i == spec.id) {
             v.push((spec.id.to_string(), short(spec.label).to_string()));
@@ -348,14 +374,14 @@ pub(crate) fn paint(painter: &Painter, c: Pos2, scale: f32, studio: Studio, item
         Some(item) => painter.text(
             c,
             Align2::CENTER_CENTER,
-            crate::i18n::tr_label(&item.label),
+            solidcraft_ui_text::tr_label(&item.label),
             FontId::proportional((t.font_title * scale).max(t.font_badge)),
             t.text,
         ),
         None => painter.text(
             c,
             Align2::CENTER_CENTER,
-            crate::i18n::tr_label(studio.label()),
+            solidcraft_ui_text::tr_label(studio.label()),
             FontId::proportional((t.font_intro * scale).max(t.font_badge)),
             t.text_dim,
         ),
@@ -501,10 +527,13 @@ fn paint_open(app: &SolveApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let pointer = ctx.input(|i| i.pointer.latest_pos());
     let area = Rect::from_center_size(wheel.centre, vec2(2.0 * (RING + 6.0), 2.0 * (RING + 6.0)));
-    Container::new(ctx, Surface::Canvas).area(egui::Id::new("sc_mouse_gesture")).fixed_pos(area.min).order(egui::Order::Foreground).show(ctx, |ui| {
-        let (r, _) = ui.allocate_exact_size(area.size(), Sense::hover());
-        paint(&ui.painter_at(r.expand(4.0)), wheel.centre, 1.0, wheel.studio, &list, pointer, t);
-    });
+    Container::new(ctx, Surface::Canvas).area(egui::Id::unique("sc_mouse_gesture")).fixed_pos(area.min).order(egui::Order::Foreground).show(
+        ctx,
+        |ui| {
+            let (r, _) = ui.allocate_exact_size(area.size(), Sense::hover());
+            paint(&ui.painter_at(r.expand(4.0)), wheel.centre, 1.0, wheel.studio, &list, pointer, t);
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -533,9 +562,10 @@ enum Op {
     Set(usize, String),
 }
 
-/// The first tool of the catalog that `list` doesn't hold.
+/// The first tool of the catalog that `list` doesn't hold. The standard views and Look At are
+/// only there to be chosen: "Add a tool" keeps adding what it did before they were offered.
 fn next_unused(list: &[String]) -> Option<String> {
-    catalog().into_iter().map(|(id, _)| id).find(|id| !list.contains(id))
+    catalog().into_iter().map(|(id, _)| id).find(|id| id != "ui.lookAt" && !VIEWS.contains(&id.as_str()) && !list.contains(id))
 }
 
 /// Applies `op` to `list`; false when it was refused (a ring keeps 1 to [`MAX_TOOLS`] tools, each
@@ -572,10 +602,14 @@ fn apply(list: &mut Vec<String>, op: Op) -> bool {
 /// The rows of Preferences › Navigation that belong to gestures: the switch, the button that
 /// opens the editor, and what the mouse mode has to be.
 pub(crate) fn nav_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
-    crate::ui_kit::settings_block(ui, crate::i18n::tr_label("Mouse gestures"), t.space_24 * 6.0 + t.space_6, |ui| {
+    crate::ui_kit::settings_block(ui, solidcraft_ui_text::tr_label("Mouse gestures"), t.space_24 * 6.0 + t.space_6, |ui| {
         ui.horizontal_wrapped(|ui| {
-            crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Ring of tools on the right button"), &mut app.preferences.mouse_gestures.enabled);
-            let customize = crate::ui_kit::button(ui, crate::i18n::tr_label("Customize…"), crate::ui_kit::Button::Normal);
+            crate::ui_kit::checkbox(
+                ui,
+                solidcraft_ui_text::tr_label("Ring of tools on the right button"),
+                &mut app.preferences.mouse_gestures.enabled,
+            );
+            let customize = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Customize…"), crate::ui_kit::Button::Normal);
             crate::scenario::publish_handle("gestures:customize", customize.rect.center());
             if customize.clicked() {
                 app.gesture.editor.open = true;
@@ -585,17 +619,16 @@ pub(crate) fn nav_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         if app.preferences.nav != MOUSE_MODE {
             crate::ui_kit::text(
                 ui,
-                crate::i18n::tr_label("Mouse gestures only work with the SolidWorks mouse mode (the wheel orbits, Ctrl + wheel pans)."),
+                solidcraft_ui_text::tr_label("Mouse gestures only work with the SolidWorks mouse mode (the wheel orbits, Ctrl + wheel pans)."),
                 crate::ui_kit::Text::Hint("mouse_gesture_mode"),
             );
-            if crate::ui_kit::button(ui, crate::i18n::tr_label("Use the SolidWorks mouse mode"), crate::ui_kit::Button::Normal).clicked() {
-                app.preferences.nav = MOUSE_MODE.to_string();
-                app.preferences.zoom_reverse = crate::prefs::nav_preset(MOUSE_MODE).reverse_zoom;
+            if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Use the SolidWorks mouse mode"), crate::ui_kit::Button::Normal).clicked() {
+                crate::prefs::choose_nav_preset(&mut app.preferences, crate::prefs::nav_preset(MOUSE_MODE));
             }
         } else if app.preferences.mouse_gestures.enabled {
             crate::ui_kit::text(
                 ui,
-                crate::i18n::tr_label(
+                solidcraft_ui_text::tr_label(
                     "With gestures on, the right button no longer orbits the view: hold it and move to open the ring, then touch a tool's zone. A plain right-click still opens the menu.",
                 ),
                 crate::ui_kit::Text::Hint("mouse_gesture_help"),
@@ -613,23 +646,23 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let mut studio = app.gesture.editor.studio;
     let mut config = app.preferences.mouse_gestures.clone();
-    let closed = crate::ui_kit::Window::new(egui::Id::new("sc_gesture_editor"), "settings", crate::i18n::tr_label("Mouse gestures"))
+    let closed = crate::ui_kit::Window::new(egui::Id::unique("sc_gesture_editor"), "settings", solidcraft_ui_text::tr_label("Mouse gestures"))
         .cards(3.0)
         .show_body(ctx, |ui| {
-            crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Ring of tools on the right button"), &mut config.enabled);
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Ring of tools on the right button"), &mut config.enabled);
             if app.preferences.nav != MOUSE_MODE {
                 ui.colored_label(
                     t.warning,
-                    crate::i18n::tr_label("Mouse gestures only work with the SolidWorks mouse mode (the wheel orbits, Ctrl + wheel pans)."),
+                    solidcraft_ui_text::tr_label("Mouse gestures only work with the SolidWorks mouse mode (the wheel orbits, Ctrl + wheel pans)."),
                 );
             }
             ui.horizontal(|ui| {
-                ui.label(crate::i18n::tr_label("Studio"));
+                ui.label(solidcraft_ui_text::tr_label("Studio"));
                 ui.scope(|ui| {
                     ui.set_max_width(200.0);
-                    crate::ui_kit::dropdown_menu(ui, "gesture_studio", crate::i18n::tr_label(studio.label()), |ui| {
+                    crate::ui_kit::dropdown_menu(ui, "gesture_studio", solidcraft_ui_text::tr_label(studio.label()), |ui| {
                         for s in Studio::ALL {
-                            if crate::ui_kit::list_picker(ui, s.label(), crate::i18n::tr_label(s.label()), studio == s).clicked() {
+                            if crate::ui_kit::list_picker(ui, s.label(), solidcraft_ui_text::tr_label(s.label()), studio == s).clicked() {
                                 studio = s;
                             }
                         }
@@ -637,7 +670,7 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 if crate::ui_kit::button(
                     ui,
-                    crate::i18n::tr_label("Restore this studio's tools"),
+                    solidcraft_ui_text::tr_label("Restore this studio's tools"),
                     crate::ui_kit::Button::Enabled(config.is_custom(studio)),
                 )
                 .clicked()
@@ -653,9 +686,14 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.vertical(|ui| {
                     ui.set_min_width(330.0);
                     ui.label(
-                        egui::RichText::new(format!("{} {}/{}", crate::i18n::tr_label("Tools, clockwise from the top"), list.len(), MAX_TOOLS))
-                            .size(t.font_small)
-                            .color(t.text_dim),
+                        egui::RichText::new(format!(
+                            "{} {}/{}",
+                            solidcraft_ui_text::tr_label("Tools, clockwise from the top"),
+                            list.len(),
+                            MAX_TOOLS
+                        ))
+                        .size(t.font_small)
+                        .color(t.text_dim),
                     );
                     for i in 0..list.len() {
                         ui.horizontal(|ui| {
@@ -663,26 +701,37 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
                             let shown = label_of(&list[i]).unwrap_or_default();
                             ui.scope(|ui| {
                                 ui.set_max_width(200.0);
-                                crate::ui_kit::dropdown_menu(ui, ("gesture_tool", i), &shown, |ui| {
-                                    let filter_id = ui.id().with("filter");
-                                    let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
-                                    crate::ui_kit::text_field(ui, &mut filter, crate::i18n::tr_label("Filter…"));
-                                    ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
-                                    let needle = filter.trim().to_lowercase();
-                                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                                        for (id, label) in &catalog {
-                                            if !needle.is_empty() && !label.to_lowercase().contains(&needle) && !id.to_lowercase().contains(&needle) {
-                                                continue;
+                                let picker = crate::ui_kit::dropdown_menu_with_close_behavior(
+                                    ui,
+                                    ("gesture_tool", i),
+                                    &shown,
+                                    egui::PopupCloseBehavior::CloseOnClickOutside,
+                                    |ui| {
+                                        let filter_id = ui.scope_id().with("filter");
+                                        let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
+                                        crate::ui_kit::text_field(ui, &mut filter, solidcraft_ui_text::tr_label("Filter…"));
+                                        ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+                                        let needle = filter.trim().to_lowercase();
+                                        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                                            for (id, label) in &catalog {
+                                                if !needle.is_empty()
+                                                    && !label.to_lowercase().contains(&needle)
+                                                    && !id.to_lowercase().contains(&needle)
+                                                {
+                                                    continue;
+                                                }
+                                                let taken = list.contains(id) && *id != list[i];
+                                                let r =
+                                                    ui.add_enabled_ui(!taken, |ui| crate::ui_kit::list_picker(ui, id, label, *id == list[i])).inner;
+                                                if r.clicked() {
+                                                    op = Some(Op::Set(i, id.clone()));
+                                                    ui.close();
+                                                }
                                             }
-                                            let taken = list.contains(id) && *id != list[i];
-                                            let r = ui.add_enabled_ui(!taken, |ui| crate::ui_kit::list_picker(ui, id, label, *id == list[i])).inner;
-                                            if r.clicked() {
-                                                op = Some(Op::Set(i, id.clone()));
-                                                ui.close();
-                                            }
-                                        }
-                                    });
-                                });
+                                        });
+                                    },
+                                );
+                                crate::scenario::publish_target(&format!("gestures:tool:{i}"), picker.rect);
                             });
                             if crate::ui_kit::button(ui, "↑", crate::ui_kit::Button::Enabled(i > 0)).clicked() {
                                 op = Some(Op::Up(i));
@@ -695,7 +744,7 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
                             }
                         });
                     }
-                    if crate::ui_kit::button(ui, crate::i18n::tr_label("Add a tool"), crate::ui_kit::Button::Enabled(list.len() < MAX_TOOLS))
+                    if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Add a tool"), crate::ui_kit::Button::Enabled(list.len() < MAX_TOOLS))
                         .clicked()
                     {
                         op = Some(Op::Add);
@@ -983,6 +1032,60 @@ mod tests {
     }
 
     #[test]
+    fn tool_search_keeps_focus_after_click_and_closes_only_when_finished() {
+        use crate::scenario::{Harness, handle_at};
+        use crate::test_support::{click, pointer};
+        use serde_json::json;
+
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.mouse_gestures.set_tools(Studio::Part, vec!["undo".into(), "solid.extrude".into()]);
+        h.app.gesture.editor.open = true;
+        h.app.gesture.editor.studio = Studio::Part;
+        h.frames(6);
+        click(&mut h, "gestures:tool:0");
+        let search = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == "Filter…" => Some(text.pos + text.galley.size() * 0.5),
+                _ => None,
+            })
+            .expect("the picker displays its search field");
+        h.frame_with(pointer(search, true));
+        h.frame_with(pointer(search, false));
+        h.frames(2);
+        assert!(egui::Popup::is_any_open(&h.ctx), "releasing a click in the search field must keep the picker open");
+
+        h.step(&json!({"text":"solid.extrude"})).unwrap();
+        h.frames(2);
+        assert!(handle_at("dialog:list:solid.extrude").is_some(), "search matches command ids");
+        assert!(handle_at("dialog:list:solid.box").is_none(), "unmatched tools are filtered out");
+        click(&mut h, "dialog:list:solid.extrude");
+        assert!(egui::Popup::is_any_open(&h.ctx), "a tool already in another slot is disabled");
+        assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part), ["undo", "solid.extrude"]);
+
+        h.frame_with(pointer(search, true));
+        h.frame_with(pointer(search, false));
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"Box"})).unwrap();
+        h.frames(2);
+        click(&mut h, "dialog:list:solid.box");
+        assert!(!egui::Popup::is_any_open(&h.ctx), "choosing a tool closes the picker");
+        assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part), ["solid.box", "solid.extrude"]);
+
+        click(&mut h, "gestures:tool:0");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!egui::Popup::is_any_open(&h.ctx), "Escape dismisses the picker");
+        click(&mut h, "gestures:tool:0");
+        h.frame_with(pointer(egui::pos2(20.0, 400.0), true));
+        h.frame_with(pointer(egui::pos2(20.0, 400.0), false));
+        h.frames(2);
+        assert!(!egui::Popup::is_any_open(&h.ctx), "clicking outside dismisses the picker");
+    }
+
+    #[test]
     fn the_editor_changes_how_many_tools_and_where_they_sit() {
         let mut list: Vec<String> = ["solid.extrude", "undo", "solid.hole"].iter().map(|s| s.to_string()).collect();
         assert!(apply(&mut list, Op::Down(0)));
@@ -1020,7 +1123,9 @@ mod tests {
         assert!(catalog.iter().all(|(id, label)| label_of(id).as_deref() == Some(label.as_str())));
         for studio in Studio::ALL {
             for id in studio.defaults() {
-                assert!(catalog.iter().any(|(i, _)| i == id), "{studio:?}: `{id}` is not offered in the editor");
+                // Shipped rings also contain planned actions and Render editors without toolbar destinations.
+                let offered = solidcraft_engine::find_command(id).is_none_or(|spec| spec.planned.is_none() && !spec.tab.is_empty());
+                assert_eq!(catalog.iter().any(|(i, _)| i == id), offered, "{studio:?}: `{id}` must follow the catalog's toolbar-tool policy");
             }
         }
     }
@@ -1067,7 +1172,7 @@ mod tests {
         let mut app = app();
         assert!(!active(&app), "off by default");
         app.preferences.mouse_gestures.enabled = true;
-        for nav in ["fusion", "inventor", "alias", "blender", "tinkercad", "openscad", "touchpad"] {
+        for nav in ["fusion", "creo", "inventor", "alias", "blender", "tinkercad", "openscad", "touchpad"] {
             app.preferences.nav = nav.into();
             assert!(!active(&app), "{nav}: gestures only work with the SolidWorks mouse mode");
         }
@@ -1156,6 +1261,60 @@ mod tests {
             .set_tools(Studio::Part, ["undo", "delete", "sketch.create", "solid.extrude", "solid.move"].map(String::from).to_vec());
         drag(&mut app, &[PRESS, PRESS + dir * 20.0, PRESS + dir * 200.0], false);
         assert!(!is_open(&app) && (app.tool.is_some() || app.dialog.is_some()), "Create Sketch started");
+    }
+
+    /// A design with a selected flat face, on a ring holding `tools`, the first at the top (#12406).
+    fn view_ring(tools: [&str; 2]) -> (crate::scenario::Harness, solidcore_record::Vec3) {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.cylinder", serde_json::json!({"diameter": 30, "height": 20})).unwrap();
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let body = state.bodies.first().unwrap();
+        let faces = body.body.faces(0.1).unwrap();
+        let flat = faces.iter().find(|f| f.plane_normal.is_some()).unwrap();
+        let normal = flat.plane_normal.unwrap();
+        h.app.session.selection = vec![solidcraft_engine::Sel::Face { body: body.name.clone(), index: flat.index, point: flat.centroid }];
+        h.app.preferences.nav = MOUSE_MODE.into();
+        h.app.preferences.mouse_gestures.enabled = true;
+        h.app.preferences.mouse_gestures.set_tools(Studio::Part, tools.map(String::from).to_vec());
+        (h, normal)
+    }
+
+    fn take_top_slot(h: &mut crate::scenario::Harness) {
+        let up = vec2(0.0, -1.0);
+        drag(&mut h.app, &[PRESS, PRESS + up * 20.0, PRESS + up * 200.0], false);
+        assert!(!is_open(&h.app), "the slot's tool was taken");
+        h.frames(90);
+    }
+
+    #[test]
+    fn the_standard_views_and_look_at_can_go_on_a_ring() {
+        use solidcraft_engine::geom::Vec3Geom as _;
+        let offered = catalog();
+        for id in ["view.front", "view.back", "view.left", "view.right", "view.top", "view.bottom", "view.isometric", "ui.lookAt"] {
+            assert!(offered.iter().any(|(i, _)| i == id), "`{id}` is offered");
+        }
+        assert_eq!(label_of("ui.lookAt").as_deref(), Some("Look At"));
+        // "Add a tool" picks what it always picked: the views are only there to be chosen.
+        let mut list: Vec<String> = ["repeat", "delete", "undo", "ui.fit", "ui.home"].map(String::from).to_vec();
+        assert!(apply(&mut list, Op::Add));
+        assert_eq!(list.last().map(String::as_str), Some("ui.finishSketch"));
+        let shipped: Vec<&str> = Studio::ALL.iter().flat_map(|s| s.defaults().iter().copied()).collect();
+        assert!(!shipped.iter().any(|id| id.starts_with("view.") || *id == "ui.lookAt"), "no shipped ring changes");
+
+        // A view on a slot turns the camera as the command does.
+        let (mut ring, _) = view_ring(["view.top", "undo"]);
+        take_top_slot(&mut ring);
+        let (mut direct, _) = view_ring(["undo", "delete"]);
+        direct.app.start("view.top");
+        direct.frames(90);
+        assert!(ring.app.cam.back().dist(direct.app.cam.back()) < 2e-6);
+
+        // Look At on a slot faces the selected flat face, as Ctrl+8 does.
+        let (mut ring, normal) = view_ring(["ui.lookAt", "undo"]);
+        take_top_slot(&mut ring);
+        let back = ring.app.cam.back();
+        assert!(back.dist(normal) < 2e-6 || back.dist(-normal) < 2e-6, "{back:?} faces {normal:?}");
     }
 
     #[test]

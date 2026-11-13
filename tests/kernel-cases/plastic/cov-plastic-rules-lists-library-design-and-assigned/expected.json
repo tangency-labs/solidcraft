@@ -1,0 +1,49 @@
+{
+ "sources": [],
+ "what": "plastic.rules after a design rule is made and assigned to a body: the six library rules, then the design's own, the active one and the assignment",
+ "source": "analytic",
+ "method": "the list is the library as the design has it (6 rules, ABS (1.5mm) first) and then the design's own (Housing, from ABS with a 3 deg draft: thickness 1.5, nominal radius 0.75); no rule was made active; Plate is assigned Housing. The plate is unchanged: V = 60*40*3",
+ "body_count": 1,
+ "volume_mm3": 7200.0,
+ "results": [
+  {
+   "step": 4,
+   "json": {
+    "active": null,
+    "assigned": {
+     "Plate": "Housing"
+    },
+    "rules": [
+     {
+      "name": "ABS (1.5mm)",
+      "library": true
+     },
+     {
+      "library": true
+     },
+     {
+      "library": true
+     },
+     {
+      "library": true
+     },
+     {
+      "library": true
+     },
+     {
+      "library": true
+     },
+     {
+      "name": "Housing",
+      "library": false,
+      "values": {
+       "thickness": 1.5,
+       "nominal_radius": 0.75,
+       "draft_deg": 3.0
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

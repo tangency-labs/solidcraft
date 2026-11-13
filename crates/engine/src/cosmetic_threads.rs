@@ -1,9 +1,11 @@
 //! Original schematic cylindrical hatching for evaluated cosmetic threads. The segments lie
 //! on the displayed triangles, so neither a separate cylinder nor a helical B-rep is needed.
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
+use solidcore_record::Vec3;
 use solidcraft_doc::{ModelBody, ThreadInfo};
-use solidcraft_geom::{Mesh, Vec3};
+use solidcraft_geom::Mesh;
 
 /// Shared upper bound for cosmetic strokes in one viewport/snapshot scene.
 pub const MAX_SCENE_SEGMENTS: usize = 65_536;
@@ -201,9 +203,9 @@ mod tests {
     fn modeled_threads_do_not_receive_cosmetic_strokes() {
         let mut s = Session::default();
         run(&mut s, "solid.cylinder", json!({"radius":3,"height":4}));
-        let before = s.world_state().bodies[0].mesh().triangles.len();
+        let before = s.world_state().unwrap().bodies[0].mesh().triangles.len();
         run(&mut s, "solid.thread", json!({"face":[3,0,3],"designation":"M6","length":2,"modeled":true}));
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         assert!(st.threads.is_empty());
         assert_ne!(st.bodies[0].mesh().triangles.len(), before);
         assert!(segments(&st.bodies[0], &st.bodies[0].mesh(), &st.threads).is_empty());
@@ -215,7 +217,7 @@ mod tests {
         run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10}));
         run(&mut s, "solid.hole", json!({"position":[10,10,10],"direction":[0,0,-1],"thread":"M6"}));
         run(&mut s, "solid.hole", json!({"position":[10,10,10],"direction":[0,0,-1],"diameter":8,"depth":3}));
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let body = &st.bodies[0];
         let lines = segments(body, &body.mesh(), &st.threads);
         assert!(!lines.is_empty());
@@ -233,7 +235,7 @@ mod tests {
         for i in 1..96 {
             run(&mut s, "occurrence.copy", json!({"component":c["component"],"translate":[i*8,0,0]}));
         }
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         assert_eq!(st.bodies.len(), 96);
         assert_eq!(st.threads.len(), 96);
         let started = std::time::Instant::now();
@@ -277,7 +279,7 @@ mod tests {
         let saved = s.doc.to_json();
         let reopened = solidcraft_doc::Document::from_json(&saved).unwrap();
         let mut s = Session::new(reopened);
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         assert_eq!(st.threads.len(), 1);
         assert!(st.threads[0].axis.z.abs() < 1e-6);
         let body = &st.bodies[0];
@@ -305,10 +307,10 @@ mod tests {
             } else {
                 run(&mut s, "solid.cylinder", json!({"radius":3,"height":10,"body_name":"Part"}));
             }
-            let before = s.world_state().bodies[0].mesh();
+            let before = s.world_state().unwrap().bodies[0].mesh();
             let face = if internal { json!([12.5, 10, 9]) } else { json!([3, 0, 9]) };
             run(&mut s, "solid.thread", json!({"face":face,"designation":"M6","length":4,"modeled":false}));
-            let st = s.world_state();
+            let st = s.world_state().unwrap();
             let body = &st.bodies[0];
             assert_eq!(before.positions, body.mesh().positions);
             assert_eq!(before.triangles, body.mesh().triangles);
@@ -336,10 +338,10 @@ mod tests {
                 }
             }
             assert_eq!(s.doc.to_json(), saved);
-            let scene = crate::view::scene(&s, &crate::render::Camera::default());
+            let scene = crate::view::scene(&s, &solidcraft_viewport::Camera::default()).unwrap();
             assert!(!scene.lines.iter().any(|l| l.width == 0.85), "ordinary snapshots preserve the default-off behavior");
             for distance in [25.0, 60.0] {
-                let cam = crate::render::Camera {
+                let cam = solidcraft_viewport::Camera {
                     target: if internal { Vec3::new(10., 10., 5.) } else { Vec3::new(0., 0., 5.) },
                     distance,
                     ..Default::default()
@@ -353,17 +355,18 @@ mod tests {
                         &crate::view::Palette::DEFAULT,
                         Default::default(),
                         true,
-                    );
+                    )
+                    .unwrap();
                     assert!(scene.lines.iter().any(|l| l.width == 0.85 && !l.on_top));
-                    let marked = crate::render::render(&scene, &cam, 320, 240).rgba;
+                    let marked = solidcraft_viewport::render(&scene, &cam, 320, 240).rgba;
                     scene.lines.retain(|l| l.width != 0.85);
-                    let plain = crate::render::render(&scene, &cam, 320, 240).rgba;
+                    let plain = solidcraft_viewport::render(&scene, &cam, 320, 240).rgba;
                     let changed = marked.as_chunks::<4>().0.iter().zip(plain.as_chunks::<4>().0.iter()).filter(|(a, b)| a != b).count();
                     assert!(changed > 15, "internal={internal}, distance={distance}, section={section:?}: {changed}");
                 }
             }
             s.execute("edit.undo", &json!({})).unwrap();
-            assert!(s.world_state().threads.is_empty());
+            assert!(s.world_state().unwrap().threads.is_empty());
         }
     }
 }

@@ -1,18 +1,29 @@
 //! Move/Copy: the move types (Free Move, Translate, Rotate, Point to Point, Point to Position),
 //! their rows and inputs, the triad on the canvas and the solid.move they make. Nothing
-//! moves until a value is typed or the triad is dragged.
+//! moves until a value is typed or the triad is dragged. Switching the type keeps the move made
+//! so far, and the next type moves the bodies on from where it left them: one solid.move holds
+//! the whole chain.
+//!
+//! The triad lies along the world's axes, and each ring turns the bodies about the world axis it
+//! shows, on top of the turns already made. So the angles apply in the order they were dragged
+//! (`order`): a drag on a ring changes its own angle alone and the angle reads what was dragged.
+//! Where no sum of angles can make a turn, the turns so far go into the move made so far and the
+//! angle starts over (`bake_turn`).
 
 use crate::selection::SelectionExt as _;
 use crate::ui_kit::{choice_row, expr_row};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::doc::{Mat, apply_point, apply_vector, is_identity, mat_inverse, mat_mul, rigid};
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::gizmo::{self, Change, Drag};
-use crate::selection::{AXES, BODIES, EDGES, FACES, ORIGIN, SelInput, VERTICES};
+use crate::selection::{AXIS_PICKS, BODIES, EDGES, FACES, ORIGIN, SNAP_POINTS, SelInput, VERTICES};
 
 pub const TYPES: [&str; 5] = ["Free Move", "Translate", "Rotate", "Point to Point", "Point to Position"];
 pub const FREE: usize = 0;
@@ -20,7 +31,7 @@ pub const TRANSLATE: usize = 1;
 pub const ROTATE: usize = 2;
 pub const POINT_TO_POINT: usize = 3;
 pub const POINT_TO_POSITION: usize = 4;
-const POINTS: u16 = VERTICES | FACES | EDGES | ORIGIN;
+const POINTS: crate::selection::Accept = VERTICES | FACES | EDGES | ORIGIN | SNAP_POINTS;
 
 /// A fresh Move dialog of a type (all values zero).
 pub fn kind(mode: usize, doc: &solidcraft_engine::doc::Document) -> Kind {
@@ -34,7 +45,7 @@ pub fn inputs(mode: usize) -> Vec<SelInput> {
     let mut v = vec![SelInput::new("Bodies", BODIES, true)];
     match mode {
         FREE => v.push(SelInput::new("Pivot", POINTS, false)),
-        ROTATE => v.push(SelInput::new("Axis", AXES | EDGES, false)),
+        ROTATE => v.push(SelInput::new("Axis", AXIS_PICKS, false)),
         POINT_TO_POINT => {
             v.push(SelInput::new("From", POINTS, false));
             v.push(SelInput::new("To", POINTS, false));
@@ -45,25 +56,213 @@ pub fn inputs(mode: usize) -> Vec<SelInput> {
     v
 }
 
-/// The Move Type row (above the inputs); switching keeps the bodies and resets the values.
-pub fn type_row(d: &mut Dialog, ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document) {
+/// The Move Type row (above the inputs); switching keeps the bodies and the move made so far
+/// (`chain`), and starts the new type's values at zero.
+pub fn type_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     let Kind::Move { mode, .. } = d.kind else { return };
     let mut m = mode;
     choice_row(ui, "Move Type", "move_type", &mut m, &TYPES);
     if m != mode {
-        let bodies = d.inputs.first().map(|i| i.items.clone()).unwrap_or_default();
-        d.kind = kind(m, doc);
-        d.inputs = inputs(m);
-        if let Some(i) = d.inputs.first_mut() {
-            i.items = bodies;
-        }
-        d.extra.remove("pivot");
-        d.active = if bodies_empty(d) { 0 } else { 1.min(d.inputs.len() - 1) };
+        switch_type(app, d, m);
     }
+}
+
+/// Change the Move Type to `m`, keeping the move made so far.
+fn switch_type(app: &SolveApp, d: &mut Dialog, m: usize) {
+    // A type whose picks are missing or whose values don't evaluate adds nothing.
+    if let Ok(Step::Made(p)) = step(app, d)
+        && let Ok(made) = transform(app, &p)
+    {
+        let total = chain(d).map_or(made, |c| mat_mul(&made, &c));
+        d.extra.insert("chain".into(), json!(total));
+    }
+    let bodies = d.inputs.first().map(|i| i.items.clone()).unwrap_or_default();
+    d.kind = kind(m, &app.session.doc);
+    d.inputs = inputs(m);
+    if let Some(i) = d.inputs.first_mut() {
+        i.items = bodies;
+    }
+    for key in ["pivot", "origin", "order"] {
+        d.extra.remove(key);
+    }
+    d.active = if bodies_empty(d) { 0 } else { 1.min(d.inputs.len() - 1) };
 }
 
 fn bodies_empty(d: &Dialog) -> bool {
     d.inputs.first().is_none_or(|i| i.items.is_empty())
+}
+
+/// The move made under earlier types, which the current type moves the bodies on from.
+fn chain(d: &Dialog) -> Option<Mat> {
+    let m: Mat = serde_json::from_value(d.extra.get("chain")?.clone()).ok()?;
+    (!is_identity(&m)).then_some(m)
+}
+
+/// The moved bodies and where the move so far puts them (the earlier types' move, then the
+/// current type's as far as it is made), while a Move dialog moves any: the picker finds them,
+/// and their highlights and centres show, where the preview draws them, also mid-drag.
+pub(crate) fn chained(app: &SolveApp) -> Option<(Vec<String>, Mat)> {
+    let d = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Move { .. }))?;
+    let m = match (made(app, d), chain(d)) {
+        (Some(s), Some(c)) => mat_mul(&s, &c),
+        (Some(s), None) => s,
+        (None, c) => c?,
+    };
+    (!is_identity(&m)).then(|| (bodies_of(app, d), m))
+}
+
+/// Whether the triad is being dragged in a Move dialog (`drag` keeps the values it began from).
+pub(crate) fn dragging(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }) && d.extra.contains_key("drag0"))
+}
+
+/// The current type's own move, when its picks and values make one.
+fn made(app: &SolveApp, d: &Dialog) -> Option<Mat> {
+    match step(app, d) {
+        Ok(Step::Made(p)) => transform(app, &p).ok(),
+        _ => None,
+    }
+}
+
+/// Where a point a pick keeps on moved body `body` (see [`from_shown`]) shows: moved on by the
+/// current type's own move.
+pub(crate) fn shown_point(app: &SolveApp, body: &str, p: Vec3) -> Vec3 {
+    let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Move { .. }) && bodies_of(app, d).iter().any(|n| n == body)) else {
+        return p;
+    };
+    made(app, d).map_or(p, |m| apply_point(&m, p))
+}
+
+/// A pick on a moved body is made where the move so far shows it; the current type measures
+/// from where the earlier types leave the body, so the pick is taken back by the current type's
+/// own move. Kept there, a pivot or From point picked mid-move doesn't move with the move it
+/// sets.
+pub(crate) fn from_shown(app: &SolveApp, sel: Sel) -> Sel {
+    let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Move { .. }) && on_moved(&bodies_of(app, d), &sel)) else { return sel };
+    let Some(back) = made(app, d).and_then(|m| mat_inverse(&m)) else { return sel };
+    match sel {
+        Sel::Edge { body, index, point } => Sel::Edge { body, index, point: apply_point(&back, point) },
+        Sel::Face { body, index, point } => Sel::Face { body, index, point: apply_point(&back, point) },
+        Sel::Vertex { body, point } => Sel::Vertex { body, point: apply_point(&back, point) },
+        other => other,
+    }
+}
+
+/// Whether a pick is on one of the bodies being moved (`moved`, see [`bodies_of`]).
+fn on_moved(moved: &[String], s: &Sel) -> bool {
+    match s {
+        Sel::Edge { body, .. } | Sel::Face { body, .. } | Sel::Vertex { body, .. } => moved.contains(body),
+        _ => false,
+    }
+}
+
+/// The bodies the picks stand for: the bodies picked, and the bodies of each picked component
+/// (the bodies its placement shows, as a Browser row lists them).
+fn bodies_of(app: &SolveApp, d: &Dialog) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for sel in items(d, 0) {
+        let names = match sel {
+            Sel::Body { name } => vec![name.clone()],
+            Sel::Occurrence { path } => app.session.occurrence_bodies(path, true).unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        for name in names {
+            if !out.contains(&name) {
+                out.push(name);
+            }
+        }
+    }
+    out
+}
+
+/// Whether Create Copy is ticked.
+fn copies(d: &Dialog) -> bool {
+    d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// Whether a Move dialog takes the components picked (not their bodies) into its bodies input: a
+/// click on a component in the component pick mode, or a Browser row. Not when it edits a move
+/// that is already a feature (its picks stay bodies). Without Create Copy the components still
+/// move their bodies (`targets`).
+pub(crate) fn picks_components(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }) && d.active == 0 && d.editing.is_none())
+}
+
+/// What a click picks in a Move dialog: with the component pick mode on, the component a body
+/// belongs to (copied as a component with Create Copy, see `targets`), otherwise the pick as it was.
+pub(crate) fn component_pick(app: &SolveApp, hit: &crate::viewport::Hit, sel: Sel) -> Sel {
+    let (crate::viewport::Hit::Face { body, .. }, Sel::Body { .. }) = (hit, &sel) else { return sel };
+    if app.ui.pick_components && picks_components(app) {
+        let occurrence = crate::viewport::component_selection(app, body);
+        if matches!(occurrence, Sel::Occurrence { .. }) {
+            return occurrence;
+        }
+    }
+    sel
+}
+
+/// A Ctrl or Shift click (adding to the selection, as in the view) on a body once Point to
+/// Point, Point to Position or Rotate has gone on to From, Point or Axis (#6170): the body joins
+/// Bodies, or leaves it if picked already, and the window stays on the input it was on. So
+/// several bodies are picked without clicking back into Bodies each time (#14205). With Shift
+/// adding only (`allow_toggle` false, Preferences), a picked body stays picked. False when the
+/// click is not such a pick, which then goes to the active input as usual, and while OK computes,
+/// when the inputs hold.
+pub(crate) fn add_body_click(app: &mut SolveApp, hits: &[crate::viewport::Hit], allow_toggle: bool) -> bool {
+    if app.applying.is_some() {
+        return false;
+    }
+    let Some(d) = app.dialog.as_mut() else { return false };
+    let Kind::Move { mode, .. } = d.kind else { return false };
+    if !matches!(mode, ROTATE | POINT_TO_POINT | POINT_TO_POSITION) || d.active == 0 || d.inputs.first().is_none_or(|i| i.accept & BODIES == 0) {
+        return false;
+    }
+    // What the click picks for Bodies, made as a click with Bodies active makes it.
+    let on = std::mem::replace(&mut d.active, 0);
+    let body = crate::viewport::candidate(app, hits).map(|(_, sel)| sel);
+    let Some(mut d) = app.dialog.take() else { return false };
+    if let Some(body) = body.clone().filter(|b| allow_toggle || d.inputs.first().is_none_or(|i| !i.items.contains(b))) {
+        d.pick(&app.session, body);
+    }
+    d.active = on;
+    app.dialog = Some(d);
+    body.is_some()
+}
+
+/// What the move moves and copies, as solid.move takes them: the bodies, and with Create Copy the
+/// components picked (copied as components, see `occurrences`).
+fn targets(app: &SolveApp, d: &Dialog) -> (Vec<String>, Vec<Vec<u64>>) {
+    if !copies(d) {
+        return (bodies_of(app, d), Vec::new());
+    }
+    let components = items(d, 0)
+        .iter()
+        .filter_map(|s| match s {
+            Sel::Occurrence { path } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    (items(d, 0).body_names(), components)
+}
+
+/// The solid.move parameters that name what the move moves (`bodies`, and `occurrences` when
+/// there are components to copy).
+fn targets_json(app: &SolveApp, d: &Dialog) -> Value {
+    let (bodies, components) = targets(app, d);
+    let mut p = json!({ "bodies": bodies });
+    if !components.is_empty() {
+        p["occurrences"] = json!(components);
+    }
+    p
+}
+
+/// A point of the model before this move where the earlier types' move puts it: on a moved body
+/// (`moved`) or, for the bodies' centre, always.
+fn carried(d: &Dialog, moved: bool, p: Vec3) -> Vec3 {
+    match chain(d) {
+        Some(c) if moved => apply_point(&c, p),
+        _ => p,
+    }
 }
 
 /// The value rows after the inputs; true when Enter was pressed in one.
@@ -92,9 +291,24 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Kind) -> bool {
     enter
 }
 
-fn sel_point(s: Option<&Sel>) -> Option<Vec3> {
-    match s? {
-        Sel::Vertex { point, .. } | Sel::Face { point, .. } | Sel::Edge { point, .. } => Some(*point),
+/// Where a point pick is: a round edge stands for its centre, where the model is before this
+/// move, in the world (a body of a placed component where its occurrence puts it, as it was
+/// picked); any other pick is where it was picked.
+fn sel_point(app: &SolveApp, d: &Dialog, s: Option<&Sel>) -> Option<Vec3> {
+    let s = s?;
+    match s {
+        Sel::Edge { body, index, point } => {
+            // As every pick reads the placed model: one that cannot be placed has no bodies here.
+            let st = match d.editing {
+                Some((id, _)) => std::sync::Arc::new(
+                    solidcraft_engine::doc::world_state(&app.session.doc, &app.session.model.state_before(id)).unwrap_or_default(),
+                ),
+                None => crate::open_meshing::session_world(&app.session),
+            };
+            // The centre is found where the body was modelled; the picked point is where it stands.
+            Some(crate::dialogs::edge_circle_in(&st, body, *index).map_or(*point, |(c, ..)| carried(d, on_moved(&bodies_of(app, d), s), c)))
+        }
+        Sel::Vertex { point, .. } | Sel::Face { point, .. } => Some(*point),
         _ => None,
     }
 }
@@ -103,37 +317,86 @@ fn items(d: &Dialog, i: usize) -> &[Sel] {
     crate::selection::items(&d.inputs, i)
 }
 
-/// The centre of the picked bodies where they are before this move.
-fn bodies_center(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
-    let st = match d.editing {
-        Some((id, _)) => app.session.model.state_before(id),
-        None => app.session.model.state(),
+/// The box around the picked bodies (see [`bodies_of`]) in the world, where they are before this move.
+fn bodies_bounds(app: &SolveApp, d: &Dialog) -> Aabb3 {
+    let names = bodies_of(app, d);
+    let mut bb = Aabb3::EMPTY;
+    let Some((id, _)) = d.editing else {
+        let st = crate::open_meshing::session_world(&app.session);
+        for b in names.iter().filter_map(|n| st.body(n)) {
+            bb = bb.union(&b.mesh().bounds());
+        }
+        return bb;
     };
-    let mut bb: Option<(Vec3, Vec3)> = None;
-    for n in items(d, 0).body_names() {
-        let Some(b) = st.body(&n) else { continue };
-        let x = b.mesh().bounds();
-        bb = Some(match bb {
-            None => (x.min, x.max),
-            Some((lo, hi)) => (
-                Vec3::new(lo.x.min(x.min.x), lo.y.min(x.min.y), lo.z.min(x.min.z)),
-                Vec3::new(hi.x.max(x.max.x), hi.y.max(x.max.y), hi.z.max(x.max.z)),
-            ),
-        });
+    // This runs every frame: place the box rather than every body of the earlier model.
+    let st = app.session.model.state_before(id);
+    for (name, source, _, _, m) in app.session.doc.body_frames_with_source(&st) {
+        if !names.contains(&name) {
+            continue;
+        }
+        let Some(x) = st.body(&source).map(|b| b.mesh().bounds()) else { continue };
+        for corner in 0..8 {
+            let pick = |bit: u8, lo: f64, hi: f64| if corner >> bit & 1 == 0 { lo } else { hi };
+            bb.add(apply_point(&m, Vec3::new(pick(0, x.min.x, x.max.x), pick(1, x.min.y, x.max.y), pick(2, x.min.z, x.max.z))));
+        }
     }
-    bb.map(|(lo, hi)| (lo + hi) * 0.5)
+    bb
 }
 
-/// What a Free Move turns about: the picked pivot, else the kept one (editing), else the
-/// bodies' centre.
+/// The centre of the picked bodies where they are before this move (after the earlier types').
+fn bodies_center(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
+    let bb = bodies_bounds(app, d);
+    (!bb.is_empty()).then(|| carried(d, true, bb.center()))
+}
+
+/// What a Free Move turns about: the picked pivot, else the kept one (editing: the stored
+/// origin, in the world), else the bodies' centre.
 fn pivot(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
-    if let Some(p) = sel_point(items(d, 1).first()) {
+    if let Some(p) = sel_point(app, d, items(d, 1).first()) {
         return Some(p);
     }
     if let Some(a) = d.extra.get("pivot").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()) {
         return Some(Vec3::new(a[0], a[1], a[2]));
     }
     bodies_center(app, d)
+}
+
+/// Whether the move turns about the origin an edited move stored: its stored values, expressions
+/// included, mean that. The triad still sits on the bodies, as that origin can be far from them.
+fn kept_turn(d: &Dialog) -> bool {
+    d.extra.contains_key("pivot") && items(d, 1).is_empty()
+}
+
+/// Where the bodies' centre is after the move as it stands.
+fn moved_centre(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
+    Some(apply_point(&made(app, d)?, bodies_center(app, d)?))
+}
+
+/// Turn the same move about the bodies' centre instead of the kept point: the angles stay, the
+/// distances become how far that centre goes. A ring needs this, as it turns about the triad.
+fn turn_on_centre(app: &SolveApp, d: &mut Dialog) {
+    // A kept turn that does not evaluate lives in `axis` and `angle`, about the kept point.
+    if !kept_turn(d) || d.extra.contains_key("angle") {
+        return;
+    }
+    let (Some(at), Some(centre)) = (moved_centre(app, d), bodies_center(app, d)) else { return };
+    let t = at - centre;
+    for key in ["pivot", "origin"] {
+        d.extra.remove(key);
+    }
+    if let Kind::Move { x, y, z, .. } = &mut d.kind {
+        (*x, *y, *z) = (length(app, t.x), length(app, t.y), length(app, t.z));
+    }
+}
+
+/// The turn part of a placement, as rows.
+pub(crate) fn rows_of(m: &Mat) -> [[f64; 3]; 3] {
+    [0, 1, 2].map(|r| [m[0][r], m[1][r], m[2][r]])
+}
+
+/// A distance worked out from a turn, without its rounding noise.
+fn length(app: &SolveApp, v: f64) -> String {
+    crate::length_input::model(&app.session.doc, (v * 1e6).round() / 1e6 + 0.0)
 }
 
 fn len(app: &SolveApp, s: &str) -> Result<f64, String> {
@@ -154,22 +417,114 @@ fn mm(v: f64) -> String {
     format!("{} mm", if s == "-0" || s.is_empty() { "0" } else { s })
 }
 
+/// The three angles of a Free Move.
+fn angles(app: &SolveApp, d: &Dialog) -> Result<[f64; 3], String> {
+    let Kind::Move { rx, ry, rz, .. } = &d.kind else { return Err("not a move".into()) };
+    Ok([ang(app, rx)?, ang(app, ry)?, ang(app, rz)?])
+}
+
+/// The order the angles apply in (see [`gizmo::turn_of`]).
+fn order(d: &Dialog) -> [usize; 3] {
+    d.extra.get("order").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or(gizmo::ANGLE_ORDER)
+}
+
+/// Put the current turn into the move made so far (`chain`) and start the angles from zero; the
+/// distances stay. Nothing moves.
+fn bake_turn(app: &SolveApp, d: &mut Dialog) {
+    let (Some(m), Kind::Move { x, y, z, .. }) = (made(app, d), &d.kind) else { return };
+    let (Ok(tx), Ok(ty), Ok(tz)) = (len(app, x), len(app, y), len(app, z)) else { return };
+    let keep = mat_mul(&rigid(Vec3::new(-tx, -ty, -tz), Vec3::ZERO, Vec3::Z, 0.0), &m);
+    let total = chain(d).map_or(keep, |c| mat_mul(&keep, &c));
+    d.extra.insert("chain".into(), json!(total));
+    d.extra.remove("order");
+    if let Kind::Move { rx, ry, rz, .. } = &mut d.kind {
+        for a in [rx, ry, rz] {
+            *a = "0 deg".into();
+        }
+    }
+}
+
 fn deg(v: f64) -> String {
     let s = format!("{:.4}", v.to_degrees());
     let s = s.trim_end_matches('0').trim_end_matches('.');
     format!("{} deg", if s == "-0" || s.is_empty() { "0" } else { s })
 }
 
-/// The solid.move parameters (bodies, translate, axis, angle).
+/// The solid.move parameters (bodies, translate, axis, angle): the current type's move after
+/// the earlier types' (`chain`), which alone is made while the current type's picks are missing.
 pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
+    let mut p = match (step(app, d)?, chain(d)) {
+        (Step::Made(p), None) => p,
+        (Step::Needs(e), None) => return Err(e),
+        (Step::Made(p), Some(c)) => {
+            let made = transform(app, &p)?;
+            with_transform(p, &mat_mul(&made, &c))
+        }
+        (Step::Needs(_), Some(c)) => with_transform(targets_json(app, d), &c),
+    };
+    if d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false) {
+        p["copy"] = json!(true);
+    }
+    Ok(p)
+}
+
+/// The current type's move, or what it still needs picked.
+enum Step {
+    Made(Value),
+    Needs(String),
+}
+
+/// The rigid transform of solid.move parameters: the turn about the supplied origin, then the translation.
+fn transform(app: &SolveApp, p: &Value) -> Result<Mat, String> {
+    let value = |v: &Value, f: fn(&SolveApp, &str) -> Result<f64, String>| match v {
+        Value::String(e) => f(app, e),
+        Value::Number(n) => n.as_f64().ok_or_else(|| "not a number".to_string()),
+        _ => Err("not a number".into()),
+    };
+    let t = match p.get("translate").and_then(Value::as_array) {
+        Some(a) if a.len() == 3 => Vec3::new(value(&a[0], len)?, value(&a[1], len)?, value(&a[2], len)?),
+        _ => Vec3::ZERO,
+    };
+    let Some(angle) = p.get("angle") else { return Ok(rigid(t, Vec3::ZERO, Vec3::Z, 0.0)) };
+    let origin = match p.get("origin").and_then(Value::as_array) {
+        Some(a) if a.len() == 3 => Vec3::new(value(&a[0], len)?, value(&a[1], len)?, value(&a[2], len)?),
+        _ => Vec3::ZERO,
+    };
+    let axis = match p.get("axis").and_then(Value::as_array) {
+        Some(a) if a.len() == 3 => Vec3::new(value(&a[0], len)?, value(&a[1], len)?, value(&a[2], len)?),
+        _ => Vec3::Z,
+    };
+    Ok(rigid(t, origin, axis, value(angle, ang)?))
+}
+
+/// `p` with its translation and turn replaced by `m`'s. `m` turns about the world origin, so a
+/// turn names that origin: an omitted one would be the moved body's own frame's origin.
+fn with_transform(mut p: Value, m: &Mat) -> Value {
+    let (axis, th) = gizmo::axis_angle(&rows_of(m));
+    p["translate"] = json!([mm(m[3][0]), mm(m[3][1]), mm(m[3][2])]);
+    if let Some(o) = p.as_object_mut() {
+        o.remove("axis");
+        o.remove("angle");
+        o.remove("origin");
+    }
+    if th.abs() > 1e-12 {
+        p["origin"] = json!([mm(0.0), mm(0.0), mm(0.0)]);
+        p["axis"] = json!([axis.x, axis.y, axis.z]);
+        p["angle"] = json!(deg(th));
+    }
+    p
+}
+
+/// The current type's own move, from where the earlier types leave the bodies.
+fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
     let Kind::Move { mode, x, y, z, rx, ry, rz, angle } = &d.kind else { return Err("not a move".into()) };
-    let bodies = items(d, 0).body_names();
-    if bodies.is_empty() {
+    let (bodies, components) = targets(app, d);
+    if bodies.is_empty() && components.is_empty() {
         return Err("select bodies first".into());
     }
-    let need_point = |i: usize, what: &str| sel_point(items(d, i).first()).ok_or(format!("select {what} first"));
+    let need_point = |i: usize, what: &str| sel_point(app, d, items(d, i).first()).ok_or(format!("select {what} first"));
     let num = |t: Vec3| json!([mm(t.x), mm(t.y), mm(t.z)]);
-    let mut p = json!({ "bodies": bodies });
+    let mut p = targets_json(app, d);
     match *mode {
         TRANSLATE => p["translate"] = json!([x, y, z]),
         FREE => {
@@ -178,25 +533,24 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
             if turned.is_empty() {
                 p["translate"] = json!([x, y, z]);
                 // A rotation kept from an edited move about another axis.
-                for k in ["axis", "angle"] {
+                for k in ["axis", "angle", "origin"] {
                     if let Some(v) = d.extra.get(k) {
                         p[k] = v.clone();
                     }
                 }
             } else {
                 let piv = pivot(app, d).ok_or("select bodies first")?;
-                let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
+                let r = gizmo::turn_of(a, order(d));
                 let (axis, th) = gizmo::axis_angle(&r);
+                p["origin"] = if items(d, 1).is_empty() { d.extra.get("origin").cloned().unwrap_or_else(|| num(piv)) } else { num(piv) };
+                p["translate"] = json!([x, y, z]);
                 match turned.as_slice() {
-                    // One turn about the origin: the typed values stay as they are.
-                    [i] if piv.len() < 1e-9 => {
-                        p["translate"] = json!([x, y, z]);
+                    // A single turn keeps its angle expression and pivot independently.
+                    [i] => {
                         p["axis"] = json!([[1, 0, 0], [0, 1, 0], [0, 0, 1]][*i]);
                         p["angle"] = json!([rx, ry, rz][*i]);
                     }
                     _ => {
-                        let t = Vec3::new(len(app, x)?, len(app, y)?, len(app, z)?);
-                        p["translate"] = num(piv - gizmo::apply(&r, piv) + t);
                         p["axis"] = json!([axis.x, axis.y, axis.z]);
                         p["angle"] = json!(deg(th));
                     }
@@ -204,31 +558,45 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
             }
         }
         ROTATE => {
-            let (o, a) = items(d, 1).first().and_then(|s| axis_line(app, s)).ok_or("select an axis or a straight edge first")?;
-            let th = ang(app, angle)?;
-            let r = gizmo::rotation(a, th);
-            p["translate"] = num(o - gizmo::apply(&r, o));
+            let Some((o, a)) = items(d, 1).first().and_then(|s| axis_line(app, d, s)) else {
+                return Ok(Step::Needs("select an axis, a straight or circular edge, or a cylinder, cone or torus face first".into()));
+            };
+            ang(app, angle)?;
+            p["origin"] = num(o);
             p["axis"] = json!([a.x, a.y, a.z]);
             p["angle"] = json!(angle);
         }
         POINT_TO_POINT => {
-            let (from, to) = (need_point(1, "the point to move from")?, need_point(2, "the point to move to")?);
+            let (from, to) = match (need_point(1, "the point to move from"), need_point(2, "the point to move to")) {
+                (Ok(from), Ok(to)) => (from, to),
+                (Err(e), _) | (_, Err(e)) => return Ok(Step::Needs(e)),
+            };
             p["translate"] = num(to - from);
         }
         _ => {
-            let from = need_point(1, "the point to move")?;
+            let from = match need_point(1, "the point to move") {
+                Ok(from) => from,
+                Err(e) => return Ok(Step::Needs(e)),
+            };
             let at = Vec3::new(len(app, x)?, len(app, y)?, len(app, z)?);
             p["translate"] = num(at - from);
         }
     }
-    if d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false) {
-        p["copy"] = json!(true);
-    }
-    Ok(p)
+    Ok(Step::Made(p))
 }
 
-/// An axis line: origin axes and sketch lines, or a straight body edge.
-fn axis_line(app: &SolveApp, s: &Sel) -> Option<(Vec3, Vec3)> {
+/// An axis line: origin axes and sketch lines, a straight or circular body edge, or a cylinder,
+/// cone or torus face (`dialogs::axis_of`), or a straight edge of a body where it was modelled;
+/// on a moved body, where the earlier types' move puts it.
+fn axis_line(app: &SolveApp, d: &Dialog, s: &Sel) -> Option<(Vec3, Vec3)> {
+    let (o, a) = modelled_axis(app, s)?;
+    match chain(d) {
+        Some(c) if on_moved(&bodies_of(app, d), s) => Some((apply_point(&c, o), apply_vector(&c, a))),
+        _ => Some((o, a)),
+    }
+}
+
+fn modelled_axis(app: &SolveApp, s: &Sel) -> Option<(Vec3, Vec3)> {
     if let Some(a) = crate::dialogs::axis_of(app, s) {
         return Some(a);
     }
@@ -242,14 +610,20 @@ fn axis_line(app: &SolveApp, s: &Sel) -> Option<(Vec3, Vec3)> {
     e.iter().all(|p| (*p - a).cross(dir).len() < 1e-6 * (1.0 + (b - a).len())).then_some((a, dir))
 }
 
-/// Where the triad sits: the pivot carried by the move so far (Free Move and Translate only).
+/// Where the triad sits: the pivot carried by the move so far, on the bodies for an edited
+/// move's kept turn (Free Move and Translate only).
 pub fn triad(app: &SolveApp, d: &Dialog) -> Option<gizmo::Triad> {
     let Kind::Move { mode, x, y, z, .. } = &d.kind else { return None };
     if !matches!(*mode, FREE | TRANSLATE) || bodies_empty(d) {
         return None;
     }
     let t = Vec3::new(len(app, x).unwrap_or(0.0), len(app, y).unwrap_or(0.0), len(app, z).unwrap_or(0.0));
-    Some(gizmo::Triad { center: pivot(app, d)? + t, translate: true, rotate: *mode == FREE })
+    let on_body = if kept_turn(d) { moved_centre(app, d) } else { None };
+    let center = match on_body {
+        Some(at) => at,
+        None => pivot(app, d)? + t,
+    };
+    Some(gizmo::Triad { center, translate: true, rotate: *mode == FREE })
 }
 
 /// Rotate's ring lies on the selected axis, level with the picked bodies' centre.
@@ -258,7 +632,7 @@ pub(crate) fn rotation_axis(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> 
         return None;
     }
     let centre = bodies_center(app, d)?;
-    let (origin, axis) = axis_line(app, items(d, 1).first()?)?;
+    let (origin, axis) = axis_line(app, d, items(d, 1).first()?)?;
     let axis = axis.normalized()?;
     Some((origin + axis * (centre - origin).dot(axis), axis))
 }
@@ -290,11 +664,10 @@ pub fn step_value_field(d: &mut Dialog, step: i64) {
     d.extra.insert("value_field".into(), json!(next));
 }
 
-pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
-    // The box shows the value the handle drives: the distance along a dragged arrow, the angle
-    // of a dragged ring (#4776). A plane square or the ball moves along two or three axes and
-    // leaves it as it is.
-    let field = match g.handle {
+/// Show the value `handle` drives in the box: the distance along an arrow, the angle of a ring
+/// (#4776). A plane square or the ball moves along two or three axes and leaves it as it is.
+pub fn show_handle_value(d: &mut Dialog, handle: crate::gizmo::Handle) {
+    let field = match handle {
         crate::gizmo::Handle::Axis(i) => Some(i.min(2)),
         crate::gizmo::Handle::Ring(i) => Some(3 + i.min(2)),
         _ => None,
@@ -304,11 +677,31 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
     {
         d.extra.insert("value_field".into(), json!(f));
     }
-    let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { return };
-    if g.started || !d.extra.contains_key("drag0") {
+}
+
+pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
+    show_handle_value(d, g.handle);
+    let snapshot = |d: &mut Dialog| {
+        let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { return };
         let v = [len(app, x), len(app, y), len(app, z), ang(app, rx), ang(app, ry), ang(app, rz)].map(|r| r.unwrap_or(0.0));
         d.extra.insert("drag0".into(), json!(v));
+    };
+    if g.started || !d.extra.contains_key("drag0") {
+        snapshot(d);
+        d.extra.remove("ring_set");
     }
+    // Once a ring turns, not on the press: a click on a ring changes nothing.
+    if let Change::Rotate { axis, angle } = g.change
+        && angle != 0.0
+        && !d.extra.contains_key("ring_set")
+    {
+        turn_on_centre(app, d);
+        settle_ring(app, d, axis);
+        d.extra.insert("ring_set".into(), json!(true));
+        snapshot(d);
+    }
+    // Once the ring has turned, a drag back to where it started is a real zero.
+    let turning = d.extra.contains_key("ring_set");
     let v0: [f64; 6] = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
     let Kind::Move { x, y, z, rx, ry, rz, .. } = &mut d.kind else { return };
     match g.change {
@@ -318,56 +711,107 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
             *z = crate::length_input::model(&app.session.doc, v0[2] + t.z);
         }
         Change::Rotate { axis, angle } => {
-            let slot = match axis {
-                0 => rx,
-                1 => ry,
-                _ => rz,
-            };
-            *slot = deg(v0.get(3 + axis.min(2)).copied().unwrap_or(0.0) + angle);
+            let i = axis.min(2);
+            if let Some(slot) = [rx, ry, rz].into_iter().nth(i)
+                && turning
+            {
+                *slot = deg(gizmo::within_turn(v0[3 + i] + angle));
+            }
         }
     }
     if g.done {
-        d.extra.remove("drag0");
+        for key in ["drag0", "ring_set"] {
+            d.extra.remove(key);
+        }
+    }
+}
+
+/// Before a ring's first turn: let its angle add, or start it over on the turns so far.
+fn settle_ring(app: &SolveApp, d: &mut Dialog, ring: usize) {
+    let Ok(a) = angles(app, d) else { return };
+    match gizmo::ring_order(a, order(d), ring) {
+        Some(o) => {
+            d.extra.insert("order".into(), json!(o));
+        }
+        None => bake_turn(app, d),
+    }
+}
+
+/// The Free Move angles (X, Y, Z) that make the same turn as a turn of `angle` about `axis`,
+/// in the dialog's default order (Z applied last, then Y, then X: [`gizmo::ANGLE_ORDER`]),
+/// so an edited move shows angles that re-make the turn the feature stored.
+pub(crate) fn euler_from_axis_angle(axis: Vec3, angle: f64) -> (f64, f64, f64) {
+    let axis = axis.normalized().unwrap_or(Vec3::Z);
+    let m = gizmo::rotation(axis, angle);
+    // R = Rz(rz) * Ry(ry) * Rx(rx): row 2 is (-sin ry, cos ry sin rx, cos ry cos rx).
+    let ry = (-m[2][0]).clamp(-1.0, 1.0).asin();
+    if m[2][1].abs() + m[2][2].abs() < 1e-9 {
+        // Half a turn about X or Y: only rx + rz shows; keep rz at zero.
+        ((-m[1][2]).atan2(m[1][1]), ry, 0.0)
+    } else {
+        (m[2][1].atan2(m[2][2]), ry, m[1][0].atan2(m[0][0]))
     }
 }
 
 /// The dialog for editing a move: Free Move with its translation and, about a world axis
-/// through the origin, its angle (another axis is kept as it is).
+/// through its saved pivot, its angle (another axis is shown as the Free Move angles that make
+/// the same turn, or kept as it is when the angle does not evaluate to a number).
 pub fn for_feature(
     doc: &solidcraft_engine::doc::Document,
     d: &mut Dialog,
-    bodies: &[String],
-    translate: &[solidcraft_engine::doc::Expr; 3],
-    axis: Option<Vec3>,
-    angle: Option<&solidcraft_engine::doc::Expr>,
-    copy: bool,
+    feature: &solidcraft_engine::doc::FeatureKind,
+    frame: &solidcraft_engine::doc::Mat,
 ) {
-    let [x, y, z] = translate.clone().map(String::from);
+    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy } = feature else { return };
+    let mut translate = translate.clone();
+    let mut origin = origin.clone();
+    let mut axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
+    if !solidcraft_engine::doc::is_identity(frame) {
+        solidcraft_engine::doc::map_vector_expr(frame, &mut translate);
+        if angle.is_some() || origin.is_some() {
+            let pivot = origin.get_or_insert_with(|| solidcraft_engine::doc::point_expr(Vec3::ZERO));
+            solidcraft_engine::doc::map_point_expr(frame, pivot);
+        }
+        axis = solidcraft_engine::doc::apply_vector(frame, axis);
+    }
+    let [x, y, z] = translate.map(String::from);
     let mut k = kind(FREE, doc);
     if let Kind::Move { x: kx, y: ky, z: kz, rx, ry, rz, .. } = &mut k {
         (*kx, *ky, *kz) = (x, y, z);
         if let Some(a) = angle {
-            let dir = axis.unwrap_or(Vec3::Z);
+            let dir = axis;
             let world = [Vec3::X, Vec3::Y, Vec3::Z].iter().position(|w| dir.cross(*w).len() < 1e-9 && dir.dot(*w) > 0.0);
             match world {
                 Some(0) => *rx = a.to_string(),
                 Some(1) => *ry = a.to_string(),
                 Some(_) => *rz = a.to_string(),
-                None => {
-                    d.extra.insert("axis".into(), json!([dir.x, dir.y, dir.z]));
-                    d.extra.insert("angle".into(), json!(a));
-                }
+                None => match doc.eval(a, ValueKind::Angle) {
+                    Ok(th) if th.is_finite() => {
+                        let (ax, ay, az) = euler_from_axis_angle(dir, th);
+                        (*rx, *ry, *rz) = (deg(ax), deg(ay), deg(az));
+                    }
+                    _ => {
+                        d.extra.insert("axis".into(), json!([dir.x, dir.y, dir.z]));
+                        d.extra.insert("angle".into(), json!(a));
+                    }
+                },
             }
-            // The stored move turns about the origin.
-            d.extra.insert("pivot".into(), json!([0.0, 0.0, 0.0]));
+        }
+        if angle.is_some() || origin.is_some() {
+            let origin = origin.unwrap_or_else(|| solidcraft_engine::doc::point_expr(Vec3::ZERO));
+            let pivot = origin.iter().map(|e| doc.eval(e, solidcraft_engine::doc::expr::Kind::Length)).collect::<Result<Vec<_>, _>>();
+            if let Ok(pivot) = pivot {
+                d.extra.insert("pivot".into(), json!(pivot));
+            }
+            d.extra.insert("origin".into(), json!(origin));
         }
     }
     d.kind = k;
     d.inputs = inputs(FREE);
     if let Some(inp) = d.inputs.first_mut() {
-        inp.items = bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect();
+        inp.items = bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
     }
-    if copy {
+    if *copy {
         d.extra.insert("copy".into(), json!(true));
     }
 }

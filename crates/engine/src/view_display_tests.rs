@@ -1,7 +1,7 @@
 use super::*;
 use serde_json::json;
-use solidcraft_geom::Vec2;
-use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource};
+use solidcore_record::Vec2;
+use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource};
 
 fn line(sk: &mut Sketch, y: f64) -> usize {
     sk.add_line(Vec2::new(0., y), Vec2::new(2., y), None, None, None).unwrap()
@@ -121,6 +121,46 @@ fn hiding_construction_geometry_keeps_ordinary_curves_centerlines_and_projected_
 }
 
 #[test]
+fn spline_tangent_guides_are_hidden_from_normal_sketch_drawing_and_extend_both_sides() {
+    let mut sk = Sketch::new();
+    let positions = [Vec2::new(0., 0.), Vec2::new(8., 6.), Vec2::new(17., 2.), Vec2::new(25., 10.)];
+    let points = positions.iter().map(|point| sk.add_point(*point, None).unwrap()).collect();
+    let spline = sk
+        .add_curve(CurveKind::Spline { pts: points, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1"))
+        .unwrap();
+    sk.add_spline_handles(spline).unwrap();
+
+    let CurveKind::Spline { pts, handles, .. } = &sk.curves[spline].kind else { panic!("expected a fit spline") };
+    let natural = solidcraft_sketch::fit_beziers(&positions);
+    for (index, handle) in handles.iter().enumerate() {
+        let position = sk.point(*handle).unwrap();
+        let fit_point = sk.point(pts[index]).unwrap();
+        let control_offset = if index == 0 { natural[0][1] - positions[index] } else { natural[index - 1][2] - positions[index] };
+        let chord = if index == 0 { positions[1].dist(positions[0]) } else { positions[index - 1].dist(positions[index]) };
+        // Measured against a third of the mean of the chords beside the point: as long as the
+        // control offset where they are equal, and scaling the spline scales its handles alike.
+        let unit = match index {
+            0 => chord,
+            i if i + 1 == positions.len() => chord,
+            i => (positions[i - 1].dist(positions[i]) + positions[i].dist(positions[i + 1])) / 2.0,
+        };
+        let expected = control_offset.len() * (unit / chord);
+        assert!((position.dist(fit_point) - expected).abs() < 1e-9, "handle {index}: arm {}, expected {expected}", position.dist(fit_point));
+    }
+
+    let helper = sk.curves.iter().position(|curve| curve.spline_handle_of.as_deref() == Some("s1")).unwrap();
+    assert!(!sketch_curve_visible(&sk, helper));
+    assert_eq!(spline_handle_display_line(&sk, helper), Some((positions[0] * 2.0 - sk.point(handles[0]).unwrap(), sk.point(handles[0]).unwrap())));
+
+    let mut sampled = Vec::new();
+    sketch_lines_with_sampler(&sk, &Plane::XY, true, &[], |_, index, _| {
+        sampled.push(index);
+        vec![vec![Vec3::ZERO, Vec3::X]]
+    });
+    assert!(!sampled.contains(&helper), "tangent guides are drawn only by the selected-spline viewport path");
+}
+
+#[test]
 fn legacy_paths_match_sampler_wrapper_and_placed_wires_are_unchanged() {
     let mut sk = Sketch::new();
     sk.add_circle(Vec2::new(2., 3.), 1., None, None).unwrap();
@@ -154,8 +194,8 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     s.execute("sketch.circle.center", &json!({"center":[2,3],"radius":1})).unwrap();
     s.section = Some((Vec3::new(0., 0., 3.), Vec3::Z));
     let cam = Camera::default();
-    let old = scene(&s, &cam);
-    let default = scene_with_sketch_sampler(&s, &cam, world_curve_parts);
+    let old = scene(&s, &cam).unwrap();
+    let default = scene_with_sketch_sampler(&s, &cam, world_curve_parts).unwrap();
     assert_eq!(old.lines.len(), default.lines.len());
     for (a, b) in old.lines.iter().zip(&default.lines) {
         assert_eq!((&a.points, a.color, a.width, a.on_top), (&b.points, b.color, b.width, b.on_top));
@@ -165,7 +205,8 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     let sampled = scene_with_sketch_sampler(&s, &cam, |_, _, plane| {
         planes.push(*plane);
         parts.clone()
-    });
+    })
+    .unwrap();
     assert_eq!(planes.len(), 1);
     assert!(planes[0].origin.dist(Vec3::new(20., 30., 40.)) < 1e-9);
     assert!(planes[0].x.dist(Vec3::X) < 1e-9);
@@ -186,7 +227,7 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     let active = s.active_sketch.unwrap();
     s.execute("sketch.finish", &json!({})).unwrap();
     s.visibility.hidden_sketches.push(active);
-    let hidden = scene_with_sketch_sampler(&s, &cam, |_, _, _| panic!("hidden sketch sampled"));
+    let hidden = scene_with_sketch_sampler(&s, &cam, |_, _, _| panic!("hidden sketch sampled")).unwrap();
     assert!(hidden.lines.iter().all(|line| !line.on_top));
 }
 
@@ -221,19 +262,19 @@ fn colored_components_override_appearances_and_restore_them() {
     }
     s.selection.clear();
     let cam = Camera::default();
-    let original = scene(&s, &cam);
+    let original = scene(&s, &cam).unwrap();
     s.execute("inspect.colored_components", &json!({"enabled": true})).unwrap();
     s.colored_components = Some(());
-    let colored = scene(&s, &cam);
+    let colored = scene(&s, &cam).unwrap();
     assert_eq!(colored.meshes.len(), 2);
     assert_ne!(colored.meshes[0].color, colored.meshes[1].color);
-    for (body, mesh) in s.world_state().bodies.iter().zip(&colored.meshes) {
+    for (body, mesh) in s.world_state().unwrap().bodies.iter().zip(&colored.meshes) {
         let [r, g, b] = component_color(&s, body.component).unwrap();
         assert_eq!(mesh.color, Rgb(r, g, b));
         assert!(mesh.face_colors.is_empty());
     }
     s.execute("inspect.colored_components", &json!({"enabled": false})).unwrap();
-    let restored = scene(&s, &cam);
+    let restored = scene(&s, &cam).unwrap();
     for (a, b) in original.meshes.iter().zip(restored.meshes) {
         assert_eq!(a.color, b.color);
         assert_eq!(a.face_colors, b.face_colors);
@@ -259,7 +300,7 @@ fn cycling_component_color_is_saved_undoable_and_shared_by_instances() {
     assert_eq!(s.doc.appearances, appearances);
     let loaded = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert_eq!(loaded.doc.component_identification_color(component), custom);
-    let copies: Vec<_> = s.world_state().bodies.iter().map(|b| b.component).collect();
+    let copies: Vec<_> = s.world_state().unwrap().bodies.iter().map(|b| b.component).collect();
     assert_eq!(copies, [component, component]);
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(component_color(&s, component), Some(automatic));

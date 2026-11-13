@@ -32,7 +32,8 @@
 //! Tolerances are relative to the loci's own size plus the rounding of the coordinates they
 //! are computed from, so a construction far from the origin behaves like the same one near it.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::model::{ConstraintKind, CurveKind, MAX_COORD, Sketch, in_range, radius_in_range};
 use crate::union_find::{find, union};
@@ -988,6 +989,10 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     }
     for (k, rd) in rounds.iter().enumerate() {
         let Some(Round { c, ends: Some((a, b)) }) = *rd else { continue };
+        // An offset's arc follows its source's centre; its held ends don't place it (#6569).
+        if sk.offset_arc_follows_source(k) {
+            continue;
+        }
         match r_of(k) {
             Some(r) => {
                 rel(c, a, Rel::Dist(r));

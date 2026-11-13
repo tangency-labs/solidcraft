@@ -1,7 +1,8 @@
 //! Certificates are producer identities, never a nearest-surface selection.
 use crate::{DocError, Document, FeatureKind, ModelBody, Result, SolvedSketch};
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Seg2;
+use solidcore_record::Seg2;
+use solidcraft_geom::prelude::*;
 
 fn valid_signature(outer: &[String], holes: &[Vec<String>]) -> bool {
     let valid = |ids: &[String]| {
@@ -68,11 +69,11 @@ pub(crate) fn cap_key(outer: &[String], holes: &[Vec<String>]) -> String {
     }
     format!("{:x}", hash.finalize())
 }
-fn exact_region_signature(curves: &ExactSketchCurves, region: &solidcraft_geom::Region2) -> Option<solidcraft_kernel::CapSignature> {
+fn exact_region_signature(curves: &ExactSketchCurves, region: &solidcore_record::Region2) -> Option<solidcraft_kernel::CapSignature> {
     if region.outer.segs.len() + region.holes.iter().map(|hole| hole.segs.len()).sum::<usize>() > 4096 || region.holes.len() > 128 {
         return None;
     }
-    let signature = |outline: &solidcraft_geom::Loop2| {
+    let signature = |outline: &solidcore_record::Loop2| {
         let mut ids = outline.segs.iter().map(|segment| curves.find(segment)).collect::<Option<Vec<_>>>()?;
         ids.sort();
         ids.dedup();
@@ -116,7 +117,7 @@ pub(crate) fn extrude_cap_bindings(sketch: &SolvedSketch, bodies: &[solidcraft_k
     let mut counts = std::collections::BTreeMap::new();
     let mut bindings = Vec::with_capacity(bodies.len());
     for body in bodies {
-        let mut cached: Option<(&solidcraft_geom::Region2, Option<solidcraft_kernel::CapSignature>)> = None;
+        let mut cached: Option<(&solidcore_record::Region2, Option<solidcraft_kernel::CapSignature>)> = None;
         let mut values = Vec::new();
         for source in body.face_sources().into_iter().flatten() {
             let signature = if let Some(FaceSource::ExtrudeCap { region, high, .. }) = source {
@@ -210,7 +211,7 @@ pub enum FaceCertificate {
     },
     /// A flat face known by its exact history name (the target's `name`, without piece
     /// numbers): what the kernel's face history says it came from, followed through every
-    /// feature since (a cut wall `F5:side:l1`, a chamfer `F7:blend:…`, a pattern copy
+    /// feature since (a cut wall `F5:side:l1`, a chamfer `F7:blend(…)`, a pattern copy
     /// `F4:top@F6.2`, a face a join merged from two features). Used where no construction
     /// certificate above names the face uniquely. Its plane is the face's exact current plane in
     /// the frame [`lineage_frame`] gives it. See docs/face-attachments.md.
@@ -392,6 +393,8 @@ pub(crate) struct ExactSketchCurves<'a> {
     /// Each analytic curve's id, whether it is projected (linked) reference geometry, and its
     /// segments.
     segments: Vec<(&'a str, bool, Vec<Seg2>)>,
+    /// Each free-form curve's id (ellipses, conics, splines) and its exact segments.
+    free_form: Vec<(&'a str, Vec<Seg2>)>,
 }
 
 impl<'a> ExactSketchCurves<'a> {
@@ -399,10 +402,17 @@ impl<'a> ExactSketchCurves<'a> {
     /// and segment allocation must not be repeated for every generated face.
     pub(crate) fn new(sketch: &'a SolvedSketch) -> Self {
         let mut segments = Vec::new();
+        let mut free_form = Vec::new();
         if sketch.sketch.curves.len() > 2000 {
-            return Self { segments };
+            return Self { segments, free_form };
         }
         for (index, curve) in sketch.sketch.curves.iter().enumerate() {
+            if !curve.construction
+                && let Some(exact) = sketch.sketch.exact_segs(index)
+            {
+                free_form.push((curve.id.as_str(), exact));
+                continue;
+            }
             if curve.construction
                 || !matches!(
                     curve.kind,
@@ -424,7 +434,21 @@ impl<'a> ExactSketchCurves<'a> {
             };
             segments.push((curve.id.as_str(), curve.link.is_some(), originals));
         }
-        Self { segments }
+        Self { segments, free_form }
+    }
+
+    /// The one free-form sketch curve (an ellipse, conic or spline) a generated segment is a
+    /// whole piece of, either way round: one of the exact segments the curve is made of. A
+    /// segment two curves share stays ambiguous.
+    pub(crate) fn find_free_form(&self, generated: &Seg2) -> Option<String> {
+        let reversed = generated.reversed();
+        let mut found: Option<Option<&str>> = None;
+        for (id, originals) in &self.free_form {
+            if originals.iter().any(|original| *original == *generated || *original == reversed) {
+                found = Some(if found.is_some() { None } else { Some(*id) });
+            }
+        }
+        found.flatten().map(str::to_owned)
     }
 
     /// The one sketch curve a generated segment lies on. A curve drawn over projected
@@ -614,7 +638,7 @@ fn exact_segment_contains(original: &Seg2, generated: &Seg2) -> bool {
         (Seg2::Line { a, b }, Seg2::Line { a: c, b: d }) => {
             let direction = *b - *a;
             let scale = direction.len().max((*d - *c).len()).max(1.);
-            let interval = |point: solidcraft_geom::Vec2| {
+            let interval = |point: solidcore_record::Vec2| {
                 let t = (point - *a).dot(direction) / direction.len2();
                 (-1e-10..=1. + 1e-10).contains(&t)
             };
@@ -650,7 +674,12 @@ fn exact_segment_contains(original: &Seg2, generated: &Seg2) -> bool {
 }
 
 impl Document {
-    pub fn configuration_face_target(&self, body: &ModelBody, index: usize, point: solidcraft_geom::Vec3) -> Result<crate::config::ConfigFaceTarget> {
+    pub fn configuration_face_target(
+        &self,
+        body: &ModelBody,
+        index: usize,
+        point: solidcore_record::Vec3,
+    ) -> Result<crate::config::ConfigFaceTarget> {
         let names = crate::naming::face_names(body);
         let mut name = names
             .get(index)
@@ -719,7 +748,7 @@ impl Document {
         certificate.validate()?;
         Ok(Some(certificate))
     }
-    pub fn strong_face_target(&self, body: &ModelBody, index: usize, point: solidcraft_geom::Vec3) -> Result<crate::config::ConfigFaceTarget> {
+    pub fn strong_face_target(&self, body: &ModelBody, index: usize, point: solidcore_record::Vec3) -> Result<crate::config::ConfigFaceTarget> {
         let mut target = self.configuration_face_target(body, index, point)?;
         match body.body.face_sources().and_then(|sources| sources.get(index)).and_then(Option::as_ref) {
             Some(solidcraft_kernel::FaceSource::Box { producer: Some(producer), axis, high, .. }) => {
@@ -752,27 +781,27 @@ impl Document {
 /// is), projected onto it. A face that moves along its normal keeps the frame where it was;
 /// one that moves within its plane (a Move feature) keeps it too, as a sketch on a face does
 /// in the definition's coordinates.
-pub fn lineage_frame(body: &ModelBody, plane: &solidcraft_geom::Plane) -> Option<solidcraft_geom::Plane> {
-    use solidcraft_geom::Vec3;
+pub fn lineage_frame(body: &ModelBody, plane: &solidcore_record::Plane) -> Option<solidcore_record::Plane> {
+    use solidcore_record::Vec3;
     let n = plane.normal();
     let m = &body.source_transform;
     let origin = crate::apply_point(m, Vec3::ZERO);
     let axis = [Vec3::X, Vec3::Y, Vec3::Z].into_iter().filter_map(|a| crate::apply_vector(m, a).normalized()).find(|a| a.dot(n).abs() < 0.6)?;
     let x = axis - n * axis.dot(n);
     let origin = origin - n * (origin - plane.origin).dot(n);
-    solidcraft_geom::Plane::new(origin, x, n.cross(x))
+    solidcore_record::Plane::new(origin, x, n.cross(x))
 }
 
 /// Whether Split Face split `body`'s faces on `plane` (a split line lies on it).
-fn split_on_purpose(body: &ModelBody, plane: &solidcraft_geom::Plane) -> bool {
+fn split_on_purpose(body: &ModelBody, plane: &solidcore_record::Plane) -> bool {
     let tolerance = 1e-6 * (1. + body.body.size());
     let on_plane =
-        |line: &Vec<solidcraft_geom::Vec3>| !line.is_empty() && line.iter().all(|p| (*p - plane.origin).dot(plane.normal()).abs() <= tolerance);
+        |line: &Vec<solidcore_record::Vec3>| !line.is_empty() && line.iter().all(|p| (*p - plane.origin).dot(plane.normal()).abs() <= tolerance);
     body.body.split_lines().is_some_and(|lines| lines.iter().any(on_plane))
 }
 
 /// Whether two exact planes are one oriented plane (pieces of one face).
-fn same_oriented_plane(a: &solidcraft_geom::Plane, b: &solidcraft_geom::Plane, scale: f64) -> bool {
+fn same_oriented_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane, scale: f64) -> bool {
     a.normal().dot(b.normal()) >= 1. - 1e-8 && (b.origin - a.origin).dot(a.normal()).abs() <= 1e-7 * (1. + scale)
 }
 
@@ -780,7 +809,7 @@ impl Document {
     /// The exact plane an anchor on face `index` of `body` is measured in: the construction
     /// certificate's plane, or for a [`FaceCertificate::Lineage`] face its current exact plane in
     /// the [`lineage_frame`].
-    pub fn anchor_face_plane(&self, body: &ModelBody, index: usize, certificate: Option<&FaceCertificate>) -> Option<solidcraft_geom::Plane> {
+    pub fn anchor_face_plane(&self, body: &ModelBody, index: usize, certificate: Option<&FaceCertificate>) -> Option<solidcore_record::Plane> {
         match certificate {
             Some(FaceCertificate::Lineage) => body.body.planar_face(index).and_then(|plane| lineage_frame(body, &plane)),
             _ => body.body.face_plane(index),
@@ -796,7 +825,7 @@ impl Document {
         &self,
         body: &ModelBody,
         index: usize,
-        point: solidcraft_geom::Vec3,
+        point: solidcore_record::Vec3,
     ) -> Option<crate::config::ConfigFaceTarget> {
         let names = crate::naming::names(body);
         if !names.verified(index) {
@@ -842,8 +871,13 @@ impl Document {
         };
         let mut indices: Vec<usize> = names.faces.iter().enumerate().filter(|(_, face)| piece_of(face)).map(|(index, _)| index).collect();
         if indices.is_empty() {
-            indices =
-                names.info.iter().enumerate().filter(|(_, info)| info.aliases.iter().any(|alias| alias == name)).map(|(index, _)| index).collect();
+            indices = names
+                .info
+                .iter()
+                .enumerate()
+                .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| other == name))
+                .map(|(index, _)| index)
+                .collect();
         }
         if indices.is_empty() {
             return Err(DocError::Unknown(format!("face `{name}` on `{}` no longer exists", body.name)));
@@ -950,10 +984,11 @@ mod tests {
         SolvedSketch {
             feature: 1,
             name: "sources".into(),
-            plane: solidcraft_geom::Plane::XY,
+            plane: solidcore_record::Plane::XY,
             sketch,
             report,
             profiles: Vec::new(),
+            profiles_3d: Vec::new(),
             ends: Default::default(),
         }
     }
@@ -985,7 +1020,7 @@ mod tests {
 
     #[test]
     fn prepared_sources_keep_exact_identity_and_reject_ambiguity() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         let mut sketch = solidcraft_sketch::Sketch::new();
         sketch.add_line(Vec2::ZERO, Vec2::new(10., 0.), None, None, Some("line")).unwrap();
         sketch.add_circle(Vec2::new(20., 0.), 2., None, Some("circle")).unwrap();
@@ -1010,7 +1045,7 @@ mod tests {
 
     #[test]
     fn a_curve_drawn_over_a_projected_boundary_is_the_source() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         // A face sketch's live boundary, with a profile edge traced over it (issue #489).
         let mut sketch = solidcraft_sketch::Sketch::new();
         let projected = sketch.add_line(Vec2::ZERO, Vec2::new(10., 0.), None, None, Some("edge")).unwrap();
@@ -1034,7 +1069,7 @@ mod tests {
     #[test]
     #[ignore = "manual optimized certification microbenchmark; no timing assertion"]
     fn benchmark_prepared_extrude_sources() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         let mut sketch = solidcraft_sketch::Sketch::new();
         for i in 0..1000 {
             let y = i as f64;
@@ -1087,7 +1122,7 @@ mod tests {
     #[test]
     fn analytic_arc_interval_refuses_unsampled_gaps_and_accepts_wrap_reversal() {
         let radians = |degrees: f64| degrees.to_radians();
-        let arc = |start, sweep| Seg2::Arc { center: solidcraft_geom::Vec2::default(), radius: 10., start: radians(start), sweep: radians(sweep) };
+        let arc = |start, sweep| Seg2::Arc { center: solidcore_record::Vec2::default(), radius: 10., start: radians(start), sweep: radians(sweep) };
         assert!(!exact_segment_contains(&arc(10., 350.), &arc(20., 360.)), "five point probes missed the missing ten-degree gap");
         assert!(!exact_segment_contains(&arc(10., 350.), &arc(20., -360.)));
         assert!(exact_segment_contains(&arc(350., 40.), &arc(355., 20.)));

@@ -4,9 +4,10 @@ MODEL → MODIFY offers Convert to Sheet Metal. The SHEET METAL tab is always av
 and selected when the active body is a sheet), and builds parts from a sheet of constant thickness under a **sheet metal rule**
 (thickness, bend radius, K-factor), set in **Sheet Metal Rules** (`sheet.manage_rules`).
 
-- **Flange** (`sheet.flange`): a base flange from a sketch profile, a contour flange from an open
+- [**Flange**](../reference/commands.md#command-sheet.flange): a base flange from a sketch profile, a contour flange from an open
   sketch, or an edge flange from a part edge.
-- **Hem** (`sheet.hem`) and **Fold** (`sheet.fold`) along a sketch line.
+- [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
+- **Fold** (`sheet.fold`) bends the sheet along a sketch line.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
 - **Convert** (`sheet.convert`) turns a plate of constant thickness into sheet metal, or, with
   bend edges, a solid or a shelled body.
@@ -15,6 +16,44 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 
 Bends follow the rule's K-factor, so flat lengths match what a press brake will make. Tests
 check flat lengths against hand-computed bend allowances.
+
+## Step by step
+
+A tray: a plate with a flange up each long side, and its flat pattern.
+
+**1. Base flange.** Sketch an 80 × 50 mm rectangle on the Top plane and finish the sketch. On the
+**SHEET METAL** tab, click **Flange**, then the profile, then **OK**: a plate at the rule's
+thickness.
+
+<video src="../media/sheet-metal/base.mp4" autoplay loop muted playsinline controls width="100%" aria-label="A base flange from a sketched rectangle: Flange, click the profile, OK"></video>
+
+**2. Edge flanges.** Click **Flange** again, then the plate's two long top edges. Type the height
+(20) and press Enter. Each flange bends up at the rule's radius.
+
+<video src="../media/sheet-metal/flange.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Edge flanges 20 mm high from the plate's two long top edges"></video>
+
+**3. Flat pattern.** **Flat Pattern** shows the part laid flat, with a dashed line for each bend,
+its flat size and a table of bends to export as DXF or CSV.
+
+<video src="../media/sheet-metal/flat.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Create Flat Pattern: the tray laid flat with its two bend lines, flat size and bend table"></video>
+
+## Rules and tools
+
+A rule is saved in its design, and a new design starts with only the default steel rule. To use
+the same rules in every design, keep them as **personal rules**, saved in your profile: open
+**Personal rules** at the top of Sheet Metal Rules.
+
+- **Save new** keeps the rule the manager shows under a name: its thickness, K factor, bend
+  radius, reliefs, gaps, corner relief shape and angle display. A bare number is saved with the
+  design's unit, so the rule makes the same sheet in a millimetre or an inch design. `Thickness`
+  and other expressions are kept as typed, and are worked out in the design the rule is used in.
+- Picking a personal rule fills the manager with it: the design's own rule of that name, or else
+  a new rule. **OK** adds it to the design (or updates that rule); picking alone changes nothing.
+- The save icon beside the box saves the manager's values over the picked personal rule.
+  **Rename** and **Delete** change the personal rule only, never the rules already in designs.
+
+A design keeps its own copy of each rule it uses, so it builds the same on a computer without
+your personal rules. The profile keeps up to 64 of them.
 
 A copy of a sheet metal body is sheet metal too. **Mirror** (`solid.mirror` with `bodies`)
 makes the opposite hand: its own flat pattern, DXF and bend table, the mirror image of the
@@ -152,6 +191,59 @@ per edge with an angle and a height box; an empty box takes the value above.
 {"command":"sheet.flange","params":{"edges":[[60,0,2],{"point":[120,45,2],"angle":"90 deg"},
  {"point":[60,90,2],"angle":"105 deg","height":"30 mm"},{"point":[0,45,2],"angle":"120 deg","height":"25 mm"}],
  "height":38.6,"angle":"75 deg"}}
+```
+
+One edge can also be split into segments: `segments` lists stretches of the picked edge, each
+`{"from": 0, "to": 0.5, "angle": "90 deg", "height": "20 mm", "flip": false}`. `from` and `to`
+are fractions of the stretch the sheet still has there (what cut-outs leave), from the end where
+the outline enters the edge, so the first `from` is 0, the last `to` is 1 and each `to` is the
+next `from`: segments divide the edge, they never leave material out (a set-back is the other
+thing). Consecutive segments that match in angle, height and side make one bend; the others make
+a bend each, with its own setback, leg and side, so the base's outline steps where their angles
+differ and the flange's far edge steps where their heights differ. A segment's `flip` replaces the
+feature's `flip` outright: `false` is the default direction and `true` the other one, whatever the
+feature's `flip` is, so it is not a turn relative to the feature. No bend relief is cut where two
+segments meet, and
+where the two stretches bend to opposite sides the blank is cut along their junction, from the inner
+bend line out to the nearer stretch's far edge, in the flat pattern and the DXF: a blank still joined
+there cannot fold one stretch up and the next down, while same-side stretches stay one piece.
+Stretches at different angles have different setbacks, so their bend lines are offset: the cut starts
+at the inner of the two, so it covers the strip between the bend lines, over which the folded part
+separates. Its outer end is the nearer far edge: past that only the longer stretch's material
+remains, so there is nothing of the other stretch left to part. Where
+a cut-out took that far edge away, the cut is clipped to the material that is left: it runs from the
+bend line to the nearest boundary the junction line meets (a notch's edge, for one), so the blank is
+parted as far as its remaining material allows. Only the stretch of the junction line from the bend
+line out to the junction's own tip belongs to that junction: past the tip the line runs on through
+material the bend never reaches (another arm of a C-shaped blank, for one), and that material keeps
+no cut. A straight boundary and a circular one are met
+exactly, so a round notch ends the cut on the arc itself and the DXF splits the arc there.
+`then` is refused on a split edge: bend each segment's far edge in its own
+feature. Stretches that meet within 1e-9 (the junction tolerance, `SEGMENT_JOIN_EPS`) are one
+partition: the junction is snapped shut whatever the two stretches' angle, height or side are, so
+no gap survives into trimming or the flat pattern, and only stretches that match make one bend. A
+stretch narrower than that tolerance is no bend of its own: the run before it takes that stretch
+(its angle and height do not build), so the bends still tile the edge with nothing left uncovered
+and no reversed span reaches the flat pattern. That includes stretches at the very start of the
+edge, with no run before them: the bend that follows them takes them and still starts at the edge's
+start, so the first bend covers the edge from 0 and the last ends at 1.
+The whole stretch must lie on one straight line of the outline, with no gap in it: a stretch
+along a curve is refused (its fractions would only follow chords), a stretch across a notch or a
+step is refused too, and a straight edge a cut-out has shortened can still be split because the
+stretch that is left lies along the same straight line. In the Flange dialog, each picked edge has
+its own **Segments** list, **Split Edge** adds one more equal stretch (or splits the last one on an
+edge the design already split), removing a stretch keeps the edge whole (the gap is bridged from
+the stretches beside it, never from the removed row, so a boundary the user did not touch does not
+move, or the whole edge when it was the only one), and editing a feature keeps every
+edge's fractions, angle, height and side, an explicit `flip: false` included. The dialog refuses
+`then` on a split edge by name, rather than dropping the chain.
+
+```json
+{"command":"sheet.flange","params":{"type":"edge","edges":[{"point":[100,0,2],"segments":[
+ {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm"},
+ {"from":0.5,"to":0.75,"angle":"90 deg","height":"15 mm"},
+ {"from":0.75,"to":1,"angle":"45 deg","height":"15 mm","flip":false}]}],
+ "height":"20 mm","angle":"90 deg"}}
 ```
 
 An edge flange can bend more than once: `then` lists further bends, each an `angle` and a

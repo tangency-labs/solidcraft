@@ -1,0 +1,43 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     1017.5,
+     -670,
+     307.5
+    ],
+    "axis": "X",
+    "radius": 5,
+    "height": 10,
+    "body_name": "A"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     1017.5,
+     -670,
+     315
+    ],
+    "axis": "Y",
+    "radius": 12.5,
+    "height": 5,
+    "operation": "new",
+    "body_name": "B"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "A",
+    "tools": [
+     "B"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

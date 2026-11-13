@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a cone of height 0 has no volume: refused",
+ "source": "analytic",
+ "method": "the base and the top coincide: no solid, a clean refusal naming the height",
+ "outcome": "refused",
+ "refusal": "height must not be zero"
+}

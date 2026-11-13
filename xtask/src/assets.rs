@@ -38,7 +38,12 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), String> {
     for e in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let e = e.map_err(|e| e.to_string())?;
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || name.starts_with("target") || matches!(name.as_str(), "plan" | "dist" | "node_modules") {
+        // vendored code keeps its own licences: the patched crates (vendor/README.md) and the
+        // kernel (solidcore/); their images, STEP files and fonts are not SolidCraft's assets.
+        if name.starts_with('.')
+            || name.starts_with("target")
+            || matches!(name.as_str(), "plan" | "dist" | "node_modules" | "corpus" | "solidcore" | "vendor")
+        {
             continue;
         }
         let p = e.path();
@@ -56,12 +61,25 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// Collected files kept beside the code that ships them, held to the same rows as `assets/`:
+/// SolidCraft's look (its icon masters and tools, fonts, theme files and glyph drawing code) and
+/// the app's own marker and navigation cube drawing code.
+const COLLECTED_OUTSIDE_ASSETS: &[&str] = &[
+    "crates/look/icons/",
+    "crates/look/fonts/",
+    "crates/look/themes/",
+    "crates/look/src/glyphs.rs",
+    "crates/look/src/pointer.rs",
+    "crates/look/src/compass.rs",
+    "crates/ui-egui/src/icons/",
+];
+
 fn needs_attribution(path: &str) -> bool {
     // Include code masters, native work, catalogs, metadata and licence texts in the collection.
     if path.starts_with("assets/locales/pending/") {
         return false;
     }
-    if path.starts_with("assets/") {
+    if path.starts_with("assets/") || COLLECTED_OUTSIDE_ASSETS.iter().any(|dir| path.starts_with(dir)) {
         return !path.ends_with(".md");
     }
     Path::new(path).extension().is_some_and(|ext| ASSET_EXT.contains(&ext.to_string_lossy().to_ascii_lowercase().as_str()))
@@ -107,6 +125,33 @@ mod tests {
         assert!(needs_attribution("design/project.vectorcraft"));
         assert!(!needs_attribution("assets/README.md"));
         assert!(!needs_attribution("crates/ui/src/widget.rs"));
+        for path in [
+            "crates/look/icons/design/palette.toml",
+            "crates/look/fonts/ibm-plex-sans/OFL.txt",
+            "crates/look/themes/nord.json",
+            "crates/look/src/glyphs.rs",
+            "crates/ui-egui/src/icons/markers.rs",
+        ] {
+            assert!(needs_attribution(path), "{path}");
+        }
+        assert!(!needs_attribution("crates/look/icons/README.md"));
+        assert!(!needs_attribution("crates/look/src/lib.rs"));
+    }
+
+    #[test]
+    fn vendored_code_is_not_an_asset() {
+        let root = std::env::temp_dir().join(format!("solidcraft-xtask-assets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("solidcore/assets")).unwrap();
+        std::fs::create_dir_all(root.join("vendor/patched")).unwrap();
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("solidcore/assets/logo.svg"), "x").unwrap();
+        std::fs::write(root.join("vendor/patched/upstream.svg"), "x").unwrap();
+        std::fs::write(root.join("assets/ours.svg"), "x").unwrap();
+        let mut files = Vec::new();
+        walk(&root, &root, &mut files).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(files, ["assets/ours.svg"]);
     }
 
     #[test]

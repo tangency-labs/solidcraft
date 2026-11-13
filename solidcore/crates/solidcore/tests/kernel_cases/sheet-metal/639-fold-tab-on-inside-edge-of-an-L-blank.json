@@ -1,0 +1,63 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "639-fold-tab-on-inside-edge-of-an-L-blank",
+  "expected": {
+    "body_count": 1,
+    "method": "blank area by the shoelace formula 7450.0 mm2 at t = 0.8; the fold has width 30 (the tab's height along the line): a fold keeps the flat length of the blank, so a fold of angle th, inner radius R, thickness t and K-factor K over a width w takes a flat strip of BA = th(R+Kt) and puts a bend of volume th((R+t)^2-R^2)w/2 in its place: V = V_flat + th w t^2 (1/2 - K) (the bend's mid-surface lies at R+t/2, the neutral axis at R+Kt). V = 7450.0*0.8 + (pi/2)*30*0.64*0.06",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#639",
+      "tangency-labs/solidcraft#653",
+      "tangency-labs/solidcraft#963"
+    ],
+    "volume_mm3": 5961.809557368468,
+    "what": "a tab (x 45..60, y 60..90) on an inside edge of an L-shaped blank folded 90 degrees at x = 59 with the fixed point on the other leg; refused as folding tabs that join again"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 46,
+      "faces": 20,
+      "vertices": 28
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 15248.644530584843,
+      "body_count": 1,
+      "edges": 42,
+      "faces": 16,
+      "vertices": 28,
+      "volume_mm3": 5961.80955709874
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#639",
+    "tangency-labs/solidcraft#653",
+    "tangency-labs/solidcraft#963"
+  ],
+  "traced_ops": [
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d"
+  ],
+  "ungraded": [],
+  "what": "a tab (x 45..60, y 60..90) on an inside edge of an L-shaped blank folded 90 degrees at x = 59 with the fixed point on the other leg; refused as folding tabs that join again",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "name": "radius-supported-just-below-limit-rejected",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2062",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "radius": 7.999991999999999e-05
+        }
+      }
+    },
+    {
+      "name": "radius-supported-at-limit-accepted",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2062",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "radius": 7.999992e-05
+        }
+      }
+    },
+    {
+      "name": "radius-supported-8x-tolerance-accepted",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2062",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "radius": 8e-05
+        }
+      }
+    },
+    {
+      "name": "radius-supported-variable-end-below-limit-rejected",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2163",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "radius": 0.5,
+          "radius_end": 7.999991999999999e-05
+        }
+      }
+    },
+    {
+      "name": "radius-supported-variable-start-below-limit-rejected",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2162",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "radius": 7.999991999999999e-05,
+          "radius_end": 0.5
+        }
+      }
+    }
+  ]
+}

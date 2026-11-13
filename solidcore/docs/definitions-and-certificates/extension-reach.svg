@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="600" viewBox="0 0 1000 600">
+  <title>extension-reach</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L1000 0 L1000 600 L0 600 Z" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 40 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">The exact extension past a face&apos;s side</tspan></text>
+    <path d="M80 380 C230 330 370 300 500 290 L500 470 L80 470 Z" fill="#eeeeee"/>
+    <path d="M500 290 C565.9 284.9 629.2 285 690 290.2" fill="none" stroke="#dce9f5" stroke-width="18" stroke-miterlimit="10"/>
+    <path d="M80 380 C230 330 370 300 500 290" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <path d="M500 290 C565.9 284.9 629.2 285 690 290.2" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <path d="M80 380 C230 330 370 300 500 290" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <path d="M500 290 C565.9 284.9 629.2 285 690 290.2" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10" stroke-dasharray="7 4"/>
+    <path d="M500 270 L500 520" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <path d="M620.244 286.511 L620.244 520" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <path d="M690.019 290.213 L690.019 520" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <path d="M500 283 L500 297" fill="none" stroke="#000000" stroke-width="2.5" stroke-miterlimit="10"/>
+    <path d="M770.244 136.511 L595.244 311.511" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <path d="M614.244 286.511 C614.244 283.197 616.93 280.511 620.244 280.511 C623.558 280.511 626.244 283.197 626.244 286.511 C626.244 289.825 623.558 292.511 620.244 292.511 C616.93 292.511 614.244 289.825 614.244 286.511 Z" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 725.244 126.511)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">neighbour G&apos;s offset</tspan></text>
+    <text transform="matrix(1 0 0 1 634.244 316.511)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#555555"><tspan x="0" y="0">the offsets meet</tspan></text>
+    <g>
+      <g>
+        <path d="M504.2 444.4 L616.044 444.4 L616.044 445.6 L504.2 445.6 Z" fill="#000000"/>
+        <path d="M500 445 L512 439 L508.4 445 L512 451 Z" fill="#000000"/>
+        <path d="M620.244 445 L608.244 451 L611.844 445 L608.244 439 Z" fill="#000000"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 507 436)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">reach r</tspan></text>
+    <g>
+      <g>
+        <path d="M504.2 504.4 L685.819 504.4 L685.819 505.6 L504.2 505.6 Z" fill="#000000"/>
+        <path d="M500 505 L512 499 L508.4 505 L512 511 Z" fill="#000000"/>
+        <path d="M690.019 505 L678.019 511 L681.619 505 L678.019 499 Z" fill="#000000"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 507 496)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">margin = r + d</tspan></text>
+    <text transform="matrix(1 0 0 1 110 440)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">face F</tspan></text>
+    <text transform="matrix(1 0 0 1 80 250)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">the face&apos;s own net, kept bit for bit</tspan></text>
+    <path d="M200 256 L220 333" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 330 545)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">joint: end knot at multiplicity p</tspan></text>
+    <path d="M470 532 L498 515" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 702 295)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">ε_ext</tspan></text>
+    <path d="M60 95 L100 95" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 110 100)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">S: the definition, continued</tspan></text>
+    <path d="M60 117 L100 117" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 110 122)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">B: the source&apos;s net, kept</tspan></text>
+    <path d="M60 139 L100 139" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10" stroke-dasharray="7 4"/>
+    <text transform="matrix(1 0 0 1 110 144)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">B past the side</tspan></text>
+    <path d="M60 161 L100 161" fill="none" stroke="#dce9f5" stroke-width="14" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 110 166)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">its certified bound ε_ext</tspan></text>
+    <text transform="matrix(1 0 0 1 40 580)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Over the source&apos;s box the result is the source (bound 0); past the side it carries a certified bound.</tspan></text>
+  </g>
+</svg>

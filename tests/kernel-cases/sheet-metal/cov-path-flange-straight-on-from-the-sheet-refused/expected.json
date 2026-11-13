@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "sheet.path_flange along a line that runs straight on from the sheet (in its own plane): no bend to make",
+ "source": "invariants",
+ "method": "the first line's angle to the sheet makes the first bend; a line at 0 degrees to it makes none, so the path is refused with the line it is about",
+ "outcome": "refused",
+ "refusal": "line 1 of the path flange's path runs straight on from the sheet"
+}
