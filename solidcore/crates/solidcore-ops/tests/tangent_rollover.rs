@@ -1,6 +1,10 @@
 //! Tangent rollover: a concave round whose contact line reaches a smooth edge of the face it
 //! rolls on, and rolls on across it onto the face beyond.
 //!
+//! Also a convex round that, past a radius, rolls on its edge's faces only past an end of the
+//! edge (SolidCraft's fuzz `atomic_commands` seed 2, body `b27`): refused, naming the radius at
+//! which it first has a section between the edge's ends, and that radius builds.
+//!
 //! The body is an L step swept 10 along z, its section in the xy plane: a wall x = 0 standing on
 //! a strip y = 0 that is `w` wide, then a cliff x = w down to y = -5. The cliff's rim (w, 0) is
 //! rounded `r1` first, which leaves the strip flat for `a = w - r1` and runs it on tangentially
@@ -8,7 +12,12 @@
 //! the flat onto the rim's round, the whole length of the edge, and the strip is consumed.
 
 #![allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)] // test
 
 mod common;
 
@@ -547,5 +556,225 @@ fn a_boss_round_too_large_names_the_size_that_fits_the_boss() {
     }
     for size in named {
         assert_boss_round_builds(size);
+    }
+}
+
+/// SolidCraft's fuzz `atomic_commands` seed 2: its body `b27` as the rig's export gives it, and
+/// the record's canonical order (edge 28 is at record index 28).
+fn b27() -> (Body, solidcore_ops::Order) {
+    use std::io::Read;
+    fixes();
+    let gz: &[u8] = include_bytes!("data/atomic_seed2_b27.bodies.json.gz");
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(gz)
+        .read_to_string(&mut text)
+        .unwrap();
+    let mut records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: solidcore_record::brep::Brep =
+        serde_json::from_value(records["b27"].take()).unwrap();
+    let (input, order) = Body::from_record(&record, true).unwrap();
+    input.copy_with_order(&order).unwrap()
+}
+
+/// Edge 28 of `b27` rounded `r` alone, on a fresh copy of the body; the body when it builds.
+fn b27_edge_28(r: f64) -> Result<Body, Error> {
+    use solidcore_ops::blend::{blend_ordered, BlendOptions};
+    let (body, order) = b27();
+    blend_ordered(
+        &body,
+        &order,
+        Blend::Round,
+        &[28],
+        &[r],
+        &[],
+        Corners::Filled,
+        BlendOptions::default(),
+    )
+    .map(|_| body)
+}
+
+/// The fit margin: a thousand of edge 28's tolerance, 1e-5.
+const B27_FIT_MARGIN: f64 = 1000.0 * 1e-5;
+
+/// In closed form, the radius above which no ball touching both of edge 28's faces lies
+/// between the edge's ends. Edge 28 is the crease of an R3 convex round (the cylinder about
+/// the line x = 3, z = 4.5 along y, between the planes x = 0 and z = 7.5, which it meets
+/// tangentially along x = 0, z = 4.5 and x = 3, z = 7.5) with a spherical pocket (radius 10
+/// about C = (2.5, 50, 0)). Its end V = (0, 50 - sqrt(73.5), 4.5) on the plane x = 0 has
+/// tangent `n_cyl x n_sphere` = (-1, 0, 0) x (V - C), along (0, 4.5, sqrt(73.5)): its End's
+/// plane is 4.5 (y - `V_y`) + sqrt(73.5) (z - 4.5) = 0. A ball of radius r touching the round
+/// along its far tangent edge (x = 3, z = 7.5) has its centre at (3, y, 7.5 - r), and touching
+/// the pocket from outside |centre - C| = 10 + r: (y - 50)^2 = (10 + r)^2 - 0.25 - (7.5 - r)^2
+/// = 43.5 + 35 r. That centre lies in V's plane where
+/// 4.5 (sqrt(73.5) - sqrt(43.5 + 35 r)) + sqrt(73.5) (3 - r) = 0, i.e.
+/// (7.5 - r)^2 73.5 / 20.25 = 43.5 + 35 r, i.e. 98 r^2 - 2415 r + 4338 = 0, whose smaller
+/// root is (2415 - sqrt(4131729)) / 196 = 1.950686...
+fn b27_edge_28_cutoff() -> f64 {
+    (2415.0 - 4_131_729.0_f64.sqrt()) / 196.0
+}
+
+/// Edge 28 of `b27` rounded at or above the cutoff (and up to r 3, where the round's offset
+/// collapses onto its axis) is refused: every ball on its faces lies past its end on x = 0,
+/// so the round has no section between its ends. It used to fail with status 1001 (at 2.99
+/// with no cross sections to trace from, at 2.5 to 1.97 on the End's cap edge, its rail 0.81
+/// off the cap's plane), and r 3's refusal named 2.99, saying any radius below 3 rolls. Each
+/// refusal now names the closed-form cutoff less the fit margin. Below r 3 the kernel's
+/// reason is `EndRollsIntoSmoothEnd`, which ops names no `RoomReason` for.
+#[test]
+fn a_round_whose_every_ball_lies_past_an_end_names_the_radius_that_has_a_section() {
+    let want = b27_edge_28_cutoff() - B27_FIT_MARGIN;
+    for (r, reason) in [
+        (3.0, Some(RoomReason::OffsetCollapses)),
+        (2.99, None),
+        (2.5, None),
+        (2.0, None),
+        (1.97, None),
+    ] {
+        match b27_edge_28(r) {
+            Err(Error::TooLarge { size, why, .. }) => {
+                assert_eq!(why, reason, "r {r}");
+                assert!((size - want).abs() <= 1e-9, "r {r}: {size} against {want}");
+            }
+            Err(e) => panic!("r {r}: {e:?}"),
+            Ok(_) => panic!("r {r}: built"),
+        }
+    }
+}
+
+/// The premise of those refusals, sampled across the whole of the R3 round: below r 3 and at
+/// or above the cutoff, the ball touching the round at angle t about its axis (t from 90
+/// degrees, its tangent edge z = 7.5, to 180, its tangent edge x = 0) and the pocket from
+/// outside has its centre past the End's plane at V = (0, 50 - sqrt(73.5), 4.5), at 4001
+/// angles each. Below the cutoff the ball on the tangent edge z = 7.5 is on the span's side.
+#[test]
+fn every_ball_on_the_r3_round_lies_past_the_end_at_or_above_the_cutoff() {
+    let rc = b27_edge_28_cutoff();
+    let vy = 50.0 - 73.5_f64.sqrt();
+    // the End's plane through V, its normal along the edge into the span
+    let past = |c: [f64; 3]| -(4.5 * (c[1] - vy) + 73.5_f64.sqrt() * (c[2] - 4.5));
+    let centre = |r: f64, t: f64| {
+        let (x, z) = (3.0 + (3.0 - r) * t.cos(), 4.5 + (3.0 - r) * t.sin());
+        let y = 50.0 - ((10.0 + r).powi(2) - (x - 2.5).powi(2) - z * z).sqrt();
+        [x, y, z]
+    };
+    for r in [rc, 1.97, 2.0, 2.5, 2.99] {
+        for i in 0..=4000 {
+            let t = PI / 2.0 + PI / 2.0 * f64::from(i) / 4000.0;
+            let d = past(centre(r, t));
+            assert!(d >= -1e-12, "r {r}, t {t}: {d} on the span's side");
+        }
+    }
+    assert!(past(centre(rc - B27_FIT_MARGIN, PI / 2.0)) < 0.0);
+}
+
+/// The rails of edge 28's round in `made`, checked against the closed forms of the faces it
+/// rolls on: every edge the round made (no edge of `input` passes through its middle) that
+/// lies on the R3 round's cylinder, the pocket's sphere or the plane z = 7.5 lies, at 17
+/// points, within the edge's tolerance (1e-5) of it and within that face (the cylinder
+/// between its tangent edges x = 0 and z = 7.5, the plane past the tangent edge x = 3). At
+/// least one rail lies on each: the round rolls on the R3 round and the pocket and over the
+/// tangent edge onto z = 7.5.
+fn assert_b27_rails_on_faces(input: &Body, made: &Body, r: f64) {
+    use solidcore::query::api_queries::{edge_closest_point, get_edges};
+    let tol = 1e-5;
+    let (ki, bi) = common::kernel_copy(input);
+    let (k, b) = common::kernel_copy(made);
+    let input_edges = get_edges(&bi).unwrap();
+    let mut counts = [0; 3];
+    for e in get_edges(&b).unwrap() {
+        let edge = b.edge(e).unwrap();
+        let curve = edge.curve.as_ref().unwrap();
+        let ivl = edge.interval;
+        let pts: Vec<_> = (0..=16)
+            .map(|i| {
+                let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 16.0;
+                curve.evaluate_point(&k, t).unwrap()
+            })
+            .collect();
+        let mid = pts[8];
+        let old = input_edges.iter().any(|&f| {
+            edge_closest_point(&ki, &bi, f, mid)
+                .unwrap()
+                .closest
+                .distance
+                <= tol
+        });
+        if old {
+            continue;
+        }
+        let on_cylinder = pts
+            .iter()
+            .all(|p| ((p.x - 3.0).hypot(p.z - 4.5) - 3.0).abs() <= tol);
+        let on_sphere = pts.iter().all(|p| {
+            ((p.x - 2.5).powi(2) + (p.y - 50.0).powi(2) + p.z * p.z).sqrt() - 10.0 <= tol
+                && 10.0 - ((p.x - 2.5).powi(2) + (p.y - 50.0).powi(2) + p.z * p.z).sqrt() <= tol
+        });
+        let on_top = pts.iter().all(|p| (p.z - 7.5).abs() <= tol);
+        if on_cylinder {
+            counts[0] += 1;
+            for p in &pts {
+                assert!(
+                    p.x <= 3.0 + tol && p.z >= 4.5 - tol,
+                    "r {r}: a rail on the R3 round leaves it at {p:?}"
+                );
+            }
+        }
+        if on_sphere {
+            counts[1] += 1;
+        }
+        if on_top {
+            counts[2] += 1;
+            for p in &pts {
+                assert!(
+                    p.x >= 3.0 - tol,
+                    "r {r}: a rail on z = 7.5 leaves it at {p:?}"
+                );
+            }
+        }
+    }
+    assert!(
+        counts.iter().all(|&n| n > 0),
+        "r {r}: rails on the R3 round, the pocket and z = 7.5: {counts:?}"
+    );
+}
+
+/// The size those refusals name builds a valid solid that is smaller than the input, its rails
+/// on the faces it rolls on, and so does 1.94. Both failed with "negative interval" in the
+/// rails' trim (#15905). Just below the cutoff the section at the end on x = 0 is solved with
+/// its centre in the End's plane, but the rail on the R3 round crosses that plane only some
+/// 60 degrees round the round from it (the round runs across the cylinder there, nearly in
+/// the plane), on the trace's extension back from its start. On the closed curve the offsets
+/// meet in, the extension past the end had stopped at the trace's domain, short of the start,
+/// keeping 250 of the gap's 351 degrees, and the extension back kept half of the rest: the
+/// rail's only crossing of the plane was 67 degrees past the other end, and the trim's
+/// interval was inverted. Each end now keeps what it keeps when the extension past the end
+/// closes. (Between 1.945 and the cutoff the trim now succeeds and the End's patch fails as
+/// at 1.6, "the smooth end cap is not built": a separate defect.)
+#[test]
+fn the_size_the_past_an_end_refusal_names_builds() {
+    let (input, _) = b27();
+    let before = input.volume(1e-9).unwrap();
+    for r in [b27_edge_28_cutoff() - B27_FIT_MARGIN, 1.94] {
+        let made = b27_edge_28(r).unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        assert!(made.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+        let after = made.volume(1e-9).unwrap();
+        assert!(after > 0.0 && after < before, "r {r}: {after} of {before}");
+        assert_b27_rails_on_faces(&input, &made, r);
+    }
+}
+
+/// A radius part of whose round lies between the edge's ends is not refused as rolling past
+/// an end, and builds (1.9 and 1.7: the ball touching the R3 round on its tangent edge
+/// z = 7.5 lies on the span's side of the End's plane on x = 0, by the closed form of
+/// [`b27_edge_28_cutoff`]; the ball rolls on the R3 round near that end and over the
+/// tangent edge onto z = 7.5 towards the other).
+#[test]
+fn a_round_partly_between_the_ends_is_not_refused_past_an_end() {
+    let (input, _) = b27();
+    for r in [1.9, 1.7] {
+        assert!(r < b27_edge_28_cutoff());
+        let made = b27_edge_28(r).unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        assert!(made.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+        assert_b27_rails_on_faces(&input, &made, r);
     }
 }
