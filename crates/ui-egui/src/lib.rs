@@ -202,6 +202,12 @@ mod boundary_dialog_tests;
 pub(crate) mod display_lod;
 pub mod drawing_jobs;
 pub mod drawing_sheet_page;
+pub mod drawing_attention_card;
+pub mod drawing_dimension_status;
+pub mod drawing_dimension_repair;
+pub mod drawing_repair_ui;
+pub mod drawing_status_controller;
+pub mod drawing_status_engine;
 pub mod drawing_workspace;
 #[cfg(test)]
 mod file_load_ui_tests;
