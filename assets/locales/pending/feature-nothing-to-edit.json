@@ -9,5 +9,38 @@
     "ui.feature_kind.mesh_import": "Imported mesh",
     "ui.feature_kind.repair": "Repair",
     "ui.feature_nothing_to_edit": "{kind}: nothing to edit"
+  },
+  "ar": {
+    "ui.feature_kind.align": "محاذاة",
+    "ui.feature_kind.body_transfer": "نقل الجسم",
+    "ui.feature_kind.construction_axis": "محور إنشائي",
+    "ui.feature_kind.construction_point": "نقطة إنشائية",
+    "ui.feature_kind.import": "جسم مستورد",
+    "ui.feature_kind.mesh_convert": "تحويل الشبكة",
+    "ui.feature_kind.mesh_import": "شبكة مستوردة",
+    "ui.feature_kind.repair": "إصلاح",
+    "ui.feature_nothing_to_edit": "{kind}: لا يوجد ما يمكن تحريره"
+  },
+  "he": {
+    "ui.feature_kind.align": "יישור",
+    "ui.feature_kind.body_transfer": "העברת גוף",
+    "ui.feature_kind.construction_axis": "ציר עזר",
+    "ui.feature_kind.construction_point": "נקודת עזר",
+    "ui.feature_kind.import": "גוף מיובא",
+    "ui.feature_kind.mesh_convert": "המרת רשת",
+    "ui.feature_kind.mesh_import": "רשת מיובאת",
+    "ui.feature_kind.repair": "תיקון",
+    "ui.feature_nothing_to_edit": "{kind}: אין מה לערוך"
+  },
+  "ja": {
+    "ui.feature_kind.align": "整列",
+    "ui.feature_kind.body_transfer": "ボディの移動",
+    "ui.feature_kind.construction_axis": "作業軸",
+    "ui.feature_kind.construction_point": "作業点",
+    "ui.feature_kind.import": "インポートしたボディ",
+    "ui.feature_kind.mesh_convert": "メッシュの変換",
+    "ui.feature_kind.mesh_import": "インポートしたメッシュ",
+    "ui.feature_kind.repair": "修復",
+    "ui.feature_nothing_to_edit": "{kind}: 編集できる項目はありません"
   }
 }
