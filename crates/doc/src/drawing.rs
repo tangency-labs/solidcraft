@@ -71,6 +71,7 @@ pub mod coverage;
 pub mod cutting_line;
 pub mod dimension;
 pub mod fields;
+pub mod fold;
 pub mod image;
 pub mod note;
 pub mod symbol;

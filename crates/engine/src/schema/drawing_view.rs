@@ -12,7 +12,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcore_record::Seg2;
-use solidcraft_doc::drawing::view::ViewPlace;
+use solidcraft_doc::drawing::view::{Beside, Diagonal, ViewPlace};
 use solidcraft_doc::drawing_view::{MAX_JOINT_VALUES, MAX_POSE_JOINTS, TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide, Scale};
@@ -771,13 +771,13 @@ pub struct ChoicesResult {
 pub struct InspectResult {
     pub view: String,
     pub sheet: String,
-    /// `base`, `projected` or `section`.
+    /// `base`, `projected`, `section` or `pictorial`.
     pub kind: &'static str,
     /// The design it draws: its own source, or its base view's.
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
-    /// The side of its parent a projected view sits on.
+    /// The side of its parent a projected view sits on, or the diagonal a pictorial view sits on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub side: Option<String>,
     /// Which way it looks, as resolved through its parents.
@@ -790,8 +790,8 @@ pub struct InspectResult {
     pub boundary_mm: BoxResult,
     /// The extents on its plane of what it shows.
     pub extents: ExtentsResult,
-    /// A projected view's display settings: `true` when all follow its parent, `false` when none
-    /// does, `"partly"` otherwise. None for a base view.
+    /// A projected or pictorial view's display settings: `true` when all follow its parent, `false`
+    /// when none does, `"partly"` otherwise. None for a base view.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Value")]
     pub linked: Option<Value>,
@@ -961,23 +961,61 @@ pub struct ProjectedParams {
     pub place: Option<PlaceParam>,
 }
 
-/// The side of its parent a projected view sits on.
+/// Where a view made from its parent sits by it: a side (a projected view) or a diagonal (a
+/// pictorial view).
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(transparent)]
-pub struct SideParam(pub ProjectedSide);
+pub struct SideParam(pub Beside);
 
 impl JsonSchema for SideParam {
     fn schema_name() -> Cow<'static, str> {
         "ProjectedSide".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        let names: Vec<Value> = ProjectedSide::ALL.iter().filter_map(|s| serde_json::to_value(s).ok()).collect();
+        let sides = ProjectedSide::ALL.map(Beside::Side).into_iter();
+        let names: Vec<Value> = sides.chain(Diagonal::ALL.map(Beside::Diagonal)).filter_map(|s| serde_json::to_value(s).ok()).collect();
         json_schema!({
-            "description": "The side of its parent it sits on: left, right, above or below. The drawing's projection says which side of the model it shows.",
+            "description": "Where it sits by its parent: left, right, above or below for a projected view (the drawing's projection says which side of the model it shows), or above_right, above_left, below_right or below_left for an isometric (pictorial) view on that diagonal.",
             "type": "string",
             "enum": names
         })
     }
+}
+
+/// What `drawing.view.projection_for` takes: the parent, and a point by its offset from the
+/// parent's centre.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ProjectionForParams {
+    pub parent: ViewIdParam,
+    /// The point, in paper millimetres from the parent's centre: `[dx, dy]`, each at most 10000
+    /// either way.
+    pub offset_mm: [f64; 2],
+}
+
+/// What `drawing.view.projection_for` returns: the view `drawing.view.projected` would make there.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ProjectionForResult {
+    /// `orthographic` (a projected view, lined up), `pictorial` (an isometric view, placed apart) or
+    /// `none`.
+    pub kind: &'static str,
+    /// Where it would sit, as `drawing.view.projected`'s `side` takes it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side: Option<String>,
+    /// Whether it would be lined up with its parent.
+    pub lined_up: bool,
+    /// Which way it would look, as `drawing.view.inspect` gives it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direction: Option<ViewResult>,
+    /// The scale it would draw at: its parent's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scale: Option<ScaleResult>,
+    /// The drawing's projection, `first` or `third`.
+    pub projection: String,
+    /// For `none`: on the parent's centre, or why no view is made from the parent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
 }
 
 /// What `drawing.view.base` and `drawing.view.projected` return.
