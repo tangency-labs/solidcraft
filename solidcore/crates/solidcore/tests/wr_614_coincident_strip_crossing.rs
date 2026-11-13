@@ -263,9 +263,10 @@ fn wr_614_wider_protruding_box_keeps_exit_crossing() {
 
     let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
     let (_, b) = strip_cubes(&mut k, D);
-    let inter = boolean_intersection(&mut k, a, b).unwrap();
-    assert_eq!(shape(&inter).3, 1, "one intersection solid");
-    assert!(shape(&inter).4, "manifold intersection");
+    let mut inter = boolean_intersection(&mut k, a, b).unwrap();
+    assert_eq!(shape(&inter).0, 0, "empty intersection");
+    assert_eq!(shape(&inter).3, 0, "no intersection solid");
+    assert_valid(&mut k, &mut inter, "wider box intersection");
 }
 
 /// The wider case with a pocket in A's face y = 20, beside the crossing: A is the wider box
@@ -610,7 +611,8 @@ fn wr_614_diverging_same_side_boxes_keep_crossing() {
     )
     .unwrap();
     let mut u = boolean_union(&mut k, a, b).unwrap();
-    assert_eq!(shape(&u), (11, 25, 16, 1, true));
+    assert_eq!(shape(&u), (10, 24, 16, 1, true));
+    assert_valid(&mut k, &mut u, "diverging boxes union");
     let want = 120.000_000_000_512;
     let v = volume(&k, &mut u);
     assert!(
