@@ -178,6 +178,8 @@ pub struct BarOut {
     pub controls_left: f32,
     pub search: Option<Rect>,
     pub assistant: Option<Rect>,
+    /// The bar had no room for the Plugins button: the app lists Plugins in the File menu.
+    pub plugins_in_file: bool,
 }
 
 fn handle(prefix: &str, key: &str) -> String {
@@ -266,12 +268,16 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     let h = &data.handles;
     let r = bar;
     let left = content.left();
-    // The Plugins button takes its width from the room the rest of the bar had, so the bar turns
-    // compact that much sooner and the document tabs keep their room.
-    let plugins_width = data.plugins.map_or(0.0, |(label, _, _)| {
-        ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text).size().x + 18.0
+    let compact = r.right() - left < COMPACT;
+    // The Plugins menu's button shows its label where the bar has room for it. Between the compact
+    // width and that room, a button would cost the bar a control it had before there was a Plugins
+    // menu: the bar leaves it out and the app puts Plugins in the File menu instead. A compact
+    // bar, which already drops controls, shows it as a narrow icon.
+    let plugins_label = data.plugins.is_some_and(|(label, _, _)| {
+        let width = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(t.font_button), t.app_bar_text).size().x + 18.0;
+        r.right() - left >= COMPACT + width
     });
-    let compact = r.right() - left < COMPACT + plugins_width;
+    let plugins_in_file = data.plugins.is_some() && !plugins_label && !compact;
     let mut actions = Vec::new();
     (data.mark)(ui.painter(), pos2(left + 20.0, r.center().y));
     // Home's place: after the name as drawn, and never before HOME_MIN.
@@ -321,9 +327,21 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     if clicked {
         actions.push(BarAction::File { rect: file });
     }
-    if let Some((label, open, name)) = data.plugins {
-        let (plugins, clicked) = text_button(ui, r, x - 2.0, (label, name), open, idle, "plugins");
-        x = plugins.right() + 17.0;
+    if let Some((label, open, name)) = data.plugins.filter(|_| !plugins_in_file) {
+        let (plugins, clicked) = if plugins_label {
+            let (plugins, clicked) = text_button(ui, r, x - 2.0, (label, name), open, idle, "plugins");
+            x = plugins.right() + 17.0;
+            (plugins, clicked)
+        } else {
+            let button = BarButton { id: "plugins", icon: "prefs_plugins", tip: name, enabled: idle, narrow: true, wide_only: false };
+            let plugins = Rect::from_center_size(pos2(x, r.center().y), vec2(22.0, 32.0));
+            if open {
+                ui.painter().rect_filled(plugins.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+            }
+            let clicked = icon_button(ui, r, x, &button, compact, h);
+            x += 24.0;
+            (plugins, clicked)
+        };
         solidcraft_ui_registry::publish_rect(h.plugins, plugins);
         solidcraft_ui_registry::publish_handle(h.plugins, plugins.center());
         if clicked {
@@ -436,7 +454,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
             actions.push(BarAction::Version);
         }
     }
-    BarOut { actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant }
+    BarOut { actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant, plugins_in_file }
 }
 
 /// Where the tab strip publishes its parts: each prefix is followed by the tab's place.
