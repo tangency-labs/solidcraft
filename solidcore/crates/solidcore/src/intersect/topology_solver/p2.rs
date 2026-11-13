@@ -1117,6 +1117,24 @@ impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
         self.solve_two_trees(first.surfaces, second.surfaces, &mut faces)
     }
 
+    /// Solves two bounded collections of topology on their exact curves and surfaces.
+    ///
+    /// # Errors
+    /// Those of tree mapping, traversal and the local geometry solvers.
+    pub fn shape_shape_solve(
+        kernel: &Kernel,
+        objects: &dyn TopologyObjects<O>,
+        first: &Shape,
+        second: &Shape,
+        options: TopologySolveOptions<'_>,
+    ) -> Result<SolutionArray<O>> {
+        let first = ShapeTreeViews::new(objects, first)?;
+        let second = ShapeTreeViews::new(objects, second)?;
+        let mut ts = new_topology_solver(kernel, objects, options);
+        ts.solve_two_tree_sets(first.views(), second.views())?;
+        Ok(ts.base.solutions)
+    }
+
     /// Solves two B-reps using their cache trees (`BrepBrepSolve`).
     ///
     /// # Errors

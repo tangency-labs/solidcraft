@@ -1335,7 +1335,7 @@ pub fn edgeuse_face_frame(
             return Err(SolidError::Unsupported {
                 operation: OP,
                 reason: "a faceuse whose orientation is unknown has no proved sense",
-            })
+            });
         }
     };
     let at = evaluate_binormal(k, brep, eu, parameter, false, &BinormalOptions::default())?;
@@ -1485,6 +1485,45 @@ fn surface_bound(k: &Kernel, surface: &Surface, p: Point3, uv: Point2) -> Result
     Ok(b.is_finite().then_some(b))
 }
 
+/// Closest distance and witness points between two trimmed shapes, evaluated on their
+/// definitions at the requested solve tolerance (not a certified distance bound).
+///
+/// # Errors
+/// Those of the topology solve; a query failure when no finite witnesses exist.
+pub fn shape_closest_pair<O: SolutionObject>(
+    k: &Kernel,
+    objects: &dyn TopologyObjects<O>,
+    first: &Shape,
+    second: &Shape,
+    tolerance: f64,
+) -> Result<(f64, [Point3; 2])> {
+    if !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(SolidError::invalid_input(
+            OP,
+            "closest-pair tolerance must be finite and positive",
+        ));
+    }
+    let mut options = solve_options(k, SolutionRequested::Single);
+    options.tolerance_3d = tolerance;
+    let solutions = TopologySolver::shape_shape_solve(k, objects, first, second, options)?;
+    let solution = solutions
+        .as_slice()
+        .first()
+        .ok_or_else(|| SolidError::query_failed(OP, "the shapes have no closest pair"))?;
+    let points = [
+        solution_point(k, objects, solution, 0)?,
+        solution_point(k, objects, solution, 1)?,
+    ];
+    if points.iter().any(|p| p.is_undef()) {
+        return Err(SolidError::query_failed(
+            OP,
+            "the closest pair has an undefined witness",
+        ));
+    }
+    let [p, q] = points;
+    Ok((point_distance(p, q)?.value, points))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1494,6 +1533,39 @@ mod tests {
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface as NlSurface;
+
+    #[test]
+    fn exact_curved_measurement_of_cylinder_rims_is_the_height() {
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut b =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 20., 30.)
+                .unwrap();
+        let rim = |z: f64| {
+            get_edges(&b)
+                .unwrap()
+                .into_iter()
+                .find(|&e| {
+                    let edge = b.edge(e).unwrap();
+                    edge.vertices
+                        .iter()
+                        .all(|v| (b.vertex(*v).unwrap().point.z - z).abs() < 1e-9)
+                })
+                .unwrap()
+        };
+        let (bottom, top) = (rim(0.), rim(30.));
+        let id = BrepId::from_index(0);
+        let first = Shape::new(&mut k, &(id, &b), &[], &[], &[(id, bottom)], &[]).unwrap();
+        let second = Shape::new(&mut k, &(id, &b), &[], &[], &[(id, top)], &[]).unwrap();
+        let query = qbrep::BrepQuery::of_brep(&b);
+        let identity = query.effective_identity();
+        let objects = qbrep::LiveBrepObjects::new(&mut b, &identity, None).unwrap();
+        let (distance, [p, q]) = shape_closest_pair(&k, &objects, &first, &second, 1e-9).unwrap();
+        assert!((distance - 30.).abs() < 1e-6, "{p:?} {q:?}");
+        assert!(p.z.abs() < 1e-6 && (q.z - 30.).abs() < 1e-6);
+    }
 
     /// Both call sites of [`faces_closest_distances_within`] read a kernel status as no answer
     /// about that one pair, and keep every other pair's answer. The status paths are not

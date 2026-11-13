@@ -966,3 +966,26 @@ fn an_older_reader_refuses_a_blend_face_by_name() {
         .to_string();
     assert!(error.contains("unknown variant `blend`"), "{error}");
 }
+
+#[test]
+fn exact_curved_measurement_records_keep_open_wire_and_vertex_shells() {
+    let a = tetra();
+    let b = sheet_with_lower_forms();
+    let joined = part::joined(&[&a, &b]).unwrap();
+    joined.brep.validate().unwrap();
+    assert_eq!(joined.brep.faces.len(), a.faces.len() + b.faces.len());
+    assert_eq!(joined.brep.edges.len(), a.edges.len() + b.edges.len());
+    assert_eq!(
+        joined.brep.vertices.len(),
+        a.vertices.len() + b.vertices.len()
+    );
+    assert_eq!(joined.brep.shells.len(), a.shells.len() + b.shells.len());
+    for (i, &source) in joined.vertices.iter().enumerate() {
+        let original = if (source as usize) < a.vertices.len() {
+            &a.vertices[source as usize]
+        } else {
+            &b.vertices[source as usize - a.vertices.len()]
+        };
+        assert_eq!(&joined.brep.vertices[i], original);
+    }
+}
