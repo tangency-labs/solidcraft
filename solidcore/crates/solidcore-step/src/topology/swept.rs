@@ -154,13 +154,19 @@ fn widest_gap(arcs: &[(f64, f64)]) -> Option<(f64, f64)> {
     a.sort_by(|x, y| x.0.total_cmp(&y.0));
     let first = a.first()?.0;
     // Swept from the first arc's start: the farthest any arc so far reaches, and the widest gap
-    // after it, the last one closing round to the first arc a turn on.
-    let (mut reach, mut best) = (f64::NEG_INFINITY, (0.0, f64::NEG_INFINITY));
+    // after it, the last one closing round to the first arc a turn on. An arc reaching past a
+    // turn from the first start covers the start of the sweep too: the reach starts there.
+    let wrapped = a.iter().map(|(_, hi)| hi - TAU).fold(f64::NEG_INFINITY, f64::max);
+    let (mut reach, mut best) = (wrapped, (0.0, f64::NEG_INFINITY));
     for (lo, hi) in a.iter().copied().chain(std::iter::once((first + TAU, first + TAU))) {
-        if reach.is_finite() && lo - reach > best.1 {
+        if lo - reach > best.1 {
             best = (reach, lo - reach);
         }
         reach = reach.max(hi);
+    }
+    // A gap before the first start is the one after the last arc, a turn back.
+    if best.0 < first {
+        best.0 += TAU;
     }
     // Arcs reaching round past the first one's start leave no gap there.
     (best.1 > 0.0).then_some(best).or(Some((reach, 0.0)))

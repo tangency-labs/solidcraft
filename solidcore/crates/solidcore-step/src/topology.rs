@@ -2192,9 +2192,10 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
 /// uncertainty, not to the last digit), with those two lines made one, their mean: the surface
 /// moves by at most half the gap, and it closes on itself, so a face on it reads as on any
 /// closed surface (a seam where its loops wind round it, its pcurves on one side of where the
-/// surface starts). Lines whose weights differ, a surface no wider than a few `tol` across that
-/// parameter, one meeting itself both ways, or one the kernel already takes as closed is left as
-/// it is (`None`).
+/// surface starts). Only where the knots are clamped at both ends of that parameter (elsewhere
+/// the end lines are not the surface's ends), and only where the surface moves by at most `tol`,
+/// weights included. A surface no wider than a few `tol` across that parameter, one meeting
+/// itself both ways, or one the kernel already takes as closed is left as it is (`None`).
 fn closed_within(s: &BSurface, tol: f64) -> Option<BSurface> {
     let (u_knots, v_knots, rows, rational): (&Vec<f64>, &Vec<f64>, Vec<Vec<[f64; 4]>>, bool) = match s {
         BSurface::Spline { u_knots, v_knots, points } => {
@@ -2204,6 +2205,26 @@ fn closed_within(s: &BSurface, tol: f64) -> Option<BSurface> {
         _ => return None,
     };
     let point = |h: &[f64; 4]| (h[3] > 0.0).then(|| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+    // The end control lines are the surface's ends only where its knots are clamped there
+    // (each end knot repeated degree + 1 times).
+    let clamped = |knots: &[f64], count: usize| -> bool {
+        let Some(p) = knots.len().checked_sub(count + 1) else { return false };
+        let (Some(head), Some(tail)) = (knots.get(..=p), knots.get(knots.len() - 1 - p..)) else { return false };
+        head.windows(2).all(|w| w.first() == w.last()) && tail.windows(2).all(|w| w.first() == w.last())
+    };
+    let counts = [rows.len(), rows.first().map_or(0, Vec::len)];
+    let ends_clamped = [clamped(u_knots, counts[0]), clamped(v_knots, counts[1])];
+    // The control net's size: no point of the surface lies farther than it from a control point.
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for p in rows.iter().flatten().filter_map(point) {
+        for (k, x) in [p.x, p.y, p.z].into_iter().enumerate() {
+            if let (Some(l), Some(h)) = (lo.get_mut(k), hi.get_mut(k)) {
+                (*l, *h) = (l.min(x), h.max(x));
+            }
+        }
+    }
+    let size = v3(hi).dist(v3(lo));
+    let least_weight = rows.iter().flatten().map(|h| h[3]).fold(f64::INFINITY, f64::min);
     // Each direction's two end lines and a line across the middle, as lists of control points.
     let columns = transposed(&rows);
     let lines = |d: usize| -> Option<(&Vec<[f64; 4]>, &Vec<[f64; 4]>, &Vec<[f64; 4]>)> {
@@ -2212,19 +2233,21 @@ fn closed_within(s: &BSurface, tol: f64) -> Option<BSurface> {
     };
     let meets = |d: usize| -> Option<bool> {
         let (a, mid, b) = lines(d)?;
-        if a.len() != b.len() || a.is_empty() {
+        if a.len() != b.len() || a.is_empty() || !ends_clamped.get(d).copied().unwrap_or(false) {
             return Some(false);
         }
-        let (mut gap, mut width) = (0.0_f64, 0.0_f64);
+        let (mut gap, mut width, mut weights) = (0.0_f64, 0.0_f64, 0.0_f64);
         for ((x, y), m) in a.iter().zip(b).zip(mid) {
-            if !((x[3] - y[3]).abs() <= 1e-9 * x[3].abs().max(y[3].abs())) {
-                return Some(false);
-            }
             let (p, q, r) = (point(x)?, point(y)?, point(m)?);
             gap = gap.max(p.dist(q));
             width = width.max(p.dist(r));
+            weights = weights.max((x[3] - y[3]).abs());
         }
-        Some(gap > 0.0 && gap <= tol && width > 10.0 * tol)
+        // The mean moves each control point by half the gap, so the surface by no more (its
+        // points are convex combinations of them); halving a weight difference δ moves it by at
+        // most δ / 2 × the net's size / its least weight. Together within the tolerance.
+        let by_weights = 0.5 * weights * size / least_weight;
+        Some(gap > 0.0 && gap <= tol && width > 10.0 * tol && 0.5 * gap + by_weights <= tol)
     };
     let d = match (meets(0)?, meets(1)?) {
         (true, false) => 0,
@@ -2447,12 +2470,20 @@ fn open_or_closed(curve: BCurve, ps: P3, pe: P3, same_sense: bool, closed: bool,
     // A vertex at the seam: its parameter there, or its point within the tolerance of the
     // curve's ends (a vertex a few µm off the seam projects a hair inside either end).
     let (vf, vt) = if same_sense { (ps, pe) } else { (pe, ps) };
-    let on_seam = |t: f64, v: P3| t - a <= eps || b - t <= eps || v3(v).dist(pa).min(v3(v).dist(pb)) <= tol;
+    let near_seam = |v: P3| v3(v).dist(pa).min(v3(v).dist(pb)) <= tol;
     if !(from + eps < to) {
-        if on_seam(from, vf) {
+        let (start_at_end, end_at_start) = (b - from <= eps, to - a <= eps);
+        let (start_near, end_near) = (start_at_end || near_seam(vf), end_at_start || near_seam(vt));
+        // Both ends at the seam yet not its two ends exactly: an edge a few µm long across the
+        // seam, which no interval of the curve is (taking both ends to the seam would make it
+        // the whole curve).
+        if start_near && end_near && !(start_at_end && end_at_start) {
+            return Err(unsupported("a short edge across a closed spline's seam"));
+        }
+        if start_near {
             from = a;
         }
-        if on_seam(to, vt) {
+        if end_near {
             to = b;
         }
     }
