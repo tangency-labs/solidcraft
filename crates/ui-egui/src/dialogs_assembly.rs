@@ -2474,11 +2474,11 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Op
             pick_joint(app, id, ui.input(|i| i.modifiers.command || i.modifiers.ctrl));
         }
         if r.slow_rename {
-            crate::browser::start_inline_rename(app, crate::context_menu::RenameWhat::Joint(id), &r);
+            crate::browser::start_inline_rename(app, crate::context_menu::RenameWhat::Joint(id), crate::browser::name_at(&r));
         } else if r.double {
             dialog = edit_joint(app, id);
         }
-        crate::browser::inline_rename(app, ui, &r, &name);
+        crate::browser::inline_rename(app, ui, crate::browser::name_at(&r), &name);
         // The same menus as the rest of the browser.
         if let Some(at) = r.secondary {
             if !app.tree.picked_joints.contains(&id) {
