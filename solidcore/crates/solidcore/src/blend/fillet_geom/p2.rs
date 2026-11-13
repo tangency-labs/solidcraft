@@ -48,6 +48,16 @@
 //!   crossing cylinders, whose offsets continued as themselves are whole circles, hold the
 //!   round of each crossing) let a guess away from the corner solve onto the other ball. The
 //!   rest of upstream's guesses follow unchanged.
+//! - **Rails rolled over a smooth far edge, the whole length (#15767, solidcore-native).** A
+//!   solver's rail rolled before the trace onto the face beyond a smooth far edge of its face
+//!   (`FilletSolver::rolled_faces`, [`crate::blend::fillet_tangent_rollover`]) has its section's
+//!   parameters on that face's surface: a mate on that side is evaluated on it (`rolled_face_of`),
+//!   and a join's shared section takes its feet guess there (the vertex's foot taken to the
+//!   rolled-over edge's nearest point, dropped on that surface) and its ends from a blend whose
+//!   rails roll on the section's two faces. At a corner where only the second blend rolled, the
+//!   side it rolled on being the mate's (`CalcRailIntEdgeuse`), the rolled blend places the vertex
+//!   and its mate: the other's section there lies on its own face's continuation, which it leaves
+//!   only in its own rollover after the trace. Without a rolled rail all of this is upstream's.
 //! - **Object model.** As in `blend.fillet_geom_p1` and `_p4`, fillet vertices, edges
 //!   and geometries are ids of the [`FilletBrep`] (`self`). `GetFilletSolver()` is an
 //!   opaque [`FilletSolverId`] resolved in the caller's `solvers` table (index `id.0`;
@@ -547,6 +557,48 @@ fn solver_surface<'s>(
     fs.surface(i)?
         .map(|slot| &slot.surface.surface)
         .ok_or_else(|| SolidError::blend_missing(op, "the solver's offset surface"))
+}
+
+/// Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): the face beyond
+/// that rail `rail` of geometry `g`'s solver rolls on, where it rolls over a smooth far edge of
+/// its face (its section's parameters there are on that face's surface), else `None`.
+fn rolled_face_of(
+    fb: &FilletBrep,
+    solvers: &RailSolvers<'_>,
+    g: FilletGeomId,
+    rail: usize,
+) -> Result<Option<FaceId>> {
+    let solver = solvers.solver(RailSolvers::geom_solver(fb, g)?)?;
+    Ok(solver.rolled_faces.get(rail).copied().flatten())
+}
+
+/// Whether geometry `g`'s rail on the far side from the side edge use `side_eu` (its mate's
+/// side at a Join) rolled over a smooth far edge of its face, the whole length, and its rail on
+/// `side_eu`'s face did not (`FilletSolver::rolled_faces`, not upstream). `false` where `g` has
+/// no rail on `side_eu`'s face.
+fn rolls_only_at_mate(
+    fb: &FilletBrep,
+    solvers: &RailSolvers<'_>,
+    g: FilletGeomId,
+    side_eu: EdgeuseId,
+    target: &Brep,
+) -> Result<bool> {
+    let Some(rail) = ignore_status(
+        fb.rail_index_of_side_eu_resolved(g, side_eu, target, &|id| solvers.solver(id)),
+    )?
+    else {
+        return Ok(false);
+    };
+    let other = other_srf(rail, OP_RAIL_EU)?.index();
+    Ok(rolled_face_of(fb, solvers, g, rail)?.is_none()
+        && rolled_face_of(fb, solvers, g, other)?.is_some())
+}
+
+/// Whether either rail of geometry `g`'s solver rolled over a smooth far edge of its face, the
+/// whole length (`FilletSolver::rolled_faces`, not upstream).
+fn rolls_anywhere(fb: &FilletBrep, solvers: &RailSolvers<'_>, g: FilletGeomId) -> Result<bool> {
+    let solver = solvers.solver(RailSolvers::geom_solver(fb, g)?)?;
+    Ok(solver.rolled_faces.iter().any(Option::is_some))
 }
 
 /// `FindParameterAtArcLength` under `SER`: `SM_ERR_NOT_CONVERGING` is an error.
@@ -2315,6 +2367,33 @@ impl FilletBrep {
             *slot = ivl.evaluate(f);
         }
 
+        // Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): at a Join
+        // whose mate lies on the face the second blend's rail rolled onto, the whole length
+        // (`join::rolled_sides`), while the first blend rolled nowhere, the second blend's
+        // section at the corner is the ball there: the first blend's, on its own face's offset,
+        // touches that face's continuation past the rolled-over edge, where its rail rolls over
+        // only later, in its own rollover. The rolled blend's end then places the vertex and its
+        // mate, solved on the side edge's other use (its own face's), and the first blend's end
+        // is solved as the second blend's always is. Both corners' sections then end the rails
+        // on the vertices they are trimmed to; the first blend's rollover solves the vertex
+        // again, from its piece rolled over, at the same ball.
+        let (mut side_eu1, mut vu1) = (side_eu1, vu1);
+        if let (None, Some(g1), Some(g2)) = (opt_fg, fillet_geom1, fillet_geom2) {
+            if g1 != g2 {
+                let side_eu2 = eu1::radial(target, side_eu1)?;
+                if let Some(side_eu2) = side_eu2 {
+                    if rolls_only_at_mate(self, solvers, g2, side_eu2, target)?
+                        && !rolls_anywhere(self, solvers, g1)?
+                    {
+                        fillet_geom1 = Some(g2);
+                        fillet_geom2 = Some(g1);
+                        side_eu1 = side_eu2;
+                        vu1 = self.vu_at_rail_end(v, Some(g2), None, None)?;
+                    }
+                }
+            }
+        }
+
         // Sometimes, we may just need to do one side
         if let Some(fg) = opt_fg {
             if Some(fg) == fillet_geom1 {
@@ -2632,7 +2711,9 @@ impl FilletBrep {
                 }
                 let face = as_face(self.fillet_vertex(mate)?.point_class_object(), OP)?
                     .ok_or_else(|| SolidError::blend_missing(OP, "the mate vertex's face"))?;
-                let uv1 = tsect1.uv_pos(other_srf(rail_index, OP)?);
+                let other_index = other_srf(rail_index, OP)?;
+                let face = rolled_face_of(self, solvers, g1, other_index.index())?.unwrap_or(face);
+                let uv1 = tsect1.uv_pos(other_index);
                 let pnt1 = evaluate_mate(k, target, face, uv1)?;
                 self.set_processed(mate, uv1, pnt1)?;
                 break;
@@ -2742,7 +2823,9 @@ impl FilletBrep {
                 }
                 let face = as_face(self.fillet_vertex(mate)?.point_class_object(), OP)?
                     .ok_or_else(|| SolidError::blend_missing(OP, "the mate vertex's face"))?;
-                let uv1 = tsect2.uv_pos(other_srf(other_rail_index, OP)?);
+                let other_index = other_srf(other_rail_index, OP)?;
+                let face = rolled_face_of(self, solvers, g2, other_index.index())?.unwrap_or(face);
+                let uv1 = tsect2.uv_pos(other_index);
                 let pnt1 = evaluate_mate(k, target, face, uv1)?;
                 self.set_processed(mate, uv1, pnt1)?;
                 break;
@@ -3118,6 +3201,13 @@ impl FilletBrep {
         // the plane: through the vertex, square to the first blend's edge
         let mut plane_orig = Point3::default();
         let mut plane_normal = Vec3::default();
+        // Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): whether
+        // a blend of the join rolled a rail over a smooth far edge of its face
+        let mut any_rolled = false;
+        for &g in &geoms {
+            any_rolled |= rolls_anywhere(self, solvers, g)?;
+        }
+        let mut ended = false;
         for (gg, &g) in geoms.iter().enumerate() {
             let sid = self.geom_solver_id(g, OP)?;
             let fs = solvers.solver(sid)?;
@@ -3159,6 +3249,36 @@ impl FilletBrep {
                     &BinormalOptions::default(),
                 )?;
                 let bin = b.binormal * distance;
+                // Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a
+                // rail rolled over a smooth far edge of its face rolls on the face beyond, whose
+                // surface the edge use's parameters are not on. Its foot is the vertex stepped
+                // into the edge use's face, taken to the nearest point of the rolled-over edge
+                // (on the face beyond) and dropped on that face's surface.
+                if let Some(onto) = fs.rolled_faces.get(ii).copied().flatten() {
+                    let tangency = fs.tangency_tolerance;
+                    let foot = b.point + bin;
+                    let from = eu1::face(target, side_eu)?
+                        .ok_or_else(|| nul("the side edge use's face"))?;
+                    let seed = crate::blend::fillet_tangent_rollover::rolled_edge_point(
+                        k, target, from, onto, foot, tangency,
+                    )?
+                    .unwrap_or(foot);
+                    let domain = base.natural_uv_domain_with_nurb(k)?;
+                    let dropped = base.drop_point::<NoObject>(
+                        k,
+                        seed,
+                        &domain,
+                        &crate::surface::surface::p5::DropPointOptions::default(),
+                    )?;
+                    if !dropped.success {
+                        return Err(SolidError::blend_failed(
+                            OP,
+                            "the rolled rail's foot does not drop onto the face beyond",
+                        ));
+                    }
+                    *slot = dropped.result_uv;
+                    continue;
+                }
                 let uv_dir = crate::surface::surface::p7::drop_vectors_at(
                     k,
                     &base,
@@ -3206,9 +3326,33 @@ impl FilletBrep {
                 self.fillet_vertexuse_mut(other_vu)?.set_tsect_pnt(&tsect);
             }
 
-            if gg == 0 {
-                // the section's ends: the first blend's feet
-                let first = usize::from(eu1::face(target, eu)? != Some(first_face));
+            // the section's ends: the first blend's feet. Not the fork's (solidcore-native,
+            // [`crate::blend::fillet_tangent_rollover`]): where a blend of the join rolled a rail
+            // over a smooth far edge of its face, those of the first blend whose rails roll on
+            // the section's two faces, a rolled rail on the face beyond (`join::rolled_sides`
+            // puts the section's end there when only the other blend rolls over); a blend
+            // still on its own face there has its feet on that face's surface, not the face
+            // beyond's
+            let first = if !any_rolled {
+                (gg == 0).then_some(usize::from(eu1::face(target, eu)? != Some(first_face)))
+            } else if ended {
+                None
+            } else {
+                let fs = solvers.solver(sid)?;
+                let mut rolls_on = [None; 2];
+                for (rail, slot) in rolls_on.iter_mut().enumerate() {
+                    *slot = match fs.rolled_faces.get(rail).copied().flatten() {
+                        Some(face) => Some(face),
+                        None => eu1::face(target, solver_edgeuse(fs, rail, OP)?)?,
+                    };
+                }
+                match rolls_on {
+                    [a, b] if a == Some(first_face) && b == Some(other_face) => Some(0),
+                    [a, b] if b == Some(first_face) && a == Some(other_face) => Some(1),
+                    _ => None,
+                }
+            };
+            if let Some(first) = first {
                 let uv_first = tsect.uv_pos(srf(first, OP)?);
                 let uv_other = tsect.uv_pos(other_srf(first, OP)?);
                 let p_first =
@@ -3217,7 +3361,14 @@ impl FilletBrep {
                     face_surface(target, Some(other_face), OP)?.evaluate_point(k, uv_other)?;
                 self.set_processed(v, uv_first, p_first)?;
                 self.set_processed(mate, uv_other, p_other)?;
+                ended = true;
             }
+        }
+        if any_rolled && !ended {
+            return Err(SolidError::blend_failed(
+                OP,
+                "no blend of the join rolls on the two faces its shared section ends on",
+            ));
         }
         Ok(())
     }

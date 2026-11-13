@@ -503,6 +503,217 @@ fn a_round_past_a_side_running_into_a_boss_rolls_onto_the_boss() {
     }
 }
 
+/// The arm and boss with the boss standing (#15767 case 2, SolidCraft #15641's test9): the arm of
+/// [`arm_and_boss`] joined with the boss's cylinder, radius 18 about B = (-54, -90) and 20 tall,
+/// whose foot on the arm's top z = 5 is rounded 5 (the foot round: the torus of tube radius 5
+/// about the circle of radius 23 at z = 10 about B's axis, which touches the top along the
+/// contact circle of radius 23 at z = 5), then the arm's inner corner C = (-36, -65) rounded `r4`
+/// (the cylinder of radius `r4` about A = (-36 + r4, -65 - r4)). The arm's top then ends on
+/// x = -36 at the contact circle, at W = (-36, -90 + sqrt(205), 5), and the side x = -36 runs on
+/// past W into the foot round tangentially.
+fn arm_boss_and_foot_round(r4: f64) -> Body {
+    let boss = solidcore_ops::make_cylinder([-54.0, -90.0, 0.0], 18.0, 20.0).unwrap();
+    let b = boolean(arm_and_boss(), boss, BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let foot = edge_at(&b, [-54.0, -72.0, 5.0]);
+    blend(&b, Blend::Round, &[foot], &[5.0], &[], Corners::Filled).unwrap();
+    let corner = edge_at(&b, [-36.0, -65.0, 2.5]);
+    blend(&b, Blend::Round, &[corner], &[r4], &[], Corners::Filled).unwrap();
+    b
+}
+
+/// W's y: the arm's top ends on x = -36 where it meets the contact circle, 18 from B's axis in x.
+fn top_end_on_side() -> f64 {
+    -90.0 + 205.0_f64.sqrt()
+}
+
+/// The rim of the arm's top on [`arm_boss_and_foot_round`], a smooth chain: its edges on y = -65,
+/// on the corner's round and on x = -36 (from the corner's round to W), then on from W the edge
+/// between x = -36 and the foot round, down to (-36, -90, 10). That last one is a plane-torus
+/// intersection, a spline fitted to it, found by its point halfway round the tube (23 - 5 / sqrt 2
+/// from B's axis) within its fit ([`edge_near`]).
+fn top_rim(b: &Body, r4: f64) -> Vec<usize> {
+    use std::f64::consts::FRAC_1_SQRT_2;
+    let rho = 23.0 - 5.0 * FRAC_1_SQRT_2;
+    [
+        [-15.5, -65.0, 5.0],
+        [
+            -36.0 + r4 - r4 * FRAC_1_SQRT_2,
+            -65.0 - r4 + r4 * FRAC_1_SQRT_2,
+            5.0,
+        ],
+        [-36.0, (-65.0 - r4 + top_end_on_side()) / 2.0, 5.0],
+        [
+            -36.0,
+            -90.0 + (rho * rho - 18.0 * 18.0).sqrt(),
+            10.0 - 5.0 * FRAC_1_SQRT_2,
+        ],
+    ]
+    .iter()
+    .map(|&p| edge_near(b, p))
+    .collect()
+}
+
+/// The ball of radius `d` with centre at (`x`, `y`) in plan that touches the foot round (the
+/// torus of tube radius 5 about the circle of radius 23 at z = 10 about B): its centre and its
+/// contact on the torus.
+fn ball_on_foot_round(x: f64, y: f64, d: f64) -> ([f64; 3], [f64; 3]) {
+    let (bx, by) = (-54.0, -90.0);
+    let rho = ((x - bx).powi(2) + (y - by).powi(2)).sqrt();
+    let reach = 5.0 + d;
+    let z = 10.0 - (reach * reach - (23.0 - rho).powi(2)).sqrt();
+    let q = [bx + 23.0 * (x - bx) / rho, by + 23.0 * (y - by) / rho, 10.0];
+    let c = [x, y, z];
+    let t = [
+        q[0] + 5.0 / reach * (c[0] - q[0]),
+        q[1] + 5.0 / reach * (c[1] - q[1]),
+        q[2] + 5.0 / reach * (c[2] - q[2]),
+    ];
+    (c, t)
+}
+
+fn edge_near(b: &Body, p: [f64; 3]) -> usize {
+    use solidcore::query::api_queries::edge_closest_point;
+    let (k, brep) = common::kernel_copy(b);
+    let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+    let (i, d) = brep
+        .edge_list()
+        .iter()
+        .enumerate()
+        .map(|(i, &e)| {
+            (
+                i,
+                edge_closest_point(&k, &brep, e, q)
+                    .unwrap()
+                    .closest
+                    .distance,
+            )
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap();
+    assert!(d < 1e-4, "no edge near {p:?}: {d}");
+    i
+}
+
+/// Whether the top's contact x = -36 - d of the ball rounding the rim `d` at V = (-36, -65 - r4),
+/// where the corner's round meets x = -36, lies inside the contact circle: (18 - d)^2 + (25 - r4)^2
+/// < 23^2. Along x = -36 the contact only nears B from V on, so the top is then narrower than the
+/// round the whole length from V to W.
+fn wholly_past(r4: f64, d: f64) -> bool {
+    (18.0 - d).powi(2) + (25.0 - r4).powi(2) < 23.0 * 23.0
+}
+
+/// The rim of the arm's top rounded `d` along [`top_rim`] on [`arm_boss_and_foot_round`]: built,
+/// valid at the full check, and its rails the closed forms, within the body's tolerance (each
+/// rail is a curve fitted to the ball's traced contacts): on the corner's round, the ball's
+/// centre r4 + d from A, before the top's contact (straight above it) meets the contact circle,
+/// its contacts on the top and on the corner's round, r4 from A. Where [`wholly_past`], also
+/// that contact meeting the contact circle, and on from there to V, and along x = -36 from V to
+/// W, the ball's contacts on the foot round ([`ball_on_foot_round`]) and on the corner's round
+/// or x = -36. (Elsewhere the rail along x = -36 rolls onto the foot round partway, in the
+/// trace's own rollover: the foot round's edge's round runs on past W to where the top's contact
+/// meets the contact circle. Its rail there lies about 1e-4 from the closed form, as before this
+/// rollover was added, and is not checked here.) No volume: the round's faces on the foot round
+/// bound no closed-form solid.
+fn assert_rim_round_builds(r4: f64, d: f64) {
+    use solidcore::query::api_queries::edge_closest_point;
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let b = arm_boss_and_foot_round(r4);
+    let rim = top_rim(&b, r4);
+    blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled)
+        .unwrap_or_else(|err| panic!("r4 {r4} d {d}: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "r4 {r4} d {d}: {report}");
+    let (k, brep) = common::kernel_copy(&b);
+    let tolerance = brep.tolerance();
+    let on_rail = |p: [f64; 3], what: &str| {
+        let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+        let distance = brep
+            .edge_list()
+            .iter()
+            .map(|&e| {
+                edge_closest_point(&k, &brep, e, q)
+                    .unwrap()
+                    .closest
+                    .distance
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            distance < tolerance,
+            "r4 {r4} d {d}: {what} {p:?} is {distance} from the nearest edge (tolerance {tolerance})"
+        );
+    };
+    // along x = -36, from V to W
+    if wholly_past(r4, d) {
+        let v = -65.0 - r4;
+        let w = top_end_on_side();
+        for f in [0.1, 0.5, 0.9] {
+            let y = v + (w - v) * f;
+            let (c, t) = ball_on_foot_round(-36.0 - d, y, d);
+            on_rail(t, "the contact on the foot round");
+            on_rail([-36.0, y, c[2]], "the contact on x = -36");
+        }
+    }
+    // on the corner's round: the top's contact A + (r4 + d) u(th) at z = 5 meets the contact
+    // circle where |A - B + (r4 + d) u|^2 = 23^2, that is m cos(th - phi) = (23^2 - m^2 -
+    // (r4 + d)^2) / (2 (r4 + d)), with m and phi A - B's length and angle
+    let (ax, ay) = (-36.0 + r4, -65.0 - r4);
+    let reach = r4 + d;
+    let (px, py) = (ax + 54.0, ay + 90.0);
+    let m = (px * px + py * py).sqrt();
+    let cosine = (23.0 * 23.0 - m * m - reach * reach) / (2.0 * reach * m);
+    let cross = py.atan2(px) + cosine.acos();
+    assert!(
+        cross > FRAC_PI_2 && (cross < PI) == wholly_past(r4, d),
+        "r4 {r4} d {d}: crossing at {cross}"
+    );
+    let along = |th: f64, r: f64| (ax + r * th.cos(), ay + r * th.sin());
+    let before = (FRAC_PI_2 + cross.min(PI)) / 2.0;
+    let (x, y) = along(before, reach);
+    on_rail([x, y, 5.0], "the contact on the top");
+    let (x, y) = along(before, r4);
+    on_rail([x, y, 5.0 - d], "the contact on the corner's round");
+    if wholly_past(r4, d) {
+        let (x, y) = along(cross, reach);
+        on_rail([x, y, 5.0], "the crossing of the contact circle");
+        for f in [0.25, 0.5, 0.75] {
+            let th = cross + (PI - cross) * f;
+            let (x, y) = along(th, reach);
+            let (c, t) = ball_on_foot_round(x, y, d);
+            on_rail(t, "the contact on the foot round");
+            let (x, y) = along(th, r4);
+            on_rail([x, y, c[2]], "the contact on the corner's round");
+        }
+    }
+}
+
+/// #15767 case 2: where [`wholly_past`], the round's rail on the arm's top along x = -36 lies off
+/// the top the whole length, past the foot round's smooth edge; it is rolled over onto the foot
+/// round before the trace, and the corner's round's rail rolls onto the foot round where it
+/// meets the contact circle, joining it at V. Refused before as having no room
+/// ([`Error::NoRoom`]; SolidCraft reports the fit 1.476 at r4 = 9).
+#[test]
+fn a_rim_round_whose_rail_lies_wholly_on_the_foot_round_rolls_onto_it() {
+    fixes();
+    for (r4, d) in [(9.0, 1.6), (9.0, 2.0), (9.0, 2.5), (10.0, 1.4), (10.0, 2.0)] {
+        assert!(wholly_past(r4, d), "r4 {r4} d {d}");
+        assert_rim_round_builds(r4, d);
+    }
+}
+
+/// Controls: where the top's contact at V lies outside the contact circle, the rail stays on the
+/// top at V and rolls onto the foot round partway along x = -36 (the trace's own rollover), as
+/// before. (8, 2.5) is the limit: 15.5^2 + 17^2 = 529.25, a quarter over 23^2.
+#[test]
+fn a_rim_round_partly_on_the_top_rolls_onto_the_foot_round_partway() {
+    fixes();
+    for (r4, d) in [(8.0, 2.0), (8.0, 2.5), (9.0, 1.4)] {
+        assert!(!wholly_past(r4, d), "r4 {r4} d {d}");
+        assert_rim_round_builds(r4, d);
+    }
+}
+
 /// The largest round at C that builds on the arm and boss, in closed form. The ball touches
 /// y = -65 and rolls on the boss: its centre is at (x, -65 - r), 18 + r from B = (-54, -90), so
 /// (x + 54)^2 + (r - 25)^2 = (18 + r)^2, that is (x + 54)^2 = 86 r - 301, and its contact on
