@@ -297,6 +297,8 @@ pub struct RowOut {
     pub drop_zone: Option<Zone>,
     pub fold_at: Option<Pos2>,
     pub eye_at: Option<Pos2>,
+    /// The eye's area, within the rows' clip (a host's own target for it).
+    pub eye_rect: Option<Rect>,
     pub radio_at: Option<Pos2>,
     /// The row's widget response (tooltips, a host's own drags).
     pub response: Option<egui::Response>,
@@ -933,6 +935,7 @@ impl Rows<'_> {
             drop_zone,
             fold_at: out.fold_at,
             eye_at: out.eye_at,
+            eye_rect: out.eye_rect,
             radio_at: out.radio_at,
             response: out.resp.clone(),
             on_control: out.on_control,

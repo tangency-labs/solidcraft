@@ -709,6 +709,7 @@ fn a_rows_response_has_its_widget_response_and_whether_a_press_was_on_a_control(
     rig.click(rig.at("row:B"));
     let b = rig.out(3);
     assert!(b.response.as_ref().is_some_and(|r| b.rect == Some(r.rect)));
+    assert!(b.eye_rect.is_some_and(|eye| eye.contains(rig.at("eye:B"))), "the eye's area holds the eye");
     assert!(!b.on_control);
     let eye = rig.at("eye:B");
     rig.frame(vec![Input::PointerMoved(eye)]);
