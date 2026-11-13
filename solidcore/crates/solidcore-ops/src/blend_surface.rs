@@ -362,9 +362,10 @@ pub struct Fillet {
 /// The fillet between sheets `a` and `b` where they meet along an edge of each: the two sheets'
 /// copies sewn into one body at `how.tolerance`, the edges they then share rounded by the
 /// kernel's blend ([`crate::blend`]) with `how.section` (on the side the sheets' normals give,
-/// as the kernel's blend of a sheet's edge takes it). Each face of the rounded body is a sheet's
-/// when a point inside it (the kernel's) lies within `how.tolerance` of that sheet, and the
-/// fillet's otherwise (the blend makes the faces it trims anew, so their ids do not tell); the
+/// as the kernel's blend of a sheet's edge takes it). The faces of the rounded body the blend
+/// made ([`crate::Blended::made`]) are the fillet's; every other face is a sheet's, the first's
+/// when a point inside it (the kernel's) lies within `how.tolerance` of the first sheet, else
+/// the second's (the blend makes the faces it trims anew, so their ids do not tell); the
 /// fillet's faces are taken out as the fillet ([`crate::trim::remove_faces`]), and with
 /// `how.trim` each sheet's as that sheet, cut back along the contact curves. The
 /// seams between the fillet and the cut sheets are measured on the rounded body
@@ -426,11 +427,12 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
         ));
     }
     let sizes = vec![size; shared.len()];
-    crate::blend::blend(&sewn, kind, &shared, &sizes, &[], crate::Corners::Filled)?;
+    let blended = crate::blend::blend(&sewn, kind, &shared, &sizes, &[], crate::Corners::Filled)?;
     let rounded = native_order(&sewn);
-    // Each face of the rounded body is a sheet's (cut back) or the fillet's, by where a point
-    // inside it lies: the kernel's blend makes the faces it trims anew, so a face's id does not
-    // say which it is.
+    // The fillet's faces are the ones the kernel's blend made. Every other face is a sheet's,
+    // cut back: the first's where a point inside it lies on the first sheet, else the
+    // second's (the blend makes the faces it trims anew, so a face's id does not say which).
+    let made = blended.made;
     let inside = inside_points(&sewn)?;
     let on = |sheet: &Body, order: &Order, p: [f64; 3]| -> Result<bool> {
         Ok(sheet
@@ -439,14 +441,15 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
             .flatten()
             .any(|d| d.is_some_and(|d| d <= how.tolerance)))
     };
-    let (mut of_a, mut of_b, mut made) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut of_a, mut of_b) = (Vec::new(), Vec::new());
     for (i, p) in inside.iter().enumerate() {
+        if made.contains(&i) {
+            continue;
+        }
         if on(a, &a_order, *p)? {
             of_a.push(i);
-        } else if on(b, &b_order, *p)? {
-            of_b.push(i);
         } else {
-            made.push(i);
+            of_b.push(i);
         }
     }
     if made.is_empty() {
