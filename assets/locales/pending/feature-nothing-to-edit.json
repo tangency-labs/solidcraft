@@ -42,5 +42,27 @@
     "ui.feature_kind.mesh_import": "インポートしたメッシュ",
     "ui.feature_kind.repair": "修復",
     "ui.feature_nothing_to_edit": "{kind}: 編集できる項目はありません"
+  },
+  "vi": {
+    "ui.feature_kind.align": "Căn chỉnh",
+    "ui.feature_kind.body_transfer": "Chuyển thân khối",
+    "ui.feature_kind.construction_axis": "Trục dựng hình",
+    "ui.feature_kind.construction_point": "Điểm dựng hình",
+    "ui.feature_kind.import": "Thân khối đã nhập",
+    "ui.feature_kind.mesh_convert": "Chuyển đổi lưới",
+    "ui.feature_kind.mesh_import": "Lưới đã nhập",
+    "ui.feature_kind.repair": "Sửa chữa",
+    "ui.feature_nothing_to_edit": "{kind}: không có gì để sửa"
+  },
+  "zh": {
+    "ui.feature_kind.align": "对齐",
+    "ui.feature_kind.body_transfer": "实体转移",
+    "ui.feature_kind.construction_axis": "构造轴",
+    "ui.feature_kind.construction_point": "构造点",
+    "ui.feature_kind.import": "导入的实体",
+    "ui.feature_kind.mesh_convert": "网格转换",
+    "ui.feature_kind.mesh_import": "导入的网格",
+    "ui.feature_kind.repair": "修复",
+    "ui.feature_nothing_to_edit": "{kind}：没有可编辑的内容"
   }
 }
