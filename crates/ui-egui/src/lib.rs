@@ -3210,6 +3210,16 @@ impl SolveApp {
         if self.saving.is_some() || self.edit_in_place.refreshing() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
+        // Preferences > Graphics > Redraw continuously. egui paints only when something asks it
+        // to, so a window nobody is touching presents no frames at all. Some displays and drivers
+        // draw a window that has stopped presenting a little dimmer than one that keeps going --
+        // a hardware overlay plane handed back to the compositor, a refresh rate that falls away
+        // under variable refresh -- and the window appears to dim whenever the mouse stops. This
+        // asks for the next frame every frame, which keeps the picture steady at the cost of the
+        // work an idle window would not otherwise do. A hidden window is left alone.
+        if self.preferences.continuous_redraw && ctx.input(|i| i.viewport().visible() != Some(false)) {
+            ctx.request_repaint();
+        }
         open_meshing::tick(self, ctx);
         open_meshing::refresh(self, ctx.input(|i| i.time));
         // Routing survives a layout re-pass, but never the next input frame. The legacy

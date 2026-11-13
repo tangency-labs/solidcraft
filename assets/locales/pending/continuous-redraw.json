@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.continuous_redraw": "إعادة الرسم باستمرار",
+    "prefs.continuous_redraw_help": "ارسم النافذة في كل إطار بدلًا من الرسم عند التغيير فقط. اتركه مُطفأً إلا إذا بدت النافذة الساكنة مختلفة عن النافذة التي تعمل فيها: فهو يُبقي بطاقة الرسوميات مشغولة ويستهلك البطارية."
+  },
+  "de": {
+    "prefs.continuous_redraw": "Fortlaufend neu zeichnen",
+    "prefs.continuous_redraw_help": "Das Fenster in jedem Bild neu zeichnen statt nur bei Änderungen. Lassen Sie dies aus, sofern ein unberührtes Fenster nicht anders aussieht als eines, in dem Sie arbeiten: Es hält die Grafikkarte beschäftigt und kostet Akkulaufzeit."
+  },
+  "en": {
+    "prefs.continuous_redraw": "Redraw continuously",
+    "prefs.continuous_redraw_help": "Draw the window every frame instead of only when something changes. Leave this off unless an untouched window looks different from one you are working in: it keeps the graphics card busy and costs battery."
+  },
+  "he": {
+    "prefs.continuous_redraw": "ציור מחדש רציף",
+    "prefs.continuous_redraw_help": "לצייר את החלון בכל פריים במקום רק כשמשהו משתנה. השאירו כבוי אלא אם חלון שלא נוגעים בו נראה שונה מחלון שעובדים בו: זה מעסיק את כרטיס המסך ועולה בסוללה."
+  },
+  "ja": {
+    "prefs.continuous_redraw": "連続して再描画",
+    "prefs.continuous_redraw_help": "変化があったときだけでなく、毎フレーム ウィンドウを描画します。操作していないウィンドウが作業中のものと違って見える場合を除き、オフのままにしてください。グラフィックスカードを動かし続け、バッテリーを消費します。"
+  },
+  "ko": {
+    "prefs.continuous_redraw": "계속 다시 그리기",
+    "prefs.continuous_redraw_help": "무언가 바뀔 때만이 아니라 매 프레임 창을 그립니다. 가만히 둔 창이 작업 중인 창과 달라 보이지 않는 한 꺼 두십시오. 그래픽 카드를 계속 사용하게 되고 배터리를 소모합니다."
+  },
+  "vi": {
+    "prefs.continuous_redraw": "Vẽ lại liên tục",
+    "prefs.continuous_redraw_help": "Vẽ cửa sổ ở mỗi khung hình thay vì chỉ khi có thay đổi. Hãy để tắt trừ khi cửa sổ không được chạm vào trông khác với cửa sổ bạn đang làm việc: nó khiến card đồ hoạ luôn bận và tốn pin."
+  },
+  "zh": {
+    "prefs.continuous_redraw": "持续重绘",
+    "prefs.continuous_redraw_help": "每一帧都重绘窗口，而不是仅在发生变化时重绘。除非闲置的窗口看起来与正在操作的窗口不同，否则请保持关闭：它会让显卡持续工作并消耗电量。"
+  }
+}

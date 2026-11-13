@@ -881,6 +881,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
 - `check_updates` (default true; [updates](book/src/guide/updates.md))
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
+- `continuous_redraw` (default false: the window is drawn only when something changes, so one nobody is touching presents no frames at all; true draws every frame, which keeps a display or driver that shows a window dimmer once it stops presenting from doing so, and costs the GPU work an idle window would not otherwise do)
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)

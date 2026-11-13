@@ -294,6 +294,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             let profile = setting::profile_operations(app, ui).backing_on_hover_text(app.tr("prefs.profile_operations_note"));
             crate::scenario::publish_target("prefs:profile_operations", profile.rect);
+            let redraw = setting::continuous_redraw(app, ui);
+            crate::scenario::publish_target("prefs:continuous_redraw", redraw.rect);
             ui.horizontal_wrapped(|ui| {
                 ui_kit::settings_inline_note(ui, app.tr("prefs.graphics_page.status_chips"));
                 for (id, label, help) in [

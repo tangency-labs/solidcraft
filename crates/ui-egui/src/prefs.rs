@@ -1221,6 +1221,11 @@ preference_settings! {
     supersampling: f32 = 1.0, PAGE_GRAPHICS;
     /// Supersample only while the view holds still (full speed while orbiting).
     supersampling_adaptive: bool = true, PAGE_GRAPHICS => check_tr("prefs.graphics_page.supersampling_adaptive");
+    /// Draw the window every frame instead of only when something changes. Off by default: an
+    /// untouched window then presents no frames at all and costs nothing. Some displays and
+    /// drivers show a window that has stopped presenting a little dimmer than one that keeps
+    /// going, and this keeps it going.
+    continuous_redraw: bool = false, PAGE_GRAPHICS => check_id_help("prefs.continuous_redraw", "prefs.continuous_redraw_help");
     /// Show the frame rate in the view's corner (the view then redraws every frame).
     show_frame_rate: bool = false, PAGE_GRAPHICS;
     /// Record where the time goes (SMLib's calls, kernel operations, features, commands, imports)
@@ -6992,6 +6997,42 @@ mod tests {
         assert_eq!(theme_file(&app, "system", true)["name"], "Onyx");
         assert_eq!(app.preferences.theme, "light");
         assert!(!app.ui.dark);
+    }
+
+    /// A window nobody is touching presents no frames, and some displays and drivers then show it
+    /// a little dimmer than one that keeps presenting. Preferences > Graphics > Redraw
+    /// continuously asks for the next frame every frame so the picture holds steady; off, which
+    /// is the default, an idle window still asks for nothing and costs nothing.
+    #[test]
+    fn redrawing_continuously_asks_for_the_next_frame_and_off_leaves_an_idle_window_idle() {
+        let mut h = crate::scenario::Harness::new();
+        let delay = |h: &mut crate::scenario::Harness| {
+            let app = &mut h.app;
+            let raw =
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))), ..Default::default() };
+            let mut out = h.ctx.run_ui(raw, |ui| {
+                app.logic(ui.ctx());
+            });
+            out.textures_delta.clear();
+            out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.repaint_delay)
+        };
+        // Settled frames: whatever the first few ask for while the app starts up, the window ends
+        // up asking for no frame of its own.
+        for _ in 0..4 {
+            delay(&mut h);
+        }
+        assert_eq!(delay(&mut h), Some(std::time::Duration::MAX), "an untouched window must ask for no frames");
+
+        let out = h.call("ui.prefs", json!({"continuous_redraw": true}));
+        assert_eq!(out["result"]["continuous_redraw"], true, "{out}");
+        assert_eq!(delay(&mut h), Some(std::time::Duration::ZERO), "redrawing continuously asks for the next frame at once");
+
+        let out = h.call("ui.prefs", json!({"continuous_redraw": false}));
+        assert_eq!(out["result"]["continuous_redraw"], false, "{out}");
+        for _ in 0..4 {
+            delay(&mut h);
+        }
+        assert_eq!(delay(&mut h), Some(std::time::Duration::MAX), "and turning it off leaves the window idle again");
     }
 
     /// The System theme leaves the native window to follow the operating system (#8983). A macOS
