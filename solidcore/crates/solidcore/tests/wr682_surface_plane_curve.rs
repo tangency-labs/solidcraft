@@ -16,6 +16,7 @@
 )] // test helpers
 
 use solidcore::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfCurves, SrfSrfOptions};
+use solidcore::error::blend::BlendFailure;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
@@ -414,18 +415,18 @@ fn on_circle(deg: f64) -> Point3 {
 }
 
 /// With `closed_by_start_direction` (not upstream), the closed circle a cylinder and a plane
-/// meet in, between two points, runs from the start the way the start direction says, also
-/// where an end lies at the circle's closure (the cylinder's seam, where the circle's parameter
-/// starts and ends: the end has two parameters) and where the arc between the points runs
-/// through it. The arc is checked by its ends, by lying on the circle and by its length, 10
-/// times the angle it sweeps (the short and the long way round differ by at least 10 (2 pi - 2
-/// angles)).
+/// meet in, between two points, runs from the start the way the start direction (the circle's
+/// own tangent there) says, also where an end lies at the circle's closure (the cylinder's
+/// seam, where the circle's parameter starts and ends: the end has two parameters), where the
+/// arc between the points runs through it, and for arcs longer than a half turn, where the
+/// chord heads the other way. The arc is checked by its ends, by lying on the circle and by
+/// its length, 10 times the angle it sweeps (the short and the long way round differ by at
+/// least 10 (2 pi - 2 angles)).
 #[test]
 fn a_closed_curve_runs_from_its_start_the_way_the_start_direction_says() {
     let k = Kernel::default();
     let plane = level(5.0);
-    // (the seam, from, to, the angle swept from `from`): the chord as the start direction, as
-    // the cap edge along a boss's foot passes it
+    // (the seam, from, to, the angle swept from `from`)
     let cases = [
         // the end at the closure, the start before it
         (0.0, -10.0, 0.0, 10.0),
@@ -438,10 +439,24 @@ fn a_closed_curve_runs_from_its_start_the_way_the_start_direction_says() {
         (5.0, 10.0, -10.0, -20.0),
         // the closure away from the arc
         (90.0, -10.0, 0.0, 10.0),
+        // longer than a half turn: the end at the closure, the long way round
+        (0.0, -10.0, 0.0, -350.0),
+        (0.0, 100.0, 0.0, 260.0),
+        // the start at the closure
+        (0.0, 0.0, 100.0, -260.0),
+        // through the closure
+        (5.0, -100.0, 100.0, 200.0),
+        (5.0, 100.0, -100.0, -200.0),
+        // the closure away from the arc
+        (90.0, 120.0, 60.0, 300.0),
+        // just past a half turn either way
+        (0.0, 30.0, 211.0, 181.0),
+        (0.0, 30.0, -151.0, -181.0),
+        (0.0, 30.0, 209.0, 179.0),
     ];
     for (seam, from, to, swept) in cases {
         let cylinder = seamed_cylinder(&k, seam);
-        let mut dir = on_circle(to) - on_circle(from);
+        let mut dir = heading(from, swept);
         check_arc(
             &k,
             &cylinder,
@@ -453,20 +468,102 @@ fn a_closed_curve_runs_from_its_start_the_way_the_start_direction_says() {
             &format!("seam {seam}, {from} -> {to}"),
         );
     }
-    // the long way round where the start direction points that way: from -10 down to 0 = -360
+}
+
+/// The tangent of the circle of radius 10 about z at `deg` degrees, the way an arc sweeping
+/// `swept` degrees from there runs.
+fn heading(deg: f64, swept: f64) -> Vec3 {
+    let t = deg.to_radians();
+    Vec3::new(-t.sin(), t.cos(), 0.0) * swept.signum()
+}
+
+/// With `closed_by_start_direction` (not upstream), a start direction neither way round the
+/// closed circle leaves along (the circle's normal there, or not a number) is not the heading
+/// of a curve between the points: the intersection fails, typed, rather than build either arc.
+/// So does one the only curve between them leaves against: a half cylinder meets the plane in
+/// a half circle, not closed.
+#[test]
+fn a_heading_along_neither_way_round_is_refused() {
+    let k = Kernel::default();
+    let plane = level(5.0);
     let cylinder = seamed_cylinder(&k, 0.0);
-    let t = (-10f64).to_radians();
-    let mut down = Vec3::new(t.sin(), -t.cos(), 0.0);
+    for (from, to) in [(-10.0, 0.0), (20.0, 290.0), (0.0, 100.0)] {
+        let t = f64::to_radians(from);
+        for (what, mut dir) in [
+            ("normal", Vec3::new(t.cos(), t.sin(), 0.0)),
+            ("NaN", Vec3::new(f64::NAN, f64::NAN, f64::NAN)),
+        ] {
+            let e = srf_srf_intersection(
+                &k,
+                Some(on_circle(from)),
+                Some(on_circle(to)),
+                Some(&mut dir),
+                None,
+                &cylinder,
+                &plane,
+                TOL,
+                ANG_TOL,
+                SrfSrfOptions {
+                    closed_by_start_direction: true,
+                    ..SrfSrfOptions::default()
+                },
+            )
+            .err()
+            .unwrap_or_else(|| panic!("{from} -> {to}, {what}: an arc was built"));
+            assert_eq!(
+                e.blend_failure(),
+                Some(&BlendFailure::StageFailed),
+                "{from} -> {to}, {what}: {e:?}"
+            );
+        }
+    }
+    // the half cylinder from 0 to 180 degrees: from 20 to 110, heading down (towards 0)
+    let half = half_cylinder(&k);
+    let mut down = heading(20.0, -1.0);
+    let e = srf_srf_intersection(
+        &k,
+        Some(on_circle(20.0)),
+        Some(on_circle(110.0)),
+        Some(&mut down),
+        None,
+        &half,
+        &plane,
+        TOL,
+        ANG_TOL,
+        SrfSrfOptions {
+            closed_by_start_direction: true,
+            ..SrfSrfOptions::default()
+        },
+    )
+    .err()
+    .unwrap_or_else(|| panic!("half circle 20 -> 110 heading down: an arc was built"));
+    assert_eq!(e.blend_failure(), Some(&BlendFailure::StageFailed), "{e:?}");
+    // heading up, the half circle's arc
+    let mut up = heading(20.0, 1.0);
     check_arc(
         &k,
-        &cylinder,
+        &half,
         &plane,
-        (-10.0, 0.0),
-        &mut down,
+        (20.0, 110.0),
+        &mut up,
         true,
-        -350.0,
-        "seam 0, -10 -> 0 the long way",
+        90.0,
+        "half circle 20 -> 110 heading up",
     );
+}
+
+/// The cylinder of radius 10 about z from 0 to 180 degrees.
+fn half_cylinder(k: &Kernel) -> Surface {
+    let frame = Axis2Placement::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    let mut cylinder = Cone::create_canonical_cylinder(k, &frame, 10.0).unwrap();
+    let mut domain = Extent2d::default();
+    domain.set_min_max_coords(0.0, 0.0, 180.0, 40.0).unwrap();
+    cylinder.adjust_step_uv_domain(k, &domain).unwrap();
+    Surface::from(cylinder)
 }
 
 /// Without `closed_by_start_direction` (every caller but a turned-back rail's cap edge, most

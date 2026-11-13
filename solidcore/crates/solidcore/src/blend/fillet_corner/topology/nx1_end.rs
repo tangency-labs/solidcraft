@@ -282,11 +282,7 @@ pub(crate) fn rolled_rail_turns_back(
             continue;
         }
         // N's tangent leaving `far`
-        let tn = if edge::start_vertex(target, n)? == Some(far) {
-            tangent(n, false)?
-        } else if edge::end_vertex(target, n)? == Some(far) {
-            -tangent(n, true)?
-        } else {
+        let Some(tn) = tangent_leaving(k, target, n, far)? else {
             continue;
         };
         if te.dot(tn) < 0.0 {
@@ -298,6 +294,32 @@ pub(crate) fn rolled_rail_turns_back(
         }
     }
     Ok(None)
+}
+
+/// Not upstream (solidcore-native, [`TurnedBack`]): the tangent of the edge `edge` leaving its
+/// end `vertex`, along its curve away from it (the curve's tangent at its start, reversed at
+/// its end); `None` where `vertex` is neither end. For an open edge: a closed one leaves its
+/// vertex both ways.
+///
+/// # Errors
+/// Those of the topology walks and the evaluation.
+pub(crate) fn tangent_leaving(
+    k: &Kernel,
+    target: &Brep,
+    edge: EdgeId,
+    vertex: VertexId,
+) -> Result<Option<Vec3>> {
+    if edge::start_vertex(target, edge)? == Some(vertex) {
+        Ok(Some(crate::topology::vertex::edge_end_tangent(
+            k, target, edge, true,
+        )?))
+    } else if edge::end_vertex(target, edge)? == Some(vertex) {
+        Ok(Some(-crate::topology::vertex::edge_end_tangent(
+            k, target, edge, false,
+        )?))
+    } else {
+        Ok(None)
+    }
 }
 
 /// A fillet vertex on the original vertex `tb.far` (`SM_FV_ON_VERTEX`), for a [`TurnedBack`]

@@ -35,9 +35,10 @@
 //!   (`calc_edge_on_tangent_seam`). Its tangency check (`EvaluateBinormal` may make a
 //!   missing UV trim) runs on a copy of the target, which the routine only reads.
 //! - **A turned-back cap edge (not upstream).** `CalcEdgeOnExtendedEdge` intersects a
-//!   turned-back rail's cap edge (`FilletCorner::turned_back_arcs`) with
-//!   `SrfSrfOptions::closed_by_start_direction`, so a closed foot curve is taken from the
-//!   rail's end towards the vertex, also across the face's seam.
+//!   turned-back rail's cap edge (`FilletCorner::turned_back_arcs`) from the foot edge N's
+//!   vertex, against N's own tangent there, with `SrfSrfOptions::closed_by_start_direction`
+//!   (`turned_back_arc`): a closed foot curve is taken the way round that continues N, of
+//!   any length and also across the face's seam.
 //! - **Near-knot rail trims (opt-in, not upstream).** With
 //!   `fixes.fillet_rail_trim_at_near_knot` (WR-664, the fork's tangency-labs/smlib@7d79866),
 //!   `TrimRailCurves` trims a rail at its knot next to a vertex's drop when the rail between
@@ -500,6 +501,66 @@ fn set_edge_curve(brep: &mut Brep, e: EdgeId, curve: Option<Curve>) -> Result<()
     }
     brep.edge_mut(e)?.curve = curve;
     Ok(())
+}
+
+/// Not upstream (solidcore-native): the curve from `ends[0]` to `ends[1]` of a turned-back
+/// rail's cap edge (`FilletCorner::turned_back_arcs`, `nx1_end::TurnedBack`), where
+/// `surfaces` meet: the foot edge N between them continued back past its vertex `far`, the
+/// edge's start (`far_at_start`, rail 0's edge) or its end (rail 1's). `along_n` is N's
+/// tangent leaving `far` (`nx1_end::tangent_leaving`).
+///
+/// The edge continues N through `far`, so it leaves `far` against `along_n`. That is the
+/// heading `sm_SrfSrfIntersection` takes the curve by
+/// (`SrfSrfOptions::closed_by_start_direction`), run from `far` and reversed where `far` is
+/// the end. Where the surfaces meet in a closed curve (a boss's foot circle), the two ways
+/// round from `far` to the rail's end leave `far` in opposite directions; N leaves along one,
+/// so the edge is the other, whatever the angle it sweeps. (The chord from the rail's end
+/// heads along a circle's arc only where the arc is shorter than a half turn.)
+///
+/// # Errors
+/// Those of the intersection (with no curve that leaves `far` against `along_n`,
+/// [`crate::error::blend::BlendFailure::StageFailed`]) and of the reversal.
+pub(crate) fn turned_back_arc(
+    k: &Kernel,
+    ends: [Point3; 2],
+    far_at_start: bool,
+    along_n: Vec3,
+    surfaces: [&Surface; 2],
+    tol: f64,
+    angle_tol: f64,
+) -> Result<Option<Curve>> {
+    let [start, end] = ends;
+    let (from, to) = if far_at_start {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    let [surface1, surface2] = surfaces;
+    let mut heading = -along_n;
+    let mut curve = super::p2::srf_srf_intersection(
+        k,
+        Some(from),
+        Some(to),
+        Some(&mut heading),
+        None,
+        surface1,
+        surface2,
+        tol,
+        angle_tol,
+        super::p2::SrfSrfOptions {
+            skip_two_pnts_intersection: false,
+            ref_point: None,
+            closed_by_start_direction: true,
+        },
+    )?
+    .curve_3d;
+    if !far_at_start {
+        if let Some(c) = curve.as_mut() {
+            let span = c.natural_interval();
+            let _ = c.reverse_parameterization(k, &span)?;
+        }
+    }
+    Ok(curve)
 }
 
 /// `SmVertex::PostInsert(pVertexuse)`: appends the use to the vertex's list and points
@@ -1821,33 +1882,39 @@ impl FilletBrep {
             SolidError::blend_missing(OP_EXT_EDGE, "the second extended B-spline surface")
         })?;
         // Not upstream (solidcore-native): the cap edge of a rail ending inside the face it
-        // rolled onto (`FilletCorner::turned_back_arcs`) runs along the end face's foot edge on
-        // that face, continued back past the rolled-over edge's vertex. Their surfaces meet in
-        // a closed curve where that face is closed (a boss's foot circle), whose parameter
-        // starts at the face's seam, and that vertex may lie on the seam or the edge run
-        // through it: the curve from the rail's end is the one that heads for the vertex
-        // (`SrfSrfOptions::closed_by_start_direction`). The chord is that heading: the edge
-        // spans the strip between the rolled-over edge and the rail, short of a half turn.
+        // rolled onto (`FilletCorner::turned_back_arcs`) runs along the end face's foot edge N
+        // on that face, continued back past N's vertex at the rolled-over edge, an end of the
+        // cap edge (`SM_FV_ON_VERTEX`): it leaves that vertex against N's own tangent there
+        // (`turned_back_arc`).
         let turned_back = the_corner.turned_back_arcs.contains(&Some(e));
         let curve_3d = if turned_back {
-            let (start, end) = (self.vertex_point(start_fv)?, self.vertex_point(end_fv)?);
-            super::p2::srf_srf_intersection(
+            let mut leaving = None;
+            for (fv, far_at_start) in [(start_fv, true), (end_fv, false)] {
+                let on = self.fillet_vertex(fv)?.point_classification().object();
+                if let Some(crate::error::EntityRef::Vertex(far)) = on {
+                    if let Some(along_n) =
+                        crate::blend::fillet_corner::topology::nx1_end::tangent_leaving(
+                            k, target, orig_edge, far,
+                        )?
+                    {
+                        leaving = Some((far_at_start, along_n));
+                        break;
+                    }
+                }
+            }
+            // (the cap edge is made with an end on N's vertex: a defect otherwise)
+            let (far_at_start, along_n) = leaving.ok_or_else(|| {
+                SolidError::blend(OP_EXT_EDGE, crate::error::blend::BlendFailure::StageFailed)
+            })?;
+            turned_back_arc(
                 k,
-                Some(start),
-                Some(end),
-                Some(&mut dir),
-                None,
-                &surface1,
-                &surface2,
+                [self.vertex_point(start_fv)?, self.vertex_point(end_fv)?],
+                far_at_start,
+                along_n,
+                [&surface1, &surface2],
                 tol,
                 angle_tol,
-                super::p2::SrfSrfOptions {
-                    skip_two_pnts_intersection: false,
-                    ref_point: None,
-                    closed_by_start_direction: true,
-                },
             )?
-            .curve_3d
         } else {
             srf_srf_intersection(
                 k,
@@ -3722,5 +3789,110 @@ mod tests {
             })
             .unwrap();
         assert!(sharp(&k, &b, seam));
+    }
+
+    /// The cylinder of radius 10 about z, its seam at `seam_deg` degrees about z, and the
+    /// plane z = 5: they meet in the circle a boss's foot edge lies on, closed, whose
+    /// parameter starts and ends at the cylinder's seam.
+    fn boss_and_floor(k: &Kernel, seam_deg: f64) -> [Surface; 2] {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::cone::Cone;
+        let t = seam_deg.to_radians();
+        let frame = Axis2Placement::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(t.cos(), t.sin(), 0.0),
+            Vec3::new(-t.sin(), t.cos(), 0.0),
+        );
+        let mut cylinder = Cone::create_canonical_cylinder(k, &frame, 10.0).unwrap();
+        let mut domain = Extent2d::default();
+        domain.set_min_max_coords(0.0, 0.0, 360.0, 40.0).unwrap();
+        cylinder.adjust_step_uv_domain(k, &domain).unwrap();
+        let frame = Axis2Placement::new(
+            Point3::new(0.0, 0.0, 5.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let mut plane = Plane::create_canonical(&frame).unwrap();
+        let mut domain = Extent2d::default();
+        domain.set_min_max_coords(-30.0, -30.0, 30.0, 30.0).unwrap();
+        plane.adjust_step_uv_domain(&domain).unwrap();
+        [Surface::from(cylinder), Surface::from(plane)]
+    }
+
+    /// The point at `deg` degrees on the circle of [`boss_and_floor`].
+    fn on_foot(deg: f64) -> Point3 {
+        let t = deg.to_radians();
+        Point3::new(10.0 * t.cos(), 10.0 * t.sin(), 5.0)
+    }
+
+    /// A turned-back rail's cap edge (`turned_back_arc`, not upstream) continues the foot edge
+    /// N back past its vertex `far` (here at 0 degrees): it leaves `far` against N's tangent
+    /// there. So it does at either end of the edge (rail 0's edge starts at `far`, rail 1's
+    /// ends there), with N leaving either way round, with the seam at `far`, inside the edge
+    /// or away from it, and for every angle the edge sweeps: also past a half turn, where the
+    /// chord from the rail's end heads the short way round (the cap edge's heading before
+    /// this). The edge is checked by its ends, by lying on the circle and by its length, 10
+    /// times the angle it sweeps (the other way round differs by 10 (2 pi - 2 angles), at
+    /// least 0.35 here).
+    #[test]
+    fn a_turned_back_cap_edge_continues_the_foot_edge_whatever_angle_it_sweeps() {
+        let k = kernel();
+        for seam in [0.0, 90.0, 200.0, 357.0] {
+            let [cylinder, plane] = boss_and_floor(&k, seam);
+            for n_way in [1.0, -1.0] {
+                // N's tangent at `far`, at 0 degrees: along +y for N running up the angles
+                let along_n = Vec3::new(0.0, n_way, 0.0);
+                for swept in [10.0, 120.0, 179.0, 181.0, 240.0, 300.0, 350.0] {
+                    // the rail's end, `swept` degrees from `far` the other way round from N
+                    let rail_end = on_foot(-n_way * swept);
+                    for far_at_start in [true, false] {
+                        let ends = if far_at_start {
+                            [on_foot(0.0), rail_end]
+                        } else {
+                            [rail_end, on_foot(0.0)]
+                        };
+                        let what = format!(
+                            "seam {seam}, N {n_way:+}, swept {swept}, far at start {far_at_start}"
+                        );
+                        let curve = turned_back_arc(
+                            &k,
+                            ends,
+                            far_at_start,
+                            along_n,
+                            [&cylinder, &plane],
+                            1e-5,
+                            2.0 * PI / 180.0,
+                        )
+                        .unwrap_or_else(|e| panic!("{what}: {e:?}"))
+                        .unwrap_or_else(|| panic!("{what}: no curve"));
+                        let ivl = curve.natural_interval();
+                        let start = curve.evaluate_point(&k, ivl.min()).unwrap();
+                        let end = curve.evaluate_point(&k, ivl.max()).unwrap();
+                        assert!(
+                            start.distance(ends[0]) <= 1e-9,
+                            "{what}: starts at {start:?}"
+                        );
+                        assert!(end.distance(ends[1]) <= 1e-9, "{what}: ends at {end:?}");
+                        let n = 2000;
+                        let mut last = start;
+                        let mut length = 0.0;
+                        for i in 1..=n {
+                            let p = curve
+                                .evaluate_point(&k, ivl.evaluate(f64::from(i) / f64::from(n)))
+                                .unwrap();
+                            let off = (p.x.hypot(p.y) - 10.0).abs().max((p.z - 5.0).abs());
+                            assert!(off <= 1e-9, "{what}: {p:?} off the circle by {off}");
+                            length += p.distance(last);
+                            last = p;
+                        }
+                        let want = 10.0 * f64::to_radians(swept);
+                        assert!(
+                            (length - want).abs() <= 1e-4,
+                            "{what}: length {length}, want {want}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
