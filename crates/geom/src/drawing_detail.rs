@@ -17,9 +17,11 @@ use std::f64::consts::PI;
 use std::fmt;
 
 use crate::drawing_view::{Invalid, Scale, ViewFrame, is_paper_coordinate, require};
-use crate::paper::MAX_SIDE_MM;
+use crate::paper::{Clip, MAX_SIDE_MM};
+use crate::prelude::*;
 use crate::section::MAX_NUMBER;
-use crate::{Aabb2, Seg2, Similarity2, Vec2};
+use crate::{Aabb2, Similarity2};
+use solidcore_record::{Seg2, Vec2};
 
 type Result<T> = std::result::Result<T, Invalid>;
 
@@ -83,6 +85,16 @@ impl Shape {
     fn on_paper(&self) -> bool {
         let b = self.bounds();
         [b.min.x, b.min.y, b.max.x, b.max.y].into_iter().all(is_paper_coordinate) && b.min.x < b.max.x && b.min.y < b.max.y
+    }
+}
+
+impl From<Shape> for Clip {
+    /// Keeps the shape in its current coordinates. Use [`Detail::window`] for a sheet's clip.
+    fn from(shape: Shape) -> Self {
+        match shape {
+            Shape::Circle { centre, radius } => Clip::Circle { center: centre, radius },
+            Shape::Rectangle(Aabb2 { min, max }) => Clip::Rect { min, max },
+        }
     }
 }
 
@@ -258,24 +270,9 @@ impl fmt::Display for Label {
 
 /// The `n`th label of [`next_label`]'s sequence, from 0: `A`…`Z` without `I`, `O` and `Q`, then
 /// `AA`, `AB`… with the same letters, then three letters. `None` past `ZZZ`.
-fn nth_label(mut n: usize) -> Option<String> {
-    let base = LETTERS.len();
-    let mut letters = 1;
-    let mut count = base;
-    while n >= count {
-        n -= count;
-        letters += 1;
-        if letters > MAX_LABEL_LETTERS {
-            return None;
-        }
-        count = count.checked_mul(base)?;
-    }
-    let mut out = vec![b'A'; letters];
-    for slot in out.iter_mut().rev() {
-        *slot = *LETTERS.get(n % base)?;
-        n /= base;
-    }
-    String::from_utf8(out).ok()
+fn nth_label(n: usize) -> Option<String> {
+    let label = crate::drawing_sheet::letters_from_alphabet(n, LETTERS)?;
+    (label.len() <= MAX_LABEL_LETTERS).then_some(label)
 }
 
 /// The first label of the sequence `A`, `B`, … `Z`, `AA`, … `ZZZ` (skipping `I`, `O` and `Q`)

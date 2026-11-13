@@ -549,16 +549,25 @@ pub fn letters(i: usize, skip_i_and_o: bool) -> String {
     const ALL: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     const NO_I_O: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ";
     let alphabet = if skip_i_and_o { NO_I_O } else { ALL };
+    letters_from_alphabet(i, alphabet).unwrap_or_default()
+}
+
+/// The same bijective sequence for a caller's alphabet (zones, details and section labels).
+/// At least two letters keep the work logarithmic even for the largest index.
+pub(crate) fn letters_from_alphabet(i: usize, alphabet: &[u8]) -> Option<String> {
     let base = alphabet.len();
+    if base < 2 {
+        return None;
+    }
     let mut out = Vec::new();
     // Bijective numbering: after the last letter comes AA, not BA.
     let mut n = i.saturating_add(1);
     while n > 0 {
         n -= 1;
-        out.extend(alphabet.get(n % base).map(|&b| char::from(b)));
+        out.push(char::from(*alphabet.get(n % base)?));
         n /= base;
     }
-    out.iter().rev().collect()
+    Some(out.iter().rev().collect())
 }
 
 #[cfg(test)]

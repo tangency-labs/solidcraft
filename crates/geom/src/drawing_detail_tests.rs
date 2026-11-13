@@ -1,7 +1,6 @@
 use super::*;
-use crate::Vec3;
 use crate::drawing_view::{NamedView, PRESETS};
-use crate::profile::Loop2;
+use solidcore_record::{Loop2, Vec3};
 
 const EPS: f64 = 1e-9;
 
@@ -79,6 +78,16 @@ fn a_rectangular_detail_maps_its_corners() {
     let window = rectangle_of(detail.window());
     assert!(near(window.min, Vec2::new(-50.0, 30.0)) && near(window.max, Vec2::new(150.0, 90.0)), "{window:?}");
     assert!(near(window.center(), Vec2::new(50.0, 60.0)));
+}
+
+#[test]
+fn detail_windows_convert_to_clips_in_sheet_millimetres() {
+    let circle = circle_detail();
+    assert_eq!(Clip::from(circle.window()), Clip::Circle { center: Vec2::new(300.0, 100.0), radius: 10.0 });
+
+    let boundary = Boundary::rectangle(Vec2::new(-10.0, 4.0), Vec2::new(30.0, -8.0)).unwrap();
+    let rect = Detail::new(&parent(), boundary, scale(5.0, 1.0), Vec2::new(50.0, 60.0)).unwrap();
+    assert_eq!(Clip::from(rect.window()), Clip::Rect { min: Vec2::new(-50.0, 30.0), max: Vec2::new(150.0, 90.0) });
 }
 
 /// The outline is one closed counter-clockwise loop whose area is the outline's.
