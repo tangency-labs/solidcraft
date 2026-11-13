@@ -395,13 +395,13 @@ impl Cone {
                 // sweep ending between it and a crossing keeps the crossing.
                 let zone_tol = zone_tols[0].unwrap_or(0.0).max(zone_tols[1].unwrap_or(0.0));
                 let dir = if distance > 0.0 { -normal } else { normal };
+                let line_in_sweep = angle_in_sweep(self, axis, dir, ang_tol)?;
                 let tangent = distance.abs() >= bot_radius
                     || (distance.abs() > bot_radius - tol
                         && bot_radius * bot_radius - distance * distance < tol * tol)
-                    || (distance.abs() > bot_radius - zone_tol
-                        && angle_in_sweep(self, axis, dir, ang_tol)?);
+                    || (distance.abs() > bot_radius - zone_tol && line_in_sweep);
                 if tangent {
-                    if angle_in_sweep(self, axis, dir, ang_tol)? {
+                    if line_in_sweep {
                         let start = bottom + bot_radius * dir;
                         let end = start + line_max * scale * axis;
                         add_plane_line(
