@@ -257,6 +257,32 @@ fn malformed_blends_are_refused() {
     assert!(blend_edges(side(&a, Continuity::G1), side(&a, Continuity::G1), &how()).is_err());
 }
 
+/// Two edges that touch at an end leave no room for a blend there: the kernel refuses, and its
+/// words reach the caller.
+#[test]
+fn a_refused_blend_keeps_the_kernels_words() {
+    let (a, ao) = sheet(
+        line([0.0, 0.0, 0.0], [0.0, 10.0, 0.0]),
+        line([10.0, 0.0, 0.0], [10.0, 10.0, 0.0]),
+    );
+    let ea = edge_through(&a, &ao, [10.0, 5.0, 0.0]);
+    // the second sheet's edge runs from the first's corner (10, 0, 0) away from it
+    let (b, bo) = sheet(
+        line([10.0, 0.0, 0.0], [15.0, 10.0, 0.0]),
+        line([20.0, 0.0, 0.0], [25.0, 10.0, 0.0]),
+    );
+    let eb = edge_through(&b, &bo, [12.5, 5.0, 0.0]);
+    let (a, b) = ((a, ao, ea), (b, bo, eb));
+    match blend_edges(side(&a, Continuity::G1), side(&b, Continuity::G1), &how()) {
+        Err(e @ Error::Refused { operation, reason }) => {
+            assert!(operation.contains("section_blend"), "{operation}");
+            assert!(reason.contains("no room for a blend"), "{reason}");
+            assert_eq!(e.to_string(), format!("{operation}: {reason}"));
+        }
+        r => panic!("{:?}", r.map(|_| ())),
+    }
+}
+
 // ---- fillet between two sheets -------------------------------------------------------------
 
 /// Two flat 10 by 10 sheets meeting at a right angle along the y axis: the first in z = 0 for x
