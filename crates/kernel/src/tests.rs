@@ -164,6 +164,22 @@ fn chamfer_and_step() {
     assert!(s.contains("MANIFOLD_SOLID_BREP") || s.contains("CLOSED_SHELL"));
 }
 
+/// A round of a cylinder's rim is the exact torus it lies on, and STEP says so: a
+/// TOROIDAL_SURFACE, not a rational B-spline net, whose bounding box and volume other readers
+/// get wrong. Pappus: the round takes off 2 pi (R - r (10 - 3 pi) / (3 (4 - pi))) (1 - pi / 4) r^2.
+#[test]
+fn a_cylinder_rim_round_goes_to_step_as_its_torus() {
+    let (big, height, r) = (10.0, 8.0, 2.5);
+    let puck = cylinder(Vec3::ZERO, Vec3::Z, big, height).unwrap();
+    let round = fillet(&puck, &[Vec3::new(0.0, big, height)], r).unwrap();
+    let text = step_export(&[&round], "puck").unwrap();
+    assert_eq!(text.matches("TOROIDAL_SURFACE").count(), 1, "{text}");
+    assert_eq!(text.matches("B_SPLINE_SURFACE").count(), 0, "{text}");
+    let back = step_import(&text).unwrap().bodies.remove(0).body;
+    let (a, b) = (measure(&round).unwrap().volume, measure(&back).unwrap().volume);
+    let pappus = PI * big * big * height - 2.0 * PI * (big - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI))) * (1.0 - PI / 4.0) * r * r;
+    assert!(rel(a, pappus) < 1e-7 && rel(b, pappus) < 1e-7, "{a} {b} {pappus}");
+}
 #[test]
 fn hostile_inputs_are_errors() {
     assert!(extrude(&Plane::XY, &[rect(1.0, 1.0)], 0.0, 0.0).is_err());
