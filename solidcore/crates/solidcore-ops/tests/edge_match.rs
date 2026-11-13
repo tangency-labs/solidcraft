@@ -63,7 +63,10 @@ fn rows(n: usize, blend: f64) -> MatchRows {
 #[test]
 fn a_two_degree_kink_is_taken_out_at_g1() {
     // 10 mm at 2 degrees: its cosine and sine as constants (ops computes no trigonometry)
-    let (c, s) = (10.0 * 0.999_390_827_019_095_8, 10.0 * 0.034_899_496_702_500_97);
+    let (c, s) = (
+        10.0 * 0.999_390_827_019_095_8,
+        10.0 * 0.034_899_496_702_500_97,
+    );
     let sheet = flat(0.0);
     let neighbour = ruled(
         &line([0.0, 0.0, 0.0], [0.0, 10.0, 0.0]),
