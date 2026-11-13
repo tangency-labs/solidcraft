@@ -6,6 +6,7 @@
 use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec3};
 use solidcraft_geom::Ring;
+use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::prelude::*;
 
 use crate::assemble::{AFace, AUse, Assembly};
@@ -57,30 +58,79 @@ impl Piece {
     }
 }
 
+fn planar_face_contains(rec: &Brep, face_index: usize, plane: &Plane, p: Vec3, tol: f64) -> bool {
+    let Some(face) = rec.faces.get(face_index) else { return false };
+    let p2 = plane.to_local(p);
+    let mut inside = false;
+    let mut on_edge = false;
+    for lp in &face.loops {
+        let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+        let mut pts = Vec::new();
+        for u in edges {
+            let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+            let Ok(eval) = CurveEval::new(edge.parameters()) else { continue };
+            let [t0, t1] = if u.forward { edge.interval } else { [edge.interval[1], edge.interval[0]] };
+            let n = match &eval {
+                CurveEval::Line { .. } => 1,
+                _ => 16,
+            };
+            for k in 0..n {
+                let t = t0 + (t1 - t0) * (k as f64 / n as f64);
+                if let Some(pt) = eval.point(t) {
+                    pts.push(plane.to_local(pt));
+                }
+            }
+        }
+        if pts.len() >= 3 {
+            let ring = Ring::new(pts);
+            for (a, b) in ring.edges() {
+                if p2.extend(0.0).dist_to_segment(a.extend(0.0), b.extend(0.0)) <= tol {
+                    on_edge = true;
+                    break;
+                }
+            }
+            if ring.contains(p2) {
+                inside = !inside;
+            }
+        }
+    }
+    on_edge || inside
+}
+
 /// The planar face of `body` at `at`: its index and outward normal.
 fn face_at(body: &Body, rec: &Brep, at: Vec3) -> Result<(usize, Vec3)> {
     let size = body.size();
-    let mesh = body.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
-    let near = mesh
-        .triangles
-        .iter()
-        .zip(&mesh.tri_face)
-        .filter_map(|(t, f)| {
-            let [a, b, c] = mesh.tri(t)?;
-            let n = (b - a).cross(c - a).normalized()?;
-            let q = at - n * (at - a).dot(n);
-            let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-9);
-            inside.then_some(((at - a).dot(n).abs(), *f as usize))
-        })
-        .min_by(|x, y| x.0.total_cmp(&y.0));
-    let (d, f) = near.ok_or_else(|| fail("no face there"))?;
-    if d > size * 1e-3 {
-        return Err(fail("no face there"));
+    let tol = (size * 1e-3).max(1e-3);
+    let mut candidates: Vec<(f64, usize, Vec3)> = Vec::new();
+    for (f, _) in rec.faces.iter().enumerate() {
+        let Some(Surf::Plane { n, d: plane_d }) = surf_of(rec, f) else { continue };
+        let d = (n.dot(at) - plane_d).abs();
+        if d > tol {
+            continue;
+        }
+        let q = at - n * (n.dot(at) - plane_d);
+        let Some(plane) = Plane::from_normal(q, n) else { continue };
+        if planar_face_contains(rec, f, &plane, q, tol) {
+            candidates.push((d, f, n));
+        }
     }
-    match surf_of(rec, f) {
-        Some(Surf::Plane { n, .. }) => Ok((f, n)),
-        _ => Err(fail("the face must be planar")),
+    candidates.sort_by(|x, y| x.0.total_cmp(&y.0));
+    if let Some((_, f, n)) = candidates.first() {
+        return Ok((*f, *n));
     }
+    for (f, _) in rec.faces.iter().enumerate() {
+        if matches!(surf_of(rec, f), Some(Surf::Plane { .. })) {
+            continue;
+        }
+        if let Some(surf) = crate::surface_kind::surface_of(rec, f) {
+            if let Some(near_pt) = surf.nearest(at) {
+                if near_pt.dist(at) <= tol {
+                    return Err(fail("the face must be planar"));
+                }
+            }
+        }
+    }
+    Err(fail("no face there"))
 }
 
 /// The face's loop moved `w` into the face (to the left of its edges, as a face's boundary has
