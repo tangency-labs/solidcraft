@@ -6,6 +6,7 @@ const HANDLES: Handles<'static> = Handles {
     home_rect: &["t:home"],
     file: &["t:file"],
     file_rect: &["t:file"],
+    plugins: "t:plugins",
     button: &["t:"],
     separator: "t:separator:",
     search: "t:search",
@@ -23,6 +24,8 @@ struct BarRig {
     ctx: egui::Context,
     width: f32,
     name: &'static str,
+    /// The bar has a Plugins menu.
+    plugins: bool,
     time: std::cell::Cell<f64>,
     out: std::cell::RefCell<Option<BarOut>>,
 }
@@ -34,7 +37,8 @@ impl BarRig {
 
     /// The bar with the app's name `name`.
     fn named(width: f32, name: &'static str) -> BarRig {
-        let rig = BarRig { ctx: crate::test_support::context(), width, name, time: std::cell::Cell::new(0.0), out: Default::default() };
+        let rig =
+            BarRig { ctx: crate::test_support::context(), width, name, plugins: false, time: std::cell::Cell::new(0.0), out: Default::default() };
         rig.frame(Vec::new());
         rig
     }
@@ -60,6 +64,7 @@ impl BarRig {
             home: BarButton { id: "home", icon: "home", tip: "Home", enabled: true, narrow: false, wide_only: false },
             file: "File",
             file_open: false,
+            plugins: self.plugins.then_some(("Plugins", false, "Plugins menu")),
             actions: vec![button("save", true, false), button("undo", false, true)],
             quick: 2,
             help: BarButton { id: "help", icon: "help", tip: "Help", enabled: true, narrow: false, wide_only: false },
@@ -113,6 +118,25 @@ fn the_bar_returns_what_was_clicked() {
     assert!(first > file.right() && step > 0.0);
     assert!(out.tabs_start > first + step, "the tabs follow the quick-access buttons");
     assert!(out.assistant.is_some_and(|a| a.left() > out.controls_left), "the assistant is in the right cluster");
+}
+
+/// The Plugins menu's button follows File without overlapping it or Save, and returns its own
+/// action; without one the bar is as before.
+#[test]
+fn the_plugins_button_sits_between_file_and_the_file_actions() {
+    for width in [1200.0, 600.0] {
+        let rig = BarRig::new(width);
+        let save_without = solidcraft_ui_registry::rect_of("t:save").expect("Save is drawn");
+        assert!(solidcraft_ui_registry::rect_of("t:plugins").is_none());
+        let rig = BarRig { plugins: true, ..rig };
+        rig.frame(Vec::new());
+        let file = solidcraft_ui_registry::rect_of("t:file").expect("File is drawn");
+        let plugins = solidcraft_ui_registry::rect_of("t:plugins").expect("Plugins is drawn");
+        let save = solidcraft_ui_registry::rect_of("t:save").expect("Save is drawn");
+        assert!(plugins.left() > file.right() && plugins.right() < save.left(), "{file:?} {plugins:?} {save:?}");
+        assert!(save.left() > save_without.left(), "the file actions move right by its width");
+        assert_eq!(rig.click("t:plugins"), vec![BarAction::Plugins { rect: plugins }]);
+    }
 }
 
 /// A compact bar leaves out the wide-only buttons and the quick-access room.
