@@ -1249,8 +1249,8 @@ pub fn section_heading(ui: &mut egui::Ui, label: &str, width: f32) {
 /// The note under a menu (how pinning works), translated.
 pub fn section_footer(ui: &mut egui::Ui, message: &str) {
     let t = Tokens::get();
-    ui.separator();
-    ui.add_space(4.0);
+    crate::Menu::separator(ui);
+    ui.add_space(2.0);
     ui.add(egui::Label::new(egui::RichText::new(message).size(t.font_small).color(t.text_dim)).wrap());
     ui.add_space(4.0);
 }
@@ -1692,7 +1692,7 @@ pub fn grid(ui: &mut egui::Ui, entries: &[(Option<&str>, MenuEntry)], loose: &[&
         // A line between groups side by side, as between the ribbon's groups.
         for x in &layout.separators {
             let x = origin.x + x;
-            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], Stroke::new(1.0, t.border));
+            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], crate::Menu::separator_stroke(&t));
         }
         for (index, (entry, (rect, _))) in plain.iter().zip(&layout.cells).enumerate() {
             let rect = rect.translate(origin.to_vec2());

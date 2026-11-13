@@ -185,8 +185,29 @@ pub struct Menu;
 pub const SUBMENU_CLOSE_DELAY: f64 = 0.3;
 
 impl Menu {
+    /// Below this contrast with `dialog_body`, a menu's rule all but vanishes on the menu surface
+    /// (#15806), as when a theme tunes `borders.tertiary` for `panel` rather than `dialog_body`.
+    pub const SEPARATOR_MIN_CONTRAST: f64 = 1.18;
+
+    /// Stroke for menu rules, preserving visible or explicitly hidden rules while rescuing
+    /// hairline rules whose contrast against `dialog_body` would otherwise vanish.
+    pub fn separator_stroke(t: &Tokens) -> Stroke {
+        let stroke = t.tertiary_border(t.dialog_rule);
+        let visible = |c: Color32| {
+            solidcraft_theme::contrast_ratio(solidcraft_theme::composite(c, t.dialog_body), t.dialog_body) >= Self::SEPARATOR_MIN_CONTRAST
+        };
+        if stroke.width <= 0.0 || stroke.color == Color32::TRANSPARENT || visible(stroke.color) {
+            return stroke;
+        }
+        let fallback = [t.dialog_rule, t.dialog_border, t.border, t.form_dim].into_iter().find(|&c| visible(c));
+        Stroke::new(stroke.width, fallback.unwrap_or(stroke.color))
+    }
+
     pub fn context<R>(response: &Response, add: impl FnOnce(&mut Ui) -> R) -> Option<egui::InnerResponse<R>> {
-        Container::new(&response.ctx, Surface::Popup).context_menu(response).frame(Self::frame()).show(add)
+        Container::new(&response.ctx, Surface::Popup).context_menu(response).frame(Self::frame()).show(|ui| {
+            ui.visuals_mut().widgets.noninteractive.bg_stroke = Self::separator_stroke(&Tokens::get());
+            add(ui)
+        })
     }
 
     pub fn button<R>(ui: &mut Ui, label: impl Into<egui::WidgetText>, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
@@ -247,6 +268,7 @@ impl Menu {
         });
         let content = |ui: &mut Ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
+            ui.visuals_mut().widgets.noninteractive.bg_stroke = Self::separator_stroke(&Tokens::get());
             // The opening gesture belongs to the parent even when a narrow popup overlaps it.
             ui.ctx().data_mut(|d| d.insert_temp(gate_id, first_click && !released));
             let result = ui.add_enabled_ui(!opening_press, add).inner;
@@ -361,7 +383,10 @@ impl Menu {
 
     pub fn show_frame<R>(ui: &mut Ui, frame: egui::Frame, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
         let bounds = ui.max_rect();
-        Container::new(ui.ctx(), Surface::Popup).show_frame(ui, frame, bounds, add)
+        Container::new(ui.ctx(), Surface::Popup).show_frame(ui, frame, bounds, |ui| {
+            ui.visuals_mut().widgets.noninteractive.bg_stroke = Self::separator_stroke(&Tokens::get());
+            add(ui)
+        })
     }
 
     pub fn show<R>(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -376,7 +401,7 @@ impl Menu {
     pub fn separator(ui: &mut Ui) {
         let t = Tokens::get();
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_10 + 1.0), Sense::hover());
-        ui.painter().hline(r.x_range(), r.center().y, t.tertiary_border(t.dialog_rule));
+        ui.painter().hline(r.x_range(), r.center().y, Self::separator_stroke(&t));
     }
 
     pub fn heading(ui: &mut Ui, label: &str) {
@@ -839,9 +864,9 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                 }
             }
         });
-        ui.add_space(t.space_6);
-        ui.separator();
-        ui.add_space(t.space_6);
+        ui.add_space(t.space_2);
+        Menu::separator(ui);
+        ui.add_space(t.space_2);
         ui.add(egui::Label::new(egui::RichText::new(menu.footer).size(solidcraft_theme::Tokens::get().font_small).color(t.text_dim)).wrap());
         ui.add_space(t.space_4);
     });
@@ -987,6 +1012,53 @@ mod tests {
             super::super::test_support::frame(&ctx, pointer(at, true), &mut draw);
             super::super::test_support::frame(&ctx, pointer(at, false), &mut draw);
             assert_eq!(clicked.get(), enabled);
+        }
+    }
+
+    #[test]
+    fn separator_stroke_preserves_hidden_and_visible_rules_and_rescues_vanishing_ones() {
+        for base in [Tokens::light(), Tokens::dark()] {
+            let stroke = Menu::separator_stroke(&base);
+            assert_eq!(stroke, base.tertiary_border(base.dialog_rule));
+            assert!(solidcraft_theme::contrast_ratio(stroke.color, base.dialog_body) >= Menu::SEPARATOR_MIN_CONTRAST);
+        }
+
+        let mut hidden_zero = Tokens::dark();
+        hidden_zero.borders.tertiary = Some(Stroke::new(0.0, Color32::WHITE));
+        assert_eq!(Menu::separator_stroke(&hidden_zero).width, 0.0);
+
+        let mut hidden_alpha = Tokens::dark();
+        hidden_alpha.borders.tertiary = Some(Stroke::new(1.0, Color32::TRANSPARENT));
+        assert_eq!(Menu::separator_stroke(&hidden_alpha).color.a(), 0);
+
+        let mut blueprint_like = Tokens::dark();
+        blueprint_like.dialog_body = Color32::from_rgb(0x11, 0x2d, 0x4b);
+        blueprint_like.dialog_rule = Color32::from_rgb(0x25, 0x47, 0x64);
+        blueprint_like.dialog_border = Color32::from_rgb(0x31, 0x57, 0x77);
+        blueprint_like.borders.tertiary = Some(Stroke::new(1.5, Color32::from_rgb(0x10, 0x27, 0x48)));
+        assert_eq!(Menu::separator_stroke(&blueprint_like), Stroke::new(1.5, blueprint_like.dialog_rule));
+
+        let mut rule_vanishes = blueprint_like;
+        rule_vanishes.dialog_rule = blueprint_like.dialog_body;
+        assert_eq!(Menu::separator_stroke(&rule_vanishes), Stroke::new(1.5, rule_vanishes.dialog_border));
+
+        let mut border_vanishes = rule_vanishes;
+        border_vanishes.dialog_border = border_vanishes.dialog_body;
+        assert_eq!(Menu::separator_stroke(&border_vanishes), Stroke::new(1.5, border_vanishes.border));
+
+        let mut all_borders_vanish = border_vanishes;
+        all_borders_vanish.border = all_borders_vanish.dialog_body;
+        assert_eq!(Menu::separator_stroke(&all_borders_vanish), Stroke::new(1.5, all_borders_vanish.form_dim));
+
+        let mut transparent_fallback = Tokens::light();
+        transparent_fallback.borders.tertiary = Some(Stroke::new(1.0, transparent_fallback.dialog_body));
+        transparent_fallback.dialog_rule = Color32::TRANSPARENT;
+        assert_eq!(Menu::separator_stroke(&transparent_fallback), Stroke::new(1.0, transparent_fallback.dialog_border));
+
+        for base in [Tokens::light(), Tokens::dark()] {
+            let mut translucent = base;
+            translucent.borders.tertiary = Some(Stroke::new(1.0, Color32::from_white_alpha(8)));
+            assert_eq!(Menu::separator_stroke(&translucent), Stroke::new(1.0, base.dialog_rule));
         }
     }
 }
