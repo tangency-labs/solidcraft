@@ -662,8 +662,19 @@ fn a_seam_to_a_rim_a_little_off_its_cylinder_is_no_farther_off_than_the_rim() {
     let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('band',(#{open}))"));
     let s = one_solid(&w.file_with_uncertainty(&[model], 1e-5));
     assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
-    // The seam: the one edge between two vertices, its tolerance covering its gap.
-    let seam = s.brep.edges.iter().find(|e| e.vertices[0] != e.vertices[1]).unwrap();
+    // The seam: the one edge from the lower rim's height to the upper's (the halves of the
+    // upper rim, split where the seam ends, also join two vertices), its tolerance covering
+    // its gap.
+    let seams: Vec<_> = s
+        .brep
+        .edges
+        .iter()
+        .filter(|e| {
+            let [a, b] = e.vertices.map(|v| s.brep.vertices[v as usize].point);
+            (a[2] - b[2]).abs() > 4.0
+        })
+        .collect();
+    let [seam] = seams.as_slice() else { panic!("{} edges between the rims", seams.len()) };
     assert!(seam.tolerance >= 0.5 * off && seam.tolerance < 10.0 * off, "{}", seam.tolerance);
 }
 
