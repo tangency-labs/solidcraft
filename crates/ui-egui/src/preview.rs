@@ -143,6 +143,8 @@ pub struct Built {
     /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
     /// (a Move). `scene` is not read then.
     pub layer: Option<Layer>,
+    /// The members of a previewed Frame Member (`dialogs_frame::centrelines`).
+    pub centrelines: Vec<crate::dialogs_frame::Centreline>,
 }
 
 /// What a preview only moves, as a layer of its own ([`crate::gpu::MovingLayer`]): scenes built
@@ -224,6 +226,8 @@ pub struct PreviewState {
     /// The bodies and plane ([`mirror_key`]) the Mirror dialog last set its operation for: an
     /// operation picked by hand afterwards stays until they change.
     pub mirror_decided: Option<u64>,
+    /// The members of the previewed Frame Member, for Remove Tube in its dialog.
+    pub centrelines: Vec<crate::dialogs_frame::Centreline>,
     straight: crate::extrude_preview::StraightPreview,
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
@@ -327,6 +331,7 @@ impl PreviewState {
         self.mirror_meets = None;
         self.mirror_decided = None;
         self.points.clear();
+        self.centrelines.clear();
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
@@ -367,6 +372,7 @@ impl PreviewState {
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
                 self.points = b.points;
+                self.centrelines = b.centrelines;
                 match b.layer {
                     // The scenes of this key are up: only the motion changes, nothing is uploaded.
                     Some(Layer { key, scenes: None, motion }) if self.layer_shown() == Some(key) => self.layer = Some((key, motion)),
@@ -404,6 +410,7 @@ impl PreviewState {
                 self.mirror_meets = None;
                 self.mirror_decided = None;
                 self.points.clear();
+                self.centrelines.clear();
             }
         }
     }
@@ -738,6 +745,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
+            b.centrelines = features().flat_map(|id| crate::dialogs_frame::centrelines(&p, id)).collect();
             Ok(b)
         }
     }
@@ -947,6 +955,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         points: Vec::new(),
         placed: None,
         layer: None,
+        centrelines: Vec::new(),
     }
 }
 
@@ -1219,6 +1228,7 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         points,
         placed: None,
         layer: None,
+        centrelines: Vec::new(),
     }
 }
 
@@ -1543,6 +1553,7 @@ mod tests {
             points: Vec::new(),
             placed: None,
             layer: None,
+            centrelines: Vec::new(),
         }
     }
 

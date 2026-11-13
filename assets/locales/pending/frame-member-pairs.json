@@ -5,7 +5,9 @@
     "Pick another point": "Pick another point",
     "A point needs another point after it": "A point needs another point after it",
     "select lines or points for the path first": "select lines or points for the path first",
-    "Ghost Frame Members": "Ghost Frame Members"
+    "Ghost Frame Members": "Ghost Frame Members",
+    "frame.remove_tubes_one": "Remove Tube",
+    "frame.remove_tubes_other": "Remove {count} Tubes"
   },
   "ar": {
     "cmd.frame_remove_member": "إزالة الأنبوب",
@@ -13,7 +15,9 @@
     "Pick another point": "اختر نقطة أخرى",
     "A point needs another point after it": "يجب أن تلي النقطة نقطة أخرى",
     "select lines or points for the path first": "اختر أولاً خطوطاً أو نقاطاً للمسار",
-    "Ghost Frame Members": "إظهار العناصر الهيكلية شفافة"
+    "Ghost Frame Members": "إظهار العناصر الهيكلية شفافة",
+    "frame.remove_tubes_one": "إزالة الأنبوب",
+    "frame.remove_tubes_other": "إزالة {count} أنابيب"
   },
   "de": {
     "cmd.frame_remove_member": "Rohr entfernen",
@@ -21,7 +25,9 @@
     "Pick another point": "Einen weiteren Punkt wählen",
     "A point needs another point after it": "Auf einen Punkt muss ein weiterer Punkt folgen",
     "select lines or points for the path first": "zuerst Linien oder Punkte für den Pfad wählen",
-    "Ghost Frame Members": "Rahmenelemente durchscheinend"
+    "Ghost Frame Members": "Rahmenelemente durchscheinend",
+    "frame.remove_tubes_one": "Rohr entfernen",
+    "frame.remove_tubes_other": "{count} Rohre entfernen"
   },
   "he": {
     "cmd.frame_remove_member": "הסרת צינור",
@@ -29,7 +35,9 @@
     "Pick another point": "בחרו נקודה נוספת",
     "A point needs another point after it": "אחרי נקודה צריכה לבוא נקודה נוספת",
     "select lines or points for the path first": "בחרו תחילה קווים או נקודות עבור המסלול",
-    "Ghost Frame Members": "איברי מסגרת שקופים"
+    "Ghost Frame Members": "איברי מסגרת שקופים",
+    "frame.remove_tubes_one": "הסרת צינור",
+    "frame.remove_tubes_other": "הסרת {count} צינורות"
   },
   "ja": {
     "cmd.frame_remove_member": "チューブを削除",
@@ -37,7 +45,9 @@
     "Pick another point": "もう 1 点選択してください",
     "A point needs another point after it": "点の後にはもう 1 つの点が必要です",
     "select lines or points for the path first": "先にパスの線または点を選択してください",
-    "Ghost Frame Members": "フレーム部材を半透明表示"
+    "Ghost Frame Members": "フレーム部材を半透明表示",
+    "frame.remove_tubes_one": "チューブを削除",
+    "frame.remove_tubes_other": "{count} 本のチューブを削除"
   },
   "ko": {
     "cmd.frame_remove_member": "튜브 제거",
@@ -45,7 +55,9 @@
     "Pick another point": "다른 점을 선택하세요",
     "A point needs another point after it": "점 다음에는 다른 점이 와야 합니다",
     "select lines or points for the path first": "먼저 경로의 선이나 점을 선택하세요",
-    "Ghost Frame Members": "프레임 부재 반투명 표시"
+    "Ghost Frame Members": "프레임 부재 반투명 표시",
+    "frame.remove_tubes_one": "튜브 제거",
+    "frame.remove_tubes_other": "튜브 {count}개 제거"
   },
   "vi": {
     "cmd.frame_remove_member": "Xóa ống",
@@ -53,7 +65,9 @@
     "Pick another point": "Chọn thêm một điểm",
     "A point needs another point after it": "Sau một điểm cần có một điểm khác",
     "select lines or points for the path first": "hãy chọn đường hoặc điểm cho đường dẫn trước",
-    "Ghost Frame Members": "Hiển thị mờ phần tử khung"
+    "Ghost Frame Members": "Hiển thị mờ phần tử khung",
+    "frame.remove_tubes_one": "Xóa ống",
+    "frame.remove_tubes_other": "Xóa {count} ống"
   },
   "zh": {
     "cmd.frame_remove_member": "删除管材",
@@ -61,6 +75,8 @@
     "Pick another point": "再选择一个点",
     "A point needs another point after it": "一个点之后需要另一个点",
     "select lines or points for the path first": "请先为路径选择线或点",
-    "Ghost Frame Members": "半透明显示框架构件"
+    "Ghost Frame Members": "半透明显示框架构件",
+    "frame.remove_tubes_one": "删除管材",
+    "frame.remove_tubes_other": "删除 {count} 根管材"
   }
 }
