@@ -348,6 +348,35 @@ pub fn circle(centre: [f64; 3], normal: [f64; 3], x_dir: [f64; 3], radius: f64) 
     on_unit(&made)
 }
 
+/// The arc about `centre`, right-handed about `normal`, from `start` to the direction of `end`
+/// (the kernel's [`ArcDefinition::from_points`]: its radius `start`'s distance from the axis, its
+/// sweep the anticlockwise angle to `end`'s direction in `(0, 2 pi]`, a full turn where `end` is in
+/// `start`'s direction; `start` and `end` taken into the plane through `centre` square to
+/// `normal`), as [`circle`] gives it: the exact rational quadratic on `[0, 1]`, from the start.
+///
+/// # Errors
+/// [`Error::Argument`] for a number not finite or past the coordinate bound, a `normal` of no
+/// length, or a start or end on the axis; [`Error::Record`] for an arc the record cannot hold;
+/// the kernel's status otherwise.
+pub fn arc_about(centre: [f64; 3], normal: [f64; 3], start: [f64; 3], end: [f64; 3]) -> Result<Curve> {
+    if ![centre, normal, start, end].iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    let made = run("curve::arc_about", |k| {
+        let definition = match ArcDefinition::from_points(point(centre), point(normal), point(start), point(end)) {
+            Ok(d) => d,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        match Ellipse::arc(k, &definition) {
+            Ok(arc) => exact_record(k, &KCurve::from(arc)),
+            Err(SolidError::InvalidInput { .. }) => Ok(Err(Error::Argument)),
+            Err(e) => Err(e),
+        }
+    })??;
+    on_unit(&made)
+}
+
 /// The full circle through `points`, starting at `points[0]` and running from it through
 /// `points[1]` to `points[2]` ([`Ellipse::circle_from_3_points`], closed), as [`circle`] gives
 /// it: the exact rational quadratic on `[0, 1]`, closed.
@@ -441,6 +470,11 @@ pub enum CurveExtension {
     /// A straight piece along the end tangent, joined to the curve as one spline of its
     /// degree (G1; the kernel's [`Continuity::G1`]).
     Linear,
+    /// The same knots and control points, the control polygon stretched along itself from the
+    /// other end so each point keeps its share of it (the kernel's
+    /// [`solidcore::nurbs::crv_basic::Curve::extend_keeping_proportion`]): the curve grows by the
+    /// length to the kernel's stop, its shape slides along the polygon.
+    Proportion,
 }
 
 /// `curve` made longer by `length` (mm, of arc length) at `at`, continued as `how` says
@@ -469,14 +503,27 @@ pub fn extend_curve(
     if nurb.is_closed() {
         return Err(Error::Argument);
     }
-    let continuity = match how {
-        CurveExtension::Natural => Continuity::Cmax,
-        CurveExtension::Linear => Continuity::G1,
-    };
     let ends: &[CurveEnd] = match at {
         CurveEndAt::Start => &[CurveEnd::Start],
         CurveEndAt::End => &[CurveEnd::End],
         CurveEndAt::Both => &[CurveEnd::Start, CurveEnd::End],
+    };
+    let continuity = match how {
+        CurveExtension::Natural => Continuity::Cmax,
+        CurveExtension::Linear => Continuity::G1,
+        CurveExtension::Proportion => {
+            return run("curve::extend_curve", |_| {
+                let mut extended = nurb;
+                for &end in ends {
+                    extended = match extended.extend_keeping_proportion(length, end) {
+                        Ok((curve, _)) => curve,
+                        Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                        Err(e) => return Err(e),
+                    };
+                }
+                Ok(record_of(&extended))
+            })?;
+        }
     };
     run("curve::extend_curve", |_| {
         let mut extended = nurb;
