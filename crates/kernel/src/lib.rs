@@ -272,6 +272,7 @@ impl From<solidcore_tess::TessError> for KernelError {
             solidcore_tess::TessError::Invalid(m) => KernelError::Invalid(m),
             solidcore_tess::TessError::Failed(m) => KernelError::Failed(m),
             solidcore_tess::TessError::Internal(m) => KernelError::Internal(m),
+            e @ solidcore_tess::TessError::TooManyVertices { .. } => KernelError::TooLarge(e.to_string()),
         }
     }
 }
