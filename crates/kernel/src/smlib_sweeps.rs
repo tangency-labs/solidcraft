@@ -559,9 +559,11 @@ mod imp {
         if !inside.is_empty() {
             let (ops, order) = ops()?;
             let points = points(inside);
-            let ds = (0..n)
-                .map(|f| ops.face_distances(order, f, &points).map_err(|e| KernelError::Failed(format!("sweep history: face {f}: {e}"))))
-                .collect::<Result<Vec<_>>>()?;
+            // Only a face within `reach` of a point can claim it below or be its nearest, so the
+            // seam is asked about those alone and answers `None` for the rest: every face against
+            // every point grew with the square of the profile's segment count (#15134).
+            let ds =
+                ops.face_distances_within(order, &points, reach).map_err(|e| KernelError::Failed(format!("sweep history: face distances: {e}")))?;
             for (j, s) in inside.iter().enumerate() {
                 let d = |f: usize| ds.get(f).and_then(|d| d.get(j).copied().flatten()).unwrap_or(f64::INFINITY);
                 let nearest = (0..n).map(d).fold(f64::INFINITY, f64::min);
