@@ -1385,6 +1385,8 @@ preference_settings! {
     /// Compact history: the browser lists each component's features in history order with the
     /// marker, and neither timeline is shown.
     history_in_browser: bool = false, PAGE_LAYOUT;
+    /// Dragging ordinary Browser feature rows changes their chronological order.
+    browser_feature_drag: bool = true, PAGE_LAYOUT;
     /// Whether vertical History lists a sketch under the feature built from it.
     history_sketches: HistorySketches = HistorySketches::default(), PAGE_LAYOUT;
     /// A Play History button in the History controls, between Previous and Next (#3688). Off
