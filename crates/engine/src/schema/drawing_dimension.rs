@@ -15,6 +15,7 @@ use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::dimension::{CornerPick, EdgePick, MAX_CHAIN_POINTS, TextPlace};
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
 
+use super::Point2;
 use super::drawing_view::ViewIdParam;
 use crate::params;
 
@@ -464,6 +465,16 @@ pub struct DimensionSet {
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub diameter: Option<bool>,
+    /// A drag: where the text's centre goes, in paper mm from the sheet's lower-left corner. It sets
+    /// `offset_mm` and `text`.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub text_to_mm: Option<Point2>,
+    /// A drag: a point the dimension line passes through, as `text_to_mm`. It sets `offset_mm`, or a
+    /// radial one's `text`, which turns with its leader.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub line_through_mm: Option<Point2>,
 }
 
 /// What `drawing.dimension.repair` takes: the dimension, which of its references, and what that
