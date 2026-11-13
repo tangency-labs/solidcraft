@@ -20,7 +20,7 @@ use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects};
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::{edge, face};
 use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId, RegionId};
-use solidcore::{Point2, Point3, Vec3};
+use solidcore::{Point3, Vec3};
 
 use crate::blend::middle;
 use crate::body::Body;
@@ -46,11 +46,11 @@ fn point(p: [f64; 3]) -> Result<Point3> {
     Ok(Point3::new(p[0], p[1], p[2]))
 }
 
-fn point2(p: [f64; 2]) -> Result<Point2> {
+fn point2(p: [f64; 2]) -> Result<solidcore::Point2> {
     if !p.iter().all(|x| x.is_finite()) {
         return Err(Error::Argument);
     }
-    Ok(Point2::new(p[0], p[1]))
+    Ok(solidcore::Point2::new(p[0], p[1]))
 }
 
 /// Mass properties of a body at unit density (mm, mm², mm³, mm⁵), and what they are worth.
