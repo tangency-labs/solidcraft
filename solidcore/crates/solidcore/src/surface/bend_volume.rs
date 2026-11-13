@@ -70,7 +70,8 @@
 //!   pseudo box is dropped.
 //! - **Trim.** [`BendVolume::trim_param_bounding_box_simple`] shifts non-seam-crossing
 //!   periodic intervals into `[-pi * |d|, pi * |d|]` and expands seam-crossing or
-//!   full-period/unbounded intervals to `[-pi * |d|, pi * |d|]` (`WR-60`;
+//!   full-period/unbounded intervals to `[-pi * |d|, pi * |d|]` (a bend of neutral
+//!   distance 0 trims `v` to 0, a non-finite period leaves `v` as it is) (`WR-60`;
 //!   `plan/upstream-issues/WR-60--addendum-2026-11-01-bend-volume-trim-across-period.md`),
 //!   where upstream's `TrimParamBoundingBoxSimple` clamps each end with
 //!   `SM_CLAMP_TO_PERIOD`, ignores the status of its final `SetMinMax`, and so leaves
@@ -529,7 +530,9 @@ impl BendVolume {
     /// over `[u_min, u_max] × [-half_angle, half_angle]` (propagating
     /// `±SM_INFINITE_PARAMETER` along unbounded `u` rays), and `proj_box`'s `y_max` is
     /// `max(sin(theta_min), sin(theta_max)) * u_min` when `u_max ==
-    /// SM_INFINITE_PARAMETER` and both end angles are `<= 0` (`WR-59`).
+    /// SM_INFINITE_PARAMETER` and both end angles are `<= 0` (`WR-59`). The pseudo box
+    /// is left unchanged when `param_box` is inside-out or the neutral distance is 0
+    /// or not finite.
     pub fn evaluate_bounding_box_simple(
         &self,
         param_box: &Extent3d,
@@ -748,14 +751,17 @@ impl BendVolume {
     /// primary period `[-pi * |d|, pi * |d|]` (`WR-60`). A `v` interval shorter than a
     /// period that does not straddle the seam `±pi * |d|` (within `SM_EFF_ZERO`) is
     /// shifted into the primary period; one that crosses the seam, or is a whole period
-    /// or unbounded, becomes the whole primary period. On `Ok(())` `trim_box` is never
-    /// inverted.
+    /// or unbounded, becomes the whole primary period. A bend of neutral distance 0
+    /// trims `v` to 0; one whose period is not finite leaves `v` as it is. On `Ok(())`
+    /// `trim_box` is never inverted.
     ///
     /// # Errors
     ///
     /// `SM_ERR`, with `trim_box` initialised to the empty box, when `param_box` is
-    /// inside-out, holds a NaN or lies entirely below `u = singularity_tol`, or, for a
-    /// bend of neutral distance 0, lies off `v = 0`.
+    /// inside-out, holds a NaN, has `v_min == v_max` at an infinite value or lies
+    /// entirely below `u = singularity_tol`; when the bend's neutral distance or
+    /// singularity tolerance is NaN; or, for a bend of neutral distance 0, when
+    /// `param_box` lies off `v = 0`.
     pub fn trim_param_bounding_box_simple(
         &self,
         param_box: &Extent3d,
@@ -1668,6 +1674,24 @@ mod tests {
         let mut t = pb;
         b.trim_param_bounding_box_simple(&across, &mut t).unwrap();
         assert_eq!(t, Extent3d::from_bounds(1.0, -PI, 0.0, 2.0, PI, 1.0));
+        // a box beyond the period shifts into it by one period
+        let beyond = Extent3d::from_bounds(1.0, 4.0, 0.0, 2.0, 5.0, 1.0);
+        b.trim_param_bounding_box_simple(&beyond, &mut t).unwrap();
+        assert!((t.v_min() - (4.0 - 2.0 * PI)).abs() < 1e-12);
+        assert!((t.v_max() - (5.0 - 2.0 * PI)).abs() < 1e-12);
+        // a NaN is refused with the empty box
+        let nan = Extent3d::from_bounds(1.0, f64::NAN, 0.0, 2.0, 1.0, 1.0);
+        let mut t = pb;
+        assert!(b.trim_param_bounding_box_simple(&nan, &mut t).is_err());
+        assert_eq!(t, Extent3d::new());
+        // a bend of neutral distance 0 trims v to 0, and refuses a box off v = 0
+        let flat = bend(0.0);
+        let mut t = pb;
+        flat.trim_param_bounding_box_simple(&pb, &mut t).unwrap();
+        assert_eq!(t, Extent3d::from_bounds(0.01, 0.0, 0.0, 2.0, 0.0, 1.0));
+        let off = Extent3d::from_bounds(1.0, 0.5, 0.0, 2.0, 1.0, 1.0);
+        assert!(flat.trim_param_bounding_box_simple(&off, &mut t).is_err());
+        assert_eq!(t, Extent3d::new());
     }
 
     #[test]
@@ -1823,6 +1847,11 @@ mod tests {
         let mut untouched = PseudoBox::new();
         b.evaluate_bounding_box_simple(&empty, None, Some(&mut untouched));
         assert!(untouched.has_negative_volume());
+
+        // So does a bend of neutral distance 0, whose angles are not defined.
+        let mut untouched_flat = PseudoBox::new();
+        bend(0.0).evaluate_bounding_box_simple(&pb, None, Some(&mut untouched_flat));
+        assert!(untouched_flat.has_negative_volume());
     }
 
     #[test]
