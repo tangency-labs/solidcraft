@@ -973,7 +973,10 @@ pub(crate) struct Hit {
     pub(crate) drag_started: bool,
     pub(crate) fold_at: Option<Pos2>,
     pub(crate) eye_at: Option<Pos2>,
+    pub(crate) eye_rect: Option<Rect>,
     pub(crate) radio_at: Option<Pos2>,
+    /// The trailing actions clicked, by target.
+    pub(crate) actions: Vec<String>,
     pub(crate) dropped: Option<Dropped>,
 }
 
@@ -1025,6 +1028,7 @@ pub(crate) fn node_row(rows: &mut Rows<'_>, spec: Spec<'_>, row: Row<'_>) -> Hit
         drag_started: out.drag_started,
         fold_at: out.fold_at,
         eye_at: out.eye_at,
+        eye_rect: out.eye_rect,
         radio_at: out.radio_at,
         ..Default::default()
     };
@@ -1053,7 +1057,8 @@ pub(crate) fn node_row(rows: &mut Rows<'_>, spec: Spec<'_>, row: Row<'_>) -> Hit
             panel::Event::NameAction(_) => hit.action = true,
             panel::Event::Menu { at, .. } => hit.secondary = Some(at),
             panel::Event::Move { zone, source, data, .. } => hit.dropped = Some(Dropped { zone, source, data }),
-            panel::Event::Action { .. } | panel::Event::Rename { .. } | panel::Event::Revealed(_) | panel::Event::EyeGesture(_) => {}
+            panel::Event::Action { action, .. } => hit.actions.push(action),
+            panel::Event::Rename { .. } | panel::Event::Revealed(_) | panel::Event::EyeGesture(_) => {}
         }
     }
     hit
@@ -1566,11 +1571,11 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
     // The card may animate all the way down to its header: the panel's scroll area shrinks to none.
     let output = present(app, ui, acts, (true, shrink_height), |app, rows, acts| {
         if crate::render_workspace::active(app) {
-            crate::render_workspace::scene::sections(app, rows.ui());
-            if !crate::render_workspace::scene::objects(app, rows.ui(), &mut acts.hover_bodies, &mut acts.hovered) {
+            crate::render_workspace::scene::sections(app, rows);
+            if !crate::render_workspace::scene::objects(app, rows, &mut acts.hover_bodies, &mut acts.hovered) {
                 component_rows(app, rows, 0, 1, acts, &mut cache);
             }
-            crate::render_workspace::scene::output(app, rows.ui());
+            crate::render_workspace::scene::output(app, rows);
         } else {
             component_rows(app, rows, 0, 0, acts, &mut cache);
         }
