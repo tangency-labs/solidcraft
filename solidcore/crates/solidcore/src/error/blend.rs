@@ -213,8 +213,6 @@ pub enum RemovalRefusal {
     /// A tangent face's seam stops short of the sharp edge and is not a line, so it cannot
     /// run on exactly.
     SeamNotStraight,
-    /// A tangent face's seam, run on along its line, does not reach the sharp edge.
-    SeamDoesNotReachSharpEdge,
     /// A seam's UV trim, run on, does not reach the new vertex on its face's surface.
     SeamTrimMissesNewVertex,
     /// The fillet face does not have four edges.
@@ -267,7 +265,6 @@ pub const fn removal_class(reason: RemovalRefusal) -> ErrorKind {
         | R::CornerOffSideLine
         | R::TangentSurfacesDoNotMeet
         | R::SeamNotStraight
-        | R::SeamDoesNotReachSharpEdge
         | R::SeamTrimMissesNewVertex => ErrorKind::RemovalNotExact,
         R::NotFourEdges
         | R::AdjacentEdgesTangent
@@ -799,7 +796,6 @@ mod tests {
             (R::CornerOffSideLine, ErrorKind::RemovalNotExact),
             (R::TangentSurfacesDoNotMeet, ErrorKind::RemovalNotExact),
             (R::SeamNotStraight, ErrorKind::RemovalNotExact),
-            (R::SeamDoesNotReachSharpEdge, ErrorKind::RemovalNotExact),
             (R::SeamTrimMissesNewVertex, ErrorKind::RemovalNotExact),
             (R::NotFourEdges, ErrorKind::NotARemovableFillet),
             (R::AdjacentEdgesTangent, ErrorKind::NotARemovableFillet),

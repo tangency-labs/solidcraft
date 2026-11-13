@@ -76,6 +76,7 @@
 //!   into `SM_ERR` is kept as the cause. The statuses are upstream's.
 //! - No recursion.
 
+use crate::curve::curve::p6::DroppedPoint;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::blend::{BlendFailure, RemovalRefusal as R};
 use crate::error::{
@@ -135,6 +136,33 @@ fn stage_failed_after(cause: SolidError) -> SolidError {
 
 fn null(what: &'static str) -> SolidError {
     SolidError::invalid_input(OP, what)
+}
+
+/// The corner dropped onto the side edge's run-on line (exact only, WR-606): the drop when it
+/// converged within `tol`; [`R::CornerOffSideLine`] when it converged farther away; a stage
+/// failure when the drop stopped or failed, which proves nothing about the line (#15034
+/// rule 5; a failed call is kept as the cause). Unported and cancelled calls pass on.
+#[track_caller]
+fn run_on_drop(drop: Result<DroppedPoint>, tol: f64) -> Result<DroppedPoint> {
+    match drop {
+        Ok(d) if d.success && d.distance <= tol => Ok(d),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(e) => Err(stage_failed_after(e)),
+        Ok(d) if !d.success => Err(stage_failed()),
+        Ok(_) => Err(refused(R::CornerOffSideLine)),
+    }
+}
+
+/// A curved side edge that does not reach the new corner (exact only, WR-606):
+/// [`R::SideEdgeNotStraight`] when the drop onto it converged (`decided`), so that it stops
+/// short is proved; a stage failure when the drop stopped or failed (#15034 rule 5).
+#[track_caller]
+fn curved_side_edge(decided: bool) -> SolidError {
+    if decided {
+        refused(R::SideEdgeNotStraight)
+    } else {
+        stage_failed()
+    }
 }
 
 /// `NER(p)`: a `NULL` pointer is `SM_ERR_NULL_POINTER`, an object the removal holds or
@@ -747,8 +775,10 @@ impl FilletRemoval {
             };
             let side_curve = ner(edge::curve(b, side)?)?.clone();
             if bspline_part(&side_curve).is_none() || !side_curve.is_linear(k, tol, false)?.linear {
-                self.not_exact = true;
-                return Err(refused(R::SideEdgeNotStraight));
+                let decided = stat_ok && success;
+                // (an undecided drop proves no inexactness)
+                self.not_exact = decided;
+                return Err(curved_side_edge(decided));
             }
             let curve_ivl = side_curve.natural_interval();
             let end = if high_end {
@@ -785,18 +815,11 @@ impl FilletRemoval {
                 SolverOperation::Minimize,
             );
             self.corner_mut(which_end, which_side)?.new_side_curve = Some(longer);
-            match drop {
-                Ok(d) if d.success && d.distance <= tol => {
-                    stat_ok = true;
-                    success = d.success;
-                    crv_param = d.parameter;
-                    crv_dist = d.distance;
-                }
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(e) => return Err(stage_failed_after(e)),
-                // the corner is off the side edge's line
-                Ok(_) => return Err(refused(R::CornerOffSideLine)),
-            }
+            let d = run_on_drop(drop, tol)?;
+            stat_ok = true;
+            success = d.success;
+            crv_param = d.parameter;
+            crv_dist = d.distance;
         }
 
         if stat_ok && success && crv_dist <= tol {
@@ -2028,7 +2051,46 @@ mod tests {
         assert_eq!(failed.blend_failure(), Some(&BlendFailure::StageFailed));
         assert_eq!(failed.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(failed.cause(), Some(&call));
+        assert!(failed.is_defect() && !failed.is_refusal());
         let unported = SolidError::unported("SmX::Y", "unit");
         assert_eq!(or_sm_err::<()>(Err(unported.clone())), Err(unported));
+    }
+
+    /// The side edge's run-on drop refuses only when it converged farther than `tol` from
+    /// the corner: a drop that stopped, or failed, proves nothing about the line and is a
+    /// stage failure (#15034 rule 5).
+    #[test]
+    fn the_run_on_drop_refuses_only_a_converged_drop() {
+        let tol = 1e-6;
+        let drop = |success, distance| DroppedPoint {
+            success,
+            parameter: 0.5,
+            distance,
+        };
+        assert_eq!(run_on_drop(Ok(drop(true, 0.0)), tol), Ok(drop(true, 0.0)));
+        let off = run_on_drop(Ok(drop(true, 0.1)), tol).unwrap_err();
+        assert_eq!(
+            off.blend_failure(),
+            Some(&BlendFailure::RemovalRefused(R::CornerOffSideLine))
+        );
+        assert!(off.is_refusal());
+        for d in [drop(false, 0.0), drop(false, 0.1)] {
+            let stopped = run_on_drop(Ok(d), tol).unwrap_err();
+            assert_eq!(stopped.blend_failure(), Some(&BlendFailure::StageFailed));
+            assert!(stopped.is_defect() && !stopped.is_refusal());
+        }
+        let call = SolidError::invalid_input("blend::call", "no such curve");
+        let failed = run_on_drop(Err(call.clone()), tol).unwrap_err();
+        assert_eq!(failed.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert_eq!(failed.cause(), Some(&call));
+        // a curved side edge is refused only when the drop onto it converged
+        assert_eq!(
+            curved_side_edge(true).blend_failure(),
+            Some(&BlendFailure::RemovalRefused(R::SideEdgeNotStraight))
+        );
+        assert_eq!(
+            curved_side_edge(false).blend_failure(),
+            Some(&BlendFailure::StageFailed)
+        );
     }
 }

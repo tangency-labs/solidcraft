@@ -392,6 +392,8 @@ impl RingFilletRemoval {
         // The closed curve every rail sample lies within reach of, the nearest.
         let mut found = curves_3d.len();
         let mut best = BIG_DOUBLE;
+        // a drop that stopped proves nothing about the distance (#15034 rule 5)
+        let mut undecided = false;
         for (cc, c) in curves_3d.iter().enumerate() {
             let Some(c) = c else {
                 continue;
@@ -417,6 +419,7 @@ impl RingFilletRemoval {
                     worst = if d.success {
                         max2(worst, d.distance)
                     } else {
+                        undecided = true;
                         BIG_DOUBLE
                     };
                 }
@@ -427,10 +430,9 @@ impl RingFilletRemoval {
             }
         }
         let Some(mut sharp) = curves_3d.get_mut(found).and_then(Option::take) else {
-            // The surfaces don't meet near the fillet within their domains: the sharp
-            // edge would lie on a continuation of one of them.
-            self.not_exact = true;
-            return Err(refused(R::TangentSurfacesDoNotMeet));
+            // (an undecided drop proves no inexactness)
+            self.not_exact = !undecided;
+            return Err(no_sharp_curve(undecided));
         };
         if bspline_part(&sharp).is_none() {
             return Err(SolidError::blend_missing(
@@ -549,7 +551,9 @@ impl RingFilletRemoval {
                     &none,
                 )?;
                 if solutions.is_empty() {
-                    return Err(refused(R::SeamDoesNotReachSharpEdge));
+                    // the global intersector finding no crossing is no proof that the line
+                    // misses the sharp edge (#15034 rule 5)
+                    return Err(stage_failed());
                 }
             }
             // One crossing (a closed curve starting there meets it at both its ends).
@@ -902,4 +906,39 @@ pub fn join_shells_at_vertex(k: &mut Kernel, b: &mut Brep, v: Option<VertexId>) 
         }
     }
     Ok(())
+}
+
+/// Why no candidate curve is the sharp edge: a stage failure when a drop onto a candidate
+/// stopped (`undecided`), which proves nothing about it (#15034 rule 5); otherwise
+/// [`R::TangentSurfacesDoNotMeet`]: the surfaces don't meet near the fillet within their
+/// domains, so the sharp edge would lie on a continuation of one of them.
+#[track_caller]
+fn no_sharp_curve(undecided: bool) -> SolidError {
+    if undecided {
+        stage_failed()
+    } else {
+        refused(R::TangentSurfacesDoNotMeet)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::blend::BlendFailure;
+
+    /// A drop onto a candidate curve that stopped proves nothing: no sharp curve is then a
+    /// stage failure, never the refusal (#15034 rule 5).
+    #[test]
+    fn no_sharp_curve_is_refused_only_when_every_drop_converged() {
+        let undecided = no_sharp_curve(true);
+        assert_eq!(undecided.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert!(undecided.is_defect() && !undecided.is_refusal());
+        let refused = no_sharp_curve(false);
+        assert_eq!(
+            refused.blend_failure(),
+            Some(&BlendFailure::RemovalRefused(R::TangentSurfacesDoNotMeet))
+        );
+        assert!(refused.is_refusal() && !refused.is_defect());
+        assert_eq!(undecided.upstream_status(), refused.upstream_status());
+    }
 }
