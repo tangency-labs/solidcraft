@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.browser_hover_shows_origin": "Show the Origin item under the pointer in the Browser",
+    "prefs.browser_hover_shows_origin_help": "Hovering an Origin plane, axis or point in the Browser shows it in the view, also when it is hidden. Off: only an origin plane that is already shown lights up."
+  },
+  "de": {
+    "prefs.browser_hover_shows_origin": "Ursprungselement unter dem Zeiger im Browser anzeigen",
+    "prefs.browser_hover_shows_origin_help": "Zeigt eine Ursprungsebene, -achse oder einen Ursprungspunkt in der Ansicht, wenn der Zeiger im Browser darauf steht, auch wenn das Element ausgeblendet ist. Aus: Nur eine bereits sichtbare Ursprungsebene wird hervorgehoben."
+  },
+  "ar": {
+    "prefs.browser_hover_shows_origin": "إظهار عنصر نقطة الأصل الموجود تحت المؤشر في المستعرض",
+    "prefs.browser_hover_shows_origin_help": "عند وضع المؤشر على مستوى أو محور أو نقطة من نقطة الأصل في المستعرض، يظهر العنصر في العرض حتى إذا كان مخفيًا. عند الإيقاف: يُبرز فقط مستوى الأصل الظاهر بالفعل."
+  },
+  "he": {
+    "prefs.browser_hover_shows_origin": "הצג את רכיב הראשית שמתחת לסמן בעץ התכן",
+    "prefs.browser_hover_shows_origin_help": "ריחוף מעל מישור, ציר או נקודה של הראשית בעץ התכן מציג אותם בתצוגה, גם כשהם מוסתרים. כבוי: רק מישור ראשית שכבר מוצג מודגש."
+  },
+  "ja": {
+    "prefs.browser_hover_shows_origin": "ブラウザでポインター下の原点要素を表示",
+    "prefs.browser_hover_shows_origin_help": "ブラウザで原点の平面、軸、点にポインターを合わせると、非表示でもビューに表示します。オフ: すでに表示されている原点平面だけが強調表示されます。"
+  },
+  "ko": {
+    "prefs.browser_hover_shows_origin": "브라우저에서 포인터 아래의 원점 항목 표시",
+    "prefs.browser_hover_shows_origin_help": "브라우저에서 원점 평면, 축 또는 점 위에 포인터를 올리면 숨겨져 있어도 뷰에 표시합니다. 끔: 이미 표시된 원점 평면만 강조됩니다."
+  },
+  "vi": {
+    "prefs.browser_hover_shows_origin": "Hiện mục Gốc tọa độ dưới con trỏ trong Trình duyệt",
+    "prefs.browser_hover_shows_origin_help": "Rê chuột lên mặt phẳng, trục hoặc điểm của Gốc tọa độ trong Trình duyệt sẽ hiện nó trong khung nhìn, kể cả khi nó đang bị ẩn. Tắt: chỉ mặt phẳng gốc đã hiện mới được làm nổi bật."
+  },
+  "zh": {
+    "prefs.browser_hover_shows_origin": "在浏览器中显示指针下的原点项目",
+    "prefs.browser_hover_shows_origin_help": "在浏览器中将指针悬停在原点的平面、轴或点上时，即使它已隐藏，也会在视图中显示。关闭：只有已显示的原点平面会高亮。"
+  }
+}

@@ -2180,7 +2180,9 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
                 acts.menu = Some((p, target));
             }
         }
-        if r.hovered && icon == "plane" {
+        // A plane row lights its plane; with the preference on, an axis or point row shows its
+        // item too, hidden or not (#15658). The view draws it; nothing here changes visibility.
+        if r.hovered && (icon == "plane" || app.preferences.browser_hover_shows_origin) {
             acts.hover_plane = Some(name);
         }
         if r.clicked

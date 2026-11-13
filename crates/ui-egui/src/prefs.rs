@@ -1556,6 +1556,11 @@ preference_settings! {
     /// they stay in sight as references wherever the view is (#11123). Off by default: short axes
     /// from the origin, solid then dashed, as before.
     origin_axes_across_view: bool = false, PAGE_DESIGN => check_id("prefs.origin_axes_across_view");
+    /// Hovering an Origin plane, axis or point row in the Browser shows that item in the view,
+    /// for the design's Origin and each part's, also while it is hidden (#15658): a hidden item
+    /// shows only during the hover, its eye and saved visibility unchanged. Off: a hover lights
+    /// only an origin plane that is already drawn, as before.
+    browser_hover_shows_origin: bool = true, PAGE_DESIGN => check_id("prefs.browser_hover_shows_origin");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
     /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
     /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is
