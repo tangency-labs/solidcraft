@@ -25,6 +25,13 @@ impl CurveEval {
     }
 }
 
+/// A closed spline or polyline with its seam moved to `start`, exactly.
+pub(crate) fn restart_curve(curve: &Curve, start: f64) -> Result<Curve, Error> {
+    let curve = c::curve(curve).map_err(|e| e.to_string())?;
+    let restarted = k::pcurve::restart_curve(&curve, start)?;
+    c::record_curve(restarted).map_err(|e| e.to_string())
+}
+
 /// A surface record ready to evaluate.
 pub(crate) struct SurfaceEval(k::SurfaceEval);
 

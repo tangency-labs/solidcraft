@@ -1090,6 +1090,102 @@ pub fn segment(
     Ok((out, points))
 }
 
+/// Start a closed spline or polyline at `start` inside its natural domain `[a, b]`.
+/// The result has domain `[start, start + b - a]`. Parameters before `start` move
+/// forward by `b - a`; all other parameters keep their points.
+///
+/// Uses [`segment`]'s exact homogeneous knot insertion, then a knot-vector shift.
+/// The old seam has multiplicity degree. A common homogeneous scale on the
+/// second piece matches unequal seam weights without changing its geometry.
+/// The seam endpoints must coincide exactly in Euclidean coordinates; a gap is
+/// refused rather than closed by moving a control point.
+///
+/// # Errors
+/// An unsupported curve, invalid spline, start outside the open domain, or size
+/// beyond the evaluator's limits.
+pub fn restart_curve(curve: &Curve, start: f64) -> std::result::Result<Curve, String> {
+    let (knots, ctrl, rational) = match curve {
+        Curve::Spline { knots, points } => (
+            knots.clone(),
+            points
+                .iter()
+                .map(|&[x, y, z]| [x, y, z, 1.0])
+                .collect::<Vec<_>>(),
+            false,
+        ),
+        Curve::RationalSpline { knots, homogeneous } => (knots.clone(), homogeneous.clone(), true),
+        Curve::Polyline { points } => {
+            let end = points.len().saturating_sub(1) as f64;
+            let knots = std::iter::once(0.0)
+                .chain((0..points.len()).map(|i| i as f64))
+                .chain(std::iter::once(end))
+                .collect();
+            (
+                knots,
+                points.iter().map(|&[x, y, z]| [x, y, z, 1.0]).collect(),
+                false,
+            )
+        }
+        _ => return Err("only splines and polylines can be restarted".into()),
+    };
+    let p = knots
+        .len()
+        .checked_sub(ctrl.len() + 1)
+        .ok_or("spline degree")?;
+    if !(1..=super::spline::MAX_SPLINE_DEGREE).contains(&p)
+        || knots.len() > MAX_KNOTS
+        || knots.iter().any(|t| !t.is_finite())
+        || knots.windows(2).any(|w| w.first() > w.get(1))
+        || ctrl
+            .iter()
+            .any(|h| h.iter().any(|x| !x.is_finite()) || h.get(3).is_none_or(|w| *w <= 0.0))
+    {
+        return Err("invalid spline to restart".into());
+    }
+    let (a, b) = (
+        *knots.get(p).ok_or("spline start")?,
+        *knots.get(ctrl.len()).ok_or("spline end")?,
+    );
+    if !(a < start && start < b) {
+        return Err("spline restart outside the open domain".into());
+    }
+    let (mut tail_knots, mut tail) = segment(p, &knots, &ctrl, start, b)?;
+    let (head_knots, head) = segment(p, &knots, &ctrl, a, start)?;
+    let &[tx, ty, tz, tw] = tail.last().ok_or("spline seam end")?;
+    let &[hx, hy, hz, hw] = head.first().ok_or("spline seam start")?;
+    let tail_end = [tx / tw, ty / tw, tz / tw];
+    let head_start = [hx / hw, hy / hw, hz / hw];
+    if tail_end.iter().chain(&head_start).any(|x| !x.is_finite()) || tail_end != head_start {
+        return Err("spline seam endpoints do not coincide".into());
+    }
+    // Sharing the endpoint needs p seam knots. Scale the entire head, not only
+    // its endpoint: a common projective scale preserves every rational span.
+    tail_knots.pop();
+    tail_knots.extend(head_knots.iter().skip(p + 1).map(|t| t + (b - a)));
+    tail.extend(head.into_iter().skip(1).map(|h| h.map(|x| x * (tw / hw))));
+    if tail_knots.len() > MAX_KNOTS
+        || tail_knots.iter().any(|t| !t.is_finite())
+        || tail_knots.windows(2).any(|w| w.first() > w.get(1))
+        || tail
+            .iter()
+            .any(|h| h.iter().any(|x| !x.is_finite()) || h.get(3).is_none_or(|w| *w <= 0.0))
+    {
+        return Err("restarted spline exceeds evaluation limits".into());
+    }
+    let restarted = if rational {
+        Curve::RationalSpline {
+            knots: tail_knots,
+            homogeneous: tail,
+        }
+    } else {
+        Curve::Spline {
+            knots: tail_knots,
+            points: tail.into_iter().map(|[x, y, z, _]| [x, y, z]).collect(),
+        }
+    };
+    Ok(restarted)
+}
+
 #[cfg(test)]
 #[path = "pcurve_tests.rs"]
 mod tests;

@@ -1489,3 +1489,65 @@ fn an_edge_is_fitted_to_its_own_tolerance() {
     let pc = &pcurves(&plane, &own, 1e-5).unwrap()[0][0];
     assert!(lift_error(&plane, &off, [0., 1.], pc) <= 2e-4);
 }
+
+#[test]
+fn restarting_a_closed_curve_preserves_both_pieces() {
+    // Non-unit domain, unequal seam weights: each side is a rational quadratic
+    // Bezier. The cut inside a span requires knot insertion; 5 is a repeated knot.
+    let rational = Curve::RationalSpline {
+        knots: vec![2., 2., 2., 5., 5., 8., 8., 8.],
+        homogeneous: vec![
+            [2., 0., 0., 2.],
+            [2., 4., 0., 2.],
+            [4., 0., 0., 2.],
+            [1., -2., 0., 1.],
+            [1., 0., 0., 1.],
+        ],
+    };
+    let spline = Curve::Spline {
+        knots: vec![2., 2., 2., 5., 5., 8., 8., 8.],
+        points: vec![
+            [0., 0., 0.],
+            [1., 2., 0.],
+            [2., 0., 0.],
+            [1., -2., 0.],
+            [0., 0., 0.],
+        ],
+    };
+    let polyline = Curve::Polyline {
+        points: vec![
+            [0., 0., 0.],
+            [1., 0., 0.],
+            [1., 1., 0.],
+            [0., 1., 0.],
+            [0., 0., 0.],
+        ],
+    };
+    for (curve, a, b, cuts) in [
+        (rational, 2., 8., [4.25, 5.]),
+        (spline, 2., 8., [4.25, 5.]),
+        (polyline, 0., 4., [1.25, 2.]),
+    ] {
+        let original = CurveEval::new(&curve).unwrap();
+        for start in cuts {
+            let rotated = restart_curve(&curve, start).unwrap();
+            let eval = CurveEval::new(&rotated).unwrap();
+            for i in 0..=128 {
+                let t = start + (b - a) * f64::from(i) / 128.;
+                let old_t = if t >= b { t - (b - a) } else { t };
+                assert!(
+                    eval.point(t).unwrap().dist(original.point(old_t).unwrap()) < 1e-12,
+                    "{start} {t}"
+                );
+            }
+            assert!(restart_curve(&curve, a).is_err());
+            assert!(restart_curve(&curve, b).is_err());
+            assert!(restart_curve(&curve, f64::NAN).is_err());
+        }
+    }
+    // Approximate closure must not move either endpoint or its neighbouring span.
+    let near_closed = Curve::Polyline {
+        points: vec![[0., 0., 0.], [1., 1., 0.], [0., 1e-8, 0.]],
+    };
+    assert!(restart_curve(&near_closed, 1.).is_err());
+}
