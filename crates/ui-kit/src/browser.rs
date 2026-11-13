@@ -12,6 +12,12 @@
 //! dragged rows and their drop marks, the eye drag, the row to reveal, the search text and the
 //! keyboard cursor. Keyboard arrows and search are options, off by default.
 //!
+//! A host that acts on each row as it draws it turns on [`Browser::events_per_row`]: each row's
+//! events come back in its [`RowOut`] instead of the frame's [`Output`]. A host with its own name
+//! editor marks its rows [`Rename::Host`]; a host showing the rows twice gives each presentation its
+//! own [`BrowserState`] and id ([`Browser::presentation`]), and marks a hidden one inactive
+//! ([`Browser::active`]), which ends the gestures it holds.
+//!
 //! Selection follows the platform: a click selects that row only, Cmd/Ctrl toggles it, Shift takes
 //! the rows from the anchor (Shift with Cmd/Ctrl adds them). Rows that are no item
 //! ([`Selectable::No`]) only report a click.
@@ -43,13 +49,16 @@ pub enum Selectable {
     Yes(u32),
 }
 
-/// How a row's name is renamed in place, besides [`BrowserState::start_rename`].
+/// How a row's name is renamed: by a slower second click on it (once the double-click delay has
+/// passed), F2 with the keyboard on, or [`BrowserState::request_rename`] (a menu's Rename).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Rename {
     #[default]
     Never,
-    /// A slower second click on the row opens the editor, once the double-click delay has passed.
-    SlowClick,
+    /// In the panel's own editor, in the row.
+    Inline,
+    /// By the host: the panel reports [`Event::RenameRequested`] and the host opens its editor.
+    Host,
 }
 
 /// The drops a row takes: before it (a line over it), inside it (a box round it). A row taking
@@ -164,10 +173,13 @@ pub enum Event {
         id: NodeId,
         text: String,
     },
+    /// Dragged rows dropped on `target`: where they came from and the host's data, as dragged.
     Move {
         ids: Vec<NodeId>,
         target: NodeId,
         zone: Zone,
+        source: Source,
+        data: Option<Payload>,
     },
     /// A trailing action (its target) or a menu entry (its id and parameters).
     Action {
@@ -184,18 +196,58 @@ pub enum Event {
     },
     /// The row [`BrowserState::reveal`] asked for is in view.
     Revealed(NodeId),
+    /// A [`Rename::Host`] row is to be renamed.
+    RenameRequested(NodeId),
 }
 
-/// The rows being dragged: the scope (document and presentation family) they come from, their
-/// kind and ids, in drawn order.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Dragged {
+/// Where dragged rows come from: the host's scope (its document) and the presentation (one of the
+/// places the same rows are shown).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Source {
     pub scope: u64,
+    pub presentation: u64,
+}
+
+/// The host's own data riding on a drag, of any type.
+#[derive(Clone)]
+pub struct Payload(std::sync::Arc<dyn std::any::Any + Send + Sync>);
+
+impl Payload {
+    pub fn new<T: std::any::Any + Send + Sync>(value: T) -> Self {
+        Payload(std::sync::Arc::new(value))
+    }
+
+    /// The data, when it is a `T`.
+    pub fn get<T: std::any::Any>(&self) -> Option<&T> {
+        self.0.downcast_ref::<T>()
+    }
+}
+
+/// The same data, not equal values: a drag's data is compared by identity.
+impl PartialEq for Payload {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for Payload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Payload(..)")
+    }
+}
+
+/// The rows being dragged: where from, their kind, their ids (the selected rows of that kind as
+/// drawn, or the set the host gave with [`Rows::drag_with`]) and the host's data.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dragged {
+    pub source: Source,
     pub class: u32,
     pub ids: Vec<NodeId>,
+    pub data: Option<Payload>,
 }
 
-/// The host's drop rules: may `Dragged` land on the row `NodeId` in `Zone`?
+/// The host's drop rules over where a drag comes from and where it would land: may `Dragged` land
+/// on the row `NodeId` in `Zone`? Without them a row takes drags of its own scope.
 pub type Accept<'a> = &'a dyn Fn(&Dragged, NodeId, Zone) -> bool;
 
 /// A row on screen this frame.
@@ -222,15 +274,30 @@ pub struct Output {
     pub content_height: f32,
 }
 
-/// What a row reports back for the host's own extras (handles, lighting).
+/// What a row reports back as it is drawn, for a host acting on it there (lighting, its own
+/// editor, a drag set): the gestures are still the panel's.
 #[derive(Clone, Debug, Default)]
 pub struct RowOut {
     pub rect: Option<Rect>,
+    /// Where the name is drawn (a host's own editor goes there).
     pub label_rect: Option<Rect>,
+    /// The row's widget id.
+    pub widget: Option<egui::Id>,
     pub hovered: bool,
+    /// A click the panel took as a click on the row (selection or [`Event::Click`]).
+    pub clicked: bool,
+    pub double: bool,
+    /// A secondary click, where.
+    pub secondary: Option<Pos2>,
+    /// A drag of the row began: [`Rows::drag_with`] may give its set now.
+    pub drag_started: bool,
+    /// Where a drag over the row, which the rules accept, would land.
+    pub drop_zone: Option<Zone>,
     pub fold_at: Option<Pos2>,
     pub eye_at: Option<Pos2>,
     pub radio_at: Option<Pos2>,
+    /// The row's events, with [`Browser::events_per_row`] (else they are in [`Output::events`]).
+    pub events: Vec<Event>,
 }
 
 #[derive(Clone, Debug)]
@@ -269,6 +336,10 @@ pub struct BrowserState {
     /// A slow second click held until the double-click delay: row, when it renames, when made.
     pending: Option<(NodeId, f64, f64)>,
     editor: Option<Editor>,
+    /// A rename asked for outside a click, done when its row is drawn.
+    rename_request: Option<NodeId>,
+    /// The widget a drag or eye drag of this presentation holds.
+    drag_widget: Option<egui::Id>,
     reveal: Option<NodeId>,
     scroll_to: Option<NodeId>,
     /// An eye drag that began in this presentation is under way.
@@ -295,6 +366,11 @@ impl BrowserState {
     /// The host refused the name the editor kept: the editor opens again with it and `message`.
     pub fn refuse_rename(&mut self, id: NodeId, text: &str, message: &str) {
         self.editor = Some(Editor { error: Some(message.to_owned()), ..Editor::new(id, text) });
+    }
+
+    /// Rename row `id` its way ([`Rename`]) when it is next drawn: a menu's Rename, F2.
+    pub fn request_rename(&mut self, id: NodeId) {
+        self.rename_request = Some(id);
     }
 
     pub fn cancel_rename(&mut self) {
@@ -396,7 +472,7 @@ pub fn order_before<T: PartialEq + Clone>(top: &[T], dragged: &[T], before: Opti
 
 /// Drop a drag of rows from `scope` (its document went away); other drags are left alone.
 pub fn cancel_drag(ctx: &egui::Context, scope: u64) {
-    if egui::DragAndDrop::payload::<Dragged>(ctx).is_some_and(|d| d.scope == scope) {
+    if egui::DragAndDrop::payload::<Dragged>(ctx).is_some_and(|d| d.source.scope == scope) {
         egui::DragAndDrop::clear_payload(ctx);
     }
 }
@@ -406,16 +482,58 @@ pub struct Browser<'s> {
     state: &'s mut BrowserState,
     style: Style,
     scope: u64,
+    presentation: u64,
     accept: Option<Accept<'s>>,
     header: Option<Header<'s>>,
     keyboard: bool,
     shrink: bool,
+    scroll: bool,
+    active: bool,
+    per_row: bool,
 }
 
 impl<'s> Browser<'s> {
-    /// `scope` names where drags may land: rows dragged in another scope (another document) never do.
+    /// `scope` is the host's document: without drop rules, rows dragged in another scope never land.
     pub fn new(state: &'s mut BrowserState, style: Style, scope: u64) -> Self {
-        Browser { state, style, scope, accept: None, header: None, keyboard: false, shrink: true }
+        Browser {
+            state,
+            style,
+            scope,
+            presentation: 0,
+            accept: None,
+            header: None,
+            keyboard: false,
+            shrink: true,
+            scroll: true,
+            active: true,
+            per_row: false,
+        }
+    }
+
+    /// Which of the host's presentations of these rows this is (a drag's [`Source`]).
+    pub fn presentation(mut self, presentation: u64) -> Self {
+        self.presentation = presentation;
+        self
+    }
+
+    /// Whether the presentation is shown. An inactive one draws nothing and emits nothing, except
+    /// that an eye drag it holds ends ([`Gesture::End`]) and a row drag it began is cancelled.
+    pub fn active(mut self, active: bool) -> Self {
+        self.active = active;
+        self
+    }
+
+    /// The rows in a scroll area (the default), or laid out in the host's own layout.
+    pub fn scroll(mut self, scroll: bool) -> Self {
+        self.scroll = scroll;
+        self
+    }
+
+    /// Each row's events come back in its [`RowOut`] as it is drawn, not in [`Output::events`]
+    /// (which keeps the panel's own: the eye gesture, the keys).
+    pub fn events_per_row(mut self, on: bool) -> Self {
+        self.per_row = on;
+        self
     }
 
     /// The host's drop rules; without them a row taking drops takes any drag of its scope.
@@ -446,7 +564,11 @@ impl<'s> Browser<'s> {
     /// id, stable from frame to frame: a host showing two presentations in one scope gives each its
     /// own (`ui.push_id`).
     pub fn show(self, ui: &mut egui::Ui, rows: impl FnOnce(&mut Rows<'_>)) -> Output {
-        let Browser { state, style, scope, accept, header, keyboard, shrink } = self;
+        let Browser { state, style, scope, presentation, accept, header, keyboard, shrink, scroll, active, per_row } = self;
+        let source = Source { scope, presentation };
+        if !active {
+            return inactive(ui, state, source);
+        }
         let base = ui.scope_id().with("sc_browser");
         let hint = header.and_then(|h| h.search);
         if hint.is_none() {
@@ -477,49 +599,63 @@ impl<'s> Browser<'s> {
         let (now, mods, pressed) = ui.input(|i| (i.time, i.modifiers, i.pointer.any_pressed()));
         let delay = ui.ctx().options(|o| o.input_options.max_double_click_delay);
         let frame_nr = ui.ctx().cumulative_frame_nr();
-        let scroll = egui::ScrollArea::vertical()
-            .id_salt(base.with("rows"))
-            .min_scrolled_height(0.0)
-            .auto_shrink([false, shrink])
-            // A drag on the rows drags rows: only the bar and the wheel scroll.
-            .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, mouse_wheel: true, ..egui::scroll_area::ScrollSource::NONE })
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                let mut list = Rows {
-                    ui,
-                    state: &mut *state,
-                    accept,
-                    base,
-                    scope,
-                    style,
-                    query,
-                    keyboard,
-                    now,
-                    mods,
-                    pressed,
-                    delay,
-                    frame_nr,
-                    eye_foreign,
-                    done: Done::default(),
-                };
-                rows(&mut list);
-                list.done
-            });
-        let done = scroll.inner;
+        let body = |ui: &mut egui::Ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let mut list = Rows {
+                ui,
+                state: &mut *state,
+                accept,
+                base,
+                source,
+                style,
+                query,
+                keyboard,
+                per_row,
+                now,
+                mods,
+                pressed,
+                delay,
+                frame_nr,
+                eye_foreign,
+                done: Done::default(),
+            };
+            rows(&mut list);
+            list.done
+        };
+        let (done, panel, content_height) = if scroll {
+            let area = egui::ScrollArea::vertical()
+                .id_salt(base.with("rows"))
+                .min_scrolled_height(0.0)
+                .auto_shrink([false, shrink])
+                // A drag on the rows drags rows: only the bar and the wheel scroll.
+                .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, mouse_wheel: true, ..egui::scroll_area::ScrollSource::NONE })
+                .show(ui, body);
+            (area.inner, area.inner_rect, area.content_size.y)
+        } else {
+            let laid = ui.scope(body);
+            (laid.inner, laid.response.rect, laid.response.rect.height())
+        };
         events.extend(done.events);
         let eye_after = ui.data(|d| d.get_temp::<bool>(eye_drag_id())).is_some();
         if eye_after && !eye_before {
             state.eye_gesture = true;
             events.insert(0, Event::EyeGesture(Gesture::Begin));
         }
-        if state.eye_gesture && !ui.input(|i| i.pointer.primary_down()) {
+        let down = ui.input(|i| i.pointer.primary_down());
+        if state.eye_gesture && !down {
             ui.data_mut(|d| d.remove_temp::<bool>(eye_drag_id()));
             state.eye_gesture = false;
             events.push(Event::EyeGesture(Gesture::End));
         }
+        if !down {
+            state.drag_widget = None;
+        }
         if let Some((id, class, selected)) = done.drag_start {
-            let ids = if selected { done.selected.iter().filter(|(_, c)| *c == Some(class)).map(|(i, _)| *i).collect() } else { vec![id] };
-            egui::DragAndDrop::set_payload(ui.ctx(), Dragged { scope, class, ids });
+            let (ids, data) = done.drag_set.unwrap_or_else(|| {
+                let ids = if selected { done.selected.iter().filter(|(_, c)| *c == Some(class)).map(|(i, _)| *i).collect() } else { vec![id] };
+                (ids, None)
+            });
+            egui::DragAndDrop::set_payload(ui.ctx(), Dragged { source, class, ids, data });
         }
         if searching {
             let shown = search_shown(&done.matches);
@@ -531,14 +667,34 @@ impl<'s> Browser<'s> {
         if keyboard {
             state.keys = done.keys;
         }
-        let panel = scroll.inner_rect;
         if done.clicked_row {
             state.focused = true;
         } else if pressed && !ui.input(|i| i.pointer.press_origin()).is_some_and(|p| panel.contains(p)) {
             state.focused = false;
         }
-        Output { events, hovered: done.hovered, drawn: done.drawn, pointer_owned: done.pointer_owned, content_height: scroll.content_size.y }
+        Output { events, hovered: done.hovered, drawn: done.drawn, pointer_owned: done.pointer_owned, content_height }
     }
+}
+
+/// A hidden presentation: it draws nothing and emits nothing, and the gestures it holds end.
+fn inactive(ui: &mut egui::Ui, state: &mut BrowserState, source: Source) -> Output {
+    let mut events = Vec::new();
+    if state.eye_gesture {
+        ui.data_mut(|d| d.remove_temp::<bool>(eye_drag_id()));
+        state.eye_gesture = false;
+        events.push(Event::EyeGesture(Gesture::End));
+    }
+    if egui::DragAndDrop::payload::<Dragged>(ui.ctx()).is_some_and(|d| d.source == source) {
+        egui::DragAndDrop::clear_payload(ui.ctx());
+    }
+    if let Some(widget) = state.drag_widget.take()
+        && ui.ctx().dragged_id() == Some(widget)
+    {
+        ui.ctx().stop_dragging();
+    }
+    state.pending = None;
+    state.rename_request = None;
+    Output { events, ..Default::default() }
 }
 
 /// What the rows gathered this frame.
@@ -552,6 +708,8 @@ struct Done {
     selected: Vec<(NodeId, Option<u32>)>,
     /// A row drag began: row, kind, whether the row is selected.
     drag_start: Option<(NodeId, u32, bool)>,
+    /// The set and data the host gave for it.
+    drag_set: Option<(Vec<NodeId>, Option<Payload>)>,
     /// While searching: (row, depth, matches).
     matches: Vec<(NodeId, usize, bool)>,
     keys: Vec<KeyRow>,
@@ -564,10 +722,11 @@ pub struct Rows<'r> {
     state: &'r mut BrowserState,
     accept: Option<Accept<'r>>,
     base: egui::Id,
-    scope: u64,
+    source: Source,
     style: Style,
     query: Option<String>,
     keyboard: bool,
+    per_row: bool,
     now: f64,
     mods: Modifiers,
     pressed: bool,
@@ -603,6 +762,15 @@ impl Rows<'_> {
         self.scroll_requests(id, rect);
     }
 
+    /// The rows and data a drag that began on the row just drawn carries ([`RowOut::drag_started`]),
+    /// instead of the selected rows of its kind as drawn: a host's set may hold items no row
+    /// draws (the selected items in a closed group).
+    pub fn drag_with(&mut self, ids: Vec<NodeId>, data: Option<Payload>) {
+        if self.done.drag_start.is_some() {
+            self.done.drag_set = Some((ids, data));
+        }
+    }
+
     /// The UI the rows are drawn in, for a host's own lines between rows.
     pub fn ui(&mut self) -> &mut egui::Ui {
         &mut *self.ui
@@ -615,6 +783,7 @@ impl Rows<'_> {
             (row.depth, row.label, row.secondary, row.fold, row.eye, row.selected, row.actions);
         let handle = row.handle.unwrap_or(label);
         let name = name.unwrap_or(label);
+        let first_event = self.done.events.len();
         if let Selectable::Yes(class) = select {
             self.state.order.push((id, class));
         }
@@ -650,6 +819,10 @@ impl Rows<'_> {
             self.done.hovered = Some(id);
         }
         self.slow_rename(id, rename, name, &mut out);
+        if self.state.rename_request == Some(id) {
+            self.state.rename_request = None;
+            self.rename(id, rename, name);
+        }
         let editing = self.state.editor.as_ref().is_some_and(|e| e.id == id);
         if self.claim(id, &out) {
             if out.fold {
@@ -702,22 +875,53 @@ impl Rows<'_> {
                 self.done.events.push(Event::Action { id, action, params });
             }
         }
+        let mut drag_started = false;
+        let mut drop_zone = None;
         if let Some(response) = out.resp.clone() {
+            if response.drag_started() {
+                // A row drag or an eye drag: this presentation holds the widget until release.
+                self.state.drag_widget = Some(widget);
+            }
             if let Some(class) = drag
                 && response.drag_started()
                 && !out.on_control
                 && !editing
             {
                 self.done.drag_start = Some((id, class, selected));
+                drag_started = true;
             }
             if drops.before || drops.into {
-                self.drop_target(id, &response, drops);
+                drop_zone = self.drop_target(id, &response, drops);
             }
         }
         if editing {
             self.editor(id, &out, handle);
         }
-        RowOut { rect: out.rect, label_rect: out.label_rect, hovered: out.hovered, fold_at: out.fold_at, eye_at: out.eye_at, radio_at: out.radio_at }
+        let events = if self.per_row { self.done.events.split_off(first_event.min(self.done.events.len())) } else { Vec::new() };
+        RowOut {
+            rect: out.rect,
+            label_rect: out.label_rect,
+            widget: out.row_id,
+            hovered: out.hovered,
+            clicked: out.clicked && !out.double,
+            double: out.double,
+            secondary: out.secondary,
+            drag_started,
+            drop_zone,
+            fold_at: out.fold_at,
+            eye_at: out.eye_at,
+            radio_at: out.radio_at,
+            events,
+        }
+    }
+
+    /// Rename row `id` its way: the panel's editor, or a request to the host.
+    fn rename(&mut self, id: NodeId, rename: Rename, name: &str) {
+        match rename {
+            Rename::Never => {}
+            Rename::Inline => self.state.editor = Some(Editor::new(id, name)),
+            Rename::Host => self.done.events.push(Event::RenameRequested(id)),
+        }
     }
 
     /// A row's actions run once a frame, however often egui lays the frame out.
@@ -771,7 +975,7 @@ impl Rows<'_> {
             } else if row == id {
                 if now >= due {
                     self.state.pending = None;
-                    self.state.editor = Some(Editor::new(id, name));
+                    self.rename(id, rename, name);
                     return;
                 }
                 self.ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((due - now).clamp(0.0, SLOW_RENAME_WINDOW)));
@@ -781,7 +985,7 @@ impl Rows<'_> {
             return;
         }
         let plain = !(self.mods.command || self.mods.ctrl || self.mods.shift);
-        let name_click = rename == Rename::SlowClick && out.clicked && !out.double && plain && self.state.editor.is_none();
+        let name_click = rename != Rename::Never && out.clicked && !out.double && plain && self.state.editor.is_none();
         let previous = self.state.last_click.replace((id, now, name_click));
         let slow = name_click
             && previous.is_some_and(|(row, time, was_name)| {
@@ -824,10 +1028,10 @@ impl Rows<'_> {
 
     /// While rows of this scope are dragged over the row, mark where they would land; on release,
     /// report the move. Drags of other kinds of payload are left alone.
-    fn drop_target(&mut self, id: NodeId, response: &egui::Response, drops: Drops) {
-        let Some(dragged) = egui::DragAndDrop::payload::<Dragged>(self.ui.ctx()) else { return };
-        if dragged.scope != self.scope || dragged.ids.contains(&id) || !response.contains_pointer() {
-            return;
+    fn drop_target(&mut self, id: NodeId, response: &egui::Response, drops: Drops) -> Option<Zone> {
+        let dragged = egui::DragAndDrop::payload::<Dragged>(self.ui.ctx())?;
+        if dragged.ids.contains(&id) || !response.contains_pointer() {
+            return None;
         }
         let r = response.rect;
         let at = self.ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos()));
@@ -838,8 +1042,12 @@ impl Rows<'_> {
         } else {
             Zone::Into
         };
-        if !self.accept.is_none_or(|accept| accept(&dragged, id, zone)) {
-            return;
+        let accepted = match self.accept {
+            Some(accept) => accept(&dragged, id, zone),
+            None => dragged.source.scope == self.source.scope,
+        };
+        if !accepted {
+            return None;
         }
         let t = Tokens::get();
         match zone {
@@ -852,8 +1060,9 @@ impl Rows<'_> {
         }
         if self.ui.input(|i| i.pointer.any_released()) {
             egui::DragAndDrop::clear_payload(self.ui.ctx());
-            self.done.events.push(Event::Move { ids: dragged.ids.clone(), target: id, zone });
+            self.done.events.push(Event::Move { ids: dragged.ids.clone(), target: id, zone, source: dragged.source, data: dragged.data.clone() });
         }
+        Some(zone)
     }
 
     /// The name editor in its row: Enter or leaving it keeps the name, Escape cancels.
@@ -971,8 +1180,12 @@ fn keys(ui: &mut egui::Ui, state: &mut BrowserState) -> Vec<Event> {
         if take(ui, Key::Enter) {
             out.push(Event::Open(row.id));
         }
-        if take(ui, Key::F2) && row.rename != Rename::Never {
-            state.editor = Some(Editor::new(row.id, &row.name));
+        if take(ui, Key::F2) {
+            match row.rename {
+                Rename::Never => {}
+                Rename::Inline => state.editor = Some(Editor::new(row.id, &row.name)),
+                Rename::Host => out.push(Event::RenameRequested(row.id)),
+            }
         }
     }
     out

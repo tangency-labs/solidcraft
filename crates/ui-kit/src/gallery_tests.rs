@@ -456,7 +456,7 @@ pub const ELEMENTS: &[Element] = &[
                         ..Default::default()
                     },
                     select: browser::Selectable::Yes(0),
-                    rename: browser::Rename::SlowClick,
+                    rename: browser::Rename::Inline,
                     ..Default::default()
                 });
             }

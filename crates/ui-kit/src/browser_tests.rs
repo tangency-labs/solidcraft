@@ -17,18 +17,51 @@ fn group_menu() -> Vec<Item> {
 
 /// The fake host: a Bodies folder holding A, B and C (and `extra` more), a group G, and a
 /// settings row that is no item.
-#[derive(Default)]
 struct Host {
     selected: Vec<NodeId>,
     hidden: Vec<NodeId>,
     folds: FoldMemory,
     extra: usize,
+    /// How the bodies are renamed.
+    rename: Rename,
+    /// When C's drag starts, the host adds this undrawn item to the set, with its own data.
+    hidden_in_drag: Option<NodeId>,
+    /// Each row's response this frame.
+    outs: RefCell<Vec<(NodeId, RowOut)>>,
+}
+
+impl Default for Host {
+    fn default() -> Self {
+        Host {
+            selected: Vec::new(),
+            hidden: Vec::new(),
+            folds: FoldMemory::default(),
+            extra: 0,
+            rename: Rename::Inline,
+            hidden_in_drag: None,
+            outs: RefCell::new(Vec::new()),
+        }
+    }
 }
 
 impl Host {
+    /// One row, its response kept; on C's drag start the host hands the panel its own set.
+    fn emit(&self, rows: &mut Rows<'_>, node: Node<'_>) {
+        let id = node.id;
+        let out = rows.row(node);
+        if out.drag_started
+            && id == 4
+            && let Some(hidden) = self.hidden_in_drag
+        {
+            rows.drag_with(vec![4, hidden], Some(Payload::new("C and a closed group's item")));
+        }
+        self.outs.borrow_mut().push((id, out));
+    }
+
     fn rows(&self, rows: &mut Rows<'_>) {
+        self.outs.borrow_mut().clear();
         let open = self.folds.is_open("bodies", true);
-        rows.row(Node {
+        self.emit(rows, Node {
             id: 1,
             key: "bodies",
             row: Row { fold: Some(open), eye: Some(!self.hidden.contains(&1)), icon: "folder", label: "Bodies", ..Default::default() },
@@ -41,7 +74,7 @@ impl Host {
             let mut bodies: Vec<(NodeId, &str)> = BODIES.to_vec();
             bodies.extend(extra.iter().map(|(id, label)| (*id, label.as_str())));
             for (id, label) in bodies {
-                rows.row(Node {
+                self.emit(rows, Node {
                     id,
                     key: label,
                     row: Row {
@@ -54,14 +87,14 @@ impl Host {
                         ..Default::default()
                     },
                     select: Selectable::Yes(0),
-                    rename: Rename::SlowClick,
+                    rename: self.rename,
                     drag: Some(0),
                     drops: Drops { before: true, into: false },
                     ..Default::default()
                 });
             }
         }
-        rows.row(Node {
+        self.emit(rows, Node {
             id: GROUP,
             key: "g",
             row: Row { fold: Some(self.folds.is_open("g", true)), icon: "folder", label: "G", name: true, ..Default::default() },
@@ -71,7 +104,7 @@ impl Host {
             menu: NodeMenu::Items(&group_menu),
             ..Default::default()
         });
-        rows.row(Node {
+        self.emit(rows, Node {
             id: SETTINGS,
             key: "settings",
             row: Row { icon: "settings", label: "Settings", ..Default::default() },
@@ -118,7 +151,14 @@ struct Rig {
     /// Whether G takes a drop inside it (the host's rule).
     into_g: Cell<bool>,
     height: Cell<f32>,
+    /// The panel's options under test.
+    per_row: Cell<bool>,
+    scroll: Cell<bool>,
+    active: Cell<bool>,
+    /// The drop rule also asks for this scope (another document's drags never land).
+    scope_rule: Cell<bool>,
     drawn: RefCell<Vec<Drawn>>,
+    content_height: Cell<f32>,
 }
 
 impl Rig {
@@ -132,7 +172,12 @@ impl Rig {
             search: Cell::new(false),
             into_g: Cell::new(true),
             height: Cell::new(500.0),
+            per_row: Cell::new(false),
+            scroll: Cell::new(true),
+            active: Cell::new(true),
+            scope_rule: Cell::new(false),
             drawn: RefCell::new(Vec::new()),
+            content_height: Cell::new(0.0),
         };
         rig.frame(Vec::new());
         rig
@@ -154,17 +199,34 @@ impl Rig {
             ui.set_width(280.0);
             let host = self.host.borrow();
             let mut state = self.state.borrow_mut();
-            let into_g = self.into_g.get();
-            let accept = move |_: &Dragged, target: NodeId, zone: Zone| into_g || !(target == GROUP && zone == Zone::Into);
-            let mut browser = Browser::new(&mut state, Style::default(), 7).accept(&accept).keyboard(self.keyboard.get());
+            let (into_g, scope_rule) = (self.into_g.get(), self.scope_rule.get());
+            let accept = move |dragged: &Dragged, target: NodeId, zone: Zone| {
+                (into_g || !(target == GROUP && zone == Zone::Into)) && (!scope_rule || dragged.source.scope == 7)
+            };
+            let mut browser = Browser::new(&mut state, Style::default(), 7)
+                .accept(&accept)
+                .keyboard(self.keyboard.get())
+                .events_per_row(self.per_row.get())
+                .scroll(self.scroll.get())
+                .active(self.active.get());
             if self.search.get() {
                 browser = browser.header(Header { title: "Objects", count: "6", collapsible: true, search: Some("Search") });
             }
             out = ui.allocate_ui(vec2(280.0, self.height.get()), |ui| browser.show(ui, |rows| host.rows(rows))).inner;
         });
-        self.host.borrow_mut().apply(&out.events);
+        let mut events = out.events;
+        if self.per_row.get() {
+            events.extend(self.host.borrow().outs.borrow().iter().flat_map(|(_, row)| row.events.clone()));
+        }
+        self.host.borrow_mut().apply(&events);
         *self.drawn.borrow_mut() = out.drawn;
-        out.events
+        self.content_height.set(out.content_height);
+        events
+    }
+
+    /// Row `id`'s response in the last frame.
+    fn out(&self, id: NodeId) -> RowOut {
+        self.host.borrow().outs.borrow().iter().find(|(row, _)| *row == id).map(|(_, out)| out.clone()).unwrap_or_default()
     }
 
     fn frame(&self, events: Vec<Input>) -> Vec<Event> {
@@ -355,15 +417,15 @@ fn a_dragged_row_moves_before_a_row_or_into_one_by_the_host_rules() {
     let rig = Rig::new();
     let (a, b, c) = (rig.at("row:A"), rig.at("row:B"), rig.at("row:C"));
     // An unselected row drags alone.
-    assert_eq!(rig.drag(c, a), vec![Event::Move { ids: vec![4], target: 2, zone: Zone::Before }]);
+    assert_eq!(rig.drag(c, a), vec![Event::Move { ids: vec![4], target: 2, zone: Zone::Before, source: Source { scope: 7, presentation: 0 }, data: None }]);
     // A selected row drags the selection of its kind.
     rig.click(a);
     rig.click_mods(b, Modifiers::COMMAND);
-    assert_eq!(rig.drag(b, c), vec![Event::Move { ids: vec![2, 3], target: 4, zone: Zone::Before }]);
+    assert_eq!(rig.drag(b, c), vec![Event::Move { ids: vec![2, 3], target: 4, zone: Zone::Before, source: Source { scope: 7, presentation: 0 }, data: None }]);
     // G takes a drop before it in its top part, and inside it below that.
     let g = rig.rect(GROUP);
-    assert_eq!(rig.drag(c, pos2(g.center().x, g.top() + 3.0)), vec![Event::Move { ids: vec![4], target: GROUP, zone: Zone::Before }]);
-    assert_eq!(rig.drag(c, g.center()), vec![Event::Move { ids: vec![4], target: GROUP, zone: Zone::Into }]);
+    assert_eq!(rig.drag(c, pos2(g.center().x, g.top() + 3.0)), vec![Event::Move { ids: vec![4], target: GROUP, zone: Zone::Before, source: Source { scope: 7, presentation: 0 }, data: None }]);
+    assert_eq!(rig.drag(c, g.center()), vec![Event::Move { ids: vec![4], target: GROUP, zone: Zone::Into, source: Source { scope: 7, presentation: 0 }, data: None }]);
     rig.into_g.set(false);
     assert_eq!(rig.drag(c, g.center()), Vec::new(), "the host's rule refuses it");
     assert_eq!(rig.drag(c, c + vec2(0.0, 4.0)), Vec::new(), "never onto itself");
@@ -382,7 +444,7 @@ fn another_kind_of_drag_passes_over_the_rows_untouched() {
 #[test]
 fn a_document_switch_cancels_only_its_own_drag() {
     let ctx = crate::test_support::context();
-    egui::DragAndDrop::set_payload(&ctx, Dragged { scope: 7, class: 0, ids: vec![2] });
+    egui::DragAndDrop::set_payload(&ctx, Dragged { source: Source { scope: 7, presentation: 0 }, class: 0, ids: vec![2], data: None });
     cancel_drag(&ctx, 8);
     assert!(egui::DragAndDrop::payload::<Dragged>(&ctx).is_some());
     cancel_drag(&ctx, 7);
@@ -477,4 +539,114 @@ fn order_before_moves_the_dragged_entries_before_the_target_or_to_the_end() {
     assert_eq!(order_before(&[1, 2, 3, 4], &[4, 1], Some(&3)), vec![2, 4, 1, 3]);
     assert_eq!(order_before(&[1, 2, 3], &[1], None), vec![2, 3, 1]);
     assert_eq!(order_before(&[1, 2, 3], &[2], Some(&9)), vec![1, 3, 2], "an unknown target is the end");
+}
+
+#[test]
+fn a_host_renamed_row_asks_the_host_on_a_slow_click_and_on_request() {
+    let rig = Rig::new();
+    rig.host.borrow_mut().rename = Rename::Host;
+    let a = rig.at("row:A");
+    rig.click(a);
+    assert_eq!(rig.click(a), Vec::new(), "the slow second click is held");
+    assert_eq!(rig.wait(0.4), vec![Event::RenameRequested(2)]);
+    assert_eq!(rig.state.borrow().renaming(), None, "the host opens its own editor");
+    // A rename asked for elsewhere (F2, a menu) goes the row's way.
+    rig.state.borrow_mut().request_rename(3);
+    assert_eq!(rig.frame(Vec::new()), vec![Event::RenameRequested(3)]);
+    rig.host.borrow_mut().rename = Rename::Inline;
+    rig.state.borrow_mut().request_rename(3);
+    assert_eq!(rig.frame(Vec::new()), Vec::new());
+    assert_eq!(rig.state.borrow().renaming(), Some(3), "an inline row opens the kit's editor");
+    let out = rig.out(3);
+    assert!(out.widget.is_some() && out.label_rect.is_some(), "a host editor has the row's id and name area");
+}
+
+#[test]
+fn with_events_per_row_each_row_hands_back_its_own_and_the_frame_none() {
+    let rig = Rig::new();
+    rig.per_row.set(true);
+    rig.frame(Vec::new());
+    assert_eq!(rig.click(rig.at("row:B")), vec![Event::Select { id: 3, how: How::Only }]);
+    let b = rig.out(3);
+    assert!(b.clicked && b.hovered);
+    assert_eq!(b.events, vec![Event::Select { id: 3, how: How::Only }], "B's response holds B's click");
+    assert!(rig.out(2).events.is_empty());
+    // While a drag hovers a row that would take it, its response says where it would land.
+    let c = rig.at("row:C");
+    let g = rig.rect(GROUP).center();
+    rig.frame(vec![Input::PointerMoved(c)]);
+    rig.press(c, PointerButton::Primary, true, Modifiers::NONE);
+    rig.frame(vec![Input::PointerMoved(c + vec2(0.0, 8.0))]);
+    assert!(rig.out(4).drag_started);
+    rig.frame(vec![Input::PointerMoved(g)]);
+    rig.frame(vec![Input::PointerMoved(g)]);
+    assert_eq!(rig.out(GROUP).drop_zone, Some(Zone::Into));
+    assert_eq!(rig.out(3).drop_zone, None);
+    let dropped = rig.press(g, PointerButton::Primary, false, Modifiers::NONE);
+    assert!(matches!(dropped.as_slice(), [Event::Move { target: GROUP, zone: Zone::Into, .. }]), "{dropped:?}");
+}
+
+#[test]
+fn a_drag_carries_its_source_and_the_hosts_set_and_data_and_the_host_rule_decides() {
+    let rig = Rig::new();
+    rig.host.borrow_mut().hidden_in_drag = Some(99);
+    let (a, c) = (rig.at("row:A"), rig.at("row:C"));
+    let events = rig.drag(c, a);
+    let [Event::Move { ids, target: 2, zone: Zone::Before, source, data: Some(data) }] = events.as_slice() else { panic!("{events:?}") };
+    assert_eq!(ids, &vec![4, 99], "the host's set, with an item no row draws");
+    assert_eq!(*source, Source { scope: 7, presentation: 0 });
+    assert_eq!(data.get::<&str>(), Some(&"C and a closed group's item"));
+
+    // Another presentation of the same document: the host's rule takes it.
+    rig.scope_rule.set(true);
+    let g = rig.rect(GROUP).center();
+    let other = Dragged { source: Source { scope: 7, presentation: 3 }, class: 0, ids: vec![50], data: None };
+    egui::DragAndDrop::set_payload(&rig.ctx, other.clone());
+    rig.frame(vec![Input::PointerMoved(g)]);
+    let events = rig.press(g, PointerButton::Primary, false, Modifiers::NONE);
+    assert_eq!(events, vec![Event::Move { ids: vec![50], target: GROUP, zone: Zone::Into, source: other.source, data: None }]);
+    // Another document: refused by the same rule.
+    egui::DragAndDrop::set_payload(&rig.ctx, Dragged { source: Source { scope: 8, presentation: 0 }, ..other });
+    rig.frame(vec![Input::PointerMoved(g)]);
+    assert_eq!(rig.press(g, PointerButton::Primary, false, Modifiers::NONE), Vec::new());
+}
+
+#[test]
+fn without_a_scroll_area_the_rows_take_the_room_they_need() {
+    let rig = Rig::new();
+    rig.height.set(60.0);
+    rig.frame(Vec::new());
+    assert!(!rig.labels().contains(&"Settings".to_owned()), "a scroll area clips the rows to its height");
+    rig.scroll.set(false);
+    rig.frame(Vec::new());
+    assert_eq!(rig.labels(), ["Bodies", "A", "B", "C", "G", "Settings"]);
+    assert!(rig.content_height.get() > 60.0);
+}
+
+#[test]
+fn an_inactive_presentation_draws_and_emits_nothing_and_ends_its_gestures() {
+    let rig = Rig::new();
+    // An eye drag under way ends when its presentation goes.
+    let (a, b) = (rig.at("eye:A"), rig.at("eye:B"));
+    rig.frame(vec![Input::PointerMoved(a)]);
+    rig.press(a, PointerButton::Primary, true, Modifiers::NONE);
+    assert_eq!(rig.frame(vec![Input::PointerMoved(b)]).first(), Some(&Event::EyeGesture(Gesture::Begin)));
+    rig.active.set(false);
+    assert_eq!(rig.frame(vec![Input::PointerMoved(b)]), vec![Event::EyeGesture(Gesture::End)]);
+    assert!(rig.labels().is_empty(), "nothing is drawn");
+    assert!(rig.ctx.dragged_id().is_none());
+    assert_eq!(rig.press(b, PointerButton::Primary, false, Modifiers::NONE), Vec::new());
+
+    // A row drag it began is cancelled.
+    rig.active.set(true);
+    rig.frame(Vec::new());
+    let c = rig.at("row:C");
+    rig.frame(vec![Input::PointerMoved(c)]);
+    rig.press(c, PointerButton::Primary, true, Modifiers::NONE);
+    rig.frame(vec![Input::PointerMoved(c + vec2(0.0, 8.0))]);
+    assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&rig.ctx));
+    rig.active.set(false);
+    assert_eq!(rig.frame(vec![Input::PointerMoved(c + vec2(0.0, 12.0))]), Vec::new());
+    assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&rig.ctx));
+    assert!(rig.ctx.dragged_id().is_none());
 }
