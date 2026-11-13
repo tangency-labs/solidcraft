@@ -50,6 +50,9 @@ struct DesktopState {
     placement: BTreeMap<InstanceId, Placement>,
     monitors: Vec<NativeMonitor>,
     monitors_updated: Option<Instant>,
+    /// A drag asked where a window would land since the last refresh: the
+    /// monitors are needed before any panel window is open.
+    landing_asked: bool,
 }
 
 /// Both the layout runtime and the UI use the same desktop registration table.
@@ -61,7 +64,9 @@ impl DesktopNativeAdapter {
         let now = Instant::now();
         {
             let state = self.0.borrow();
-            if state.hosts.is_empty() || state.monitors_updated.is_some_and(|last| now.duration_since(last) < Duration::from_secs(1)) {
+            if (state.hosts.is_empty() && !state.landing_asked)
+                || state.monitors_updated.is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
+            {
                 return;
             }
         }
@@ -73,6 +78,7 @@ impl DesktopNativeAdapter {
         let mut state = self.0.borrow_mut();
         state.monitors = monitors;
         state.monitors_updated = Some(now);
+        state.landing_asked = false;
     }
 
     pub fn owns(&self, host: &HostId, section: &SectionId) -> bool {
@@ -221,7 +227,9 @@ impl DesktopNativeAdapter {
         preferred: Size,
         bounds: (Size, Size),
     ) -> Option<egui::Rect> {
-        let state = self.0.borrow();
+        let mut state = self.0.borrow_mut();
+        state.landing_asked = true;
+        let state = &*state;
         let saved = state.placement.get(instance);
         let (min, max) = (egui::vec2(bounds.0.width, bounds.0.height), egui::vec2(bounds.1.width, bounds.1.height));
         let size = saved.map_or_else(|| egui::vec2(preferred.width, preferred.height), |saved| saved.size).clamp(min, max);

@@ -14080,19 +14080,25 @@ fn a_dropped_window_opens_at_the_shown_place_kept_on_its_monitor() {
     use super::native::{DesktopNativeAdapter, NativeMonitor};
 
     let mut adapter = DesktopNativeAdapter::default();
-    let host = HostId::new("drop-test").unwrap();
-    let create = [HostEffect::CreateNative { host: host.clone(), section: SectionId::new("drop-section").unwrap() }];
-    adapter.prepare(&create).unwrap();
-    adapter.commit(&create);
     let monitor = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2000.0, 1600.0));
-    adapter.update_monitors(|| vec![NativeMonitor { name: Some("Primary".into()), bounds: monitor, scale: 2.0, primary: true }]);
+    let monitors = || vec![NativeMonitor { name: Some("Primary".into()), bounds: monitor, scale: 2.0, primary: true }];
     let ctx = egui::Context::default();
     let instance = InstanceId::new("drop-panel").unwrap();
     let bounds = (Size { width: 200.0, height: 100.0 }, Size { width: 900.0, height: 900.0 });
     let preferred = Size { width: 360.0, height: 440.0 };
+    // No panel window is open yet: the monitors are read once a drag asks
+    // where its window would land, so the first window out is placed too.
+    adapter.update_monitors(monitors);
+    let unknown = adapter.landing(&ctx, &instance, egui::pos2(900.0, 700.0), preferred, bounds).unwrap();
+    assert_eq!(unknown.min, egui::pos2(900.0, 700.0), "no monitor was read before the drag asked");
+    adapter.update_monitors(monitors);
     // On the monitor: the landing is the window's outer rectangle at the corner.
     let shown = adapter.landing(&ctx, &instance, egui::pos2(100.0, 80.0), preferred, bounds).unwrap();
     assert_eq!(shown.min, egui::pos2(100.0, 80.0));
+    let host = HostId::new("drop-test").unwrap();
+    let create = [HostEffect::CreateNative { host: host.clone(), section: SectionId::new("drop-section").unwrap() }];
+    adapter.prepare(&create).unwrap();
+    adapter.commit(&create);
     adapter.place(&ctx, &instance, shown);
     let builder = adapter.builder(&ctx, &host, &instance, "Panel".into(), preferred, bounds).unwrap();
     assert_eq!(builder.position, Some(shown.min));
