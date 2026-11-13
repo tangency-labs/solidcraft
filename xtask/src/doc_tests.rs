@@ -20,7 +20,9 @@
 //!   workspace (other than the standard library's), a procedural one, or one an unread macro is
 //!   handed to. A macro is told from another of its name by the path it is called by (`std::`,
 //!   `crate::`, a dependency's) and by the `use` items of its file, so `dependency::println!`, or
-//!   `println!` after `use dependency::println`, is not the standard library's;
+//!   `println!` after `use dependency::println`, is not the standard library's. In a file that
+//!   imports all of a dependency's module (`use dependency::prelude::*`, `#[macro_use] extern
+//!   crate dependency`), a macro called by its name alone may be the dependency's, whatever it is;
 //! - code a build script writes (`include!(concat!(env!("OUT_DIR"), ..))`) is judged by what
 //!   writes it, the build script and the workspace crates it builds with: a `///` line they write
 //!   whole is read as a doc; one they leave open or start with a `{}` placeholder, a block doc
@@ -34,9 +36,7 @@
 //!   blocks of another text file it names, the `///` comments of any other file.
 //!
 //! It runs no code, so it cannot see doc text a build script copies from a file it reads (a
-//! template), or Rust that a build dependency writes without one of those four crates. Nor does it
-//! follow a glob import or `#[macro_use]` that brings in a dependency's macro under the name of a
-//! standard or workspace one.
+//! template), or Rust that a build dependency writes without one of those four crates.
 //!
 //! Library means what `cargo test --doc` tests: a `lib` or `proc-macro` target, whatever its
 //! `doctest` setting (an explicit `--doc` ignores it).
@@ -140,7 +140,8 @@ pub fn command(only: Option<&[&str]>, cargo_args: &[&str], test_args: &[&str]) -
             .map(|(library, thread)| (library, thread.join().unwrap_or_else(|_| vec![FileDocs { test: true, ..FileDocs::default() }])))
             .collect()
     });
-    let macros = macros(read.iter().flat_map(|(_, files)| files), libraries.iter().map(|library| library.crate_name.clone()).collect());
+    let crates = libraries.iter().map(|library| library.crate_name.clone()).collect();
+    let macros = macros(read.iter().flat_map(|(_, files)| files), crates, dependency_crates(&meta));
     let mut code_writers = None;
     let mut considered = 0;
     let mut chosen = Vec::new();
@@ -160,6 +161,17 @@ pub fn command(only: Option<&[&str]>, cargo_args: &[&str], test_args: &[&str]) -
     eprintln!("doc tests: {} of {considered} libraries have a code block rustdoc would compile: {}", chosen.len(), chosen.join(", "));
     let all: Vec<&str> = libraries.iter().map(|library| library.name.as_str()).collect();
     Ok(Some((format!("doc tests ({} libraries)", chosen.len()), doc_command(&all, &chosen, cargo_args, test_args))))
+}
+
+/// The names the workspace's packages give the crates they depend on (`serde_json`, or a rename).
+fn dependency_crates(meta: &serde_json::Value) -> BTreeSet<String> {
+    let packages = meta["packages"].as_array().map(Vec::as_slice).unwrap_or_default();
+    packages
+        .iter()
+        .flat_map(|p| p["dependencies"].as_array().map(Vec::as_slice).unwrap_or_default())
+        .filter_map(|d| d["rename"].as_str().or_else(|| d["name"].as_str()))
+        .map(|name| name.replace('-', "_"))
+        .collect()
 }
 
 /// An error naming the first of `names` that is no workspace package (cargo never sees them).
@@ -249,7 +261,8 @@ struct FileDocs {
     /// (macro, other): a `macro_rules!` macro it defines hands an argument on to another macro,
     /// named by the path it is called by (`dependency::documented`).
     forwards: Vec<(String, String)>,
-    /// (path, name): what its `use` items bring in (`dependency::println`), and under which name.
+    /// (path, name): what its `use` items bring in (`dependency::println`), and under which name;
+    /// `*` for all of a module (a glob, or `#[macro_use] extern crate`).
     imports: Vec<(String, String)>,
     /// The string literals it passes to macros or attributes that could hold a code block, with the
     /// path each macro is called by (`println`, `std::println`; `IN_ATTRIBUTE` for an attribute):
@@ -308,6 +321,8 @@ struct Macros {
     known: BTreeSet<String>,
     /// The workspace's library crates, by the name a path gives them.
     crates: BTreeSet<String>,
+    /// The crates the workspace depends on, by the name a path gives them.
+    dependencies: BTreeSet<String>,
 }
 
 /// Where a path leads, by its first segment.
@@ -322,13 +337,13 @@ impl Macros {
     /// Whether the strings a macro (or an attribute, `IN_ATTRIBUTE`) is called with in `file` may
     /// become docs: it writes docs from them, or what it does is not read. A macro called by a
     /// path is the one the path leads to; one called by its name alone is a dependency's when the
-    /// file imports that name from one.
+    /// file imports that name, or all of a module, from one.
     fn may_write_docs(&self, path: &str, file: &FileDocs) -> bool {
         match path.rsplit_once("::") {
             None => {
                 self.docs.contains(path)
                     || !self.known.contains(path)
-                    || file.imports.iter().any(|(from, name)| name == path && self.origin(from) == Origin::Dependency)
+                    || file.imports.iter().any(|(from, name)| (name == path || name == "*") && self.origin(from) == Origin::Dependency)
             }
             Some((qualifier, name)) => match self.origin(qualifier) {
                 Origin::Std => !STD_MACROS.contains(&name),
@@ -338,25 +353,24 @@ impl Macros {
         }
     }
 
-    /// Where a path leads: `std::`, `core::` and `alloc::` to the standard library; `crate::`,
-    /// `self::`, `super::`, `$crate::` and a workspace crate to the workspace; anything else to a
-    /// dependency.
+    /// Where a path leads: `std::`, `core::` and `alloc::` to the standard library; a crate the
+    /// workspace depends on to a dependency; anything else (`crate::`, `self::`, `super::`,
+    /// `$crate::`, a workspace crate, a module or enum in scope) to the workspace.
     fn origin(&self, path: &str) -> Origin {
         match path.split("::").next().unwrap_or_default() {
             "std" | "core" | "alloc" => Origin::Std,
-            "crate" | "self" | "super" | "$crate" => Origin::Workspace,
-            first if self.crates.contains(first) => Origin::Workspace,
-            _ => Origin::Dependency,
+            first if !self.crates.contains(first) && self.dependencies.contains(first) => Origin::Dependency,
+            _ => Origin::Workspace,
         }
     }
 }
 
 /// The workspace's macros, read: those that write docs from their arguments themselves, those
 /// that hand their arguments on to one or to a macro not read, and the names `use` brings them in
-/// as. `crates` are the workspace's library crates.
-fn macros<'a>(files: impl Iterator<Item = &'a FileDocs> + Clone, crates: BTreeSet<String>) -> Macros {
+/// as. `crates` are the workspace's library crates, `dependencies` the crates it depends on.
+fn macros<'a>(files: impl Iterator<Item = &'a FileDocs> + Clone, crates: BTreeSet<String>, dependencies: BTreeSet<String>) -> Macros {
     let defined: BTreeSet<String> = files.clone().flat_map(|f| f.macros.iter().cloned()).collect();
-    let mut macros = Macros { docs: BTreeSet::new(), known: BTreeSet::new(), defined, crates };
+    let mut macros = Macros { docs: BTreeSet::new(), known: BTreeSet::new(), defined, crates, dependencies };
     let leaf = |path: &str| path.rsplit("::").next().unwrap_or_default().to_string();
     let mut known: BTreeSet<String> = STD_MACROS.iter().map(|name| name.to_string()).chain(macros.defined.iter().cloned()).collect();
     for (from, name) in files.clone().flat_map(|f| &f.imports) {
@@ -703,8 +717,10 @@ fn walk(tokens: TokenStream, lines: &[&str], include_ignored: bool, out: &mut Fi
     let trees: Vec<TokenTree> = tokens.into_iter().collect();
     let mut docs = Vec::new();
     let mut inner_run = None;
-    // The attributes before this token name the file of a module (`#[path = ".."]`).
+    // The attributes before this token name the file of a module (`#[path = ".."]`), or bring in
+    // the macros of an `extern crate` (`#[macro_use]`, all of them when the list is empty).
     let mut module_path = false;
+    let mut macro_use: Option<Vec<String>> = None;
     let mut i = 0;
     while i < trees.len() {
         if let Some((attribute, inner, next)) = attribute(&trees, i) {
@@ -717,6 +733,13 @@ fn walk(tokens: TokenStream, lines: &[&str], include_ignored: bool, out: &mut Fi
             let parts: Vec<TokenTree> = attribute.stream().into_iter().collect();
             module_path |=
                 matches!(&parts[..], [TokenTree::Ident(key), TokenTree::Punct(eq), TokenTree::Literal(_)] if *key == "path" && eq.as_char() == '=');
+            match &parts[..] {
+                [TokenTree::Ident(key)] if *key == "macro_use" => macro_use = Some(Vec::new()),
+                [TokenTree::Ident(key), TokenTree::Group(names)] if *key == "macro_use" => {
+                    macro_use = Some(names.stream().into_iter().filter_map(|t| matches!(&t, TokenTree::Ident(_)).then(|| t.to_string())).collect());
+                }
+                _ => {}
+            }
             read_attribute(&parts, written(&trees[i], lines), &mut docs, &mut out.paths, &mut out.macro_literals);
             i = next;
             continue;
@@ -756,6 +779,16 @@ fn walk(tokens: TokenStream, lines: &[&str], include_ignored: bool, out: &mut Fi
                 let end = rest.iter().position(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == ';')).unwrap_or(rest.len());
                 use_tree(rest.get(..end).unwrap_or_default(), &[], &mut out.imports);
             }
+            (TokenTree::Ident(keyword), Some(TokenTree::Ident(krate)), Some(TokenTree::Ident(name)), _)
+                if *keyword == "extern" && *krate == "crate" =>
+            {
+                if let Some(names) = macro_use.take() {
+                    if names.is_empty() {
+                        out.imports.push((name.to_string(), "*".to_string()));
+                    }
+                    out.imports.extend(names.into_iter().map(|macro_name| (format!("{name}::{macro_name}"), macro_name)));
+                }
+            }
             (TokenTree::Ident(keyword), Some(TokenTree::Ident(name)), Some(TokenTree::Punct(semicolon)), _)
                 if *keyword == "mod" && semicolon.as_char() == ';' && !module_path =>
             {
@@ -768,6 +801,7 @@ fn walk(tokens: TokenStream, lines: &[&str], include_ignored: bool, out: &mut Fi
             || matches!(&trees[i], TokenTree::Group(g) if g.delimiter() == Delimiter::Brace)
         {
             module_path = false;
+            macro_use = None;
         }
         if let TokenTree::Group(group) = &trees[i] {
             walk(group.stream(), lines, include_ignored, out);
@@ -944,8 +978,8 @@ fn macro_path(trees: &[TokenTree], at: usize) -> String {
 }
 
 /// What a `use` tree (after `prefix`) brings in: (the path it names, the name it brings in).
-/// `a::b::{self, c as d}` brings in `a::b` as `b` and `a::b::c` as `d`; a glob brings in nothing
-/// by name.
+/// `a::b::{self, c as d}` brings in `a::b` as `b` and `a::b::c` as `d`; `a::b::*` brings in all
+/// of `a::b`, as `*`, unless `b` is a type (its name capitalised), whose variants are no macros.
 fn use_tree(trees: &[TokenTree], prefix: &[String], out: &mut Vec<(String, String)>) {
     let mut path = prefix.to_vec();
     let mut i = 0;
@@ -966,7 +1000,14 @@ fn use_tree(trees: &[TokenTree], prefix: &[String], out: &mut Vec<(String, Strin
                     i += 1;
                 }
             }
-            TokenTree::Punct(p) if p.as_char() == '*' => return,
+            TokenTree::Punct(p) if p.as_char() == '*' => {
+                if let Some(last) = path.last()
+                    && !last.starts_with(|c: char| c.is_ascii_uppercase())
+                {
+                    out.push((path.join("::"), "*".to_string()));
+                }
+                return;
+            }
             TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
                 for part in split_commas(group.stream()) {
                     use_tree(&part, &path, out);
@@ -1145,7 +1186,7 @@ mod tests {
     /// that may write docs.
     fn found_in_calls(files: &[&str]) -> bool {
         let files: Vec<FileDocs> = files.iter().map(|source| file_docs(source, false)).collect();
-        let macros = macros(files.iter(), BTreeSet::from(["workspace_crate".to_string()]));
+        let macros = macros(files.iter(), BTreeSet::from(["workspace_crate".to_string()]), BTreeSet::from(["dependency".to_string()]));
         files.iter().any(|f| f.macro_literals.iter().any(|(path, text)| macros.may_write_docs(path, f) && literal_has_doc_test(text, false)))
     }
 
@@ -1273,6 +1314,16 @@ mod tests {
         assert!(found_in_calls(&[forwarder, &format!("wrap!({block});\n")]));
         let paths = format!("std::println!({block});\ncrate::plain!({block});\nworkspace_crate::plain!({block});\nuse std::{{self, println}};\n");
         assert!(!found_in_calls(&[plain, &paths]));
+        // A glob or `#[macro_use]` from a dependency may bring in a macro of any name; a glob of
+        // an enum's variants, of the workspace's own modules or of the standard library's may not.
+        assert!(found_in_calls(&[&format!("use dependency::prelude::*;\nprintln!({block});\n")]));
+        assert!(found_in_calls(&[&format!("use dependency::{{other, prelude::*}};\nprintln!({block});\n")]));
+        assert!(found_in_calls(&[&format!("#[macro_use]\nextern crate dependency;\nprintln!({block});\n")]));
+        assert!(found_in_calls(&[&format!("#[macro_use(println)]\nextern crate dependency;\nprintln!({block});\n")]));
+        let globs = format!(
+            "use dependency::Kind::*;\nuse super::*;\nuse local_module::*;\nuse std::fmt::*;\n#[macro_use]\nmod macros;\nprintln!({block});\n"
+        );
+        assert!(!found_in_calls(&[&globs]));
         // A string with no code block is no doc wherever it goes.
         assert!(!found_in_calls(&["dependency::documented!(\"Plain    words.\");\n#[dependency::documented(\"Plain.\")]\nfn f() {}\n"]));
     }
