@@ -57,9 +57,8 @@ fn half_round(k: &Kernel) -> Curve {
 }
 
 /// The peg joined, its face count and volume.
-fn peg(fix: bool) -> (Brep, usize, f64) {
+fn peg(_fix: bool) -> (Brep, usize, f64) {
     let mut k = Kernel::default();
-    k.fixes.cover_wraps_across_closed_seam = fix;
     let a = line(p(0.0, -R), p(CX, -R));
     let b = half_round(&k);
     let c = line(p(CX, R), p(0.0, R));

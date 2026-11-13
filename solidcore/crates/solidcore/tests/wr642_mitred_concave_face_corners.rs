@@ -31,14 +31,11 @@ use solidcore::{Brep, Kernel};
 /// Mitre turn of two equal cylinders is their exact plane section only with the rounds'
 /// exact classes and circle sections, its companion fixes (on the default kernel the boss
 /// root's rounds come 4.8e-4 off the closed form, #2400).
-fn kernel(mitre: bool) -> Kernel {
-    let mut k = Kernel {
+fn kernel(_mitre: bool) -> Kernel {
+    Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
-    };
-    k.fixes.geometric_g2_continuity = false;
-    k.fixes.fillet_mitre_concave_face_corners = mitre;
-    k
+    }
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {

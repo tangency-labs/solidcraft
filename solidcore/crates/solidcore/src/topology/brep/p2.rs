@@ -397,7 +397,7 @@ pub fn set_tolerance(
             BoundingBoxOptions::default(),
         ))?;
         // fork 60a8a51: a box that cannot be computed is no size, as an absurd one is not
-        let no_box = bbox.is_none() && k.fixes.brep_edit_statuses_pass_on;
+        let no_box = bbox.is_none();
         let mut size = bbox.unwrap_or_default().size().length();
         if no_box || size >= 1.0e15 || size <= 0.0 {
             size = 1.0;
@@ -3098,10 +3098,7 @@ pub fn mate_lamina_edge_to_surface(
     } else {
         ccw_trim_ivl.set_min_max(ccw_trim_ivl.min(), ccw_trim)
     };
-    ignore_status(crate::error::passed_on(
-        set,
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    ignore_status(crate::error::passed_on(set, true)?)?;
     // may snap sIvl by tol to existing knots
     match ccw_ext.trim(k, &mut ccw_trim_ivl, TrimMode::Notify) {
         Ok(()) => {}
@@ -3116,10 +3113,7 @@ pub fn mate_lamina_edge_to_surface(
     } else {
         cw_trim_ivl.set_min_max(cw_trim, cw_trim_ivl.max())
     };
-    ignore_status(crate::error::passed_on(
-        set,
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    ignore_status(crate::error::passed_on(set, true)?)?;
     match cw_ext.trim(k, &mut cw_trim_ivl, TrimMode::Notify) {
         Ok(()) => {}
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -3314,9 +3308,7 @@ fn set_vertex_point(b: &mut Brep, env: &mut NotifyEnv<'_>, v: VertexId, p: Point
 fn uv_trim_curve_copy(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<BSplineCurve> {
     let fetched = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
     // (fork 60a8a51 passes this status on: `SER`)
-    if k.fixes.brep_edit_statuses_pass_on {
-        fetched.status?;
-    }
+    fetched.status?;
     let curve = eu1::uv_trim_curve(b, eu)?
         .0
         .ok_or(null_deref("edge use without UV trim curve"))?;
@@ -3355,7 +3347,7 @@ fn trim_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId, ivl: &Extent1d) -
     match curve.trim(k, &mut trim_ivl, TrimMode::Notify) {
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         // (fork 60a8a51 passes the trim's status on: `SER`)
-        Err(e) if k.fixes.brep_edit_statuses_pass_on => Err(e),
+        Err(e) if true => Err(e),
         _ => Ok(()),
     }
 }

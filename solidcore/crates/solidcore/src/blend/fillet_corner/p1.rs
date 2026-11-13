@@ -651,10 +651,7 @@ pub fn create_planar_surface(k: &Kernel, plane_pnts: &[Point3], tol_3d: f64) -> 
             let ext = Extent2d::from_points(Point2::new(-size, -size), Point2::new(size, size));
             // fork 66b02de passes this on (SER)
             ignored(
-                crate::error::passed_on(
-                    plane.adjust_step_uv_domain(k, &ext),
-                    k.fixes.fillet_statuses_pass_on,
-                )?,
+                crate::error::passed_on(plane.adjust_step_uv_domain(k, &ext), true)?,
                 (),
             )?;
             Ok(plane)
@@ -1283,14 +1280,9 @@ pub fn check_nx1_degeneracy_status(
     // `fillet_knife_edge_rounds` (WR-570, fork b7ec55b) anti-parallel normals are a cusp
     // (the faces folded back on each other, a knife edge): the ball touches them back
     // from the vertex and the fillet ends there as at any other corner
-    if k.fixes.fillet_knife_edge_rounds {
-        // (`bAntiParallel` starts FALSE; `IsParallelTo` leaves it for a zero vector)
-        let (parallel, anti) = faceuse_normal1.parallel_sense(faceuse_normal2, EFF_ZERO_SQRT);
-        return Ok(Ok(parallel && !anti.unwrap_or(false)));
-    }
-    Ok(Ok(
-        faceuse_normal1.is_parallel_to(faceuse_normal2, EFF_ZERO_SQRT)
-    ))
+    // (`bAntiParallel` starts FALSE; `IsParallelTo` leaves it for a zero vector)
+    let (parallel, anti) = faceuse_normal1.parallel_sense(faceuse_normal2, EFF_ZERO_SQRT);
+    return Ok(Ok(parallel && !anti.unwrap_or(false)));
 }
 
 // ---- SmFilletCorner methods: the corner geometry steps -----------------------------------
@@ -1316,9 +1308,6 @@ fn keep_end_definition(
     support: &Surface,
     net: &mut Surface,
 ) -> Result<()> {
-    if !k.fixes.fillet_round_as_definition {
-        return Ok(());
-    }
     let mut boundary = Vec::with_capacity(edges.len());
     for &e in edges {
         let curve = pseudo
@@ -1602,7 +1591,7 @@ impl FilletCorner {
     }
 
     /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream; opt-in
-    /// `fixes.fillet_nx1_end_rib_global_merge`, WR-303, tangency-labs/solidcore#841;
+    /// `true`, WR-303, tangency-labs/solidcore#841;
     /// tangency-labs/smlib `967f7ab`), outside a cliff overflow: see
     /// [`FilletCorner::drop_end_rib`]. Returns whether the rib was deleted for the global
     /// merge.
@@ -1623,8 +1612,8 @@ impl FilletCorner {
     }
 
     /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream; opt-in
-    /// `fixes.fillet_nx1_end_rib_global_merge`, WR-303, tangency-labs/solidcore#841;
-    /// tangency-labs/smlib `967f7ab`; in a cliff overflow, `fixes.fillet_cliff_overflow`,
+    /// `true`, WR-303, tangency-labs/solidcore#841;
+    /// tangency-labs/smlib `967f7ab`; in a cliff overflow, `true`,
     /// WR-631, tangency-labs/smlib `8ba4667` and `3f22e97`). At a corner of at most three
     /// edges the one corner edge is the end rib, from one rail's end on its side edge to
     /// the other's. When one rail missed its side edge (`SM_FV_NO_INT_RAIL_EU`) because
@@ -1664,7 +1653,7 @@ impl FilletCorner {
             return Ok(EndRibDrop::Kept);
         };
         let tangent_ends = tangent_ends && !cliff_overflow;
-        if !(k.fixes.fillet_nx1_end_rib_global_merge || cliff_overflow || tangent_ends)
+        if !(true || cliff_overflow || tangent_ends)
             || !matches!(self.kind, FilletCornerKind::NByOne | FilletCornerKind::Open)
             || pseudo.fillet_edge(end_rib)?.edge_type != FilletEdgeType::FilletXSideFace
         {
@@ -1822,7 +1811,7 @@ impl FilletCorner {
         if runs_on {
             return Ok(EndRibDrop::Kept);
         }
-        // Not upstream (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`,
+        // Not upstream (WR-674, `true`,
         // tangency-labs/solidcore#2176): the side edge the rail missed continues the filleted
         // edge tangentially across the vertex and reaches past the fillet's width there (the
         // straight side of a plate's outline running on from a rounded corner arc): the rail
@@ -1838,9 +1827,6 @@ impl FilletCorner {
                 pseudo.delete_wire_fillet_edge(k, end_rib)?;
                 self.edges.clear();
                 return Ok(EndRibDrop::OpenEnd);
-            }
-            if !k.fixes.fillet_nx1_end_rib_global_merge {
-                return Ok(EndRibDrop::Kept);
             }
         }
         if cliff_overflow {
@@ -1865,7 +1851,7 @@ impl FilletCorner {
             self.edges.clear();
             return Ok(EndRibDrop::OpenEnd);
         }
-        if both_miss || !k.fixes.fillet_nx1_end_rib_global_merge {
+        if both_miss {
             return Ok(EndRibDrop::Kept);
         }
         pseudo.delete_wire_fillet_edge(k, end_rib)?;
@@ -1877,7 +1863,7 @@ impl FilletCorner {
     /// vertex `vertex` continues the filleted edge (of `fil_eu`) tangentially there, within
     /// the corner's tangency tolerance, and reaches past the fillet's width: its other vertex
     /// lies farther from `vertex` than the other rail's end, and it is straight (WR-674,
-    /// `fixes.fillet_round_ends_at_tangent_continuation`). A side edge that ends within the
+    /// `true`). A side edge that ends within the
     /// fillet's width or bends away (WR-303's short arc, past which the round runs onto
     /// another face) is left to the global merge.
     ///

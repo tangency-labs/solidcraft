@@ -99,16 +99,16 @@ pub enum NoRoomReason {
     /// fork's 410dfe1, WR-696).
     BallDoesNotFit,
     /// A rail leaves the face it rolls on between its ends (the fork's
-    /// `RailsFitTheirFaces`; `fixes.fillet_refuse_rails_leaving_faces`, WR-302).
+    /// `RailsFitTheirFaces`; `true`, WR-302).
     RailLeavesFace,
     /// The blends take the whole of a face they roll on, some at an angle to it (the fork's
-    /// `FacesOutlastTheirBlends`; `fixes.fillet_refuse_face_consuming_blends`, WR-320).
+    /// `FacesOutlastTheirBlends`; `true`, WR-320).
     FaceConsumed,
     /// A blend's rail runs inside the band another blend takes off a face they share (the
-    /// fork's `BandsClearOtherRails`; `fixes.fillet_refuse_overlapping_bands`, WR-542).
+    /// fork's `BandsClearOtherRails`; `true`, WR-542).
     BandsOverlap,
     /// A concave blend (one that adds material) whose rail leaves its face (the fork's cliff
-    /// overflow choice; `fixes.fillet_cliff_overflow`, WR-631).
+    /// overflow choice; `true`, WR-631).
     ConcaveOverflow,
     /// A round or curvature-continuous blend whose rail leaves its face into the body's
     /// material, beyond a wall (WR-631).
@@ -164,11 +164,11 @@ pub enum NoRoomReason {
     CliffSubtractionLeavesNoSolid,
     /// A round that ends where its edge runs on tangentially is built only alone, with both
     /// its ends such ends, and with its faces' sections at the ends straight (not the fork's,
-    /// WR-674, `fixes.fillet_round_ends_at_tangent_continuation`).
+    /// WR-674, `true`).
     TangentContinuationEndUnsupported,
     /// A blend past its faces creases a face that runs on tangentially from a face it rolls
     /// on: the rail would roll over onto it, no cliff (the fork's `TrimAtCreases`,
-    /// tangency-labs/smlib@bacd0bb; `fixes.fillet_overflow_trim_at_creases`, WR-695).
+    /// tangency-labs/smlib@bacd0bb; `true`, WR-695).
     CreaseAcrossTangentEdge,
     /// A blend past its faces keeps no length of its edge: its corners take the whole of it
     /// (the fork's `TrimAtCreases`, tangency-labs/smlib@8832ead; WR-695).
@@ -699,7 +699,7 @@ pub struct FilletExecutive<O> {
     /// the constructor and `SetFilletParameters`): a convex blend's rail leaves its face
     /// across a cliff; the blend is built on its faces' continuations and the material it
     /// removes is subtracted from the target. Set only with
-    /// `fixes.fillet_cliff_overflow`.
+    /// `true`.
     pub cliff_overflow: bool,
     /// `m_vOpenEnds` (the fork's, WR-631): the fillet's ends the Nx1 corner there left
     /// uncut, in a cliff overflow.
@@ -710,7 +710,7 @@ pub struct FilletExecutive<O> {
     /// `CreateFilletBrep` stops after classifying the rails, building nothing, with
     /// `FilletErrorType::OverflowFirst` and [`Self::overflow_edges`]: the caller blends
     /// the edges that overflow on their own first, then what is left of the others. Acts
-    /// only with `fixes.fillet_refuse_rails_leaving_faces` and `fixes.fillet_cliff_overflow`
+    /// only with `true` and `true`
     /// (the fork's rail classification).
     pub overflow_first: bool,
     /// `m_bClassifyOnly` (the fork's, WR-634; `FALSE` from the constructor, kept by
@@ -731,7 +731,7 @@ pub struct FilletExecutive<O> {
     /// `m_vFanSplitPoints` (the fork's, WR-665, tangency-labs/smlib@e418750; cleared by
     /// `SetFilletParameters`): where a blended edge's vertex the body touches itself at
     /// was split into one vertex per fan (`SplitBlendedVertexFans`, with
-    /// `fixes.fillet_corner_per_vertex_fan`), for `JoinBlendedVertexFans`.
+    /// `true`), for `JoinBlendedVertexFans`.
     pub fan_split_points: Vec<Point3>,
     /// `m_vEarlierPassFaces` (the fork's, tangency-labs/smlib@9822462, smlib#130; empty
     /// from the constructor, kept by `SetFilletParameters`): the faces an earlier pass of
@@ -811,7 +811,7 @@ pub struct OpenEnd<O> {
     pub vertex: O,
     /// `m_pEndFace`: the face whose surface's continuation cuts the fillet off there.
     pub end_face: O,
-    /// Not the fork's (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`): the
+    /// Not the fork's (WR-674, `true`): the
     /// fillet is cut off by its section through the vertex, the plane normal to the
     /// filleted edge there, not by `end_face` (then one of the filleted edge's faces).
     pub section: bool,
@@ -2577,7 +2577,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         Ok(None)
     }
     /// The fork's `SmFilletSolver::RailsFitTheirFaces` for `solver` (not upstream; opt-in
-    /// `fixes.fillet_refuse_rails_leaving_faces`, WR-302): whether every rail of its
+    /// `true`, WR-302): whether every rail of its
     /// untrimmed fillet stays on the face it rolls on. Only an accessor with a live
     /// pseudo-B-rep can tell.
     ///
@@ -2596,7 +2596,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
     /// The fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)` for `solver`
-    /// (WR-631, `fixes.fillet_cliff_overflow`): as [`Self::geometry_rails_fit`], and
+    /// (WR-631, `true`): as [`Self::geometry_rails_fit`], and
     /// whether a rail rolls over a tangent edge or runs on into the body's material.
     ///
     /// # Errors
@@ -2614,7 +2614,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
     /// The fork's `SmFilletSolver::EndSectionsFitTheirFaces` for `solver` (WR-631,
-    /// `fixes.fillet_cliff_overflow`; tangency-labs/smlib `a307480`): whether its fillet's
+    /// `true`; tangency-labs/smlib `a307480`): whether its fillet's
     /// end section at each Nx1 end lies on its end face.
     ///
     /// # Errors
@@ -2656,7 +2656,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
     /// The fork's `SmFilletExecutive::FacesOutlastTheirBlends` over `solvers` (not
-    /// upstream; opt-in `fixes.fillet_refuse_face_consuming_blends`, WR-320): `false`
+    /// upstream; opt-in `true`, WR-320): `false`
     /// when the blends take the whole of a face they roll on, some at an angle to it.
     ///
     /// # Errors
@@ -2669,7 +2669,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
     /// The fork's `SmFilletExecutive::BandsClearOtherRails` over `solvers` (not upstream;
-    /// opt-in `fixes.fillet_refuse_overlapping_bands`, WR-542): `false` when a blend's
+    /// opt-in `true`, WR-542): `false` when a blend's
     /// rail runs inside the band another blend takes off a face they share, away from a
     /// corner that trims them.
     ///
@@ -2769,14 +2769,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
         access.create_corners(k, self, None)?;
         self.do_filleting(k, access, None)?;
-        if !k.fixes.fillet_refuse_non_manifold_result {
-            return Ok(());
-        }
         self.check_closed_manifold(access)
     }
 
     /// Refuse a filleted target that is not a closed manifold solid (not upstream;
-    /// opt-in `fixes.fillet_refuse_non_manifold_result`, WR-212,
+    /// opt-in `true`, WR-212,
     /// tangency-labs/solidcore#422). Upstream ignores the `bMaybeNotSolid` that
     /// `OrientTrimmedSurfaces` reports and returns success, so a round whose
     /// trimming breaks the shell came back as a valid body. The first edge of the
@@ -2959,7 +2956,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
     /// Refuse blends whose rails leave the faces they roll on, after every solver's fillet
     /// geometry exists (not upstream; the fork's check in `CreateFilletBrep`, opt-in
-    /// `fixes.fillet_refuse_rails_leaving_faces`, WR-302, tangency-labs/solidcore#841 and
+    /// `true`, WR-302, tangency-labs/solidcore#841 and
     /// #1024): a solver whose rail leaves the face it rolls on between its ends
     /// (`SmFilletSolver::RailsFitTheirFaces`). Fails with `FilletErrorType::NoRoom` (8, not
     /// an upstream code).
@@ -2972,26 +2969,24 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::executive::refuse_blends_larger_than_faces");
-        if k.fixes.fillet_refuse_rails_leaving_faces && k.fixes.fillet_cliff_overflow {
+        if true {
             return self.choose_cliff_overflow(k, access);
         }
-        if k.fixes.fillet_refuse_rails_leaving_faces {
-            let mut index = 0;
-            while let Some(solver) = self.solvers.get(index).copied() {
-                if !access.geometry_rails_fit(k, solver, self)? {
-                    return self.record_no_room(
-                        NoRoomReason::RailLeavesFace,
-                        "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow)",
-                    );
-                }
-                index += 1;
+        let mut index = 0;
+        while let Some(solver) = self.solvers.get(index).copied() {
+            if !access.geometry_rails_fit(k, solver, self)? {
+                return self.record_no_room(
+                    NoRoomReason::RailLeavesFace,
+                    "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow)",
+                );
             }
+            index += 1;
         }
         Ok(())
     }
 
     /// The fork's choice in `CreateFilletBrep` (WR-631, tangency-labs/smlib@8ba4667; opt-in
-    /// `fixes.fillet_cliff_overflow` with `fixes.fillet_refuse_rails_leaving_faces`): a
+    /// `true` with `true`): a
     /// blend whose rails leave the faces they roll on between its ends is larger than
     /// those faces. A convex blend (one that removes material) whose rails leave them
     /// across cliffs is a cliff overflow ([`FilletExecutive::cliff_overflow`]). Refused
@@ -3118,7 +3113,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     }
 
     /// Refuse blends that take the whole of a face they roll on, some meeting it at an angle
-    /// (not upstream; opt-in `fixes.fillet_refuse_face_consuming_blends`, WR-320, #879:
+    /// (not upstream; opt-in `true`, WR-320, #879:
     /// `SmFilletExecutive::FacesOutlastTheirBlends`). The fork calls it in `CreateFilletBrep`
     /// after the fillet faces are built and before they are stitched (the diff in #879),
     /// on the trimmed rails; here it runs once the geometry exists, which is earlier. The
@@ -3134,9 +3129,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
-        if k.fixes.fillet_refuse_face_consuming_blends
-            && !access.geometry_faces_outlast(k, &self.solvers)?
-        {
+        if !access.geometry_faces_outlast(k, &self.solvers)? {
             // the fork's 49f393d, a3d6d81 and 5e8c9c1 (WR-696): the largest radius that leaves
             // some of the face, for a polygon with every edge blended
             // (NoteFitOfPolygonsTakenWhole) and a plane bounded by one blended circle (the ball
@@ -3160,7 +3153,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
-    /// Not the fork's (#2401, with `fixes.fillet_refuse_face_consuming_blends`): a plane face bounded by straight edges,
+    /// Not the fork's (#2401, with `true`): a plane face bounded by straight edges,
     /// each blended with a constant ball, is taken whole once the least of its balls reaches
     /// the radius that leaves some of it (`NoteFitOfPolygonsTakenWhole`'s bound, the deepest
     /// point of the face in the balls' terms), to within the blended edge's tolerance (a face
@@ -3217,7 +3210,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     }
 
     /// Refuse blends whose bands on a face they share overlap, away from any corner that
-    /// trims them (not upstream; opt-in `fixes.fillet_refuse_overlapping_bands`, WR-542:
+    /// trims them (not upstream; opt-in `true`, WR-542:
     /// the fork's tangency-labs/smlib@c0d74ee, `SmFilletExecutive::BandsClearOtherRails`,
     /// called right after `FacesOutlastTheirBlends`). Fails with `FilletErrorType::NoRoom`.
     ///
@@ -3228,9 +3221,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
-        if k.fixes.fillet_refuse_overlapping_bands
-            && !access.geometry_bands_clear_other_rails(k, &self.solvers)?
-        {
+        if !access.geometry_bands_clear_other_rails(k, &self.solvers)? {
             // the fork's a3d6d81 (WR-696): the largest common radius at which the bands stay
             // apart, where they meet (closed), the least over the pairs
             let solvers = self.solvers.clone();
@@ -3551,10 +3542,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             ignore(access.stitch_attribute(edge, self.edge_attribute))?;
         }
         let tolerance = access.faces_tolerance(k, fillet)?;
-        // Opt-in, not upstream (`fixes.fillet_patch_keeps_fillet_edges`, WR-546, #1377;
+        // Opt-in, not upstream (`true`, WR-546, #1377;
         // tangency-labs/smlib@1072d1b): where a corner's patch meets a fillet, the
         // fillet's edge is kept (`SmFilletPatchStitchCallback`).
-        let mut attempt = if k.fixes.fillet_patch_keeps_fillet_edges {
+        let mut attempt = if true {
             access.stitch_body_keeping_fillet_edges(k, fillet, tolerance, &self.corners)?
         } else {
             access.stitch_body(k, fillet, tolerance)?
@@ -3972,17 +3963,15 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             .ok_or_else(|| SolidError::blend_missing(OP, "the target B-rep"))?;
         ignore(access.creation_smooth(k, self))?;
 
-        // Opt-in, not upstream (`fixes.fillet_trace_reaches_rails`, WR-609/WR-610; the
+        // Opt-in, not upstream (`true`, WR-609/WR-610; the
         // fork's tangency-labs/smlib@a9277fd and @6e77631): each solver's base surfaces
         // reach as far as its rails can lie from the edge before the corners look for
         // where the rails meet the side edges, which search those surfaces' extended
         // domains as the trace does.
-        if k.fixes.fillet_trace_reaches_rails {
-            let mut index = 0;
-            while let Some(solver) = self.solvers.get(index).copied() {
-                access.creation_extend_trace_to_its_rails(k, solver)?;
-                index += 1;
-            }
+        let mut index = 0;
+        while let Some(solver) = self.solvers.get(index).copied() {
+            access.creation_extend_trace_to_its_rails(k, solver)?;
+            index += 1;
         }
 
         // Not upstream (WR-696; the fork's tangency-labs/smlib#79, 410dfe1 to a34b5e8 and
@@ -4002,9 +3991,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
         // not the fork's (#2401): a polygon face its blends take whole, refused before the
         // trace that its rails of no length would fail
-        if k.fixes.fillet_refuse_face_consuming_blends {
-            self.refuse_polygons_taken_whole(k, access)?;
-        }
+        self.refuse_polygons_taken_whole(k, access)?;
 
         // Not the fork's (#2546, WR-739): a rail whose ends would be one vertex, or that
         // lies past its arc's axis
@@ -4307,10 +4294,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // fork 873c7c9 passes this on (SER)
         let oriented =
             access.finish_orient_trimmed_surfaces(k, target, true, &mut maybe_not_solid, false);
-        ignore(crate::error::passed_on(
-            oriented,
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        ignore(crate::error::passed_on(oriented, true)?)?;
         Ok(())
     }
 

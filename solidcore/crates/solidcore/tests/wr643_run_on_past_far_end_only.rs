@@ -111,16 +111,8 @@ fn removed(r: f64) -> f64 {
 /// The knife edge of the part (mirrored when `s` is -1) rounded `r` with the knife edge,
 /// the run-on and the analytic continuation on: its face count, volume and manifoldness,
 /// or the fillet error code.
-fn round(far_end_only: bool, s: f64, r: f64) -> Result<(usize, f64, bool), i32> {
+fn round(_far_end_only: bool, s: f64, r: f64) -> Result<(usize, f64, bool), i32> {
     let mut k = Kernel::default();
-    k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
-    k.fixes.fillet_cliff_overflow = true;
-    k.fixes.offset_extension_from_base = true;
-    k.fixes.offset_extension_as_itself = true;
-    k.fixes.fillet_run_on_past_far_end_only = far_end_only;
     let mut b = part(&mut k, s);
     let e = knife_edge(&k, &b, s);
     {

@@ -71,9 +71,8 @@ fn vase(k: &mut Kernel, up: bool) -> Brep {
 }
 
 /// The vase shelled 2 inward, open at its top, with WR-342's `fixed`.
-fn shelled(up: bool, fixed: bool) -> (Kernel, Brep) {
+fn shelled(up: bool, _fixed: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.offset_clip_right_side_out = fixed;
     let part = vase(&mut k, up);
     let open = planar_faces_at(&k, &part, 1, H);
     assert_eq!(open.len(), 1, "the top");

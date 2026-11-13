@@ -2135,11 +2135,7 @@ impl Sphere {
         let angles_v = iso_v.angles.unwrap_or(Extent1d::new());
         // not upstream (WR-493, opt-in; tangency-labs/smlib@7ea6a96): the half-meridian
         // tolerance compensates for degrees, as RebuildSTEPFromNURBParameters [B279]
-        let half_meridian_tol = if k.fixes.found_torus_sphere_keep_tested_nurb {
-            360.0 * EFF_ZERO
-        } else {
-            EFF_ZERO
-        };
+        let half_meridian_tol = if true { 360.0 * EFF_ZERO } else { EFF_ZERO };
         // not upstream: the angles' rounding at the points' size (`meridian_rounding`)
         let corners = min_pnt.max_dimension().max(max_pnt.max_dimension());
         let (p, q) = (test.degree(SurfParamType::U), test.degree(SurfParamType::V));
@@ -2297,21 +2293,19 @@ impl Sphere {
 
         // not upstream (WR-493, opt-in; tangency-labs/smlib@7ea6a96): the sphere keeps
         // the NURB tested (SetFromGwNurb, whose rebuild's status is ignored)
-        if k.fixes.found_torus_sphere_keep_tested_nurb {
-            let nurb = test
-                .gw_nurb()
-                .ok_or_else(|| SolidError::surface_missing(OP_NURB_SPHERE, "the tested NURB"))?;
-            sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
-            sphere.base.base.nurb_is_borrowed = false;
-            ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
-            // (not in the fork) the rebuild takes the sweep interval from one iso circle
-            // and the polar curve from another; they differ beyond the check's 1e-12 on a
-            // small sphere. The interval is the polar curve's (#2073).
-            if let Some(ivl) = sphere.base.polar_curve().map(Ellipse::step_interval) {
-                let d = sphere.base.anal_uv_domain;
-                sphere.base.anal_uv_domain =
-                    Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
-            }
+        let nurb = test
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_missing(OP_NURB_SPHERE, "the tested NURB"))?;
+        sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
+        sphere.base.base.nurb_is_borrowed = false;
+        ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
+        // (not in the fork) the rebuild takes the sweep interval from one iso circle
+        // and the polar curve from another; they differ beyond the check's 1e-12 on a
+        // small sphere. The interval is the polar curve's (#2073).
+        if let Some(ivl) = sphere.base.polar_curve().map(Ellipse::step_interval) {
+            let d = sphere.base.anal_uv_domain;
+            sphere.base.anal_uv_domain =
+                Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
         }
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
@@ -2611,13 +2605,13 @@ impl Sphere {
     /// `SM_ERR` with the fix for the centre of a sphere no larger than `tol`.
     pub(crate) fn inversion_location(
         &self,
-        k: &Kernel,
+        _k: &Kernel,
         anal_domain: &Extent2d,
         point: Point3,
         tol: f64,
     ) -> Result<LocationType> {
         let inv = self.step_inversion(anal_domain, point, tol, None);
-        if k.fixes.analytic_inversion_answers_apart && !inv.answered {
+        if !inv.answered {
             return Err(SolidError::surface_failed(
                 OP_SPHERE_STEP_INV,
                 "the point is the centre of a sphere within the tolerance and has no parameters",
@@ -3433,8 +3427,7 @@ mod tests {
     #[test]
     fn inversion_location_passes_on_a_failed_inversion() {
         for apart in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.analytic_inversion_answers_apart = apart;
+            let k = Kernel::default();
             let s = canonical(&k, 1e-6);
             let d = s.base.anal_uv_domain;
             let r = s.inversion_location(&k, &d, frame().origin(), 1e-3);
@@ -3513,8 +3506,7 @@ mod tests {
     /// the sphere found in a NURB keeps exactly that NURB.
     #[test]
     fn wr493_sphere_found_in_its_nurb_keeps_it() {
-        let mut k = Kernel::default();
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
+        let k = Kernel::default();
         for radius in [2.0, -2.0, 1e-3, 500.0] {
             let s = canonical(&k, radius);
             let nurbs = BSplineSurface::from_gw_nurb(s.base().base().gw_nurb().unwrap());

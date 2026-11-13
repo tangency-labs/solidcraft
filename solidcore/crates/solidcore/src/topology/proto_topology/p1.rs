@@ -506,9 +506,8 @@ mod tests {
         Curve::from(crate::curve::offset_curve::OffsetCurve::empty())
     }
 
-    fn kernel_pass_on(pass_on: bool) -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes.ssi_proto_topology_statuses_pass_on = pass_on;
+    fn kernel_pass_on(_pass_on: bool) -> Kernel {
+        let k = Kernel::default();
         k
     }
 
@@ -704,8 +703,7 @@ mod tests {
     /// against the remaining proto edges.
     #[test]
     fn issue_848_no_hit_is_false() {
-        let mut k = Kernel::default();
-        k.fixes.proto_vertex_miss_is_false = true;
+        let k = Kernel::default();
         let geo = Geo(vec![line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0])]);
         let mut m = manager();
         let ivl = geo.0[0].natural_interval();
@@ -751,7 +749,6 @@ mod tests {
             .unwrap());
         assert_eq!(m.proto_vertices(), &[off]);
         // the default keeps upstream's TRUE
-        k.fixes.proto_vertex_miss_is_false = false;
         assert!(m
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, off)
             .unwrap());

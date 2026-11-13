@@ -285,7 +285,7 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
     })
 }
 
-/// Without `fixes.fillet_cliff_overflow` the kernel refuses every blend whose rail leaves its
+/// Without `true` the kernel refuses every blend whose rail leaves its
 /// face, where with it it decides between building it over the cliff and refusing it.
 const RAIL_LEAVES_FACE: &str =
     "a blend whose rail leaves its face, refused without the cliff overflow fix";
@@ -1283,7 +1283,7 @@ fn blend_impl(
     with_body("blend", body, |k, b| {
         // the Facet is the kernel's blend corner's, under its fix: refused, not built as the
         // Mitre, without it
-        if options.chamfer_corner == ChamferCorner::Facet && !k.fixes.fillet_chamfer_corner {
+        if options.chamfer_corner == ChamferCorner::Facet && false {
             return Ok(Err(Error::Unsupported(
                 "the chamfered corner needs the kernel's fillet_chamfer_corner fix",
             )));

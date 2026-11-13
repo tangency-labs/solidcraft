@@ -54,13 +54,12 @@ const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 const RIM_REMOVED: f64 = 7.958_672_926_831_696;
 
 /// Every opt-in fix on (as in the issue), with WR-706 as given.
-fn kernel(wr706: bool) -> Kernel {
+fn kernel(_wr706: bool) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
         *f.flag_mut(name).unwrap() = true;
     }
-    f.fillet_section_end_trim_at_creases = wr706;
     k.fixes = f;
     k
 }

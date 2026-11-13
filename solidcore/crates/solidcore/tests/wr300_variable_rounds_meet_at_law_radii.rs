@@ -58,9 +58,7 @@ fn edge_from_to(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> EdgeId {
 }
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_variable_span_follows_fillet = true;
-    k
+    Kernel::default()
 }
 
 /// The default kernel and [`kernel`] (`fillet_variable_span_follows_fillet` on): each case

@@ -273,7 +273,6 @@ fn certificate_failure_propagates_and_rolls_back_earlier_closures_with_flags_off
 
     for statuses in [false, true] {
         let (mut k, mut b) = unsupported_shared_edge();
-        k.fixes.brep_edit_statuses_pass_on = statuses;
         let before = binary(&k, &b);
         let ids = (
             b.face_list().to_vec(),

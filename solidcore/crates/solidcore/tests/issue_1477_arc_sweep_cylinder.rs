@@ -194,7 +194,6 @@ fn issue_1477_an_arc_extruded_square_to_its_plane_is_a_cylinder() {
 
     // the fix on: a cylinder of radius 4 about x = 4, y = 4, domain 0..90 by 0..50, its
     // u from the arc's start at (0, 4) to its end at (4, 0)
-    k.fixes.linear_sweep_arc_is_cylinder = true;
     let mut b = quarter_disc(&mut k, &arc, Vec3::Z, 50.0);
     assert_eq!(kinds(&b), ["cylinder", "plane", "plane", "plane", "plane"]);
     assert_solid(&mut k, &mut b, QUARTER_DISC_VOLUME, "fix on");
@@ -231,7 +230,6 @@ fn issue_1477_a_sweep_against_the_arc_normal_turns_the_frame_to_the_arc_end() {
     for (dir, dist) in [(-Vec3::Z, 50.0), (Vec3::Z, -50.0)] {
         let case = format!("{dir:?} {dist}");
         let mut k = Kernel::default();
-        k.fixes.linear_sweep_arc_is_cylinder = true;
         let arc = circle(&k, &issue_frame(), 4.0, 0.0, 90.0);
         let mut b = quarter_disc(&mut k, &arc, dir, dist);
         assert_eq!(
@@ -293,7 +291,6 @@ fn issue_1477_the_frame_is_turned_to_the_arc_start() {
             ["extrusion", "plane", "plane", "plane", "plane"],
             "{case}"
         );
-        k.fixes.linear_sweep_arc_is_cylinder = true;
         let mut b = quarter_disc(&mut k, arc, Vec3::Z, 50.0);
         assert_eq!(
             kinds(&b),
@@ -325,7 +322,6 @@ fn issue_1477_an_extruded_l_with_a_modelled_bend_has_two_cylinders() {
     let p = |x: f64, y: f64| Vec3::new(x, y, 0.0);
     for fix in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.linear_sweep_arc_is_cylinder = fix;
         let curves = [
             circle(&k, &issue_frame(), 4.0, 0.0, 90.0),
             seg(p(4.0, 0.0), p(14.0, 0.0)),
@@ -379,7 +375,6 @@ fn issue_1477_a_sweep_not_square_to_the_arc_stays_a_surface_of_extrusion() {
     let arc = circle(&off, &issue_frame(), 4.0, 0.0, 90.0);
     let upstream = kinds(&quarter_disc(&mut off, &arc, dir, 50.0));
     let mut on = Kernel::default();
-    on.fixes.linear_sweep_arc_is_cylinder = true;
     let fixed = kinds(&quarter_disc(&mut on, &arc, dir, 50.0));
     assert_eq!(fixed, upstream);
     assert_eq!(fixed[0], "extrusion");
@@ -390,7 +385,6 @@ fn issue_1477_a_sweep_not_square_to_the_arc_stays_a_surface_of_extrusion() {
 fn issue_1477_a_whole_circle_keeps_upstream_cylinder() {
     for fix in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.linear_sweep_arc_is_cylinder = fix;
         let disc = circle(&k, &issue_frame(), 4.0, 0.0, 360.0);
         let mut b = create_linear_sweep(&mut k, &[Some(&disc)], Vec3::Z, 50.0, true).unwrap();
         assert_eq!(kinds(&b), ["cylinder", "plane", "plane"], "fix {fix}");

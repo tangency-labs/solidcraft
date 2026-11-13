@@ -281,7 +281,7 @@ impl SurfPtGlobalSolver<'_> {
         let (mut best_idx_u, mut best_idx_v) = best_idx;
         let mut uv = Point2::UNDEF;
 
-        // The suspicious triangle guess, kept as a candidate with `fixes.point_solve_keeps_triangle_guess`
+        // The suspicious triangle guess, kept as a candidate with `true`
         // (WR-444, #1164): the nearest control point found below can be worse.
         let mut triangle: Option<(Point2, usize, usize)> = None;
 
@@ -306,10 +306,7 @@ impl SurfPtGlobalSolver<'_> {
                         }
                     }
                 }
-                if suspicious
-                    && k.fixes.point_solve_keeps_triangle_guess
-                    && op != SolverOperation::Signed3dDirectedMaximize
-                {
+                if suspicious && op != SolverOperation::Signed3dDirectedMaximize {
                     triangle = Some((b.domain().clamp_point(uv), best_idx_u, best_idx_v));
                 }
                 suspicious
@@ -450,7 +447,7 @@ impl SurfPtGlobalSolver<'_> {
         let uv = b.domain().clamp_point(uv);
 
         // Return the better of the triangle guess and the control-point guess, judged on
-        // the surface itself (`fixes.point_solve_keeps_triangle_guess`, WR-444, #1164).
+        // the surface itself (`true`, WR-444, #1164).
         if let Some((tri_uv, tri_u, tri_v)) = triangle {
             let on_surface = |guess: Point2| match self.calc_func_val(k, guess) {
                 Ok(v) => Ok(Some(v)),
@@ -2308,9 +2305,8 @@ mod tests {
     #[test]
     fn a_point_solve_finds_the_point_on_stacked_runs_with_the_fix() {
         let (s, dom) = stacked_runs_strip(4);
-        let solve = |fixed: bool, target: Point3| {
-            let mut k = Kernel::default();
-            k.fixes.point_solve_keeps_triangle_guess = fixed;
+        let solve = |_fixed: bool, target: Point3| {
+            let k = Kernel::default();
             s.global_point_solve(
                 &k,
                 Some(Srf),

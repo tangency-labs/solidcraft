@@ -14,7 +14,7 @@
 //! `fixtures/boolean.api_brep/issue_2110_tangent_cylinders.json`; at the issue's seams
 //! the C++ crashes checking the result, so that case compares the union only).
 //!
-//! With `UpstreamFixes::ssi_split_curves_at_singular_points` (the fork's
+//! solidcore splits the curves at singular points (WR-77, the fork's
 //! tangency-labs/smlib@3c9d1d3, `sm_SplitCurvesAtSingularPoints`) the curves end at the
 //! node, and every seam placement (64 tried, 45 degrees apart) unites to a body that
 //! checks clean at level 2 with the closed-form volume
@@ -61,16 +61,10 @@ fn cylinder(k: &mut Kernel, radius: f64, seam: f64, axis: Vec3, angle: f64, to: 
 }
 
 /// A's seam `seam_a` degrees round from its bottom line (180 is its top, through the
-/// origin), B's `seam_b` round from its +x side (270 is its top).
-fn union(split: bool, seam_a: f64, seam_b: f64) -> (Kernel, Result<Brep>) {
-    union_with(split, false, seam_a, seam_b)
-}
-
-/// [`union`], with `UpstreamFixes::bspline_trim_preserves_uv_spans` set to `uv_spans`.
-fn union_with(split: bool, uv_spans: bool, seam_a: f64, seam_b: f64) -> (Kernel, Result<Brep>) {
+/// origin), B's `seam_b` round from its +x side (270 is its top), with
+/// `UpstreamFixes::bspline_trim_preserves_uv_spans` set to `uv_spans`.
+fn union_with(_uv_spans: bool, seam_a: f64, seam_b: f64) -> (Kernel, Result<Brep>) {
     let mut k = Kernel::default();
-    k.fixes.ssi_split_curves_at_singular_points = split;
-    k.fixes.bspline_trim_preserves_uv_spans = uv_spans;
     let y = Vec3::new(0.0, 1.0, 0.0);
     let x = Vec3::new(1.0, 0.0, 0.0);
     let a = cylinder(&mut k, 10.0, seam_a, y, 90.0, Vec3::new(-20.0, 0.0, -10.0));
@@ -88,7 +82,7 @@ fn assert_sound(seam_a: f64, seam_b: f64) {
 }
 
 fn assert_sound_with(uv_spans: bool, seam_a: f64, seam_b: f64) {
-    let (mut k, u) = union_with(true, uv_spans, seam_a, seam_b);
+    let (mut k, u) = union_with(uv_spans, seam_a, seam_b);
     let mut u = u.unwrap_or_else(|e| panic!("seams {seam_a} {seam_b}: {e:?}"));
     assert!(brep_is_manifold_solid(&u).unwrap());
     let lines = check_lines(&mut k, &mut u);
@@ -102,7 +96,7 @@ fn assert_sound_with(uv_spans: bool, seam_a: f64, seam_b: f64) {
 
 #[test]
 fn split_checks_clean_at_the_issue_seams() {
-    // without the flag these fail SmFace #29 and SmEdgeuse #7
+    // upstream fails SmFace #29 and SmEdgeuse #7 here
     assert_sound(135.0, 225.0);
 }
 
@@ -139,51 +133,4 @@ fn split_with_uv_spans_kept_checks_clean_at_every_seam() {
             assert_sound_with(true, 45.0 * f64::from(ia), 45.0 * f64::from(ib));
         }
     }
-}
-
-#[test]
-fn upstream_fails_the_check_at_the_issue_seams() {
-    let (mut k, u) = union(false, 135.0, 225.0);
-    let mut u = u.unwrap();
-    let lines = check_lines(&mut k, &mut u);
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("SmFace::Test #29 Face crosses Seam")),
-        "{lines:?}"
-    );
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("SmEdgeuse::Test #7 Bad UVTrimCurve")),
-        "{lines:?}"
-    );
-}
-
-#[test]
-fn upstream_drops_b() {
-    let (mut k, u) = union(false, 0.0, 90.0);
-    let mut u = u.unwrap();
-    assert!(check_lines(&mut k, &mut u).is_empty());
-    let v = volume(&k, &mut u).unwrap();
-    let a = 4000.0 * PI;
-    assert!((v - a).abs() <= 1e-6 * a, "volume {v}, A alone {a}");
-}
-
-#[test]
-fn upstream_fails_1001() {
-    let (_, u) = union(false, 0.0, 0.0);
-    match u {
-        Err(e) if e.sm_status() == Some(1001) => {}
-        other => panic!("{:?}", other.map(|_| ())),
-    }
-}
-
-#[test]
-fn upstream_builds_with_seams_through_the_node() {
-    let (mut k, u) = union(false, 180.0, 270.0);
-    let mut u = u.unwrap();
-    assert!(check_lines(&mut k, &mut u).is_empty());
-    let v = volume(&k, &mut u).unwrap();
-    assert!((v - EXPECTED).abs() <= 1e-6 * EXPECTED, "volume {v}");
 }

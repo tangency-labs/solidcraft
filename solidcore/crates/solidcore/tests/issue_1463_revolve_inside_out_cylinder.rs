@@ -5,9 +5,9 @@
 //! - `Cone::is_nurb_surface_cylinder` (`SmCylinder::IsNurbSurfaceCylinder`) keeps the
 //!   bottom-knot circle and the NURB's linear direction for an inside-out NURB, so the
 //!   recognised cylinder's Z is reversed and its STEP evaluation is mirrored in height.
-//!   Upstream does the same; `fixes.nurb_cylinder_inside_out_frame` (opt-in) builds the
+//!   Upstream does the same; `true` (opt-in) builds the
 //!   frame as `is_nurb_surface_cone` does.
-//! - With `fixes.revolve_analytic_profile_faces`, the revolve made an inside-out
+//! - With `true`, the revolve made an inside-out
 //!   cylinder (or cone) for a profile line running against the axis. Fork commit
 //!   tangency-labs/smlib 9853e54, which that flag ports, builds them from the low end
 //!   upwards, never inside out.
@@ -82,13 +82,12 @@ fn inside_out_cylinder(k: &Kernel) -> Cone {
 
 #[test]
 fn issue_1463_inside_out_nurb_cylinder_keeps_its_axis() {
-    let mut k = Kernel::default();
+    let k = Kernel::default();
     let c = inside_out_cylinder(&k);
     let made = test3(&c);
     assert!(made > 0.0, "the made cylinder is valid: {made}");
 
     // the fix on: the cylinder it was given
-    k.fixes.nurb_cylinder_inside_out_frame = true;
     let r = Cone::is_nurb_surface_cylinder(&k, c.rev().base(), 1.0)
         .unwrap()
         .unwrap();
@@ -114,7 +113,6 @@ fn issue_1463_inside_out_nurb_cylinder_keeps_its_axis() {
     assert!(gap < 1e-12, "STEP vs NURB {gap}");
 
     // the fix off: upstream's reversed axis from the bottom-knot circle (z = 22)
-    k.fixes.nurb_cylinder_inside_out_frame = false;
     let r = Cone::is_nurb_surface_cylinder(&k, c.rev().base(), 1.0)
         .unwrap()
         .unwrap();
@@ -192,7 +190,6 @@ fn issue_1463_revolved_cylinders_are_never_inside_out() {
     ] {
         let case = format!("reverse {reverse}, {angle} deg, scale {scale}");
         let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = true;
         let cones = revolve_cones(&mut k, reverse, angle, scale);
         assert_eq!(cones.len(), 3, "{case}");
         for c in &cones {
@@ -208,7 +205,6 @@ fn issue_1463_revolved_cylinders_are_never_inside_out() {
             // the C++ reader's round trip, with upstream's IsNurbSurfaceCylinder and
             // with the fix: the same cylinder
             for fix in [false, true] {
-                k.fixes.nurb_cylinder_inside_out_frame = fix;
                 let r = Cone::is_nurb_surface_cylinder(&k, c.rev().base(), 1.0)
                     .unwrap()
                     .unwrap();
@@ -222,7 +218,6 @@ fn issue_1463_revolved_cylinders_are_never_inside_out() {
                 let (a, b) = (r.canonical().origin, c.canonical().origin);
                 assert!((a.z_axis() - b.z_axis()).length() < 1e-12, "{case} {fix}");
             }
-            k.fixes.nurb_cylinder_inside_out_frame = false;
         }
     }
 }
@@ -238,7 +233,6 @@ fn issue_1463_revolved_cylinders_are_never_inside_out() {
 #[test]
 fn issue_2539_a_revolved_line_sweeps_its_exact_cylinder() {
     let mut k = Kernel::default();
-    k.fixes.revolve_analytic_profile_faces = true;
     let corners = [
         Vec3::new(15.984703566454204, -14.5, -54.99999718598504),
         Vec3::new(15.984703566454204, -6.5, -54.99999718598504),

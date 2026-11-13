@@ -186,18 +186,13 @@ impl SurfOfRevolution {
 
         // Preserve upstream's update order by default. The opt-in keeps a
         // rejected generator edit from changing the surface's advertised domain.
-        if !k.fixes.ellipse_step_interval_checks {
-            self.anal_uv_domain = *new_step_uv_domain;
-        }
         let v_ivl = new_step_uv_domain.v_interval();
         let gen = self
             .gen_curve
             .as_mut()
             .ok_or_else(|| SolidError::surface_missing(OP_ADJUST, "the generator curve"))?;
         gen_adjust_step_interval(k, gen, &v_ivl)?;
-        if k.fixes.ellipse_step_interval_checks {
-            self.anal_uv_domain = *new_step_uv_domain;
-        }
+        self.anal_uv_domain = *new_step_uv_domain;
 
         // build Nurb domain from Analytic domain
         let mut nurb_domain = *new_step_uv_domain;
@@ -376,14 +371,14 @@ impl SurfOfRevolution {
             match self.step_inversion_with_outputs(k, anal_domain, point_on_surf, tol_3d, uv_guess)
             {
                 Ok(r) => r,
-                Err(e) if k.fixes.analytic_inversion_answers_apart && is_off_generator(&e) => {
+                Err(e) if is_off_generator(&e) => {
                     return Err(not_within_tolerance(OP_STEP_INV));
                 }
                 Err(e) => return Err(e),
             };
         if r.inside {
             Ok((r.uv, r.location))
-        } else if k.fixes.analytic_inversion_answers_apart {
+        } else if true {
             // the fork (tangency-labs/smlib dfc7cb6): outside the sweep is an answer
             Err(SolidError::surface(
                 OP_STEP_INV,

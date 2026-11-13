@@ -19,7 +19,6 @@ use solidcore::{Kernel, Vec3};
 #[test]
 fn far_disks_join_on_one_plane_with_the_fix() {
     let mut k = Kernel::default();
-    k.fixes.boolean2d_plane_covers_far_faces = true;
     let near = create_planar_circle(&mut k, Vec3::new(0.0, 0.0, 0.0), 2.0).unwrap();
     let far = create_planar_circle(&mut k, Vec3::new(1500.0, 0.0, 0.0), 2.0).unwrap();
     let joined = match boolean_2d(&mut k, near, far, Boolean2d::Union).unwrap() {

@@ -180,7 +180,7 @@ pub(crate) fn corner_of<'c>(
 /// (SER): with `fillet_statuses_pass_on` its error is returned.
 fn copy_as_b_spline(k: &Kernel, curve: &Curve) -> Result<Option<Curve>> {
     // fork 9b7cd48 passes this on (SER)
-    let copy = crate::error::passed_on(curve.copy(k), k.fixes.fillet_statuses_pass_on)?;
+    let copy = crate::error::passed_on(curve.copy(k), true)?;
     Ok(ignored(copy)?.filter(|c| c.is_kind_of(BSPLINE_CURVE_TYPE)))
 }
 
@@ -259,10 +259,7 @@ fn drop_param(
 /// 9b7cd48 passes on (SER): with `fillet_statuses_pass_on` its error is returned.
 fn copy_as_b_spline_surface(k: &Kernel, surface: &Surface) -> Result<Option<Surface>> {
     // fork 9b7cd48 passes this on (SER)
-    match ignored(crate::error::passed_on(
-        surface.copy(k),
-        k.fixes.fillet_statuses_pass_on,
-    )?)? {
+    match ignored(crate::error::passed_on(surface.copy(k), true)?)? {
         Some(s) if s.is_kind_of(B_SPLINE_SURFACE_TYPE)? => Ok(Some(s)),
         _ => Ok(None),
     }
@@ -1860,10 +1857,8 @@ impl FilletBrep {
             if let Some(off) = other_off_surf {
                 // SmOffsetSurface::Copy(); a failed copy leaves the slot unchanged; fork
                 // 9b7cd48 passes this on (SER)
-                if let Some(surface) = ignored(crate::error::passed_on(
-                    off.surface.copy(k),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)? {
+                if let Some(surface) = ignored(crate::error::passed_on(off.surface.copy(k), true)?)?
+                {
                     let new_off = OffsetSurface {
                         surface,
                         base_id: off.base_id,
@@ -2663,7 +2658,7 @@ impl FilletBrep {
                 // points most the way the fillet's does. The pieces' binormals are opposite,
                 // so its dot is the positive one, however steeply the fillet meets the face;
                 // only a fillet square to the face (no side) is ambiguous.
-                let inside = if k.fixes.fillet_trim_inside_by_best_dot {
+                let inside = if true {
                     let mut inside = None;
                     let mut best_dot = EFF_ZERO_SQRT;
                     for (index, &eu) in edgeuses.iter().enumerate().step_by(2) {

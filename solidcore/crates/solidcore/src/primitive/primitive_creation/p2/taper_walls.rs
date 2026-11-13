@@ -759,13 +759,13 @@ fn on_cone(w: &Wall, h: Vec3) -> bool {
 /// past the seams leaves the face short of its surface, which `ShrinkGeometry` trims,
 /// removing every trim curve to project the edges again (#2497). `None` otherwise.
 fn cone_face_angles<'s>(
-    k: &Kernel,
+    _k: &Kernel,
     w: &Wall,
     seams: impl IntoIterator<Item = (&'s Seam, f64)>,
     n: Vec3,
     h: Vec3,
 ) -> Option<(f64, f64)> {
-    if !k.fixes.keep_exact_pcurves || !on_cone(w, h) {
+    if !on_cone(w, h) {
         return None;
     }
     let mut lo = f64::INFINITY;

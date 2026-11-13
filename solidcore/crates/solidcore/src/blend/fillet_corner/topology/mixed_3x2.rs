@@ -98,15 +98,13 @@ fn cross_uses_convex_fillet(
     // An unfilleted edge whose faces meet tangentially at the vertex (a block's side
     // running tangent into a cylinder whose wall the block's top meets above it) has no
     // convexity: the roles follow the faces' corners (WR-597).
-    if k.fixes.fillet_3x2_tangent_side_edge_roles
-        && check_tangential_edgeuse_at_vertex(
-            k,
-            target,
-            curr_eu,
-            vertex,
-            crate::math::rad_to_deg(tangency_tol_radians),
-        )?
-    {
+    if check_tangential_edgeuse_at_vertex(
+        k,
+        target,
+        curr_eu,
+        vertex,
+        crate::math::rad_to_deg(tangency_tol_radians),
+    )? {
         curr = !check_face_complimentary_corner_concavity(
             k, target, vertex, convex_eu, curr_eu, None,
         )?;
@@ -182,7 +180,7 @@ impl FilletCorner {
         // `fillet_3x2_mixed_concave_side_edge` (WR-524) the roles follow the unfilleted
         // edge's convexity, as tangency-labs/smlib@1255993: that fork resolves the
         // in-between edge use and its convexity before the solvers.
-        let (cross_eu, ext_eu, cross_id, ext_id) = if k.fixes.fillet_3x2_mixed_concave_side_edge {
+        let (cross_eu, ext_eu, cross_id, ext_id) = if true {
             let curr_eu = curr_eu_found
                 .ok_or_else(|| SolidError::blend_missing(OP, "the corner's unfilleted edge use"))?;
             if cross_uses_convex_fillet(
@@ -423,10 +421,8 @@ mod tests {
             .collect()
     }
 
-    fn roles(fix: bool) -> Vec<bool> {
+    fn roles(_fix: bool) -> Vec<bool> {
         let mut k = Kernel::default();
-        k.fixes.fillet_3x2_mixed_concave_side_edge = true;
-        k.fixes.fillet_3x2_tangent_side_edge_roles = fix;
         let mut b = block_and_cylinder(&mut k);
         let at = Point3::new(40.0, -10.0, 15.0);
         let vertex = crate::topology::brep::p1::vertices(&b, None)

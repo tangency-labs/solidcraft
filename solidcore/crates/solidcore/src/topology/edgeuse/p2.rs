@@ -468,7 +468,7 @@ pub fn evaluate_binormal_step_off_into(
 
     let mut eval_fun = FindStepOff::new(k, step_off_distance, surf_point, plane_normal, surface);
     let mut ls = LocalSolveNd::new(&mut eval_fun, Some(&intervals), Some(&periodicities));
-    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+    ls.set_skips_failed_evaluations(true);
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
 
     // intersect: plane, surface and sphere
@@ -542,7 +542,7 @@ pub fn is_convex_radial_sector(
         (PI * (90.0 - tol_deg) / 180.0).cos()
     };
 
-    let propagate_step_off_err = k.fixes.edgeuse_convexity_propagates_step_off_failure;
+    let propagate_step_off_err = true;
     let options = StepOffOptions::default();
     // for every requested sample point
     for i in 0..num_samples {
@@ -1033,7 +1033,7 @@ pub fn is_edgeuse_side_in_surface(
         // Edge->3d Point (status ignored: a failed evaluation leaves the last point;
         // with the opt-in fix a sample that cannot be evaluated or dropped gives no
         // evidence, TRUE, as the fork has it: tangency-labs/smlib 666242b)
-        let no_evidence = k.fixes.query_statuses_pass_on;
+        let no_evidence = true;
         match ignored(edge_curve.evaluate_point(k, param))? {
             Some(p) => edge_point = p,
             None if no_evidence => return Ok(out),
@@ -1228,7 +1228,7 @@ pub fn has_dog_leg_near_pole(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<DogL
     };
     // with the opt-in fix, without the polygon or the angles the edge use is not shown
     // to dog-leg (tangency-labs/smlib 666242b); upstream's polygon error is the port's
-    let no_evidence = k.fixes.query_statuses_pass_on;
+    let no_evidence = true;
     let control_points = match base.polygon(&base.natural_interval()) {
         Err(e) if no_evidence && !e.is_unported_or_cancelled() => return Ok(out),
         r => r?,
@@ -1427,8 +1427,7 @@ mod tests {
         let mut k = Kernel::default();
         let b0 = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 2.0, 3.0)
             .unwrap();
-        let mut on_k = Kernel::default();
-        on_k.fixes.query_statuses_pass_on = true;
+        let on_k = Kernel::default();
         for eu in b0.edgeuses().ids() {
             if face(&b0, eu).unwrap().is_none() {
                 continue;
@@ -1532,8 +1531,7 @@ mod tests {
     }
 
     fn kernel_with_wr84_fix() -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes.edgeuse_convexity_propagates_step_off_failure = true;
+        let k = Kernel::default();
         k
     }
 
@@ -1562,14 +1560,12 @@ mod tests {
     #[test]
     fn wr84_flag_default_off_and_lookup_by_name() {
         let mut k = Kernel::default();
-        assert!(!k.fixes.edgeuse_convexity_propagates_step_off_failure);
         let slot = k
             .fixes
             .flag_mut("edgeuse_convexity_propagates_step_off_failure")
             .unwrap();
         assert!(!*slot);
         *slot = true;
-        assert!(k.fixes.edgeuse_convexity_propagates_step_off_failure);
     }
 
     #[test]

@@ -9,11 +9,9 @@ use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 
 #[test]
-fn bottom_hyperbola_uses_other_principal_curvature_only_when_enabled() {
-    for enabled in [false, true] {
-        let mut kernel = Kernel::default();
-        assert!(!kernel.fixes.dupin_bottom_hyperbola_axis);
-        kernel.fixes.dupin_bottom_hyperbola_axis = enabled;
+fn bottom_hyperbola_uses_other_principal_curvature() {
+    {
+        let kernel = Kernel::default();
         let domain = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
         let x = Vec3::new(1.0, 0.0, 0.0);
         let y = Vec3::new(0.0, 1.0, 0.0);
@@ -42,7 +40,7 @@ fn bottom_hyperbola_uses_other_principal_curvature_only_when_enabled() {
                 }
                 assert_eq!((top_bottom[0].a(), top_bottom[0].b()), (b, a));
                 assert_eq!(top_bottom[1].a(), b);
-                assert_eq!(top_bottom[1].b(), if enabled { a } else { b });
+                assert_eq!(top_bottom[1].b(), a);
                 assert_eq!(top_bottom[1].theta_rad(), -1.5 * std::f64::consts::PI);
             }
         }

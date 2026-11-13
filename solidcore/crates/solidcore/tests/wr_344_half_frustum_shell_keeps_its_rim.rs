@@ -40,9 +40,8 @@ const CASES: [(f64, f64, f64, f64); 3] = [
 ];
 
 /// The two-half frustum shelled `t` inward, open at its top, with WR-344's `fixed`.
-fn shelled(fixed: bool, (r0, r1, h, t): (f64, f64, f64, f64)) -> (Kernel, Brep) {
+fn shelled(_fixed: bool, (r0, r1, h, t): (f64, f64, f64, f64)) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.offset_extended_edges_mated = fixed;
     let o = Vec3::new(0.0, 0.0, 0.0);
     let a = create_partial_cone(&mut k, o, r0, r1, h, 0.0, 180.0).unwrap();
     let b = create_partial_cone(&mut k, o, r0, r1, h, 180.0, 360.0).unwrap();

@@ -81,9 +81,7 @@ fn check(k: &Kernel, s: &Surface, level: u8) -> (bool, Vec<u64>) {
     (ok, failed)
 }
 
-fn set_fix(k: &mut Kernel, on: bool) {
-    k.fixes.extrusion_origin_scaled_zero = on;
-}
+fn set_fix(_k: &mut Kernel, _on: bool) {}
 
 #[test]
 fn ordinary_origin_is_valid_with_and_without_the_fix() {

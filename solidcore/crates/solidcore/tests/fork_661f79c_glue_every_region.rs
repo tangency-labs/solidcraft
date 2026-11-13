@@ -73,9 +73,8 @@ fn two_cubes(k: &mut Kernel, share_solid_region: bool) -> (Brep, VertexId, Verte
 
 /// Glues the second cube's vertex onto the first's: the survivor's shells afterwards,
 /// and how many shells each region of the survivor holds.
-fn glue(fix: bool, share_solid_region: bool) -> (usize, Vec<usize>) {
+fn glue(_fix: bool, share_solid_region: bool) -> (usize, Vec<usize>) {
     let mut k = Kernel::default();
-    k.fixes.glue_vertices_joins_every_region = fix;
     let (mut b, a, d) = two_cubes(&mut k, share_solid_region);
     // the premise: each vertex is in a solid shell and an infinite-region shell
     assert_eq!(vertex::shells(&b, a).unwrap().len(), 2);

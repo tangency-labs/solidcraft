@@ -413,7 +413,7 @@ impl FilletSurfaceGenerator {
     /// thumbweight, the certificate), as the fork's generator object does.
     ///
     /// `ball`: what the circular generator reads off the solver (`None` where the caller
-    /// has no such solver); with it and `fixes.fillet_round_as_definition` a constant
+    /// has no such solver); with it and `true` a constant
     /// round between NURBS faces is its definition, the rails and uv curves rebuilt on its
     /// stations ([`CircularCrossSectionFsg::definition_surface`], the fork's cc08236).
     /// With it, a round whose centre line or a
@@ -650,7 +650,7 @@ pub struct FilletSolver {
     pub saved_offsets: [f64; 2],
     /// `m_dSurfaceExtensionFactor` (`0.5`).
     pub surface_extension_factor: f64,
-    /// Fork `m_dTraceReach` (WR-609, `fixes.fillet_trace_reaches_rails`): how far (3D)
+    /// Fork `m_dTraceReach` (WR-609, `true`): how far (3D)
     /// the trace's base surface domains reach past their own at least, across the edge
     /// (`0` = by the extension factor alone; [`FilletSolver::domain_extension`]).
     pub trace_reach: f64,
@@ -1343,7 +1343,7 @@ impl FilletSolver {
         domain: &mut Extent2d,
     ) -> Result<()> {
         // get length of extensions (fork WR-609: and the trace's reach, which stays 0
-        // without `fixes.fillet_trace_reaches_rails`)
+        // without `true`)
         let mut size = self.domain_extension(k, Some(surface), &*domain)?;
 
         // Extend by a smaller amount if periodic.
@@ -1552,7 +1552,7 @@ impl FilletSolver {
             pseudo
                 .geom_mut(new_fillet_geom)?
                 .set_offset_surface(other_idx, off_surf),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )?)?;
 
         if which_end == 0 {
@@ -1570,14 +1570,14 @@ impl FilletSolver {
                 pseudo
                     .geom_mut(new_fillet_geom)?
                     .set_offset_surface(rail_idx, off_surf),
-                k.fixes.fillet_statuses_pass_on,
+                true,
             )?)?;
             // fork 66b02de passes this on (SER)
             ignore_status(crate::error::passed_on(
                 pseudo
                     .geom_mut(fillet_geom)?
                     .set_offset_surface(rail_idx, Some(adj_off_surf)),
-                k.fixes.fillet_statuses_pass_on,
+                true,
             )?)?;
         } else {
             // New FG becomes rollover, on adjacent face.
@@ -1597,7 +1597,7 @@ impl FilletSolver {
                 pseudo
                     .geom_mut(new_fillet_geom)?
                     .set_offset_surface(rail_idx, Some(adj_off_surf)),
-                k.fixes.fillet_statuses_pass_on,
+                true,
             )?)?;
         }
         self.fillet_geoms.push(new_fillet_geom);
@@ -2319,14 +2319,14 @@ fn copy_offset_surface(k: &Kernel, s: Option<&OffsetSurfaceSlot>) -> Result<Opti
         return Ok(None);
     };
     // fork 66b02de passes this on (SER)
-    Ok(ignored(crate::error::passed_on(
-        slot.surface.surface.copy(k),
-        k.fixes.fillet_statuses_pass_on,
-    )?)?
-    .map(|surface| OffsetSurface {
-        surface,
-        base_id: slot.surface.base_id,
-    }))
+    Ok(
+        ignored(crate::error::passed_on(slot.surface.surface.copy(k), true)?)?.map(|surface| {
+            OffsetSurface {
+                surface,
+                base_id: slot.surface.base_id,
+            }
+        }),
+    )
 }
 
 /// `pFG->GetOffsetSurface(rail)` copied with `Copy(m_crContext, pSurf)` (status
@@ -2346,14 +2346,14 @@ fn geom_offset_surface_copy(
         return Ok(None);
     };
     // fork 66b02de passes this on (SER)
-    Ok(ignored(crate::error::passed_on(
-        orig.surface.copy(k),
-        k.fixes.fillet_statuses_pass_on,
-    )?)?
-    .map(|surface| OffsetSurface {
-        surface,
-        base_id: orig.base_id,
-    }))
+    Ok(
+        ignored(crate::error::passed_on(orig.surface.copy(k), true)?)?.map(|surface| {
+            OffsetSurface {
+                surface,
+                base_id: orig.base_id,
+            }
+        }),
+    )
 }
 
 /// `Evaluate1stDerivatives(uv, TRUE, TRUE, ..)` of an offset surface (the inherited
@@ -3493,8 +3493,6 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
     // path reads it
     tk.rng = k.rng.clone();
     tk.cancel.clone_from(&k.cancel);
-    tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
-    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     b.edge_mut(rail)?
         .curve
         .as_mut()

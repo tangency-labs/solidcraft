@@ -50,17 +50,12 @@
 //! - **Bounded loops.** The start point loop pops one start point per pass; no pass
 //!   adds start points (`TraceCurve` adds none), so it ends after at most as many
 //!   passes as `FindBoundaryStartPoints` made points.
-//! - **Opt-in fix (WR-76, #392).** With
-//!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
-//!   a traced curve removes, before it is flushed, the start points left in a tangent
+//! - **WR-76 (#392).** a traced curve removes, before it is flushed, the start points left in a tangent
 //!   cluster with either of its ends (`SurfaceIntersector::remove_end_tangent_clusters`);
-//!   the SolidCraft fork's tangency-labs/smlib@0ce09f2. Off by default (upstream
-//!   behaviour).
-//! - **Opt-in fix (WR-77, #393, #2110).** With
-//!   [`UpstreamFixes::ssi_split_curves_at_singular_points`](crate::kernel::UpstreamFixes::ssi_split_curves_at_singular_points)
-//!   the curves are split at the singular points they pass through after the tangent
+//!   the SolidCraft fork's tangency-labs/smlib@0ce09f2.
+//! - **WR-77 (#393, #2110).** the curves are split at the singular points they pass through after the tangent
 //!   nodes are added (`super::singular_splits`); the SolidCraft fork's
-//!   tangency-labs/smlib@3c9d1d3. Off by default (upstream behaviour).
+//!   tangency-labs/smlib@3c9d1d3.
 //! - **Empty trace (WR-80).** A curve is traced back the other way
 //!   ([`SurfaceIntersector::trace_back`], part 4) only when `TraceCurve` produced
 //!   points. Upstream also reverses the empty curve of a trace
@@ -580,7 +575,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         // get bounding box intersection - the region containing a possible
         // intersection (status ignored; passed on with
         // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         if let Ok(b) = passed_on(bbox.intersect(&root2), pass)? {
             bbox = b;
         }
@@ -732,12 +727,10 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                     self.base.trace_back(k, start, &out.curves_3d)?;
                 }
 
-                // opt-in fix (WR-76, #392): a traced curve that ends on a boundary
+                // WR-76 (#392): a traced curve that ends on a boundary
                 // inside a tangential contact consumes the start points of that
                 // contact's boundary cluster
-                if k.fixes.ssi_trace_tangent_curves_once {
-                    self.base.remove_end_tangent_clusters(k)?;
-                }
+                self.base.remove_end_tangent_clusters(k)?;
 
                 // create the curves from the points in m_vCurvePoints
                 self.base.flush_curve(k, &mut out)?;
@@ -762,43 +755,40 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         };
         self.find_interior_curves(k, &mut interior)?;
 
-        // not upstream (WR-75, opt-in; the fork's FindTangentCurves): trace the
+        // not upstream (WR-75; the fork's FindTangentCurves): trace the
         // tangential curves the marcher above cannot follow
-        let mut tangent_nodes = Vec::new();
-        if k.fixes.ssi_tangent_curve_tracer {
-            let size = crate::math::min2(root1.size().length(), root2.size().length());
-            let seeds = core::mem::take(&mut self.tangent_curve_seeds);
-            let mut curves = TsectCurves {
-                curves_3d: core::mem::take(&mut interior.curves_3d),
-                uv_curves: [
-                    core::mem::take(&mut interior.surface1_uv_curves),
-                    core::mem::take(&mut interior.surface2_uv_curves),
-                ],
-                curve_types: core::mem::take(&mut interior.curve_types),
-                deviations: core::mem::take(&mut interior.deviations),
-            };
-            let traced = super::tangent_curves::find_tangent_curves(
-                k,
-                &mut self.base,
-                size,
-                &seeds,
-                &mut curves,
-            );
-            let TsectCurves {
-                curves_3d,
-                uv_curves: [surface1_uv_curves, surface2_uv_curves],
-                curve_types,
-                deviations,
-            } = curves;
-            interior = InteriorCurves {
-                curves_3d,
-                surface1_uv_curves,
-                surface2_uv_curves,
-                curve_types,
-                deviations,
-            };
-            tangent_nodes = traced?;
-        }
+        let size = crate::math::min2(root1.size().length(), root2.size().length());
+        let seeds = core::mem::take(&mut self.tangent_curve_seeds);
+        let mut curves = TsectCurves {
+            curves_3d: core::mem::take(&mut interior.curves_3d),
+            uv_curves: [
+                core::mem::take(&mut interior.surface1_uv_curves),
+                core::mem::take(&mut interior.surface2_uv_curves),
+            ],
+            curve_types: core::mem::take(&mut interior.curve_types),
+            deviations: core::mem::take(&mut interior.deviations),
+        };
+        let traced = super::tangent_curves::find_tangent_curves(
+            k,
+            &mut self.base,
+            size,
+            &seeds,
+            &mut curves,
+        );
+        let TsectCurves {
+            curves_3d,
+            uv_curves: [surface1_uv_curves, surface2_uv_curves],
+            curve_types,
+            deviations,
+        } = curves;
+        interior = InteriorCurves {
+            curves_3d,
+            surface1_uv_curves,
+            surface2_uv_curves,
+            curve_types,
+            deviations,
+        };
+        let tangent_nodes = traced?;
         let InteriorCurves {
             mut curves_3d,
             mut surface1_uv_curves,
@@ -813,11 +803,8 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             if curve.is_degenerate(k, EFF_ZERO, None)? {
                 // status ignored: an unset point (passed on with
                 // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-                let point = ignored(passed_on(
-                    curve.evaluate_point(k, 0.0),
-                    k.fixes.ssi_proto_topology_statuses_pass_on,
-                )?)?
-                .unwrap_or(Vec3::UNDEF);
+                let point =
+                    ignored(passed_on(curve.evaluate_point(k, 0.0), true)?)?.unwrap_or(Vec3::UNDEF);
                 if self
                     .base
                     .is_point_on_curve(k, point, &curves_3d, Some(ii))?
@@ -843,24 +830,22 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             ii += 1;
         }
 
-        // not upstream (WR-75, opt-in; the fork's AddTangentNodes): report the singular
+        // not upstream (WR-75; the fork's AddTangentNodes): report the singular
         // points where crossing branches meet
-        if k.fixes.ssi_tangent_curve_tracer {
-            super::tangent_curves::add_tangent_nodes(
-                k,
-                &self.base,
-                &tangent_nodes,
-                &mut curves_3d,
-                &mut surface1_uv_curves,
-                &mut surface2_uv_curves,
-                &mut curve_types,
-                &mut deviations,
-            )?;
-        }
+        super::tangent_curves::add_tangent_nodes(
+            k,
+            &self.base,
+            &tangent_nodes,
+            &mut curves_3d,
+            &mut surface1_uv_curves,
+            &mut surface2_uv_curves,
+            &mut curve_types,
+            &mut deviations,
+        )?;
 
-        // not upstream (WR-77, opt-in; the fork's sm_SplitCurvesAtSingularPoints): split
+        // not upstream (WR-77; the fork's sm_SplitCurvesAtSingularPoints): split
         // crossing curves at singular points (parallel normals) they pass through
-        if k.fixes.ssi_split_curves_at_singular_points && !self.base.doing_self_intersection {
+        if !self.base.doing_self_intersection {
             super::singular_splits::split_curves_at_singular_points(
                 k,
                 self.base.surface(SrfIndex::First),
@@ -1052,9 +1037,8 @@ mod tests {
         );
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
-        let run = |pass_on: bool, s1: &Surface, s2: &Surface| {
-            let mut k = Kernel::default();
-            k.fixes.ssi_proto_topology_statuses_pass_on = pass_on;
+        let run = |_pass_on: bool, s1: &Surface, s2: &Surface| {
+            let k = Kernel::default();
             let d1 = s1.natural_uv_domain_with_nurb(&k).unwrap();
             let d2 = s2.natural_uv_domain_with_nurb(&k).unwrap();
             let r = do_intersection(&k, s1, &d1, s2, &d2, [true, true], None, None).unwrap();

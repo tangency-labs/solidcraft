@@ -59,7 +59,7 @@ impl PrimitiveCreation {
         let curves_direction = if same_direction_curves { 1 } else { 2 };
 
         // Pass call along; fork c8f6a31 (WR-662): SER(CreateBlendPrimitive(..)).
-        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+        let p = true;
         let blend = self.create_blend_primitive(
             a,
             brep,

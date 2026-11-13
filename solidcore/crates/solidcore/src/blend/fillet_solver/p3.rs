@@ -716,7 +716,7 @@ impl FilletSolver {
 
         // NewtonRaphson solver
         let mut ls = LocalSolveNd::new(&mut eval_fun, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+        ls.set_skips_failed_evaluations(true);
         ls.set_desired_accuracy(EFF_ZERO_SQ);
         ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
         ls.set_maximum_iterations(30);
@@ -840,7 +840,7 @@ impl EvalNFunctions for SphereSolveFn<'_, '_> {
 /// intersection (`SM_BT_MINIMAL`), their union (`SM_BT_MAXIMAL`), else each interval.
 /// Upstream sets both from `rCIvl1.Intersect/Union(rCIvl2)`; an `Intersect` failure
 /// (disjoint: excluded by the callers) leaves the "inside out" extent, or with
-/// `pass_on` (`fixes.fillet_statuses_pass_on`) is returned.
+/// `pass_on` (`true`) is returned.
 fn trim_pair(
     trim_type: BoundaryTrimmingType,
     ivl1: &Extent1d,
@@ -982,8 +982,7 @@ impl FilletSolver {
             // disjoint intervals: just get the next good interval
             if !civl1.are_disjoint(&civl2, 0.0) {
                 let (ivl1, ivl2) =
-                    trim_pair(trim_type, &civl1, &civl2, k.fixes.fillet_statuses_pass_on)?
-                        .unwrap_or((civl1, civl2));
+                    trim_pair(trim_type, &civl1, &civl2, true)?.unwrap_or((civl1, civl2));
                 // Make sure that length of the intervals is sufficient.
                 let curve1 = class_curve(geometry, &cc1)?;
                 let curve2 = class_curve(geometry, &cc2)?;
@@ -1025,8 +1024,7 @@ impl FilletSolver {
                 found_intersection = true;
                 let (ivl1, ivl2) = match trim_type {
                     BoundaryTrimmingType::Minimal | BoundaryTrimmingType::Maximal => {
-                        trim_pair(trim_type, &civl1, &civl2, k.fixes.fillet_statuses_pass_on)?
-                            .unwrap_or((civl1, civl2))
+                        trim_pair(trim_type, &civl1, &civl2, true)?.unwrap_or((civl1, civl2))
                     }
                     BoundaryTrimmingType::None => {
                         if i > 0 {
@@ -1259,14 +1257,14 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
         // fork 66b02de passes this on (SER)
         if let Some(p) = ignored(crate::error::passed_on(
             rail_curve.evaluate_point(k, ivl.min()),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )?)? {
             pnt_min = p;
         }
         // fork 66b02de passes this on (SER)
         if let Some(p) = ignored(crate::error::passed_on(
             rail_curve.evaluate_point(k, ivl.max()),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )?)? {
             pnt_max = p;
         }
@@ -1316,14 +1314,14 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
         // fork 66b02de passes this on (SER)
         if let Some(p) = ignored(crate::error::passed_on(
             edge_curve.evaluate_point(k, eu_param_min),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )?)? {
             pnt_min = p;
         }
         // fork 66b02de passes this on (SER)
         if let Some(p) = ignored(crate::error::passed_on(
             edge_curve.evaluate_point(k, eu_param_max),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )?)? {
             pnt_max = p;
         }
@@ -1341,12 +1339,12 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
         // fork 66b02de passes this on (SER)
         ignore_status(crate::error::passed_on(
             max_side_ivl.set_min(new_param),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )?)?;
         // fork 66b02de passes this on (SER)
         ignore_status(crate::error::passed_on(
             min_side_ivl.set_max(new_param),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )?)?;
         classification.at_mut(ii + 1)?.set_interval(&max_side_ivl);
         classification.at_mut(ii - 1)?.set_interval(&min_side_ivl);

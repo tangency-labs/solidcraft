@@ -253,9 +253,7 @@ fn curved_shell_tangent_quarter_torus_seam_tracks_boundary() -> solidcore::Resul
     // 2. Analytic wall and round (`revolve_analytic_profile_faces` produces `SmCone`
     //    for the cylindrical wall, and `fillet_exact_round_classes` produces `SmTorus`
     //    for the circular top-rim round).
-    let mut k_analytic = Kernel::default();
-    k_analytic.fixes.revolve_analytic_profile_faces = true;
-    k_analytic.fixes.fillet_exact_round_classes = true;
+    let k_analytic = Kernel::default();
     check_quarter_torus_seam_case(k_analytic)
 }
 

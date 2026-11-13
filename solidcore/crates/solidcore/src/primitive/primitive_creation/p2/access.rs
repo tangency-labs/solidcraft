@@ -126,7 +126,7 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
         self.with_brep_mut(brep, |k, b, this_face, env| {
             // Not the fork (WR-722, opt-in): the walls' exact pcurves are their edge uses'
             // trims (`pbOptCrvOnSurf`), not projected again later
-            let keep = (k.fixes.keep_exact_pcurves && curves.uv_curves.is_some()).then_some(true);
+            let keep = (curves.uv_curves.is_some()).then_some(true);
             crate::topology::brep::p7::make_face_with_curves(
                 k,
                 b,

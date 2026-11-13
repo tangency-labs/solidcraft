@@ -35,7 +35,7 @@
 //!   (`calc_edge_on_tangent_seam`). Its tangency check (`EvaluateBinormal` may make a
 //!   missing UV trim) runs on a copy of the target, which the routine only reads.
 //! - **Near-knot rail trims (opt-in, not upstream).** With
-//!   `fixes.fillet_rail_trim_at_near_knot` (WR-664, the fork's tangency-labs/smlib@7d79866),
+//!   `true` (WR-664, the fork's tangency-labs/smlib@7d79866),
 //!   `TrimRailCurves` trims a rail at its knot next to a vertex's drop when the rail between
 //!   the two is no longer than the zone tolerance (`snap_rail_end_to_knot`).
 //! - **Object model.** As in `blend.fillet_geom_p1` / `_p4`, a fillet vertex, edge or
@@ -141,7 +141,7 @@ const OP_INT_FILLET: &str = "blend::fillet_geom::p5::FilletBrep::calc_fillet_int
 const OP_CROSS: &str = "blend::fillet_geom::p5::FilletBrep::calc_cross_section";
 const OP_SIDE: &str = "blend::fillet_geom::p5::FilletBrep::calc_fillet_int_side_face";
 
-/// Not the fork's (#2406; with `fixes.fillet_round_as_definition`): where the plane `end` holds a section of the round
+/// Not the fork's (#2406; with `true`): where the plane `end` holds a section of the round
 /// `fillet` by its definition (a [`SurfaceKind::ProceduralBlend`]) that runs from one of
 /// `ends` (the rib's start, then its end) to the other, the end rib is that section: the
 /// definition's rational quadratic arc of the ball's circle (`EvaluateDefinition`, order 1)
@@ -610,7 +610,7 @@ fn fillet_edge_update_split_face(
     // fork 9b7cd48 passes this on (SER)
     ignore_non_unported(crate::error::passed_on(
         fb.update_edge_split_face(k, e, orig_face, new_face, target, corners),
-        k.fixes.fillet_statuses_pass_on,
+        true,
     )?)
 }
 
@@ -1141,7 +1141,7 @@ impl FilletBrep {
                                 tol,
                                 solvers,
                             ),
-                            k.fixes.fillet_statuses_pass_on,
+                            true,
                         )?)?;
 
                         // Upstream's `pSurface1` / `pSurface2` point at the fillet
@@ -1468,10 +1468,7 @@ impl FilletBrep {
                     let uv_domain = Extent2d::from_bounds(-x_len, -y_len, 2.0 * x_len, 2.0 * y_len);
                     let mut plane = Plane::new(origin, x_vector, y_vector, uv_scale, &uv_domain);
                     // fork 9b7cd48 passes this on (SER)
-                    ignore_non_unported(crate::error::passed_on(
-                        plane.make_nurb(),
-                        k.fixes.fillet_statuses_pass_on,
-                    )?)?;
+                    ignore_non_unported(crate::error::passed_on(plane.make_nurb(), true)?)?;
                     (
                         Some(Surface::from(plane)),
                         Some(ExecutiveErrorObject::TempEndPlane(e)),
@@ -1556,17 +1553,13 @@ impl FilletBrep {
             } else if let Some(section) = match &surface {
                 // Not the fork's (#2406): an End's plane that holds a section of a round
                 // by its definition through both rail ends cuts the round in that section
-                Some(surface)
-                    if k.fixes.fillet_round_as_definition && the_corner.end_cap.is_some() =>
-                {
-                    definition_section_in_plane(
-                        k,
-                        &fillet_surface1,
-                        surface,
-                        [start_pnt, end_pnt],
-                        approx_tol,
-                    )?
-                }
+                Some(surface) if the_corner.end_cap.is_some() => definition_section_in_plane(
+                    k,
+                    &fillet_surface1,
+                    surface,
+                    [start_pnt, end_pnt],
+                    approx_tol,
+                )?,
                 _ => None,
             } {
                 Ok(section)
@@ -1761,20 +1754,18 @@ impl FilletBrep {
         // bounds the end face and a face that is not the side face this edge runs in:
         // its extension is where that side face meets the end face's extension
         // (tangency-labs/smlib@d5ebcb3, WR-457).
-        if k.fixes.fillet_nx1_tangent_side_edge {
-            if let Some(side) = self.fillet_edge(e)?.original_face() {
-                if !faces.contains(&side) {
-                    let mut end_face = None;
-                    for &f in &faces {
-                        if extended_surface(the_corner, f)?.is_some() {
-                            end_face = Some(f);
-                            break;
-                        }
+        if let Some(side) = self.fillet_edge(e)?.original_face() {
+            if !faces.contains(&side) {
+                let mut end_face = None;
+                for &f in &faces {
+                    if extended_surface(the_corner, f)?.is_some() {
+                        end_face = Some(f);
+                        break;
                     }
-                    let end_face = end_face
-                        .ok_or_else(|| SolidError::blend_missing(OP_EXT_EDGE, "the end face"))?;
-                    faces = vec![side, end_face];
                 }
+                let end_face = end_face
+                    .ok_or_else(|| SolidError::blend_missing(OP_EXT_EDGE, "the end face"))?;
+                faces = vec![side, end_face];
             }
         }
         let mut surfaces: Vec<Option<Surface>> = Vec::with_capacity(2);
@@ -2445,10 +2436,7 @@ impl FilletBrep {
                 )?;
                 let mut c = approx.curve;
                 // fork 9b7cd48 passes this on (SER)
-                ignore_non_unported(crate::error::passed_on(
-                    c.convert_to_2d(k),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?;
+                ignore_non_unported(crate::error::passed_on(c.convert_to_2d(k), true)?)?;
                 c
             }
         } else {
@@ -2569,10 +2557,10 @@ impl FilletBrep {
             .fillet_solver()
             .ok_or_else(|| SolidError::blend_missing(OP_TRIM, "the geometry's fillet solver"))?;
         let app_tol = resolve(sid, OP_TRIM)?.approx_tol_3d;
-        // Opt-in (`fixes.fillet_rail_trim_at_near_knot`, WR-664; the fork's
+        // Opt-in (`true`, WR-664; the fork's
         // tangency-labs/smlib@7d79866): the target B-rep's zone tolerance
         // (`SmTol::GetZoneTol3d(GetEdgeuse(0)->GetBrep())`).
-        let zone_tol = if k.fixes.fillet_rail_trim_at_near_knot {
+        let zone_tol = if true {
             resolve(sid, OP_TRIM)?
                 .edgeuse(0)?
                 .ok_or_else(|| SolidError::blend_missing(OP_TRIM, "the solver's edge use"))?;
@@ -2792,7 +2780,7 @@ impl FilletBrep {
                 // clip the interval to drop points; fork 9b7cd48 passes this on (SER)
                 ignore_non_unported(crate::error::passed_on(
                     trim_ivl.set_min_max(param1, param2),
-                    k.fixes.fillet_statuses_pass_on,
+                    true,
                 )?)?;
 
                 // Trim 3D curve and both UVTrimCurves (each may snap sIvl by tol to
@@ -3132,7 +3120,7 @@ impl FilletBrep {
                     // fork 9b7cd48 passes this on (SER)
                     ignore_non_unported(crate::error::passed_on(
                         trim_ivl.set_min_max(param1, param2),
-                        k.fixes.fillet_statuses_pass_on,
+                        true,
                     )?)?;
                     let mut copy_curve = orig_rail_curve.copy(k)?;
                     copy_curve.trim(k, &mut trim_ivl, TrimMode::Notify)?;
@@ -3256,7 +3244,7 @@ fn user_surface(
 /// tolerance when there is no edge. `SmBSplineCurve::Trim` maps it to parameter space
 /// to find degenerate end spans to remove.
 /// The fork's `sm_SnapRailEndToKnot` (tangency-labs/smlib@7d79866, opt-in
-/// `fixes.fillet_rail_trim_at_near_knot`, WR-664), not upstream: where a rail is trimmed
+/// `true`, WR-664), not upstream: where a rail is trimmed
 /// at an end vertex, the parameter `param` found for the vertex, or the rail's knot next
 /// to it inside `trim_ivl` (above it for the trim's start, below it for its end) when the
 /// rail between the two is no longer than `zone_tol`. A trim there would leave an end span

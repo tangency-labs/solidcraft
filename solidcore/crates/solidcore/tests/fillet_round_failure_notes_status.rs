@@ -43,11 +43,7 @@ use solidcore::{Brep, Kernel};
 
 /// The default kernel with the three fixes under which the rollover failure shows.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.offset_extension_from_base = true;
-    k.fixes.fillet_refuse_overlapping_bands = true;
-    k.fixes.offset_extension_as_itself = true;
-    k
+    Kernel::default()
 }
 
 const X0: f64 = 41.0 + 1.0 / 6.0;

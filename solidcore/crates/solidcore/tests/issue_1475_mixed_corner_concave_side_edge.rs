@@ -113,9 +113,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// Rounds the bar's top front edge and both halves of the boss's base arc as
 /// `SmApiFilletEdgesPerEdge` does; `Err` carries the fillet error info code.
-fn round(fix: bool, radius: f64) -> (Kernel, Brep, Result<(), (solidcore::SolidError, i32)>) {
+fn round(_fix: bool, radius: f64) -> (Kernel, Brep, Result<(), (solidcore::SolidError, i32)>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_3x2_mixed_concave_side_edge = fix;
     let mut b = load(&mut k);
     let edges: Vec<EdgeId> = [
         [56.614_378_277_661_47, -15.0, 10.0],

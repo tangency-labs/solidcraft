@@ -26,10 +26,8 @@ use solidcore::Kernel;
 const TOL: f64 = 1e-3;
 const SEMI: f64 = 70.0;
 
-fn kernel(on: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.cone_iso_circle_at_axial_height = on;
-    k
+fn kernel(_on: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn placement() -> Axis2Placement {

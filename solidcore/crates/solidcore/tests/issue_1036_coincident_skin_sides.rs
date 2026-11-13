@@ -174,9 +174,8 @@ fn issue_1036_probe() {
     // the results (run of 2026-10-27).
     for fix in ["classify_edge_interval", "boolean_cleanup_removes_slits"] {
         let mut k = Kernel::default();
-        match fix {
-            "classify_edge_interval" => k.fixes.classify_edge_interval = true,
-            _ => k.fixes.boolean_cleanup_removes_slits = true,
+        if fix == "classify_edge_interval" {
+            k.fixes.classify_edge_interval = true;
         }
         for (name, op) in [("A - B", 0), ("A n B", 1), ("A u B", 2)] {
             let (a, b) = (

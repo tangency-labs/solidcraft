@@ -13,7 +13,6 @@ use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -22,12 +21,6 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::edge;
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel};
-
-fn kernel(set: impl FnOnce(&mut UpstreamFixes)) -> Kernel {
-    let mut k = Kernel::default();
-    set(&mut k.fixes);
-    k
-}
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     let store = AttributeStore::default();
@@ -169,7 +162,7 @@ const NO_ROOM: i32 = FilletErrorType::NoRoom as i32;
 fn blends_larger_than_their_faces_are_refused() {
     for xsect in [0, 1] {
         for size in [6.0, 9.0] {
-            let mut k = kernel(|f| f.fillet_refuse_rails_leaving_faces = true);
+            let mut k = Kernel::default();
             assert_eq!(
                 holed_cube_blend(&mut k, size, xsect),
                 Outcome::Refused { code: NO_ROOM },
@@ -178,7 +171,7 @@ fn blends_larger_than_their_faces_are_refused() {
         }
         let mut k = Kernel::default();
         let off = holed_cube_blend(&mut k, 4.0, xsect);
-        let mut k = kernel(|f| f.fillet_refuse_rails_leaving_faces = true);
+        let mut k = Kernel::default();
         assert_eq!(holed_cube_blend(&mut k, 4.0, xsect), off);
     }
 }
@@ -209,37 +202,27 @@ fn cylinder_rim(k: &mut Kernel, size: f64, xsect: u32) -> Outcome {
 /// builds either way, as does everything below the full width.
 #[test]
 fn chamfer_as_wide_as_its_face_is_refused() {
-    let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = true);
+    let mut k = Kernel::default();
     assert_eq!(
         cylinder_rim(&mut k, 10.0, 0),
         Outcome::Refused { code: NO_ROOM }
     );
-    let mut k = Kernel::default();
-    assert!(!matches!(
-        cylinder_rim(&mut k, 10.0, 0),
-        Outcome::Refused { code: NO_ROOM }
-    ));
 
     // the round of 10: the cylinder (pi 100 10) and a hemisphere (2/3 pi 1000)
     let hemisphere = std::f64::consts::PI * (1000.0 + 2000.0 / 3.0);
-    for on in [false, true] {
-        let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = on);
-        let Outcome::Built { volume, manifold } = cylinder_rim(&mut k, 10.0, 1) else {
-            panic!("on {on}: refused");
-        };
+    let mut k = Kernel::default();
+    let Outcome::Built { volume, manifold } = cylinder_rim(&mut k, 10.0, 1) else {
+        panic!("refused");
+    };
+    assert!(manifold && near(volume, hemisphere, 5e-3), "{volume}");
+    for xsect in [0, 1] {
         assert!(
-            manifold && near(volume, hemisphere, 5e-3),
-            "on {on}: {volume}"
+            matches!(
+                cylinder_rim(&mut k, 9.99, xsect),
+                Outcome::Built { manifold: true, .. }
+            ),
+            "xsect {xsect}"
         );
-        for xsect in [0, 1] {
-            assert!(
-                matches!(
-                    cylinder_rim(&mut k, 9.99, xsect),
-                    Outcome::Built { manifold: true, .. }
-                ),
-                "on {on} xsect {xsect}"
-            );
-        }
     }
 }
 
@@ -266,7 +249,7 @@ fn no_room_reason(
 /// cube's chamfer of 5, once refused under another code (WR-301's rollover), builds.
 #[test]
 fn no_room_refusals_are_named() {
-    let mut k = kernel(|f| f.fillet_refuse_rails_leaving_faces = true);
+    let mut k = Kernel::default();
     let mut b = holed_cube(&mut k);
     let e = edge_between(&k, &b, [0.0, 0.0, 20.0], [20.0, 0.0, 20.0]);
     assert_eq!(
@@ -274,7 +257,7 @@ fn no_room_refusals_are_named() {
         Some(NoRoomReason::RailLeavesFace)
     );
 
-    let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = true);
+    let mut k = Kernel::default();
     let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0).unwrap();
     let rim = *b
         .edge_list()

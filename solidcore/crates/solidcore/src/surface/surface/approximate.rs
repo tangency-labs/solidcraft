@@ -220,7 +220,7 @@ impl Surface {
         *achieved_tol = -1.0;
         // with the opt-in fix the statuses SMLib drops here are passed on
         // (WR-663; tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
 
         // low work - when asked, just copy BSplines
         if just_copy_b_splines && self.is_kind_of(B_SPLINE_SURFACE_TYPE)? {

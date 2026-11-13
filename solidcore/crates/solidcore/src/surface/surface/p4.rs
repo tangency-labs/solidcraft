@@ -286,7 +286,7 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
     ) -> Result<bool> {
         let k = self.kernel;
         // (the fork's `SER(Unitize)`, with the opt-in fix: WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         let directed = self.solver_operation == SolverOperation::Signed3dDirectedMinimize;
         let count = if directed { 4 } else { 3 };
         check_len(x, f, count, OP_CS_NORMALIZE)?;
@@ -705,7 +705,7 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
     ) -> Result<bool> {
         let k = self.kernel;
         // (the fork's `SER(Unitize)`, with the opt-in fix: WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         let directed = self.solver_operation == SolverOperation::Signed3dDirectedMinimize;
         let count = if directed { 5 } else { 4 };
         check_len(x, f, count, OP_SS_NORMALIZE)?;
@@ -888,7 +888,7 @@ impl SurfaceEval<'_> {
         }
         // upstream ignores the status (`Eval();`) and reads the matrix as it stands
         // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        ignore_or_pass_on(self.eval(), k.fixes.query_statuses_pass_on)?;
+        ignore_or_pass_on(self.eval(), true)?;
 
         let uv = self.uv();
         let (u_left, v_left) = self.sides();
@@ -969,7 +969,7 @@ impl SurfaceEval<'_> {
 
         // upstream ignores the statuses of both evaluations (passed on with the opt-in
         // fix, WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         ignore_or_pass_on(self.eval(), pass)?;
         ignore_or_pass_on(self.eval_normal(k), pass)?;
 
@@ -1144,7 +1144,7 @@ pub fn is_point_on_normal(
                         Side::Left,
                         Side::Left,
                     ),
-                    k.fixes.query_statuses_pass_on,
+                    true,
                 )?;
                 if let Some(pd) = srf_pd {
                     if let (Some(&p0), Some(&p1)) = (pd.first(), pd.get(1)) {
@@ -1956,7 +1956,7 @@ pub fn classify_curve_surface_xsect_point_with(
     edge_tolerance: Option<f64>,
 ) -> Result<XsectClassification> {
     // (the fork's `SER`s, with the opt-in fix: WR-663, tangency-labs/smlib 21dcf69)
-    let pass = k.fixes.query_statuses_pass_on;
+    let pass = true;
     let mut out = XsectClassification {
         found_guess: false,
         new_uv_guess: Point2::UNDEF,

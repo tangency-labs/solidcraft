@@ -633,9 +633,7 @@ fn read_curve_type(db: &mut DatabaseReader) -> Result<(i64, u64)> {
 fn read_body(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<CurveBoundedSurface> {
     // file type
     let ascii = db.file_type() == FileType::Ascii;
-    let fix = k
-        .fixes
-        .curve_bounded_surface_read_uv_type_and_implicit_outer;
+    let fix = true;
 
     // locals
     let (l3d_boundaries_size, luv_boundaries_size, implicit_outer) = if ascii {
@@ -871,9 +869,7 @@ mod tests {
     }
 
     fn kernel_with_wr43() -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes
-            .curve_bounded_surface_read_uv_type_and_implicit_outer = true;
+        let k = Kernel::default();
         k
     }
 
@@ -1016,22 +1012,6 @@ mod tests {
 
     #[test]
     fn wr43_mismatched_3d_and_uv_curve_types_and_implicit_false() {
-        let mut fixes = UpstreamFixes::default();
-        assert!(!fixes.curve_bounded_surface_read_uv_type_and_implicit_outer);
-        *fixes
-            .flag_mut("curve_bounded_surface_read_uv_type_and_implicit_outer")
-            .unwrap() = true;
-        assert!(fixes.curve_bounded_surface_read_uv_type_and_implicit_outer);
-        assert_eq!(
-            fixes.flags().find(|&(name, _)| {
-                name == "curve_bounded_surface_read_uv_type_and_implicit_outer"
-            }),
-            Some((
-                "curve_bounded_surface_read_uv_type_and_implicit_outer",
-                true
-            ))
-        );
-
         let k_def = Kernel::default();
         let k_opt = kernel_with_wr43();
 

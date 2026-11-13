@@ -39,7 +39,7 @@
 //!   a window past 360° by no more than `SM_EFF_ZERO` of a turn as the whole turn, where
 //!   upstream asks `CreateCircleSegment` for the span as is and is refused past 360°.
 //! - **Meridians keep their kind (opt-in, not upstream).** With
-//!   `fixes.plane_first_torus_section_exact` (WR-721, #2405), `IntersectWithPlane` through the
+//!   `true` (WR-721, #2405), `IntersectWithPlane` through the
 //!   axis rotates a circle generator (a torus's) as the circle it is, where upstream rotates
 //!   its `SmBSplineCurve` part.
 //! - **Derived class.** `SmSurfOfRevolution` derives from `SmBSplineSurface`; the base
@@ -1738,7 +1738,7 @@ impl SurfOfRevolution {
                         // Not upstream (WR-721, #2405, opt-in): a circle generator (a
                         // torus's) rotated as the circle it is, so the meridian keeps its
                         // kind
-                        CurveKind::Ellipse(_) if k.fixes.plane_first_torus_section_exact => {
+                        CurveKind::Ellipse(_) if true => {
                             let mut c = gen.clone();
                             c.transform(k, &trans, None)?;
                             c

@@ -671,7 +671,7 @@ impl Surface {
                         non_zero_tangents: false,
                     },
                 ))?;
-                if evaluated.is_none() && k.fixes.query_statuses_pass_on {
+                if evaluated.is_none() {
                     singular = false;
                     approx_singular = false;
                     break;
@@ -805,7 +805,7 @@ impl Surface {
         let mut tight_box = Extent3d::new();
         // with the opt-in fix the statuses SMLib drops here are passed on (WR-663,
         // tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
 
         // Special case for 2x2 B-Spline surfaces (SM_CAST_NONNULL_PTR(SmBSplineSurface)):
         let bspline_based = !matches!(
@@ -988,7 +988,7 @@ impl Surface {
     ) -> Result<CoverCoincident> {
         // with the opt-in fix the statuses SMLib drops here are passed on (WR-663,
         // tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         // init outputs
         let failure = CoverCoincident {
             success: false,
@@ -1023,13 +1023,11 @@ impl Surface {
         // extension degrades with distance; for a plane, grow the search domain to the
         // orthogonal projection of the other surface's bounding box, which holds every
         // point the checks below drop.
-        if k.fixes.boolean2d_plane_covers_far_faces {
-            if let SurfaceKind::Plane(plane) = self.kind() {
-                let mut other_box = other.calculate_tight_bounding_box(k, &other_dom)?;
-                other_box.expand_absolute(tol);
-                for corner in other_box.corners() {
-                    big_domain.add_point(plane.project_point_to_uv_domain(corner));
-                }
+        if let SurfaceKind::Plane(plane) = self.kind() {
+            let mut other_box = other.calculate_tight_bounding_box(k, &other_dom)?;
+            other_box.expand_absolute(tol);
+            for corner in other_box.corners() {
+                big_domain.add_point(plane.project_point_to_uv_domain(corner));
             }
         }
 
@@ -1242,7 +1240,7 @@ impl Surface {
         // (`Kernel::fixes.cover_wraps_across_closed_seam`); upstream refuses every crossing.
         // `bAcrossWrappedSeams` FALSE asks for the cover only within one period, as
         // without the fork (tangency-labs/smlib@b518bbe).
-        let wraps_across_seam = k.fixes.cover_wraps_across_closed_seam && across_wrapped_seams;
+        let wraps_across_seam = across_wrapped_seams;
         let (wraps_u, wraps_v) = if wraps_across_seam {
             let this_domain = self.natural_uv_domain_with_nurb(k)?;
             // The steps are in STEP parameters (u round a surface of revolution's axis), the
@@ -1424,8 +1422,7 @@ impl Surface {
         // merge will use: its normal must not vanish or turn back between neighbouring
         // samples of a grid over that domain. Opt-in (`Kernel::fixes.cover_refuses_folded_continuation`,
         // WR-407); upstream merges onto the continuation.
-        if k.fixes.cover_refuses_folded_continuation
-            && out_of_bounds_enabled(self).is_some()
+        if out_of_bounds_enabled(self).is_some()
             && !update_domain.is_contained_by(&orig_domain, 0.0)
         {
             let Some((_, reference)) = self.step_normal(k, orig_domain.evaluate(0.5, 0.5))? else {
@@ -1537,7 +1534,7 @@ impl Surface {
         // outside because of the problems with the surface normals being the same.
         let steepest_descent = false;
         // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        let plane_norm = if k.fixes.query_statuses_pass_on {
+        let plane_norm = if true {
             plane_normal.unitize()?
         } else {
             plane_normal.unitize_or_z()
@@ -1557,7 +1554,7 @@ impl Surface {
             sq_node_tol,
         );
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+        solver.set_skips_failed_evaluations(true);
 
         solver.set_desired_accuracy(EFF_ZERO_SQ);
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
@@ -1628,7 +1625,7 @@ impl Surface {
         let mut equations =
             SsNormalizeEnfo::new(k, self, other, operation, Some(opt_vectors), EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+        solver.set_skips_failed_evaluations(true);
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
 
         // Solve it
@@ -1717,7 +1714,7 @@ impl Surface {
         // Construct the Newton-Raphson Solver class with the surf/surf/surf equation set
         let mut equations = SssIntersectEnfo::new(k, s1, s2, s3, EFF_ZERO_SQ);
         let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
-        solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+        solver.set_skips_failed_evaluations(true);
 
         // set the solver's exit behavior for solutions that run outside the boundary
         solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
@@ -2039,8 +2036,7 @@ mod tests {
         let s = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::default());
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
+        let on = Kernel::default();
         assert!(s.calculate_tight_bounding_box(&off, &dom).is_ok());
         assert!(s.calculate_tight_bounding_box(&on, &dom).is_err());
     }
@@ -2142,12 +2138,11 @@ mod tests {
         Ok((covered, this.step_uv_domain().u_interval().max()))
     }
 
-    /// With `fixes.cover_refuses_folded_continuation` (WR-407, #434; SolidCraft change,
+    /// With `true` (WR-407, #434; SolidCraft change,
     /// tangency-labs/smlib 1b6f5fa) the cover across the fold fails and changes nothing.
     #[test]
     fn issue_434_cover_refuses_a_continuation_that_folds() -> Result<()> {
-        let mut k = Kernel::default();
-        k.fixes.cover_refuses_folded_continuation = true;
+        let k = Kernel::default();
         let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
         assert!(
             !covered.success,
@@ -2167,7 +2162,6 @@ mod tests {
     #[test]
     fn issue_434_default_refuses_the_fold_of_a_planar_sheet() -> Result<()> {
         let k = Kernel::default();
-        assert!(!k.fixes.cover_refuses_folded_continuation);
         let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
         assert!(
             !covered.success,

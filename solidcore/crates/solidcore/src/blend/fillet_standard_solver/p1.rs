@@ -58,7 +58,7 @@
 //!   each circle of fewer arcs again with the most (`ArcCounts`), as the approximated
 //!   arcs' second pass does with knots; and each point section takes the nearest
 //!   circle's arcs and weights (`collapse_point_sections`).
-//! - **Knife edges.** With `fixes.fillet_knife_edge_rounds` (WR-570, the fork's
+//! - **Knife edges.** With `true` (WR-570, the fork's
 //!   tangency-labs/smlib `b7ec55b`, not in SMLib at the pin) the edge-use constructors
 //!   orient their offsets by `sector_sides` (`sm_SectorSides`), which also sides a
 //!   cusp's faces; off, they keep upstream's tangency refusal.
@@ -427,7 +427,7 @@ fn edgeuse_orientations(
 }
 
 /// `sm_SectorSides(rpEdgeuses, dLength, rdSides)` (the fork's tangency-labs/smlib
-/// `b7ec55b`, `fixes.fillet_knife_edge_rounds`): the side of each face of the sector
+/// `b7ec55b`, `true`): the side of each face of the sector
 /// between `eus[0]` and its radial `eus[1]` on which the other face lies, at the middle
 /// of the edge, `+1.0` when face `1 - i` lies on the side face `i`'s surface normal
 /// points to, else `-1.0` (the sign of face `i`'s offset). Where the faces are tangent
@@ -611,7 +611,7 @@ pub fn constant_radius_from_edgeuse(
     }
 
     // Create offset surfaces of appropriate radius in appropriate direction.
-    let ([eu0, eu1], orientations) = if k.fixes.fillet_knife_edge_rounds {
+    let ([eu0, eu1], orientations) = if true {
         // (fork b7ec55b) offset each surface to the side of it the other face lies on
         // (sm_SectorSides), a cusp's faces too
         let radial = edgeuse::radial(brep, edgeuse)?;
@@ -2410,7 +2410,7 @@ fn bspline_is_arc(k: &Kernel, c: &BSplineCurve) -> Result<Option<(Axis2Placement
 }
 
 /// `GetKnots` with the status ignored: the unique knots, or `old` on failure (with
-/// `pass_on`, `fixes.fillet_statuses_pass_on`, the failure is returned).
+/// `pass_on`, `true`, the failure is returned).
 fn knots_or(c: &BSplineCurve, old: Vec<f64>, pass_on: bool) -> Result<Vec<f64>> {
     // fork 66b02de passes this on (SER)
     Ok(ignored(crate::error::passed_on(c.knots(None), pass_on)?)?.map_or(old, |k| k.0))
@@ -2430,7 +2430,7 @@ fn knot(knots: &[f64], i: usize, op: &'static str) -> Result<f64> {
 /// is `SM_ERR`; otherwise upstream loops forever, here
 /// [`SolidError::InvalidInput`]). Returns the knots of `rail1`. The insertion and
 /// `GetKnots` statuses are ignored, or returned with `pass_on`
-/// (`fixes.fillet_statuses_pass_on`).
+/// (`true`).
 fn add_section_knots(
     rail1: &mut BSplineCurve,
     rail2: &mut BSplineCurve,
@@ -2702,7 +2702,7 @@ fn section_mut<'a>(
 /// the end cross section to its copy scaled, translated and rotated onto the rail
 /// tangents `start` / `end` (`CreateByScaleTransRot`), over `[curve interval] x [0, 1]`
 /// (the domain status ignored, or returned with `pass_on`,
-/// `fixes.fillet_statuses_pass_on`).
+/// `true`).
 fn deriv_surface(
     gen_curve: &BSplineCurve,
     start: Vec3,
@@ -2734,7 +2734,7 @@ fn tangent_at(c: &BSplineCurve, t: f64, op: &'static str) -> Result<Vec3> {
 
 /// Inserts the mid knots of the first and last spans of `rail1` into both rails (the
 /// G1 continuity set-up of the generators; statuses ignored, or returned with
-/// `pass_on`, `fixes.fillet_statuses_pass_on`).
+/// `pass_on`, `true`).
 fn insert_end_span_knots(
     rail1: &mut BSplineCurve,
     rail2: &mut BSplineCurve,
@@ -2822,7 +2822,7 @@ fn equalise_singular_rows(
                 // fork 66b02de passes this on (SER)
                 ignore_status(crate::error::passed_on(
                     surface.set_control_point(form, idx_u, ii, pt1, w1),
-                    k.fixes.fillet_statuses_pass_on,
+                    true,
                 )?)?;
             }
         }
@@ -2960,43 +2960,34 @@ impl CircularCrossSectionFsg {
 
         // Surface creation requires 4 or more cross sections so add
         // some extra knots if needed.
-        let knots = add_section_knots(
-            rail1,
-            rail2,
-            knots,
-            true,
-            OP,
-            k.fixes.fillet_statuses_pass_on,
-        )?;
+        let knots = add_section_knots(rail1, rail2, knots, true, OP, true)?;
 
         // Where the rails meet at an end of the fillet (a degenerate corner whose cross
         // section is a point), both rails end at that one point: each rail is lifted
         // from its own surface, and their ends differ by the model's accuracy, so the
         // skinned surface came out close to singular there instead of exactly
         // (tangency-labs/smlib@5fdefb9, WR-594).
-        if k.fixes.fillet_rails_meet_at_one_end_point {
-            for end in 0..2 {
-                let ivl = rail1.natural_interval();
-                let t = if end == 0 { ivl.min() } else { ivl.max() };
-                let end1 = rail1.evaluate_point(t)?;
-                let end2 = rail2.evaluate_point(t)?;
-                if end1.distance(end2) >= approx_tol_3d {
-                    continue;
-                }
-                let meet = (end1 + end2) / 2.0;
-                for rail in [&mut *rail1, &mut *rail2] {
-                    let idx = if end == 0 {
-                        0
-                    } else {
-                        rail.number_control_points()?
-                            .checked_sub(1)
-                            .ok_or_else(|| {
-                                SolidError::blend_failed(OP, "the rail has no control points")
-                            })?
-                    };
-                    let (_, w) = rail.control_point(ControlPointForm::EuclideanRational, idx)?;
-                    rail.set_control_point(ControlPointForm::EuclideanRational, idx, meet, w)?;
-                }
+        for end in 0..2 {
+            let ivl = rail1.natural_interval();
+            let t = if end == 0 { ivl.min() } else { ivl.max() };
+            let end1 = rail1.evaluate_point(t)?;
+            let end2 = rail2.evaluate_point(t)?;
+            if end1.distance(end2) >= approx_tol_3d {
+                continue;
+            }
+            let meet = (end1 + end2) / 2.0;
+            for rail in [&mut *rail1, &mut *rail2] {
+                let idx = if end == 0 {
+                    0
+                } else {
+                    rail.number_control_points()?
+                        .checked_sub(1)
+                        .ok_or_else(|| {
+                            SolidError::blend_failed(OP, "the rail has no control points")
+                        })?
+                };
+                let (_, w) = rail.control_point(ControlPointForm::EuclideanRational, idx)?;
+                rail.set_control_point(ControlPointForm::EuclideanRational, idx, meet, w)?;
             }
         }
 
@@ -3142,17 +3133,12 @@ impl CircularCrossSectionFsg {
                 let end = tangent_at(rail2, t, OP)?;
 
                 // save the crossTangent surface
-                *slot = Some(deriv_surface(
-                    gen_curve,
-                    st,
-                    end,
-                    k.fixes.fillet_statuses_pass_on,
-                )?);
+                *slot = Some(deriv_surface(gen_curve, st, end, true)?);
             }
 
             // add a new knot in the NewSurface start/end intervals
             // to allow the newSurface to interpolate the computed crossTangent values
-            insert_end_span_knots(rail1, rail2, OP, k.fixes.fillet_statuses_pass_on)?;
+            insert_end_span_knots(rail1, rail2, OP, true)?;
         }
 
         // Build the Skinned Surface to interpolate crossSections and optional end Cross Tangents

@@ -160,34 +160,22 @@ impl BSplineVolume {
 
         // low work - no geometric tests
         if !calc_geometric {
-            if k.fixes.volume_representational_end_continuities {
-                out.conts = vec![ContinuityType::Discontinuous; knot_cnt];
-                let interior_cnt = knot_cnt.saturating_sub(2);
-                for (c, &mult) in out
-                    .conts
-                    .iter_mut()
-                    .skip(1)
-                    .zip(mults.iter().skip(1))
-                    .take(interior_cnt)
-                {
-                    *c = knot_continuity(degree, mult);
-                    if lower(*c, out.min_cont) {
-                        out.min_cont = *c;
-                    }
-                }
-                return Ok(());
-            }
-            // size rConts array (new elements are zero: SM_CT_UNDEFINED)
-            out.conts = vec![ContinuityType::Undefined; knot_cnt];
-            // compute conts at each internal knot
-            for (c, &mult) in out.conts.iter_mut().zip(&mults).take(knot_cnt - 1) {
+            out.conts = vec![ContinuityType::Discontinuous; knot_cnt];
+            let interior_cnt = knot_cnt.saturating_sub(2);
+            for (c, &mult) in out
+                .conts
+                .iter_mut()
+                .skip(1)
+                .zip(mults.iter().skip(1))
+                .take(interior_cnt)
+            {
                 *c = knot_continuity(degree, mult);
-                // save min continuity
                 if lower(*c, out.min_cont) {
                     out.min_cont = *c;
                 }
             }
             return Ok(());
+            // size rConts array (new elements are zero: SM_CT_UNDEFINED)
         }
 
         // Get the knots going in the other (u/v/w) directions.
@@ -538,8 +526,7 @@ mod tests {
     #[test]
     fn wr49_single_span_clamped_volume_ends_and_has_discontinuities() {
         let k_def = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.volume_representational_end_continuities = true;
+        let k_on = Kernel::default();
 
         let kc: &[f64] = &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
         let tricubic = volume([3, 3, 3], [kc, kc, kc]);
@@ -602,8 +589,7 @@ mod tests {
     #[test]
     fn wr49_multi_span_cubic_interior_continuities() {
         let k_def = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.volume_representational_end_continuities = true;
+        let k_on = Kernel::default();
 
         let klin: &[f64] = &[0.0, 0.0, 1.0, 1.0];
         let ku_smooth: &[f64] = &[0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0];
@@ -677,14 +663,12 @@ mod tests {
     #[test]
     fn wr49_volume_wrapper_and_flag_lookup() {
         let k_def = Kernel::default();
-        assert!(!k_def.fixes.volume_representational_end_continuities);
 
         let mut k_on = Kernel::default();
         *k_on
             .fixes
             .flag_mut("volume_representational_end_continuities")
             .unwrap() = true;
-        assert!(k_on.fixes.volume_representational_end_continuities);
         assert!(k_on
             .fixes
             .flags()

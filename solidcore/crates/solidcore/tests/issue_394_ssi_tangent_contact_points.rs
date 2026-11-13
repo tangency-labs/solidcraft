@@ -6,9 +6,7 @@
 //! The cases are the ssi-corpus' `c3n_parab_apex`, `c3n_four_points` and
 //! `y23_t6_ex4_tangential_point` (jyviko/ssi-corpus `b04c8a6`, surfaces copied here),
 //! intersected as `difftest --ssi-corpus` does (natural domains, edges on, approximation
-//! tolerance `1e-6`). By default the port returns nothing, as the pinned C++ does; with
-//! `Kernel::fixes.ssi_tangent_contact_points` each true contact comes back as one
-//! degenerate `TOUCHING` curve.
+//! tolerance `1e-6`). Each true contact comes back as one degenerate `TOUCHING` curve.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -61,9 +59,8 @@ fn plane_z0() -> Surface {
     Surface::from(plane)
 }
 
-fn intersect(fix: bool, a: &Surface, b: &Surface) -> SurfaceIntersection {
-    let mut k = Kernel::default();
-    k.fixes.ssi_tangent_contact_points = fix;
+fn intersect(a: &Surface, b: &Surface) -> SurfaceIntersection {
+    let k = Kernel::default();
     let da = a.natural_uv_domain_with_nurb(&k).unwrap();
     let db = b.natural_uv_domain_with_nurb(&k).unwrap();
     let tol = approx_tol3d(&k, 1e-6);
@@ -192,28 +189,16 @@ fn y23_t6_ex4() -> (Surface, Surface) {
 }
 
 #[test]
-fn issue_394_default_misses_the_paraboloid_apex() {
-    let (a, b) = parab_apex();
-    assert!(intersect(false, &a, &b).curves_3d.is_empty());
-}
-
-#[test]
 fn issue_394_fix_finds_the_paraboloid_apex() {
     let (a, b) = parab_apex();
-    let x = intersect(true, &a, &b);
+    let x = intersect(&a, &b);
     assert_points(&touching_points(&x, &a, &b), &[[0.0, 0.0, 0.0]], 1e-9);
-}
-
-#[test]
-fn issue_394_default_misses_the_four_points() {
-    let (a, b) = four_points();
-    assert!(intersect(false, &a, &b).curves_3d.is_empty());
 }
 
 #[test]
 fn issue_394_fix_finds_the_four_points() {
     let (a, b) = four_points();
-    let x = intersect(true, &a, &b);
+    let x = intersect(&a, &b);
     assert_points(
         &touching_points(&x, &a, &b),
         &[
@@ -227,15 +212,9 @@ fn issue_394_fix_finds_the_four_points() {
 }
 
 #[test]
-fn issue_394_default_misses_the_y23_tangential_point() {
-    let (a, b) = y23_t6_ex4();
-    assert!(intersect(false, &a, &b).curves_3d.is_empty());
-}
-
-#[test]
 fn issue_394_fix_finds_the_y23_tangential_point() {
     let (a, b) = y23_t6_ex4();
-    let x = intersect(true, &a, &b);
+    let x = intersect(&a, &b);
     // the corpus' truth, to its own data's precision (the control points have six to
     // eight digits)
     assert_points(

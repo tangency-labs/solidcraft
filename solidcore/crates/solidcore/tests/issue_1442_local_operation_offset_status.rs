@@ -28,8 +28,6 @@ use solidcore::Kernel;
 
 fn move_side() -> solidcore::Result<()> {
     let mut k = Kernel::default();
-    k.fixes.offset_resolve_crossing_loops = true;
-    k.fixes.offset_walls_touch_refused = true;
     let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();
     let hole = create_cylinder(&mut k, Point3::new(5.0, 20.0, -1.0), 2.0, 12.0).unwrap();
     let mut part = boolean_difference(&mut k, plate, hole).unwrap();

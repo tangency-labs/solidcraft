@@ -1803,7 +1803,7 @@ impl<'target> FilletSession<'target> {
     /// per edge, the offset of the second edge use's surface (`radii` gives the first's).
     /// With a linear cross-section that is a chamfer with setbacks `radii[i]` and
     /// `second_radii[i]`. It runs the same `SetFilletParameters`, so the fork's vertex-fan
-    /// split (`fixes.fillet_corner_per_vertex_fan`) applies to it.
+    /// split (`true`) applies to it.
     ///
     /// # Errors
     /// Those of [`FilletSession::prepare_per_edge_constant_radius`]; native invalid input
@@ -2141,8 +2141,7 @@ impl<'target> FilletSession<'target> {
                 // edge is chamfered are the blend corner's chamfer event, closed by their
                 // planes, of the session's corner type; refused where that type does not
                 // exist there; a corner the event declines stays the pinned 3x3 one
-                if k.fixes.fillet_chamfer_corner
-                    && corner.chamfer
+                if corner.chamfer
                     && corner.kind == FilletCornerKind::ConvexNByN
                 {
                     use crate::blend::blend_corner::chamfer::{classify_chamfer, ChamferClass};
@@ -3288,7 +3287,7 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             }
         } else {
             // WR-674: a round's end where its edge runs on tangentially is left open too.
-            let tangent_ends = k.fixes.fillet_round_ends_at_tangent_continuation;
+            let tangent_ends = true;
             let dropped = corner.drop_end_rib(
                 k,
                 target,
@@ -6233,7 +6232,7 @@ impl SessionObjects<'_> {
         // set filletVertex->Positions (fork 66b02de passes this on: SER)
         crate::error::ignore_status(crate::error::passed_on(
             self.calc_nx1_corner_vert_geom(k, id),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )?)?;
 
         // set FilletSideEdge->Curves
@@ -6269,10 +6268,7 @@ impl SessionObjects<'_> {
             );
             replay_corner_error(&mut executive.error, &note);
             // fork 66b02de passes this on (SER)
-            crate::error::ignore_status(crate::error::passed_on(
-                result,
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            crate::error::ignore_status(crate::error::passed_on(result, true)?)?;
         }
 
         // When proposing an extended surface
@@ -6337,7 +6333,7 @@ impl SessionObjects<'_> {
                 false,
                 [None, None],
             ),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )?)?
         .flatten()
         .is_some();
@@ -7329,7 +7325,6 @@ mod tests {
     fn create_corners_consults_the_vertex_diagnostics_fix() {
         for fix in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.fillet_vertex_error_diagnostics = fix;
             let mut body = pentagonal_pyramid(&mut k);
             let apex = crate::topology::brep::p1::vertices(&body, None)
                 .unwrap()
@@ -7383,7 +7378,6 @@ mod tests {
     fn do_fillet_keeps_the_missing_corner_note_or_the_same_later_failure() {
         for (fix, stale_note) in [(false, false), (false, true), (true, false)] {
             let mut k = Kernel::default();
-            k.fixes.fillet_vertex_error_diagnostics = fix;
             let mut body = pentagonal_pyramid(&mut k);
             let apex = crate::topology::brep::p1::vertices(&body, None)
                 .unwrap()
@@ -7443,7 +7437,6 @@ mod tests {
     #[test]
     fn a_no_room_refusal_after_an_unsupported_corner_names_no_stale_site() {
         let mut k = Kernel::default();
-        k.fixes.fillet_vertex_error_diagnostics = true;
         let mut body = pentagonal_pyramid(&mut k);
         let apex = crate::topology::brep::p1::vertices(&body, None)
             .unwrap()

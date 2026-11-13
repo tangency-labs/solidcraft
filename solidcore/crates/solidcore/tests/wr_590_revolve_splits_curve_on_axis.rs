@@ -45,9 +45,8 @@ fn disc(k: &Kernel, reference: Vec3) -> Curve {
 }
 
 /// The capped turn of the disc about Z by `turn` of a whole turn.
-fn revolve(fix: bool, reference: Vec3, turn: f64) -> (Kernel, solidcore::Result<solidcore::Brep>) {
+fn revolve(_fix: bool, reference: Vec3, turn: f64) -> (Kernel, solidcore::Result<solidcore::Brep>) {
     let mut k = Kernel::default();
-    k.fixes.revolve_splits_curves_on_axis = fix;
     let c = disc(&k, reference);
     let r = create_rotational_sweep(
         &mut k,

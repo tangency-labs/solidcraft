@@ -354,7 +354,7 @@ impl Surface {
                 // pole (WR-663, tangency-labs/smlib 21dcf69)
                 let srf_point = match ignored(self.evaluate_point(k, uv))? {
                     Some(p) => p,
-                    None if k.fixes.query_statuses_pass_on => {
+                    None if true => {
                         return Ok(Singularity {
                             singular: false,
                             direction,
@@ -647,7 +647,7 @@ impl Surface {
 
         // when asked - build OptUVIsoCurve (status ignored; passed on with the opt-in
         // fix, WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         let uv_iso_curve = if want_uv_iso_curve {
             ignored_or_pass_on(iso.create_uv_iso_line_with_nurb(k), pass)?
         } else {
@@ -825,7 +825,7 @@ fn find_ps_normal_solve(
     //           - specify boundary behavior
     let mut equations = FindPsNormalEnfo::new(k, test_point, surface, EFF_ZERO * EFF_ZERO, op);
     let mut solver = LocalSolveNd::new(&mut equations, Some(&intervals), Some(&periodicities));
-    solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+    solver.set_skips_failed_evaluations(true);
     solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
 
     // let solver look for an answer with a loose tolerance (SER)
@@ -882,7 +882,7 @@ fn finish_ps_solve<O: Copy>(
         // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
         let d = ignored_or_pass_on(
             evaluate_1st_derivatives(k, surface, uv, Side::Right, Side::Right),
-            k.fixes.query_statuses_pass_on,
+            true,
         )?
         .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
         let (pnt1, du, dv) = d;
@@ -1324,7 +1324,7 @@ impl Surface {
                             // tangency-labs/smlib 21dcf69)
                             let (_, du, dv) = ignored_or_pass_on(
                                 evaluate_1st_derivatives(k, self, this_uv, Side::Left, Side::Left),
-                                k.fixes.query_statuses_pass_on,
+                                true,
                             )?
                             .unwrap_or((
                                 Vec3::UNDEF,
@@ -1433,7 +1433,7 @@ impl Surface {
 
         // nearest point of each surface (statuses ignored; passed on with the opt-in fix,
         // WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         let nearest =
             |s: &Self, domain: &Extent2d, fallback_domain: &Extent2d| -> Result<Option<Point2>> {
                 let mut sols = ignored_or_pass_on(
@@ -2252,7 +2252,7 @@ pub fn filter_solution<O: SolutionObject>(
             // get the surface's normal section evaluation (upstream ignores the status;
             // outputs keep their default-constructed values)
             // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-            let pass = k.fixes.query_statuses_pass_on;
+            let pass = true;
             let (surface_curvature, surface_normal) = ignored_or_pass_on(
                 surface_evaluate_normal_section(k, surface, uv, curve_tangent),
                 pass,
@@ -2408,7 +2408,7 @@ fn surface_identical_solutions<O: SolutionObject>(
 
         // Check positions (statuses ignored; with the opt-in fix points that cannot be
         // evaluated are not shown the same, WR-663, tangency-labs/smlib 21dcf69).
-        let not_shown = k.fixes.query_statuses_pass_on;
+        let not_shown = true;
         let Some(pt1) =
             ignored(surf.evaluate_point(k, uv1))?.or_else(|| (!not_shown).then_some(Vec3::UNDEF))
         else {

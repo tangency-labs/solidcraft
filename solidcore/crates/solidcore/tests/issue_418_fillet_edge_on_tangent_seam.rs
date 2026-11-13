@@ -63,9 +63,8 @@ fn slot_top_edge(b: &Brep, slot_floor: f64) -> solidcore::topology::EdgeId {
         .expect("slot top edge")
 }
 
-fn fillet(flag: bool, slot_floor: f64) -> solidcore::Result<(f64, Brep)> {
+fn fillet(_flag: bool, slot_floor: f64) -> solidcore::Result<(f64, Brep)> {
     let mut k = Kernel::default();
-    k.fixes.fillet_nx1_tangent_side_edge = flag;
     let mut body = bar_with_slot(&mut k, slot_floor);
     let e = slot_top_edge(&body, slot_floor);
     fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0)?;

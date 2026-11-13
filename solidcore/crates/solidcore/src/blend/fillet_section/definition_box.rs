@@ -697,7 +697,6 @@ mod tests {
         use crate::query::api_queries::{edge_closest_point, get_edges};
         use crate::topology::face;
         let mut k = Kernel::default();
-        k.fixes.fillet_round_as_definition = true;
         let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
         let mut pipe = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
         let phi = 4.0_f64.to_radians();

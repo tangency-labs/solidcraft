@@ -1,4 +1,4 @@
-//! WR-669 (`fixes.fillet_exact_round_classes`), the SolidCraft fork's tangency-labs/smlib@dda3b5d:
+//! WR-669 (`true`), the SolidCraft fork's tangency-labs/smlib@dda3b5d:
 //! a round between two faces touching at one point the same way round is exact on the nodal
 //! quartic their offsets meet in, where upstream (and the flag before that commit) traces it.
 //!
@@ -80,10 +80,8 @@ fn pipes(exact: bool) -> (Kernel, Brep, Result<()>, Vec<FaceId>) {
 }
 
 /// [`pipes`] with `definition` (`fillet_round_as_definition`, #2485) set.
-fn pipes_kept(exact: bool, definition: bool) -> (Kernel, Brep, Result<()>, Vec<FaceId>) {
+fn pipes_kept(_exact: bool, _definition: bool) -> (Kernel, Brep, Result<()>, Vec<FaceId>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let a = create_cylinder(&mut k, Point3::new(0.0, 0.0, -10.0), R, 20.0).unwrap();
     let mut small = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), RHO, 10.0 - X0).unwrap();
     // z to x: the small pipe from (X0, R - RHO, 0) along +x

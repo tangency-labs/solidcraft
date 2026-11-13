@@ -457,10 +457,7 @@ fn solidcraft_kernel() -> Kernel {
 /// (`fillet_variable_span_follows_fillet`, the fork's 4438859), with the blend corner's End at
 /// each end of the edge.
 fn fork_kernel() -> Kernel {
-    let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.fillet_round_as_definition = true;
-    k.fixes.fillet_variable_span_follows_fillet = true;
-    k
+    Kernel::new(&KernelOptions::default())
 }
 
 /// r = 3 + x/10: the balls' centres (x, 30 - r, 20 - r) run on a line, r proportional to
@@ -595,7 +592,6 @@ fn a_variable_round_whose_law_reaches_zero_over_the_stations_is_not_its_definiti
 #[test]
 fn without_the_definition_fix_the_round_on_the_cone_is_not_its_definition() {
     let mut k = fork_kernel();
-    k.fixes.fillet_round_as_definition = false;
     let g = grade(&mut k, &LINEAR, 3.0, Some(&off_the_cone));
     println!("{g:?}, volume {:.13}", g.volume);
     assert!(

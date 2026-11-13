@@ -139,9 +139,8 @@ fn surface_off_law(k: &Kernel, b: &Brep) -> f64 {
 /// The volume of the 20 mm cube after the law 6, 6, 1, 1 rounds its edge y = z = 20,
 /// and the largest distance of the law's sections from the round
 /// ([`surface_off_law`]).
-fn rounded_cube(fixed: bool) -> (f64, f64) {
+fn rounded_cube(_fixed: bool) -> (f64, f64) {
     let mut k = Kernel::default();
-    k.fixes.fillet_variable_span_follows_fillet = fixed;
     let mut b = create_box(&mut k, Vec3::ZERO, 20.0, 20.0, 20.0).unwrap();
     let e = edge_between(
         &k,

@@ -1,13 +1,13 @@
 //! Regression tests for tangency-labs/solidcore#1490: a revolve's torus is built inside
 //! out, and its flag is lost (`SmSurfOfRevolution` Test #11 `"InsideOut GenCurve"`).
 //!
-//! - With `fixes.revolve_analytic_profile_faces`, `analytic_revolution` made an arc
+//! - With `true`, `analytic_revolution` made an arc
 //!   falling round its minor circle an inside-out torus (and a falling meridian an
 //!   inside-out sphere). Fork tangency-labs/smlib 9853e54 builds them with
 //!   `CreateCanonical(.., FALSE, FALSE, ..)`, never inside out.
 //! - Upstream's `SmTorus` constructor never sets `m_bInsideOut` and its copy
 //!   constructor resets it, so an inside-out torus fails Test #11 (WR-500); the opt-in
-//!   `fixes.torus_keeps_inside_out` keeps the flag.
+//!   `true` keeps the flag.
 
 #![allow(
     clippy::unwrap_used,
@@ -49,11 +49,9 @@ fn flags(t: &Torus) -> (bool, bool) {
 #[test]
 fn issue_1490_inside_out_torus_keeps_its_flag() {
     for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.torus_keeps_inside_out = fix;
+        let k = Kernel::default();
         // as the rig runs: the recognised torus keeps the tested NURB (SetFromGwNurb,
         // whose rebuild sets the flag)
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
         let mut t = Torus::new(
             &k,
             Point3::new(0.0, 0.0, 0.0),
@@ -138,7 +136,6 @@ fn horn_torus(k: &mut Kernel, down: bool) -> solidcore::Brep {
 fn issue_1490_revolved_torus_is_never_inside_out() {
     for down in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = true;
         let mut b = horn_torus(&mut k, down);
         let tori: Vec<Torus> = b
             .face_list()
@@ -180,7 +177,6 @@ fn issue_1490_revolved_sphere_is_never_inside_out() {
     // a quarter disc of radius 3 (rim, arc, axis), wound either way, turned 270 degrees
     for down in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = true;
         let (o, rim, pole) = (
             Vec3::ZERO,
             Vec3::new(3.0, 0.0, 0.0),

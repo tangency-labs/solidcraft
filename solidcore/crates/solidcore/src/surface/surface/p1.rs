@@ -1880,7 +1880,7 @@ impl Surface {
         // tangency-labs/smlib 21dcf69)
         let derivs = match ignored_surface_result(passed_on(
             self.evaluate(k, uv, 1, 1, upper_flags(false)),
-            k.fixes.query_statuses_pass_on,
+            true,
         )?)? {
             Some(m) => first_block(&m),
             None => [[Vec3::ZERO; 2]; 2],
@@ -2034,7 +2034,7 @@ impl Surface {
             let knots =
                 match ignored_surface_result(self.knots_with_nurb(k, SurfParamType::U, None))? {
                     Some(kn) => kn.0,
-                    None if k.fixes.query_statuses_pass_on => return Ok(Extent2d::new()),
+                    None if true => return Ok(Extent2d::new()),
                     None => Vec::new(),
                 };
             let u_conts = cache.u_continuities();
@@ -2074,7 +2074,7 @@ impl Surface {
             let knots =
                 match ignored_surface_result(self.knots_with_nurb(k, SurfParamType::V, None))? {
                     Some(kn) => kn.0,
-                    None if k.fixes.query_statuses_pass_on => return Ok(Extent2d::new()),
+                    None if true => return Ok(Extent2d::new()),
                     None => Vec::new(),
                 };
             let v_conts = cache.v_continuities();
@@ -2622,13 +2622,12 @@ impl Surface {
             // `Kernel::fixes.revolution_round_offset_collapses` (WR-567): an offset that
             // shrinks the generatrix arc onto its centre or past it is no surface
             SurfaceKind::SurfOfRevolution(s)
-                if k.fixes.revolution_round_offset_collapses
-                    && self.revolution_offset_collapses(
-                        k,
-                        s,
-                        signed_offset_distance,
-                        approx_tol_3d,
-                    )? =>
+                if self.revolution_offset_collapses(
+                    k,
+                    s,
+                    signed_offset_distance,
+                    approx_tol_3d,
+                )? =>
             {
                 Ok(None)
             }
@@ -2702,7 +2701,7 @@ impl Surface {
             SurfaceKind::Torus(s) => s.offset_collapses(signed_offset_distance, tol),
             // the fork's SmBallPatch::OffsetCollapses (f8e6709)
             SurfaceKind::BallPatch(s) => s.offset_collapses(k, signed_offset_distance, tol),
-            SurfaceKind::SurfOfRevolution(s) if k.fixes.revolution_round_offset_collapses => {
+            SurfaceKind::SurfOfRevolution(s) if true => {
                 self.revolution_offset_collapses(k, s, signed_offset_distance, tol)?
             }
             _ => false,
@@ -2890,7 +2889,7 @@ impl Surface {
                     let mut trim2 = Extent1d::from_min_max(ivl.min(), param);
                     // with the opt-in fix a split that cannot be trimmed fails (WR-663,
                     // tangency-labs/smlib 21dcf69; the pieces are dropped with the error)
-                    let pass = k.fixes.query_statuses_pass_on;
+                    let pass = true;
                     // may snap sIvl by tol to existing knots
                     ignore_status(passed_on(
                         new_bsc.trim(k, &mut trim2, TrimMode::Notify),
@@ -2983,27 +2982,14 @@ impl Surface {
             // surface evaluations on either side of the possible seam (statuses ignored;
             // with the opt-in fix a surface that cannot be evaluated is not shown
             // periodic, WR-663, tangency-labs/smlib 21dcf69)
-            if k.fixes.query_statuses_pass_on {
-                let Some(d) = ignored(self.evaluate(k, uv_min, 1, 1, upper_flags(true)))? else {
-                    return Ok(false);
-                };
-                p_min = first_block(&d);
-                let Some(d) = ignored(self.evaluate(k, uv_max, 1, 1, upper_flags(true)))? else {
-                    return Ok(false);
-                };
-                p_max = first_block(&d);
-            } else {
-                if let Some(d) =
-                    self.evaluate_ignoring_status(k, uv_min, 1, 1, upper_flags(true))?
-                {
-                    p_min = first_block(&d);
-                }
-                if let Some(d) =
-                    self.evaluate_ignoring_status(k, uv_max, 1, 1, upper_flags(true))?
-                {
-                    p_max = first_block(&d);
-                }
-            }
+            let Some(d) = ignored(self.evaluate(k, uv_min, 1, 1, upper_flags(true)))? else {
+                return Ok(false);
+            };
+            p_min = first_block(&d);
+            let Some(d) = ignored(self.evaluate(k, uv_max, 1, 1, upper_flags(true)))? else {
+                return Ok(false);
+            };
+            p_max = first_block(&d);
 
             let scaled_zero = p_max[0][0].scaled_zero();
 
@@ -3150,10 +3136,7 @@ impl Surface {
     pub fn is_flat_corner(&self, k: &Kernel, uv: Point2, angle_tol_deg: f64) -> Result<bool> {
         // Surface Eval (with the opt-in fix a point that cannot be evaluated is not a
         // flat corner, WR-663, tangency-labs/smlib 21dcf69)
-        let Some(d) = checked_or_ignored(
-            self.evaluate(k, uv, 1, 1, upper_flags(false)),
-            !k.fixes.query_statuses_pass_on,
-        )?
+        let Some(d) = checked_or_ignored(self.evaluate(k, uv, 1, 1, upper_flags(false)), false)?
         else {
             return Ok(false);
         };
@@ -3412,7 +3395,7 @@ pub fn base_is_degenerate_point(
 
     // with the opt-in fix a surface that cannot be evaluated is not shown degenerate
     // (WR-663, tangency-labs/smlib 21dcf69): `None`, and the test is `false`
-    let checked = !k.fixes.query_statuses_pass_on;
+    let checked = false;
     let eval = |uv: Point2| -> Result<Option<[[Vec3; 2]; 2]>> {
         Ok(
             checked_or_ignored(surface.evaluate(k, uv, 1, 1, upper_flags(false)), checked)?
@@ -3561,7 +3544,7 @@ pub fn base_is_degenerate_curve(
 
     // with the opt-in fix a surface that cannot be evaluated is not shown degenerate
     // (WR-663, tangency-labs/smlib 21dcf69): `None`, and the test is `false`
-    let checked = !k.fixes.query_statuses_pass_on;
+    let checked = false;
     let eval = |uv: Point2| -> Result<Option<[[Vec3; 2]; 2]>> {
         Ok(
             checked_or_ignored(surface.evaluate(k, uv, 1, 1, upper_flags(false)), checked)?
@@ -4171,7 +4154,7 @@ impl<'s> FindSingularParamWithGivenTangentDir<'s> {
         // SM_ERR is passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
         let derivs =
             at(&m, w.0, w.1).unitized_derivative2(at(&m, ws.0, ws.1), at(&m, wss.0, wss.1));
-        if derivs.is_err() && k.fixes.query_statuses_pass_on {
+        if derivs.is_err() {
             return Err(SolidError::surface_failed(
                 "surface::surface::p1::FindSingularParamWithGivenTangentDir::evaluate",
                 "the unit derivatives of the singular direction are undefined",
@@ -4869,8 +4852,7 @@ mod tests {
 
     fn issue_2009_kernels() -> (Kernel, Kernel) {
         let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
+        let on = Kernel::default();
         (off, on)
     }
 

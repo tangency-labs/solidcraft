@@ -179,6 +179,5 @@ fn chamfer_past_the_bottom_is_refused_with_the_blend_corner() {
 #[test]
 fn chamfer_past_the_bottom_is_no_room_with_the_flag() {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     assert_eq!(chamfer(&mut k), Err(FilletErrorType::NoRoom as i32));
 }

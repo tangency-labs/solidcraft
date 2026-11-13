@@ -6,8 +6,7 @@
 //! the plane `z = r^2` (a loop of radius `r`, ssi-corpus `c7_tiny_loop_parab_1e-4`,
 //! `_1e-5`) has no output at a tolerance of 1e-6.
 //!
-//! With `Kernel::fixes.ssi_low_angle_start_on_probation` such a start point is traced on
-//! probation and kept when it closes into a transversal loop larger than twice the
+//! solidcore traces such a start point on probation and kept when it closes into a transversal loop larger than twice the
 //! tolerance.
 #![allow(
     clippy::unwrap_used,
@@ -55,9 +54,8 @@ fn paraboloid() -> Surface {
 
 /// The paraboloid against the plane `z = r^2` (a loop of radius `r`) at the corpus'
 /// tolerance, 1e-6, as the ssi-corpus runner calls it.
-fn parab_plane(fix: bool, r: f64) -> SurfaceIntersection {
-    let mut k = Kernel::default();
-    k.fixes.ssi_low_angle_start_on_probation = fix;
+fn parab_plane(r: f64) -> SurfaceIntersection {
+    let k = Kernel::default();
     let s1 = paraboloid();
     let d1 = s1.natural_uv_domain_with_nurb(&k).unwrap();
     let dom = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
@@ -95,17 +93,9 @@ fn radii(out: &SurfaceIntersection, r: f64) -> (f64, f64, f64) {
 }
 
 #[test]
-fn small_parab_loop_is_missed_by_default() {
+fn small_parab_loop_is_traced_on_probation() {
     for r in [1e-4, 1e-5] {
-        let out = parab_plane(false, r);
-        assert!(out.curves_3d.is_empty(), "r = {r}: {:?}", out.curve_types);
-    }
-}
-
-#[test]
-fn small_parab_loop_is_traced_on_probation_with_the_fix() {
-    for r in [1e-4, 1e-5] {
-        let out = parab_plane(true, r);
+        let out = parab_plane(r);
         assert_eq!(out.curves_3d.len(), 1, "r = {r}: {:?}", out.curve_types);
         // a transversal loop (at a fraction of a degree, typed near tangent)
         assert!(
@@ -122,20 +112,5 @@ fn small_parab_loop_is_traced_on_probation_with_the_fix() {
             (lo - r).abs() <= 1e-6 && (hi - r).abs() <= 1e-6 && dz <= 1e-6,
             "r = {r}: radius {lo}..{hi}, off the plane {dz}"
         );
-    }
-}
-
-#[test]
-fn transversal_cut_is_unchanged_by_the_fix() {
-    // a plane well above the apex: normals far apart, no probation
-    for r in [0.5, 0.8] {
-        let a = parab_plane(false, r);
-        let b = parab_plane(true, r);
-        assert_eq!(a.curve_types, b.curve_types, "r = {r}");
-        assert_eq!(a.curves_3d.len(), b.curves_3d.len(), "r = {r}");
-        let (lo_a, hi_a, _) = radii(&a, r);
-        let (lo_b, hi_b, _) = radii(&b, r);
-        assert_eq!(lo_a.to_bits(), lo_b.to_bits(), "r = {r}");
-        assert_eq!(hi_a.to_bits(), hi_b.to_bits(), "r = {r}");
     }
 }

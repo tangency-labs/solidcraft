@@ -168,8 +168,7 @@ const fn ord(c: ContinuityType) -> i32 {
 /// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`] a failure is returned, as
 /// the fork's tight boxes (`SER`, tangency-labs/smlib 8311f8e).
 fn eval_keep(k: &Kernel, curve: &Curve, t: f64, pt: &mut Point3) -> Result<()> {
-    if let Some(p) = ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
-    {
+    if let Some(p) = ignored_or_pass_on(curve.evaluate_point(k, t), true)? {
         *pt = p;
     }
     Ok(())
@@ -273,7 +272,7 @@ impl EndSolve<'_> {
             ) {
                 Ok(f) => Ok(f),
                 // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-                Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => Err(e),
+                Err(e) if e.is_unported_or_cancelled() || true => Err(e),
                 Err(_) => Ok(false),
             }
         } else {
@@ -287,7 +286,7 @@ impl EndSolve<'_> {
                     merge_point_solution(solution, f, &s, self.op);
                     Ok(f)
                 }
-                Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => Err(e),
+                Err(e) if e.is_unported_or_cancelled() || true => Err(e),
                 Err(_) => Ok(false),
             }
         }
@@ -918,7 +917,7 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                         tol,
                         &opts,
                     ),
-                    k.fixes.query_statuses_pass_on,
+                    true,
                 )?
                 .map(|r| r.solutions)
                 .unwrap_or_default();
@@ -958,9 +957,7 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
             ) {
                 Ok((true, s)) => Some(s),
                 // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-                Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => {
-                    return Err(e)
-                }
+                Err(e) if e.is_unported_or_cancelled() || true => return Err(e),
                 Ok((false, _)) | Err(_) => None,
             };
 
@@ -1244,7 +1241,7 @@ fn natural_box(k: &Kernel, curve: &Curve) -> Result<Option<Extent3d>> {
     };
     Ok(ignored_or_pass_on(
         curve.calculate_bounding_box(k, &curve.natural_interval(), req, true),
-        k.fixes.query_statuses_pass_on,
+        true,
     )?
     .and_then(|b| b.normal))
 }
@@ -1525,7 +1522,7 @@ impl Curve {
                     },
                     &mut sols,
                 ),
-                k.fixes.query_statuses_pass_on,
+                true,
             )?;
             // all done
             return Ok(sols);
@@ -1599,7 +1596,7 @@ impl Curve {
                 },
                 &mut sols,
             ),
-            k.fixes.query_statuses_pass_on,
+            true,
         )?;
 
         Ok(sols)
@@ -1875,7 +1872,7 @@ impl Curve {
                     EFF_ZERO,
                     &opts,
                 ),
-                k.fixes.query_statuses_pass_on,
+                true,
             )?
             else {
                 return Ok(false);
@@ -1988,7 +1985,7 @@ pub fn is_on_plane_base(
     // Unitize of the normal leaves (0, 0, 1) in the x axis, the others unwritten)
     // (with the opt-in fix this status and the box's are passed on,
     // tangency-labs/smlib 8311f8e)
-    let pass_on = k.fixes.query_statuses_pass_on;
+    let pass_on = true;
     let basis = match plane_normal.make_unit_ortho_vectors(None) {
         Ok([x, y, z]) => [y, z, x],
         Err(e) if pass_on => return Err(e),
@@ -2210,9 +2207,8 @@ mod tests {
     fn projected_pair_maximum_zero_retention_and_cancellation_propagate() {
         let a = segment([-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
         let normal = [Vec3::new(0.0, 0.0, 1.0)];
-        for pass_on in [false, true] {
+        for _pass_on in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.query_statuses_pass_on = pass_on;
             let opts = CurveSolveOptions {
                 handles: handles(&a, &a),
                 opt_vectors: Some(&normal),
@@ -2604,9 +2600,8 @@ mod tests {
         let b = segment([-0.5, 0.5, 0.0], [0.5, 0.5, 0.0]);
         let vertical = segment([0.0, 0.0, -1.0], [0.0, 0.0, 1.0]);
         let normal = [Vec3::new(0.0, 0.0, 1.0)];
-        for pass_on in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.query_statuses_pass_on = pass_on;
+        for _pass_on in [false, true] {
+            let k = Kernel::default();
             let solve = |other: &Curve| {
                 a.global_curve_solve(
                     &k,

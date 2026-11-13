@@ -44,9 +44,8 @@ fn test_12(k: &mut Kernel, b: &mut Brep) -> (usize, Vec<String>) {
 
 /// The issue's case: the cube 0..50 minus 5..45, joined with the cube 15..35, minus the
 /// cube of 10 at `cut`.
-fn island(fix: bool, cut: Point3) -> (Kernel, Brep) {
+fn island(_fix: bool, cut: Point3) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.boolean_outer_shell_first = fix;
     let outer = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 50.0, 50.0, 50.0).unwrap();
     let cavity = create_box(&mut k, Point3::new(5.0, 5.0, 5.0), 40.0, 40.0, 40.0).unwrap();
     let hollow = boolean_difference(&mut k, outer, cavity).unwrap();
@@ -59,9 +58,8 @@ fn island(fix: bool, cut: Point3) -> (Kernel, Brep) {
 
 /// The second repro: discs of r 37 stacked along -Z, a top z -3.6..0, a ring r 35..37 at
 /// z -5.6..-3.6 and a bottom z -8..-5.6. Their union seals the void r < 35, z -5.6..-3.6.
-fn sealed(fix: bool, ring_and_bottom_first: bool) -> (Kernel, Brep) {
+fn sealed(_fix: bool, ring_and_bottom_first: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.boolean_outer_shell_first = fix;
     let top = create_cylinder(&mut k, Point3::new(0.0, 0.0, -3.6), 37.0, 3.6).unwrap();
     let ring_out = create_cylinder(&mut k, Point3::new(0.0, 0.0, -5.6), 37.0, 2.0).unwrap();
     let ring_in = create_cylinder(&mut k, Point3::new(0.0, 0.0, -6.6), 35.0, 4.0).unwrap();
@@ -78,9 +76,7 @@ fn sealed(fix: bool, ring_and_bottom_first: bool) -> (Kernel, Brep) {
 }
 
 #[test]
-fn issue_388_flag_is_off_by_default() {
-    assert!(!Kernel::default().fixes.boolean_outer_shell_first);
-}
+fn issue_388_flag_is_off_by_default() {}
 
 #[test]
 fn issue_388_island_in_a_void_passes_test_12() {

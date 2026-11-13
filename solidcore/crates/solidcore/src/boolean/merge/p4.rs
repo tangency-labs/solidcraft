@@ -696,9 +696,7 @@ fn classify_edge_faces(
             let non_solid = first_equal && !second_equal;
             // the coincident faceuses point the same way (FindRadialSector): when the
             // primary face bounds material, its faceuse faces it if its region is solid
-            let slice_same = if operation == BooleanOperation::Slice
-                && kernels.primary.fixes.slice_coincident_faces_sheet_side
-            {
+            let slice_same = if operation == BooleanOperation::Slice {
                 let solid = void(primary, pf_regions.0)? == 0;
                 if solid == (void(primary, pf_regions.1)? == 0) {
                     None
@@ -1169,7 +1167,7 @@ fn make_other_faces(
                     required(made.old_region)?,
                     new_face,
                     f,
-                    kernels.primary.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?;
             }
         }
@@ -1287,12 +1285,10 @@ fn put_outer_shells_first(
     primary: &mut Brep,
     operation: BooleanOperation,
 ) -> Result<()> {
-    if !kernels.primary.fixes.boolean_outer_shell_first
-        || !matches!(
-            operation,
-            BooleanOperation::Union | BooleanOperation::Difference | BooleanOperation::Intersection
-        )
-    {
+    if !matches!(
+        operation,
+        BooleanOperation::Union | BooleanOperation::Difference | BooleanOperation::Intersection
+    ) {
         return Ok(());
     }
     let regions = bp::regions(primary, None)?;
@@ -1414,7 +1410,7 @@ fn editing_stages(
             if let Some(of) = intersector.face_mate(f) {
                 ignored(crate::error::passed_on(
                     intersector.remove_relationship(f, of),
-                    kernels.primary.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
         }
@@ -1532,11 +1528,9 @@ fn editing_stages(
             }
         }
     }
-    // Not upstream unless opted in (`fixes.boolean_union_refuses_solid_leak`, WR-619): a
+    // Not upstream unless opted in (`true`, WR-619): a
     // union never deletes a face that bounds a solid against the outside.
-    if kernels.primary.fixes.boolean_union_refuses_solid_leak
-        && operation == BooleanOperation::Union
-    {
+    if operation == BooleanOperation::Union {
         if let Some(f) = face_leaking_solid(primary, &faces.delete)? {
             return Err(Failure::new(OP, BooleanFailure::SolidLeaks { face: f }).into_error());
         }
@@ -1569,13 +1563,13 @@ fn editing_stages(
                 bp::SetRegionVoidType::InfiniteRegionSwap,
                 None,
             ),
-            kernels.primary.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
     }
     put_outer_shells_first(kernels, primary, operation)?;
     ignored(crate::error::passed_on(
         intersector.propagate_regions(kernels, primary, other, attributes, operation),
-        kernels.primary.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     if options.boolean_post_process
         && matches!(
@@ -1718,7 +1712,7 @@ fn manifold_boolean_translated(
             let first = required(bp::faces(b, None)?.first().copied())?;
             ignored(crate::error::passed_on(
                 orient_sheet_surfaces(kernels, b, first, true),
-                kernels.primary.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
         }
     }
@@ -1832,7 +1826,7 @@ fn manifold_boolean_translated(
                         &mut component,
                         attributes,
                     ),
-                    kernels.primary.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
                 components.push(component);
             }
@@ -1895,10 +1889,7 @@ fn finish_boolean(
         *other = None;
     }
     if let Some(a) = primary.as_mut() {
-        ignored(crate::error::passed_on(
-            delete_caches(a),
-            kernels.primary.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        ignored(crate::error::passed_on(delete_caches(a), true)?)?;
     }
     kernels.doing_boolean(false);
     Ok(operation != BooleanOperation::ExtractSeparate)
@@ -2062,14 +2053,13 @@ mod tests {
     /// floor 10) joined with a lid over its top 10 closes the cavity 80 x 80 x 80. For
     /// either operand order, whether each shell of the one solid region is mated to the
     /// infinite region (the outer shell).
-    fn cup_and_lid_outer_shells(fix: bool) -> Vec<Vec<bool>> {
+    fn cup_and_lid_outer_shells(_fix: bool) -> Vec<Vec<bool>> {
         use crate::boolean::api_brep::boolean;
         use crate::math::Point3;
         use crate::primitive::api_primitives::create_box;
         let mut out = Vec::new();
         for lid_first in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.boolean_outer_shell_first = fix;
             let cube = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 100.0).unwrap();
             let hollow =
                 create_box(&mut k, Point3::new(10.0, 10.0, 10.0), 80.0, 80.0, 100.0).unwrap();

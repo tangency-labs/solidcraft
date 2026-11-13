@@ -1323,7 +1323,7 @@ fn assign_uv_curves(
             let interval = crate::topology::edge::interval(brep, edge)?;
             ignore_status(crate::error::passed_on(
                 curve.edit_parameterization(&interval),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
 
             ignore_status(
@@ -1489,7 +1489,7 @@ fn split_closed(
     // WR-584 (opt-in, fork tangency-labs/smlib@69c5198): search from both sides at
     // once. Same answer; no walk across the whole shell, no marks (nothing below
     // reads the walk's marks: the replacement claims a new mark before it moves).
-    let closed = if k.fixes.boolean_new_face_closure_both_sides {
+    let closed = if true {
         tr::closure_traversal_from_both_sides(brep, start)?
     } else {
         tr::closure_traversal(k, brep, marks, start, lock, None)?
@@ -2043,7 +2043,7 @@ pub(crate) fn nest_closed_shells_as_cavities(
     // the profile: the ring it turns into lies inside the ring around it, in that ring's
     // region) and left the region inside the inner shell material. Where every shell is
     // closed the regions alternate material and void from the infinite region in.
-    if k.fixes.revolve_holed_profile_void && brep.region(infinite)?.shells.len() < 2 {
+    if brep.region(infinite)?.shells.len() < 2 {
         let regions = super::p1::regions(brep, None)?;
         if regions.len() <= 2 {
             return Ok(());

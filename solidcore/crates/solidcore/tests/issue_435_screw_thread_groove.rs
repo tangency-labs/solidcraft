@@ -87,9 +87,8 @@ fn screw_groove(k: &mut Kernel, z0: f64, turns: f64, per_turn: usize) -> Brep {
 }
 
 /// Case 1250: the shaft minus the groove, run a pitch past each end.
-fn threaded_shaft(extend: bool) -> (Kernel, Brep) {
+fn threaded_shaft(_extend: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.imprint_extends_edge_to_proto_vertex = extend;
     let shaft = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), RADIUS, LENGTH).unwrap();
     let turns = (LENGTH + 2.0 * PITCH) / PITCH;
     let groove = screw_groove(&mut k, -PITCH, turns, 16);

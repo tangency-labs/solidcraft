@@ -26,9 +26,8 @@ use solidcore::topology::brep::local_operation::local_operation;
 use solidcore::{Brep, Kernel};
 
 /// The cube with its top moved up by `d`, with WR-534's `fixed`.
-fn raised(fixed: bool, d: f64) -> (Kernel, Brep) {
+fn raised(_fixed: bool, d: f64) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.local_operation_box_holds_new_surfaces = fixed;
     let mut part = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
     let top = planar_faces_at(&k, &part, 2, 20.0);
     assert_eq!(top.len(), 1, "the top");

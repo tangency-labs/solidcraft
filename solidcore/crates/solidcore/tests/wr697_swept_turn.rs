@@ -289,9 +289,8 @@ use solidcore::surface::procedural_blend::BlendNet;
 use solidcore::surface::surface::Surface;
 
 /// The swept boss base, with or without `fillet_round_as_definition`.
-fn swept_boss_base(definition: bool) -> (Kernel, Brep) {
+fn swept_boss_base(_definition: bool) -> (Kernel, Brep) {
     let mut k = all_fixes();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = boss_base(&mut k);
     round(&mut k, &mut b, &BASE, &[1.0; 4]).unwrap();
     (k, b)

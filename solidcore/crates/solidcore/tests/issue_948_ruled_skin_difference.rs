@@ -88,11 +88,10 @@ fn ruled_skin(k: &mut Kernel, secs: &[Vec<Point3>]) -> Brep {
 /// section's seam is aligned with the previous section's (the loft fix for #15263, WR-778), the
 /// skins' side faces no longer twist between sections, and the difference is one closed
 /// manifold solid smaller than the outer skin.
-fn difference_volume(query_statuses_pass_on: bool) -> f64 {
+fn difference_volume(_query_statuses_pass_on: bool) -> f64 {
     use solidcore::mass::integrator::properties::brep_volume_default;
     let data = sections(MIN7);
     let mut k = Kernel::default();
-    k.fixes.query_statuses_pass_on = query_statuses_pass_on;
     let mut outer = ruled_skin(&mut k, &data[0].1);
     let inner = ruled_skin(&mut k, &data[1].1);
     assert!(is_manifold_solid(&outer).unwrap());

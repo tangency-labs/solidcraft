@@ -1266,7 +1266,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     }
 
     /// [`Self::create_fillet_corners`] with the vertex's point supplied on an
-    /// unsupported corner, so the opt-in `fixes.fillet_vertex_error_diagnostics` can
+    /// unsupported corner, so the opt-in `true` can
     /// retain the fields written by the fork's corrected vertex `NoteError` overload.
     ///
     /// With the fix off (the default), an unsupported corner records nothing and keeps
@@ -1333,7 +1333,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     refused = true;
                 }
                 CornerCreation::Unsupported { location } => {
-                    if k.fixes.fillet_vertex_error_diagnostics && !refused {
+                    if !refused {
                         self.error.note_vertex_error(
                             vertex,
                             location,
@@ -1426,7 +1426,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             shares_edge_curve.push(shares);
         }
 
-        let pass_on = k.fixes.fillet_statuses_pass_on;
+        let pass_on = true;
         let mut bs_curves = access.smooth_with_target_mut(&edges, |target| {
             // fork 873c7c9 passes this on (SER)
             crate::error::ignore_status(crate::error::passed_on(
@@ -2227,8 +2227,7 @@ mod tests {
 
         let point = Point3::new(4.0, 5.0, 6.0);
         for (fix, expected) in [(false, (0, None, None)), (true, (9, Some(H(3)), None))] {
-            let mut k = Kernel::default();
-            k.fixes.fillet_vertex_error_diagnostics = fix;
+            let k = Kernel::default();
             let mut executive = corner_creation_executive();
             executive.filleted_vertices = vec![Some(H(3))];
             executive
@@ -2283,8 +2282,7 @@ mod tests {
     fn create_corners_original_factory_shape_still_notes_without_a_location() {
         use crate::blend::fillet_executive::p3::VertexEntry;
 
-        let mut k = Kernel::default();
-        k.fixes.fillet_vertex_error_diagnostics = true;
+        let k = Kernel::default();
         let mut executive = corner_creation_executive();
         executive.filleted_vertices = vec![Some(H(3))];
         executive

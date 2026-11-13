@@ -279,11 +279,7 @@ fn curve_is_line_base(
 
         // exact tangent values (status ignored; with the opt-in fix a curve that
         // cannot be evaluated is not shown a line, tangency-labs/smlib 8311f8e)
-        let Soft::Kept(v) = ignored_or_soft(
-            curve.evaluate(k, t, 1, false, false),
-            k.fixes.query_statuses_pass_on,
-        )?
-        else {
+        let Soft::Kept(v) = ignored_or_soft(curve.evaluate(k, t, 1, false, false), true)? else {
             return Ok(None);
         };
         if let Some(v) = v {
@@ -655,10 +651,8 @@ impl Curve {
                 // that cannot be evaluated is not shown linear, tangency-labs/smlib
                 // 8311f8e)
                 let start = self.natural_interval().min();
-                let Soft::Kept(v) = ignored_or_soft(
-                    self.evaluate(k, start, 1, false, false),
-                    k.fixes.query_statuses_pass_on,
-                )?
+                let Soft::Kept(v) =
+                    ignored_or_soft(self.evaluate(k, start, 1, false, false), true)?
                 else {
                     return Ok(out);
                 };
@@ -712,7 +706,7 @@ impl Curve {
         let mut base_vec = end_pt - start_pt;
         // (with the opt-in fix a point that cannot be evaluated does not show it linear,
         // tangency-labs/smlib 8311f8e)
-        let soft = k.fixes.query_statuses_pass_on;
+        let soft = true;
         if base_vec.length_squared() < tol * tol {
             let Soft::Kept(p) =
                 ignored_or_soft(self.evaluate_point(k, domain.evaluate(0.38)), soft)?
@@ -1020,7 +1014,7 @@ pub fn crvs_cleanup(k: &Kernel, curves: &mut Vec<Curve>, tol: f64) -> Result<Cle
         // Curve Start and End Points (statuses ignored; with the opt-in fix a curve
         // that cannot be evaluated is not shown tiny, it is kept, tangency-labs/smlib
         // 8311f8e)
-        let soft = k.fixes.query_statuses_pass_on;
+        let soft = true;
         let Soft::Kept(p) = ignored_or_soft(crv1.evaluate_point(k, domain1.evaluate(0.0)), soft)?
         else {
             ii += 1;
@@ -1144,7 +1138,7 @@ pub fn remove_duplicate_curves(k: &Kernel, curves: &mut Vec<Option<Curve>>) -> R
             for &t in &params {
                 // (with the opt-in fix points that cannot be evaluated do not show a
                 // duplicate, tangency-labs/smlib 8311f8e)
-                let soft = k.fixes.query_statuses_pass_on;
+                let soft = true;
                 let Soft::Kept(p) =
                     ignored_or_soft(crv1.evaluate_point(k, ivl1.evaluate(t)), soft)?
                 else {
@@ -1299,11 +1293,7 @@ impl Curve {
             // (status ignored; `SmCurve::Evaluate`'s default `bNonZeroTangents = TRUE`;
             // with the opt-in fix a curve that cannot be evaluated is not shown on a
             // boundary, tangency-labs/smlib 8311f8e)
-            let Soft::Kept(v) = ignored_or_soft(
-                self.evaluate(k, t, 1, false, true),
-                k.fixes.query_statuses_pass_on,
-            )?
-            else {
+            let Soft::Kept(v) = ignored_or_soft(self.evaluate(k, t, 1, false, true), true)? else {
                 return Ok(SurfParamType::Neither);
             };
             if let Some(v) = v {
@@ -1352,7 +1342,7 @@ pub fn is_periodic<C: CurveEvaluate + ?Sized>(
         let mut pv2 = [Vec3::UNDEF; 2];
         // nonZeroTangent values (statuses ignored; with the opt-in fix a curve that
         // cannot be evaluated is not shown periodic, tangency-labs/smlib 8311f8e)
-        let soft = k.fixes.query_statuses_pass_on;
+        let soft = true;
         let Soft::Kept(v) =
             ignored_or_soft(curve.evaluate(k, interval.min(), 1, true, true), soft)?
         else {
@@ -1426,7 +1416,7 @@ pub fn is_point_solution_across_closed_seam_boundary<O: Copy>(
         // statuses ignored)
         // (with the opt-in fix a solution whose tangents cannot be evaluated is not
         // shown across the seam, tangency-labs/smlib 8311f8e)
-        let soft = k.fixes.query_statuses_pass_on;
+        let soft = true;
         let mut pv1 = [Vec3::UNDEF; 2];
         let mut pv2 = [Vec3::UNDEF; 2];
         let Soft::Kept(v) = ignored_or_soft(this.evaluate(k, start1, 1, true, true), soft)? else {
@@ -1611,7 +1601,7 @@ where
     // Don't use [0, .5, 1] in case of closed curve.
     // (with the opt-in fix a curve that cannot be evaluated or framed is not shown an
     // arc, tangency-labs/smlib 8311f8e)
-    let soft = k.fixes.query_statuses_pass_on;
+    let soft = true;
     let interval = curve.natural_interval();
     let point = |t: f64| -> Result<Option<Point3>> {
         match ignored_or_soft(curve.evaluate_point(k, t), soft)? {
@@ -1916,7 +1906,7 @@ impl Curve {
         if degenerate || !tessellated {
             // let the length equal the end-point distance (statuses ignored; passed on
             // with the opt-in fix, tangency-labs/smlib 8311f8e)
-            let pass_on = k.fixes.query_statuses_pass_on;
+            let pass_on = true;
             let p1 = ignored_or_pass_on(self.evaluate_point(k, interval.min()), pass_on)?
                 .unwrap_or(Vec3::UNDEF);
             let p2 = ignored_or_pass_on(self.evaluate_point(k, interval.max()), pass_on)?
@@ -2134,7 +2124,7 @@ pub fn local_property_analysis<C: CurveEvaluate + ?Sized, O: Copy>(
         Err(_) => return Err(SolidError::curve_failed(OP_LPA, "the 1D solver failed")),
     };
     let mut found_t = outcome.t;
-    let pass_on = k.fixes.query_statuses_pass_on;
+    let pass_on = true;
 
     // The projected maximum's equation is zero at every stationary point of the
     // projected distance, minima included. Only where the distance turns down is the
@@ -2462,7 +2452,7 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> CcIntersectEnfo<'_,
             // 8311f8e)
             if let Some(r) = ignored_or_pass_on(
                 CcTangentIntEnfo::static_evaluate(k, self.curve1, self.curve2, x, f, jacobian),
-                k.fixes.query_statuses_pass_on,
+                true,
             )? {
                 found = r;
             }
@@ -2598,7 +2588,7 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> FindCcNormalEnfo<'_
             let pv = geom3(k, self.curve1, x0)?;
             // (Unitize statuses ignored; passed on with the opt-in fix,
             // tangency-labs/smlib 8311f8e)
-            let pass_on = k.fixes.query_statuses_pass_on;
+            let pass_on = true;
             if pv[2].length_squared() > EFF_ZERO_SQ {
                 trans = unitize_or_pass_on(pv[2], pass_on)?;
             } else {
@@ -2806,8 +2796,8 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> FindCcNormalEnfo<'_
                 let gpp = n.cross(pvv2[2]).cross(n);
                 // (statuses ignored; passed on with the opt-in fix, tangency-labs/smlib
                 // 8311f8e)
-                let ufp = unitize_or_pass_on(fp, k.fixes.query_statuses_pass_on)?;
-                let ugp = unitize_or_pass_on(gp, k.fixes.query_statuses_pass_on)?;
+                let ufp = unitize_or_pass_on(fp, true)?;
+                let ugp = unitize_or_pass_on(gp, true)?;
                 let piv_f = n.cross(pvv1[0] - pivot).cross(n);
                 let piv_g = n.cross(pvv2[0] - pivot).cross(n);
                 let mut sign = 1.0;
@@ -2849,7 +2839,7 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> FindCcNormalEnfo<'_
 
                 // Surface quantities (status ignored; this and the unitizations below
                 // are passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-                let pass_on = k.fixes.query_statuses_pass_on;
+                let pass_on = true;
                 let (u_ders, v_ders) = ignored_or_pass_on(
                     crv_on_surf.evaluate_surface_1st_deriv_derivs(k, x1, false),
                     pass_on,
@@ -2979,8 +2969,7 @@ mod tests {
     }
 
     fn kernels() -> (Kernel, Kernel) {
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
+        let on = Kernel::default();
         (Kernel::default(), on)
     }
 

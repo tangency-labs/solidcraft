@@ -505,7 +505,7 @@ pub(crate) fn extrude(profile: &[Profile], direction: [f64; 3], distance: f64, d
         let angle = draft * 180.0 / PI;
         // The fork's corner rules (54148db, e8f23e0): the curvature rule continues each wall as
         // itself, the tangent rule a profile of lines and arcs as their tangent planes
-        // (`fixes.taper_tangent_corner_planes`), and a corner either cannot close is refused,
+        // (`true`), and a corner either cannot close is refused,
         // with why and where (`SmTaperCornerRefusal`, `pOptRefusedCorner`), as the capi passes it on.
         let rule = match corner {
             DraftCorner::Curvature => OffsetCornerType::CurveExtension,

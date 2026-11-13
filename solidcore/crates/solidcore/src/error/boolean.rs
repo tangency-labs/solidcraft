@@ -68,7 +68,7 @@ pub enum BooleanFailure {
         what: &'static str,
     },
     /// A union would delete `face`, which bounds a solid against the outside, so the solid
-    /// would merge into the outside (opt-in `fixes.boolean_union_refuses_solid_leak`).
+    /// would merge into the outside (opt-in `true`).
     SolidLeaks {
         /// The face, of the B-rep the operation edits.
         face: FaceId,

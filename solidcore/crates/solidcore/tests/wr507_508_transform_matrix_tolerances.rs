@@ -65,7 +65,6 @@ fn wr507_transform_matrix_keeps_or_scales_an_edge_tolerance() {
     ];
     for (name, m, scale) in moves {
         let mut k = Kernel::default();
-        k.fixes.transform_scales_each_tolerance = true;
         let mut b = api::create_box(&mut k, Point3::new(1.0, 2.0, 3.0), 10.0, 20.0, 30.0).unwrap();
         assert!(
             b.tolerance() < wide * 1e-1,
@@ -106,7 +105,6 @@ fn wr508_transform_matrix_sizes_a_lone_torus_from_its_box() {
     let c = Point3::new(10.0, 5.0, 3.0);
     for s in [2.0, 0.5] {
         let mut k = Kernel::default();
-        k.fixes.transform_model_size_from_body_box = true;
         let m = [
             [s, 0.0, 0.0, 0.0],
             [0.0, s, 0.0, 0.0],

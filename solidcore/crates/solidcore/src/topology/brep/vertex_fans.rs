@@ -18,7 +18,7 @@
 //! given its point), and none for the joined vertex's deletion, which the fork deletes
 //! directly. Behaviour belongs to callers: on its own neither function is reached by an
 //! upstream path; the fillet executive calls them only with
-//! `fixes.fillet_corner_per_vertex_fan` (WR-665). No recursion; each fan walk is bounded
+//! `true` (WR-665). No recursion; each fan walk is bounded
 //! by the vertex's use count, as the fork's.
 
 use std::collections::{BTreeMap, BTreeSet};

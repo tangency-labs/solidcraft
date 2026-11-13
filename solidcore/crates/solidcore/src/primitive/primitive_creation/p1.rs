@@ -235,7 +235,7 @@ pub fn position_profile_curves(
         tol,
         path,
         output,
-        k.fixes.planar_path_profile_placement_statuses,
+        true,
         std::slice::from_ref(path),
     )
 }
@@ -459,8 +459,7 @@ mod tests {
 
     #[test]
     fn audit_483_placement_read_failures_keep_the_successful_prefix() {
-        let mut k = Kernel::default();
-        k.fixes.planar_path_profile_placement_statuses = true;
+        let k = Kernel::default();
         let profile =
             Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
         let path = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z).unwrap());
@@ -479,8 +478,7 @@ mod tests {
 
     #[test]
     fn audit_483_placement_rejects_failed_box_before_appending_copy() {
-        let mut k = Kernel::default();
-        k.fixes.planar_path_profile_placement_statuses = true;
+        let k = Kernel::default();
         let bad = Curve::from(BSplineCurve::default());
         let path = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z).unwrap());
         let expected = bad
@@ -630,8 +628,7 @@ mod tests {
                 .expect("pinned C++ ignores the failed placement");
             assert_eq!(pinned.len(), 2);
 
-            let mut k = Kernel::default();
-            k.fixes.planar_path_profile_placement_statuses = true;
+            let k = Kernel::default();
             let mut output = vec![marker()];
             let error = position_profile_curves(&k, &profiles, tol, &path, &mut output)
                 .expect_err("opt-in reports the failed placement");
@@ -679,8 +676,7 @@ mod tests {
         position_profile_curves(&Kernel::default(), &profiles, 1e-9, &path, &mut pinned)
             .expect("pinned placement");
 
-        let mut k = Kernel::default();
-        k.fixes.planar_path_profile_placement_statuses = true;
+        let k = Kernel::default();
         let mut opt_in = Vec::new();
         position_profile_curves(&k, &profiles, 1e-9, &path, &mut opt_in)
             .expect("well-conditioned opt-in placement");

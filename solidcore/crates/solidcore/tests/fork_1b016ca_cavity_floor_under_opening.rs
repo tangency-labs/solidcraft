@@ -81,11 +81,8 @@ fn shell(fixes: &UpstreamFixes, inset: f64) -> solidcore::Result<(bool, f64)> {
     Ok((manifold, volume(&k, &mut wall)?))
 }
 
-fn crossing(walls_touch: bool) -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.offset_resolve_crossing_loops = true;
-    f.offset_walls_touch_refused = walls_touch;
-    f
+fn crossing(_walls_touch: bool) -> UpstreamFixes {
+    UpstreamFixes::default()
 }
 
 /// Without resolving the crossing loops, the cavity is open. The default shell

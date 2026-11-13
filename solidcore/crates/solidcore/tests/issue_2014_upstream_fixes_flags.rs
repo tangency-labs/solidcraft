@@ -68,15 +68,13 @@ fn default_lists_every_field_off_in_declaration_order() {
 
 #[test]
 fn one_flag_on_is_exactly_that_entry() {
-    let mut newest = UpstreamFixes::default();
-    newest.face_points_span_domain = true;
-    assert_eq!(turned_on(&newest), ["face_points_span_domain"]);
-    assert_eq!(listed(&newest), debug_fields(&newest));
-
-    let mut first = UpstreamFixes::default();
-    first.plane_recognition_origin_after_axes = true;
-    assert_eq!(turned_on(&first), ["plane_recognition_origin_after_axes"]);
-    assert_eq!(listed(&first), debug_fields(&first));
+    let names = UpstreamFixes::NAMES;
+    for name in [names[0], names[names.len() - 1]] {
+        let mut one = UpstreamFixes::default();
+        *one.flag_mut(name).expect("a field name") = true;
+        assert_eq!(turned_on(&one), [name]);
+        assert_eq!(listed(&one), debug_fields(&one));
+    }
 }
 
 /// `flag_mut` finds every field by its name, and only by it.

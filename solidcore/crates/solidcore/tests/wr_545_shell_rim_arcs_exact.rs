@@ -25,7 +25,6 @@ use solidcore::Kernel;
 #[test]
 fn wr_545_shelled_rounded_box_rim_is_arcs() {
     let mut k = Kernel::default();
-    k.fixes.shell_edges_on_analytics_exact = true;
     let mut part = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let uprights: Vec<_> = part
         .edges()

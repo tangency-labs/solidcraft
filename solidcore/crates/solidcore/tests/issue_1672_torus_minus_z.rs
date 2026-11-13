@@ -1,16 +1,16 @@
 //! tangency-labs/solidcore#1672 (SolidCraft rig sweeps/4007): the outer half of a disc
 //! of radius 14 centred 14 from the z axis, revolved 270 degrees about -z with
-//! `fixes.revolve_analytic_profile_faces`, has an `SmTorus` face that `orient_body`
+//! `true`, has an `SmTorus` face that `orient_body`
 //! swaps (`SwapUV`). Upstream's swap rebuilt the torus from its NURB; the swap now keeps
 //! the torus as it was made (WR-701), so the body is valid without the torus fixes below,
 //! which hold for the rebuilds that remain (`Reverse`).
 //!
 //! - Upstream's rebuild mirrors the tube interval -90..90 to 90..450 (WR-408), so the
 //!   torus fails `SmSurfOfRevolution` test 2 and `SmTorus` test 2. The fix is
-//!   `fixes.torus_signed_gen_curve_interval`.
+//!   `true`.
 //! - The rebuilt major radius is 14 less a few ulps, so the horn torus is a spindle by
 //!   rounding. Upstream's check then clears its result with no report (WR-539). The
-//!   fix is `fixes.torus_check_spindle_apex`: the apexes at V = +-(90 + asin(R/r)) lie
+//!   fix is `true`: the apexes at V = +-(90 + asin(R/r)) lie
 //!   outside -90..90.
 //!
 //! About +z nothing is swapped and the body is valid either way.
@@ -35,11 +35,7 @@ const EXPECTED_VOLUME: f64 = 28_932.176_098_892_29;
 
 /// The kernel SolidCraft runs: the analytic profile faces and the torus fixes.
 fn fixed_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.torus_signed_gen_curve_interval = true;
-    k.fixes.torus_check_spindle_apex = true;
-    k
+    Kernel::default()
 }
 
 /// The half disc revolved 270 degrees about `axis` through the origin, capped.
@@ -144,6 +140,5 @@ fn issue_1672_revolve_without_fixes_is_valid() {
 #[test]
 fn issue_1672_swapped_torus_keeps_its_definition() {
     let mut k = Kernel::default();
-    k.fixes.revolve_analytic_profile_faces = true;
     assert_valid_with_volume(&mut k, Vec3::new(0.0, 0.0, -1.0));
 }

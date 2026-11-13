@@ -84,12 +84,6 @@ impl<'a> SmoothInteriorPlan<'a> {
     /// unrepresentable widths, nonfinite/singular rail jets, or rail jumps that
     /// violate the required vanishing orders. Propagates station solve errors.
     pub fn prepare(k: &Kernel, definition: &'a ProceduralBlend, initial: &[f64]) -> Result<Self> {
-        if !k.fixes.fillet_round_as_definition {
-            return Err(SolidError::invalid_input(
-                OP,
-                "correction preparation requires the procedural definition opt-in",
-            ));
-        }
         if definition.order() != 2 {
             return Err(SolidError::invalid_input(OP, "this correction plan supports G2 only; G3 needs a separate third-order face-smoothness proof"));
         }
@@ -153,7 +147,7 @@ impl<'a> SmoothInteriorPlan<'a> {
     /// # Errors
     /// Invalid station index/height, the missing definition opt-in, or a solve error.
     pub fn jump_at(&self, k: &Kernel, station: usize, t: f64) -> Result<JumpJet> {
-        if !k.fixes.fillet_round_as_definition || !t.is_finite() || !(0.0..=1.0).contains(&t) {
+        if !t.is_finite() || !(0.0..=1.0).contains(&t) {
             return Err(SolidError::invalid_input(
                 OP,
                 "the procedural definition opt-in and a height in [0,1] required",

@@ -1,5 +1,5 @@
 //! #2385 (WR-717): a cliff overflow's crease that runs along an edge of the face it crosses,
-//! within the trim's tolerance, is that edge (`fixes.fillet_overflow_crease_along_edge`).
+//! within the trim's tolerance, is that edge (`true`).
 //!
 //! A disc 13 in radius and 2 high (SolidCraft #190's) has its top edge rounded r a little
 //! past its height. The round's section is the circle of radius r about (13 - r, 2 - r) in
@@ -43,9 +43,8 @@ use solidcore::{Brep, Kernel};
 const PI: f64 = std::f64::consts::PI;
 
 /// Every flag, with WR-717's set as `on`.
-fn kernel(on: bool) -> Kernel {
+fn kernel(_on: bool) -> Kernel {
     let mut fixes = UpstreamFixes::all();
-    fixes.fillet_overflow_crease_along_edge = on;
     // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on the
     // body's outline (`wr730_round_ends_on_outline.rs`)
     fixes.fillet_round_ends_on_outline = false;

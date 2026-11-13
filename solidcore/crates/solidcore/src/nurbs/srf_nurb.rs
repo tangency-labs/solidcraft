@@ -1599,13 +1599,13 @@ impl Surface {
     /// Those of [`Surface::is_closed_smooth_flag`].
     pub fn is_closed_smooth_flag_with_fixes(
         &self,
-        fixes: &UpstreamFixes,
+        _fixes: &UpstreamFixes,
         level: usize,
         tols: &[f64],
         dflg: Direction,
     ) -> Result<(Option<Direction>, Option<SolidError>)> {
         const OP: &str = "nurbs::srf_nurb::Surface::is_closed_smooth";
-        let pole_limit = fixes.closed_smooth_pole_tangent_limit;
+        let pole_limit = true;
         let tol = |i: usize| -> Result<f64> {
             tols.get(i)
                 .copied()
@@ -3397,7 +3397,6 @@ mod tests {
 
     fn pole_fix() -> UpstreamFixes {
         UpstreamFixes {
-            closed_smooth_pole_tangent_limit: true,
             ..UpstreamFixes::default()
         }
     }

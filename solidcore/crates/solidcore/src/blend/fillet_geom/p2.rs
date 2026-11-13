@@ -27,7 +27,7 @@
 //!   within its approximation tolerance
 //!   ([`crate::surface::procedural_blend::NetScope::within`]).
 //! - **Rail end on the continued surface (WR-630, #960).** With
-//!   `fixes.fillet_rail_end_on_continued_surface`, `CalcRailIntEdgeuse` evaluates the
+//!   `true`, `CalcRailIntEdgeuse` evaluates the
 //!   rail's end on its base surface with out-of-bounds evaluation on (the fork's
 //!   tangency-labs/smlib@3f22e97).
 //! - **A rail's end at a side edge starts from the round's corner section (#13538).**
@@ -1975,7 +1975,7 @@ impl FilletBrep {
             // this on (SER)
             let rail_index = ignore_status(crate::error::passed_on(
                 self.rail_index_of_side_eu_resolved(g1, side_eu1, target, &|id| solvers.solver(id)),
-                k.fixes.fillet_statuses_pass_on,
+                true,
             )?)?
             .unwrap_or(0);
 
@@ -2213,12 +2213,12 @@ impl FilletBrep {
                 .offset_surface(self, g1, rail_index)?
                 .ok_or_else(|| SolidError::blend_missing(OP, "the rail's offset surface"))?
                 .base_surface();
-            // Opt-in, not upstream (`fixes.fillet_rail_end_on_continued_surface`, WR-630;
+            // Opt-in, not upstream (`true`, WR-630;
             // the fork's tangency-labs/smlib@3f22e97): on the base surface continued, as
             // the solve found it (over the surface's extended domain). Clamped to the
             // surface's own domain, a rail meeting a side edge's line just past the
             // edge's end (a cliff overflow) was placed on the edge's end vertex instead.
-            let pnt = if k.fixes.fillet_rail_end_on_continued_surface {
+            let pnt = if true {
                 with_out_of_bounds_enabled_in_place(base, || base.evaluate_point(k, uv))?
             } else {
                 base.evaluate_point(k, uv)?
@@ -2298,7 +2298,7 @@ impl FilletBrep {
                         }),
                         None => Err(SolidError::blend_missing(OP, "the second side edge use")),
                     },
-                    k.fixes.fillet_statuses_pass_on,
+                    true,
                 )?)?
                 .unwrap_or(0);
             let side_eu2 = side_eu2
@@ -2526,7 +2526,7 @@ impl FilletBrep {
                     // (SER)
                     if let Some(uv) = ignore_status(crate::error::passed_on(
                         vertexuse_unit::compute_uv_point(k, target, vu, true),
-                        k.fixes.fillet_statuses_pass_on,
+                        true,
                     )?)? {
                         *slot = uv;
                     }
@@ -3397,10 +3397,7 @@ impl FilletBrep {
         } else {
             let mut uv = new_curve;
             // its status is ignored upstream; fork 9b7cd48 passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                uv.convert_to_2d(),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            ignore_status(crate::error::passed_on(uv.convert_to_2d(), true)?)?;
             uv_curve = Some(Curve::from(uv));
             curve_3d = None;
         }

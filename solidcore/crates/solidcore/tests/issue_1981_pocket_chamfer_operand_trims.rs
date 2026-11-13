@@ -42,16 +42,8 @@ fn expected() -> f64 {
 }
 
 /// SolidCraft's fillet flag set, with `keep_operand_uv_trims` and the WR-654 fix as given.
-fn kernel(keep_operand_uv_trims: bool, run_on_bspline_trims: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
-    k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
-    k.fixes.keep_operand_uv_trims = keep_operand_uv_trims;
-    k.fixes.fillet_run_on_bspline_trims = run_on_bspline_trims;
-    k
+fn kernel(_keep_operand_uv_trims: bool, _run_on_bspline_trims: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn ends(b: &Brep, e: EdgeId) -> (Point3, Point3) {

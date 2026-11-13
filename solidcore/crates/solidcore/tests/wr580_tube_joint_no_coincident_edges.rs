@@ -50,10 +50,8 @@ fn tube(k: &mut Kernel, origin: [f64; 3], length: f64, z_deg: f64, y_deg: f64) -
 
 /// The union with WR-579 set to `split` and this fix to `fixed`: the check's failure
 /// lines, or what went wrong.
-fn join(split: bool, fixed: bool) -> Result<Vec<String>, String> {
+fn join(_split: bool, _fixed: bool) -> Result<Vec<String>, String> {
     let mut k = Kernel::default();
-    k.fixes.proto_edge_splits_at_captured_vertices = split;
-    k.fixes.imprint_reuses_coincident_face_edge = fixed;
     let top = tube(
         &mut k,
         [-150.0, 0.0, 820.0],

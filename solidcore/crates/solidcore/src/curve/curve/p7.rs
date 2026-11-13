@@ -184,7 +184,7 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         let interval1 = self.interval1;
         let interval2 = self.interval2;
         // the fork passes on the statuses SMLib drops here (tangency-labs/smlib 8311f8e)
-        let pass_on = k.fixes.query_statuses_pass_on;
+        let pass_on = true;
 
         // expand target interval 3d bounding boxes
         let mut expanded_box = pseudo_box1;
@@ -1162,11 +1162,7 @@ impl Curve {
             if planar.is_planar {
                 // (status ignored: a failed angle is 0; passed on with the opt-in fix,
                 // tangency-labs/smlib 8311f8e)
-                let angle = passed_on(
-                    planar.normal.angle_between(opt(0)?),
-                    k.fixes.query_statuses_pass_on,
-                )?
-                .unwrap_or(0.0);
+                let angle = passed_on(planar.normal.angle_between(opt(0)?), true)?.unwrap_or(0.0);
                 if angle < EFF_ZERO {
                     return Ok(());
                 }
@@ -1273,7 +1269,7 @@ impl Curve {
                 // (status ignored; this and the frame below are passed on with the
                 // opt-in fix, tangency-labs/smlib 8311f8e; the geometric evaluation's
                 // status stays dropped, as the fork: a straight sample has no torsion)
-                let pass_on = k.fixes.query_statuses_pass_on;
+                let pass_on = true;
                 let mut pv: [Vec3; 3] =
                     ignored_or_pass_on(eval_n(k, self, t, 2, true, !exact), pass_on)?
                         .unwrap_or([Vec3::UNDEF; 3]);

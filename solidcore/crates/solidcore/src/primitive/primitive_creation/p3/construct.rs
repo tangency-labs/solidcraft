@@ -707,7 +707,7 @@ impl PrimitiveCreation {
             // (a B-spline surface just made: never lazy)
             let domain = surface.natural_uv_domain_if_built();
             // fork c8f6a31 (WR-662): SER(CreateFacesFromSurface(..)).
-            let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+            let p = true;
             ignore_status(passed_on(
                 a.surface_faces(brep, surface, domain, &mut made),
                 p,
@@ -785,7 +785,7 @@ impl PrimitiveCreation {
         // (a B-spline surface just made: never lazy)
         let domain = surface.natural_uv_domain_if_built();
         // fork c8f6a31 (WR-662): SER(pBrep->CreateFaceFromSurface(..)).
-        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+        let p = true;
         ignore_status(passed_on(a.surface_face(brep, surface, domain, output), p)?)?;
         Ok(())
     }
@@ -980,7 +980,7 @@ impl PrimitiveCreation {
                 groups.push(first..side_faces.len());
             }
             // fork c8f6a31 (WR-662): SER(pBrep->Transform(..)) for both moves back.
-            let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+            let p = true;
             ignore_status(passed_on(
                 a.transform_primitive(brep, &prepared.rotation_back),
                 p,
@@ -1002,8 +1002,7 @@ impl PrimitiveCreation {
             // not upstream (#2192, opt-in): a closed path whose end sections lie on its
             // start sections gets no caps; the stitch joins the ends instead
             let cap_ends = options.cap_ends
-                && !(a.kernel(brep)?.fixes.curve_sweep_closed_path_joins_ends
-                    && sweep_ends_coincide(&*a, brep, side_faces, options.translational_sweep)?);
+                && !(sweep_ends_coincide(&*a, brep, side_faces, options.translational_sweep)?);
             if cap_ends {
                 // not upstream (WR-404, #411)
                 let (mut starts, mut ends) = sweep_end_curves(
@@ -1018,7 +1017,7 @@ impl PrimitiveCreation {
                 a.planar_faces(region, &mut ends, approx_tol, end_faces)?;
             }
             // fork c8f6a31 (WR-662): SER(pBrep->StitchAndOrient()).
-            let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+            let p = true;
             ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
             Ok(())
         })();

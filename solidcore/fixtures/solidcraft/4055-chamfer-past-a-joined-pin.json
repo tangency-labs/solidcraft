@@ -70,10 +70,7 @@
   {
    "name": "pin_r8_chamfer_2_5",
    "note": "Pin r 8; chamfer 2.5 on the bar's bottom front edge (y = -10, z = 30).",
-   "fixes": [
-    "fillet_refuse_rails_leaving_faces",
-    "fillet_cliff_overflow"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "cylinder",
@@ -137,10 +134,7 @@
   {
    "name": "pin_r8_chamfer_3_0",
    "note": "Pin r 8; chamfer 3 on the bar's bottom front edge (y = -10, z = 30).",
-   "fixes": [
-    "fillet_refuse_rails_leaving_faces",
-    "fillet_cliff_overflow"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "cylinder",
@@ -204,10 +198,7 @@
   {
    "name": "pin_r8_chamfer_4_0",
    "note": "Pin r 8; chamfer 4 on the bar's bottom front edge (y = -10, z = 30).",
-   "fixes": [
-    "fillet_refuse_rails_leaving_faces",
-    "fillet_cliff_overflow"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "cylinder",
@@ -271,10 +262,7 @@
   {
    "name": "pin_r8_chamfer_5_0",
    "note": "Pin r 8; chamfer 5 on the bar's bottom front edge (y = -10, z = 30).",
-   "fixes": [
-    "fillet_refuse_rails_leaving_faces",
-    "fillet_cliff_overflow"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "cylinder",
@@ -338,10 +326,7 @@
   {
    "name": "pin_r6_chamfer_5_0",
    "note": "Pin r 6; chamfer 5 on the bar's bottom front edge (y = -10, z = 30).",
-   "fixes": [
-    "fillet_refuse_rails_leaving_faces",
-    "fillet_cliff_overflow"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "cylinder",

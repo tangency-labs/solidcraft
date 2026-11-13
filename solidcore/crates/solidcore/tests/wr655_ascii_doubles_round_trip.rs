@@ -123,7 +123,6 @@ fn read(k: &mut Kernel, file: Vec<u8>) -> Brep {
 #[test]
 fn an_ascii_b_rep_reloads_exactly_with_the_fix() {
     let mut k = Kernel::default();
-    k.fixes.ascii_doubles_round_trip = true;
     let (b, file) = box_file(&mut k);
     let text = String::from_utf8(file.clone()).unwrap();
     assert!(text.contains("e-1"), "exponent notation");

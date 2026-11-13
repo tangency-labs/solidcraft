@@ -36,11 +36,8 @@ use solidcore::topology::brep::local_operation::local_operation;
 use solidcore::topology::FaceId;
 use solidcore::{Brep, Kernel};
 
-fn kernel(step_walls: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.local_operation_refuses_loose_tangent_edges = true;
-    k.fixes.local_operation_step_walls = step_walls;
-    k
+fn kernel(_step_walls: bool) -> Kernel {
+    Kernel::default()
 }
 
 /// A `dx x dy x dz` block whose top is imprinted along x = `split` (the capi's

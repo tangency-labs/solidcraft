@@ -7,9 +7,7 @@
   {
    "name": "fillet_knife_edge_0_5_plate_first",
    "note": "Fillet 0.5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -89,10 +87,7 @@
   {
    "name": "chamfer_knife_edge_0_5_plate_first",
    "note": "Chamfer 0.5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds",
-    "fillet_trim_inside_by_best_dot"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -172,9 +167,7 @@
   {
    "name": "fillet_knife_edge_2_plate_first",
    "note": "Fillet 2 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -254,10 +247,7 @@
   {
    "name": "chamfer_knife_edge_2_plate_first",
    "note": "Chamfer 2 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds",
-    "fillet_trim_inside_by_best_dot"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -337,9 +327,7 @@
   {
    "name": "fillet_knife_edge_5_plate_first",
    "note": "Fillet 5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -419,10 +407,7 @@
   {
    "name": "chamfer_knife_edge_5_plate_first",
    "note": "Chamfer 5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds",
-    "fillet_trim_inside_by_best_dot"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -502,9 +487,7 @@
   {
    "name": "fillet_knife_edge_0_5_corner_first",
    "note": "Fillet 0.5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -584,10 +567,7 @@
   {
    "name": "chamfer_knife_edge_0_5_corner_first",
    "note": "Chamfer 0.5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds",
-    "fillet_trim_inside_by_best_dot"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -667,9 +647,7 @@
   {
    "name": "fillet_knife_edge_2_corner_first",
    "note": "Fillet 2 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -749,10 +727,7 @@
   {
    "name": "chamfer_knife_edge_2_corner_first",
    "note": "Chamfer 2 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds",
-    "fillet_trim_inside_by_best_dot"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -832,9 +807,7 @@
   {
    "name": "fillet_knife_edge_5_corner_first",
    "note": "Fillet 5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -914,10 +887,7 @@
   {
    "name": "chamfer_knife_edge_5_corner_first",
    "note": "Chamfer 5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds",
-    "fillet_trim_inside_by_best_dot"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -997,9 +967,7 @@
   {
    "name": "fillet_knife_edge_0_5_cut_from_a_box",
    "note": "Fillet 0.5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -1059,10 +1027,7 @@
   {
    "name": "chamfer_knife_edge_0_5_cut_from_a_box",
    "note": "Chamfer 0.5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds",
-    "fillet_trim_inside_by_best_dot"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -1122,9 +1087,7 @@
   {
    "name": "fillet_knife_edge_2_cut_from_a_box",
    "note": "Fillet 2 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -1184,10 +1147,7 @@
   {
    "name": "chamfer_knife_edge_2_cut_from_a_box",
    "note": "Chamfer 2 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds",
-    "fillet_trim_inside_by_best_dot"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -1247,9 +1207,7 @@
   {
    "name": "fillet_knife_edge_5_cut_from_a_box",
    "note": "Fillet 5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -1309,10 +1267,7 @@
   {
    "name": "chamfer_knife_edge_5_cut_from_a_box",
    "note": "Chamfer 5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds",
-    "fillet_trim_inside_by_best_dot"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",

@@ -295,7 +295,7 @@ impl Torus {
         // (the self-intersection test of a major radius below the minor radius only
         // warns upstream); not upstream (WR-500, opt-in): the surface is inside out
         // with its generator
-        let keeps_inside_out = k.fixes.torus_keeps_inside_out;
+        let keeps_inside_out = true;
         Ok(Self {
             base,
             major_radius,
@@ -1100,7 +1100,7 @@ impl Torus {
         // not upstream (WR-501, #1470, opt-in; tangency-labs/smlib@6136a04): the major
         // radius runs from the torus origin, not from the first sweep circle's centre,
         // which lies off the equator when the tube does not start there
-        let major_vec = if k.fixes.torus_major_radius_from_origin {
+        let major_vec = if true {
             other_frame.origin() - torus_origin
         } else {
             other_frame.origin() - ref_frame.origin()
@@ -1133,7 +1133,7 @@ impl Torus {
 
         // get GenCurve min and max angles measured from each GenCurve's origin and start
         // vector
-        let (gen_angle_min, gen_angle_max) = if k.fixes.torus_signed_gen_curve_interval {
+        let (gen_angle_min, gen_angle_max) = if true {
             // not upstream (WR-408, tangency-labs/solidcore#1112, opt-in): signed
             // angles; a failed angle is not a torus, as the fork. Zero is SM_EFF_ZERO_DEG
             // (tangency-labs/smlib@40344bf, #1471): the ends carry the rounding of their
@@ -1231,14 +1231,12 @@ impl Torus {
         // not upstream (WR-493, opt-in; the SolidCraft fork's tangency-labs/smlib@7ea6a96):
         // the torus keeps the NURB tested (SetFromGwNurb, whose rebuild's status is
         // ignored)
-        if k.fixes.found_torus_sphere_keep_tested_nurb {
-            let nurb = test
-                .gw_nurb()
-                .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the tested NURB"))?;
-            torus.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
-            torus.base.base.nurb_is_borrowed = false;
-            ignore_status(torus.rebuild_step_from_nurb_parameters(k))?;
-        }
+        let nurb = test
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the tested NURB"))?;
+        torus.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
+        torus.base.base.nurb_is_borrowed = false;
+        ignore_status(torus.rebuild_step_from_nurb_parameters(k))?;
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
         Ok(Some(torus))
@@ -1412,7 +1410,7 @@ impl Torus {
         let vec_max = nurb_max_point - max_origin;
 
         // not upstream (WR-408, tangency-labs/solidcore#1112, opt-in): signed angles
-        let (gen_angle_min, gen_angle_max) = if k.fixes.torus_signed_gen_curve_interval {
+        let (gen_angle_min, gen_angle_max) = if true {
             torus_gen_curve_interval(
                 [start_for_min_angle, vec_min],
                 [start_for_max_angle, vec_max],
@@ -1492,7 +1490,7 @@ impl Torus {
         self.minor_radius = min_rad;
         self.inside_out = inside_out;
         // not upstream (WR-500, opt-in): its copies keep the flag
-        self.keeps_inside_out |= k.fixes.torus_keeps_inside_out;
+        self.keeps_inside_out |= true;
         self.base.planar_generator = true;
         self.base.position = ref_frame;
         self.base.swap_uv = swap_uv;
@@ -1589,7 +1587,7 @@ impl Torus {
         // init output object
         let mut torus = Self::empty();
         // not upstream (WR-500, opt-in): its copies keep the flag read
-        torus.keeps_inside_out = k.fixes.torus_keeps_inside_out;
+        torus.keeps_inside_out = true;
 
         if db.file_type() == FileType::Ascii {
             if let Some(s) = db.in_stream_mut() {
@@ -1772,19 +1770,12 @@ fn iso_curve(
         let mut x_axis = torus_z_axis.cross(nurb_min_vec.cross(torus_z_axis));
         let mut length = x_axis.length();
         if length < EFF_ZERO_SQRT {
-            if k.fixes.torus_iso_circle_axis_from_midpoint {
-                // WR-504 (#1514, opt-in): the direction comes from the mid point, as the
-                // fallback intends; it is read now, so a failed evaluation propagates (the
-                // fork's SER, smlib@672a437ee; v1.0.1 ignores it)
-                let mid_point = iso.curve.evaluate_point(nurb_ivl.evaluate(0.5))?;
-                let mid_vec = mid_point - torus_origin;
-                x_axis = torus_z_axis.cross(mid_vec.cross(torus_z_axis));
-            } else {
-                // (the mid point is evaluated but not used upstream; the start vector is
-                // used again, which is zero on the axis)
-                let _ = ignored(iso.curve.evaluate_point(nurb_ivl.evaluate(0.5)))?;
-                x_axis = torus_z_axis.cross(nurb_min_vec).cross(torus_z_axis);
-            }
+            // WR-504 (#1514, opt-in): the direction comes from the mid point, as the
+            // fallback intends; it is read now, so a failed evaluation propagates (the
+            // fork's SER, smlib@672a437ee; v1.0.1 ignores it)
+            let mid_point = iso.curve.evaluate_point(nurb_ivl.evaluate(0.5))?;
+            let mid_vec = mid_point - torus_origin;
+            x_axis = torus_z_axis.cross(mid_vec.cross(torus_z_axis));
             length = x_axis.length();
         }
         x_axis = Div::div(x_axis, length);
@@ -2229,8 +2220,7 @@ mod tests {
     /// (WR-408).
     #[test]
     fn issue_1112_rebuilt_torus_keeps_an_interval_below_its_equator() {
-        let mut k = Kernel::default();
-        k.fixes.torus_signed_gen_curve_interval = true;
+        let k = Kernel::default();
         let frame = Axis2Placement::new(
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(1.0, 0.0, 0.0),
@@ -2321,7 +2311,7 @@ mod tests {
     /// with `found_torus_sphere_keep_tested_nurb` it keeps exactly that NURB.
     #[test]
     fn issue_1433_torus_found_in_its_nurb_keeps_it() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let t = Torus::create_canonical(
             &k,
             &Axis2Placement::default(),
@@ -2340,7 +2330,6 @@ mod tests {
         assert!((found.major_radius() - 10.0).abs() < 1e-9);
         assert!((found.minor_radius() - 3.0).abs() < 1e-9);
 
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
         let found = Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
             .unwrap()
             .expect("a torus");
@@ -2357,9 +2346,7 @@ mod tests {
     /// with the flags on and keep their NURB; a perturbed NURB is not a torus.
     #[test]
     fn torus_recognition_partial_scaled_and_non_matching() {
-        let mut k = Kernel::default();
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
-        k.fixes.torus_signed_gen_curve_interval = true;
+        let k = Kernel::default();
         let frame = Axis2Placement::new(
             Vec3::new(1.0, 2.0, 0.5),
             Vec3::new(0.0, 1.0, 0.0),
@@ -2487,9 +2474,7 @@ mod tests {
             .unwrap();
             let nurbs = plain(&t);
 
-            let mut k = Kernel::default();
-            k.fixes.torus_major_radius_from_origin = true;
-            k.fixes.torus_signed_gen_curve_interval = true;
+            let k = Kernel::default();
             let found = Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
                 .unwrap()
                 .expect("a torus");
@@ -2548,8 +2533,7 @@ mod tests {
         let domain = t.base.base.natural_uv_domain();
         let fixed = domain.u_interval().evaluate(0.25);
 
-        let mut k = Kernel::default();
-        k.fixes.torus_iso_circle_axis_from_midpoint = true;
+        let k = Kernel::default();
         let iso = t
             .create_iso_parametric_curve(&k, SurfParamType::U, fixed, None, false)
             .expect("minor iso circle");

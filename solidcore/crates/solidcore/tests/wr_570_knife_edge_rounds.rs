@@ -100,9 +100,8 @@ fn removed(r: f64) -> f64 {
 
 /// The knife edge of the part (mirrored when `s` is -1) rounded `r`: its face count and
 /// volume, or the round's failure.
-fn round(knife_edges: bool, s: f64, r: f64) -> solidcore::Result<(usize, f64, bool)> {
+fn round(_knife_edges: bool, s: f64, r: f64) -> solidcore::Result<(usize, f64, bool)> {
     let mut k = Kernel::default();
-    k.fixes.fillet_knife_edge_rounds = knife_edges;
     let mut b = part(&mut k, s);
     let e = knife_edge(&k, &b, s);
     fillet_edges(&mut k, &mut b, &[e], r, 1, 1, 1.0)?;

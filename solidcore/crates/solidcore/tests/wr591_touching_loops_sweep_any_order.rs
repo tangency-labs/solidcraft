@@ -117,11 +117,8 @@ fn orders() -> Vec<(usize, usize, Vec<Curve>)> {
     out
 }
 
-fn kernel(round: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.join_touching_loops = true;
-    k.fixes.loops_go_on_round_the_vertex = round;
-    k
+fn kernel(_round: bool) -> Kernel {
+    Kernel::default()
 }
 
 /// The cap plane's loops: the outer loop counts, the loop counts and the signed area
@@ -193,7 +190,6 @@ fn is_plate(s: &Swept) -> bool {
 /// the default.
 #[test]
 fn wr591_without_the_flag_the_capped_sweep_returns_an_open_skin() {
-    assert!(!Kernel::default().fixes.loops_go_on_round_the_vertex);
     let mut refused = Vec::new();
     for (variant, turn, curves) in orders() {
         let mut k = kernel(false);

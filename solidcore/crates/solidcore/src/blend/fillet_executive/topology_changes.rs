@@ -73,7 +73,7 @@ pub fn update_topology_changes<O: Copy + PartialEq>(
                 // fork 873c7c9 passes this on (SER)
                 ignored(crate::error::passed_on(
                     access.change_geometry(k, geometry, original, face),
-                    k.fixes.fillet_statuses_pass_on,
+                    true,
                 )?)?;
             }
         }
@@ -83,7 +83,7 @@ pub fn update_topology_changes<O: Copy + PartialEq>(
             // fork 873c7c9 passes this on (SER)
             ignored(crate::error::passed_on(
                 access.change_corner(k, corner, original, face),
-                k.fixes.fillet_statuses_pass_on,
+                true,
             )?)?;
         }
     }
@@ -172,8 +172,7 @@ mod tests {
     /// before the other geometries and the corners; without it every update runs.
     #[test]
     fn fillet_statuses_pass_on_returns_the_first_failed_split_face_update() {
-        let mut k = Kernel::default();
-        k.fixes.fillet_statuses_pass_on = true;
+        let k = Kernel::default();
         let mut changes = Changes {
             users: vec![Some(3), Some(8)],
             ..Changes::default()
@@ -181,7 +180,6 @@ mod tests {
         let e = update_topology_changes(&k, &[2, 1], &[7], &mut changes, 0, 3).unwrap_err();
         assert_eq!(e, SolidError::sm_err("ordinary ignored update"));
         assert_eq!(changes.events, vec![(false, 20, 8)]);
-        k.fixes.fillet_statuses_pass_on = false;
         let mut changes = Changes {
             users: vec![Some(3), Some(8)],
             ..Changes::default()

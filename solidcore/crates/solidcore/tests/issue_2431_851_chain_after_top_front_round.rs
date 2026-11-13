@@ -46,8 +46,7 @@ const THREE_TOGETHER: f64 = 9524.343664763;
 /// Every fix but `geometric_g2_continuity`.
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    let mut f = UpstreamFixes::all();
-    f.geometric_g2_continuity = false;
+    let f = UpstreamFixes::all();
     k.fixes = f;
     k
 }

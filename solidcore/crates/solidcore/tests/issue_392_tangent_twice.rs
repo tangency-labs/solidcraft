@@ -8,8 +8,7 @@
 //! The case is the SSI corpus' `c2n_cylN_on_planeN` (jyviko/ssi-corpus `b04c8a6`): a
 //! rational quadratic NURBS cylinder of radius 1 about the x axis at `z = 1`, lying on the
 //! NURBS plane `z = 0` along `y = 0, -2 <= x <= 2`, at approximation tolerance `1e-6`.
-//! With `UpstreamFixes::ssi_trace_tangent_curves_once` off (upstream) the result is two
-//! tangent curves on top of each other; with it on, one.
+//! The result is one tangent curve.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -56,9 +55,8 @@ fn nurbs(
 }
 
 /// The corpus' plane and cylinder, intersected as its `gsi` runner does.
-fn intersect(fix: bool) -> SurfaceIntersection {
-    let mut k = Kernel::default();
-    k.fixes.ssi_trace_tangent_curves_once = fix;
+fn intersect() -> SurfaceIntersection {
+    let k = Kernel::default();
     let plane = nurbs(
         [1, 1],
         &[0.0, 0.0, 1.0, 1.0],
@@ -127,24 +125,8 @@ fn ends(r: &SurfaceIntersection) -> Vec<[[f64; 3]; 2]> {
 }
 
 #[test]
-fn upstream_traces_the_tangent_line_twice() {
-    let r = intersect(false);
-    assert_eq!(
-        r.curve_types,
-        [TsectCurveType::Tangent, TsectCurveType::Tangent],
-        "{:?}",
-        ends(&r)
-    );
-    // both run the whole line, from x = -2 to x = 2 (one each way)
-    for [a, b] in ends(&r) {
-        assert!((a[0].abs() - 2.0).abs() < 1e-6 && (b[0].abs() - 2.0).abs() < 1e-6);
-        assert!((a[0] + b[0]).abs() < 1e-6);
-    }
-}
-
-#[test]
 fn fixed_traces_the_tangent_line_once() {
-    let r = intersect(true);
+    let r = intersect();
     assert_eq!(r.curve_types, [TsectCurveType::Tangent], "{:?}", ends(&r));
     let [[a, b]] = <[[[f64; 3]; 2]; 1]>::try_from(ends(&r)).unwrap();
     assert!((a[0].abs() - 2.0).abs() < 1e-6 && (b[0].abs() - 2.0).abs() < 1e-6);

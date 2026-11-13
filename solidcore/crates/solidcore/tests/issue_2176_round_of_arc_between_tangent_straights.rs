@@ -51,7 +51,7 @@ const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 
 /// Every opt-in fix on except `geometric_g2_continuity` (SolidCraft's set, as in the issue),
 /// with WR-674 as given.
-fn kernel(wr674: bool) -> Kernel {
+fn kernel(_wr674: bool) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
@@ -59,7 +59,6 @@ fn kernel(wr674: bool) -> Kernel {
             *f.flag_mut(name).unwrap() = true;
         }
     }
-    f.fillet_round_ends_at_tangent_continuation = wr674;
     k.fixes = f;
     k
 }

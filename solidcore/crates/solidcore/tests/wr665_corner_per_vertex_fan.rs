@@ -148,9 +148,8 @@ fn fork_4ecfbab_join_refuses_neighbours() {
 
 /// Chamfers the axis edges `which` (of the two, sorted) with leg 1; `Err` is the fillet
 /// error code. Also gives the number of vertices left at the origin.
-fn chamfer_axis_edges(per_fan: bool, which: &[usize]) -> Result<(f64, usize), i32> {
+fn chamfer_axis_edges(_per_fan: bool, which: &[usize]) -> Result<(f64, usize), i32> {
     let mut k = Kernel::default();
-    k.fixes.fillet_corner_per_vertex_fan = per_fan;
     let mut b = up_down_squares(&mut k);
     let all = axis_edges(&b);
     assert_eq!(all.len(), 2);
@@ -200,7 +199,6 @@ fn fork_e418750_one_fan_blended() {
 #[test]
 fn fork_e418750_failed_blend_joins_the_fans_again() {
     let mut k = Kernel::default();
-    k.fixes.fillet_corner_per_vertex_fan = true;
     let mut b = up_down_squares(&mut k);
     let ids = axis_edges(&b);
     let mut s = FilletSession::new(&mut k, &mut b).unwrap();
@@ -288,9 +286,8 @@ fn fork_e418750_is_knife_edge() {
 /// corner is built at that vertex ("Corner Case Not Implemented").
 #[test]
 fn fork_e418750_no_two_edge_corner_at_a_knife_edge() {
-    let kinds = |per_fan: bool| {
+    let kinds = |_per_fan: bool| {
         let mut k = Kernel::default();
-        k.fixes.fillet_corner_per_vertex_fan = per_fan;
         let mut b = knife_part(&mut k);
         let (knife, others) = tip_edges(&b);
         let tip = edge::start_end_vertices(&b, others[0]).unwrap();

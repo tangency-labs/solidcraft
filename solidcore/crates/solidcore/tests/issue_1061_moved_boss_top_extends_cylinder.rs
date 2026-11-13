@@ -76,7 +76,6 @@ fn rim_off_circle(k: &Kernel, b: &Brep) -> f64 {
 /// rim's distance from the circle.
 fn moved_top(exact_mates: bool) -> (f64, f64) {
     let mut k = Kernel::default();
-    k.fixes.offset_analytic_mate_edges = exact_mates;
     let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(30.0, 20.0, 5.0), 10.0, 15.0).unwrap();
     let mut part = boolean_union(&mut k, plate, boss).unwrap();

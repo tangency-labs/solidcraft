@@ -83,7 +83,7 @@ pub enum OffsetFailure {
         radius: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they
-    /// come from meet there (opt-in `fixes.offset_walls_touch_refused`).
+    /// come from meet there (opt-in `true`).
     WallsTouch {
         /// The face whose offset's loops touch, when known.
         face: Option<FaceId>,
@@ -91,7 +91,7 @@ pub enum OffsetFailure {
         contact: WallContact,
     },
     /// Loops of the offset of `face` cross in a way the offset does not resolve (opt-in
-    /// `fixes.offset_resolve_crossing_loops`).
+    /// `true`).
     LoopsCross {
         /// The face whose offset's loops cross, when known.
         face: Option<FaceId>,

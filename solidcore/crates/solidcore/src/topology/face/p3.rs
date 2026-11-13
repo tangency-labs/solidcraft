@@ -152,8 +152,8 @@ const OP: &str = "topology::face::p3";
 /// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 6997962):
 /// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
 /// handed on to the site's own ignore otherwise.
-fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
-    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
+fn pass<T>(_k: &Kernel, r: Result<T>) -> Result<Result<T>> {
+    crate::error::passed_on(r, true)
 }
 
 fn null(reason: &'static str) -> SolidError {

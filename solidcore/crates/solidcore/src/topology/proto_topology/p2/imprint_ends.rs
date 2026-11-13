@@ -125,9 +125,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             if !(gap > EFF_ZERO * (1.0 + end_pt.max_dimension())) {
                 continue;
             }
-            if k.fixes.imprint_extends_edge_to_proto_vertex
-                && self.extend_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, end_pt, gap)?
-            {
+            if self.extend_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, end_pt, gap)? {
                 continue;
             }
             self.trim_end_to_proto_vertex(k, brep, ed, at_end, pv_pos, gap)?;
@@ -183,7 +181,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else {
             trimmed.set_min(param)
         };
-        if moved.is_err() && k.fixes.ssi_proto_topology_statuses_pass_on {
+        if moved.is_err() {
             // fork bcc6f01: `SER( sTrimmed.SetMin/SetMax(dParam) )`
             return moved;
         }

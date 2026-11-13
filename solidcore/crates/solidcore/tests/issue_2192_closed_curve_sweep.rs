@@ -118,7 +118,6 @@ fn bounded_regions(b: &Brep) -> usize {
 #[test]
 fn closed_sweep_joins_its_end_to_its_start() {
     let mut k = Kernel::default();
-    k.fixes.curve_sweep_closed_path_joins_ends = true;
     let mut tube = closed_tube(&mut k);
     assert_eq!(bounded_regions(&tube), 1);
     // five walls and no caps, closed on itself: V - E + F = 0
@@ -138,7 +137,6 @@ fn closed_sweep_joins_its_end_to_its_start() {
 #[test]
 fn closed_sweep_cuts_the_torus_around_it() {
     let mut k = Kernel::default();
-    k.fixes.curve_sweep_closed_path_joins_ends = true;
     let body = torus(&mut k);
     let tool = closed_tube(&mut k);
     let mut cut = boolean_difference(&mut k, body, tool).unwrap();

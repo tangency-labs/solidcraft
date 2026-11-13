@@ -36,9 +36,7 @@ const L: f64 = 10.0;
 const R: f64 = 2.0;
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
-    k
+    Kernel::default()
 }
 
 fn bilinear(p: [Point3; 4]) -> BSplineSurface {
@@ -937,7 +935,6 @@ fn a_revolved_label_needs_the_form_s_parametrisation() {
     };
     use solidcore::topology::face::p2 as face;
     let mut k = kernel();
-    k.fixes.fillet_exact_round_classes = true;
     let o = Point3::new(1.0, -2.0, 3.0);
     let mut rounded = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 8.0, 6.0).unwrap();
     let edge = rounded.edges().ids().next().unwrap();

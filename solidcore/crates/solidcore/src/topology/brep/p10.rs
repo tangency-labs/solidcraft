@@ -2516,18 +2516,12 @@ pub fn remove_all_topology_notified(
 
     for e in brep_wire_edges(b)? {
         // status ignored upstream
-        ignored(crate::error::passed_on(
-            delete_edge(k, b, env, e),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        ignored(crate::error::passed_on(delete_edge(k, b, env, e), true)?)?;
     }
 
     for v in brep_shell_vertices(b)? {
         // status ignored upstream
-        ignored(crate::error::passed_on(
-            delete_vertex(k, b, env, v),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        ignored(crate::error::passed_on(delete_vertex(k, b, env, v), true)?)?;
     }
     Ok(())
 }

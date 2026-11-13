@@ -390,10 +390,8 @@ fn counts(b: &Brep) -> (usize, usize, usize) {
 }
 
 /// Kernel settings for diagnostic dumps.
-fn dump_kernel(exact_classes: bool) -> Kernel {
-    let mut k = all_fixes();
-    k.fixes.fillet_exact_round_classes = exact_classes;
-    k
+fn dump_kernel(_exact_classes: bool) -> Kernel {
+    all_fixes()
 }
 
 fn dump_blend(

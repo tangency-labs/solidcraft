@@ -452,12 +452,7 @@ impl BendVolume {
                 };
                 let next_derivs = next.map(position, n, &map_opts)?;
                 // Concatenate Evaluate(ParamPoint) = Next(Mid(ParamPoint))
-                concat_evals_opt_in(
-                    n,
-                    &d,
-                    &next_derivs,
-                    opts.fixes.volume_lift_third_derivative_terms,
-                )
+                concat_evals_opt_in(n, &d, &next_derivs, true)
             }
             _ => Ok(d),
         }
@@ -582,14 +577,14 @@ impl BendVolume {
         param_box: &Extent3d,
         proj_box: Option<&mut Extent3d>,
         proj_pseudo_box: Option<&mut PseudoBox>,
-        fixes: &UpstreamFixes,
+        _fixes: &UpstreamFixes,
     ) {
         // no work - no output
         if proj_box.is_none() && proj_pseudo_box.is_none() {
             return;
         }
         // (a box reaching u < GetLegalMinU() is only reported upstream)
-        let fix_bbox = fixes.bend_volume_bbox_contains_wide_angle_and_inf_u;
+        let fix_bbox = true;
 
         // locals
         let v_min = param_box.v_min();
@@ -882,53 +877,11 @@ impl BendVolume {
         &self,
         param_box: &Extent3d,
         trim_box: &mut Extent3d,
-        fixes: &UpstreamFixes,
+        _fixes: &UpstreamFixes,
     ) -> Result<()> {
-        if fixes.bend_volume_trim_param_box_across_period {
-            return self.trim_param_bounding_box_simple_periodic(param_box, trim_box);
-        }
+        return self.trim_param_bounding_box_simple_periodic(param_box, trim_box);
 
         // locals
-        let mut u_min = param_box.u_min();
-        let mut v_min = param_box.v_min();
-        let w_min = param_box.w_min();
-        let u_max = param_box.u_max();
-        let mut v_max = param_box.v_max();
-        let w_max = param_box.w_max();
-
-        // Trim to 1/2 space, U > 0 - boxes totally outside the legal domain are
-        // turned into negative volumes
-        if u_max < self.singularity_tol {
-            trim_box.init();
-            return Err(SolidError::surface_failed(
-                OP_TRIM,
-                "the box is outside the bend's half space",
-            ));
-        }
-        if u_min < self.singularity_tol {
-            u_min = self.singularity_tol;
-        }
-
-        // Get primary period
-        let period_min = self.bend_neutral_dist * -PI;
-        let period_max = -period_min;
-
-        // boxes outside the legal domain are turned into negative volumes
-        if v_max < period_min - EFF_ZERO || v_min > period_max + EFF_ZERO {
-            trim_box.init();
-            return Err(SolidError::surface_failed(
-                OP_TRIM,
-                "the box is outside the bend's period",
-            ));
-        }
-
-        // Trim to Primary Period
-        v_min = clamp_to_period(v_min, period_min, period_max);
-        v_max = clamp_to_period(v_max, period_min, period_max);
-
-        // set output (status ignored upstream)
-        let _ = trim_box.set_min_max_coords(u_min, v_min, w_min, u_max, v_max, w_max);
-        Ok(())
     }
 
     /// Opt-in `WR-60` periodic parameter-box trim to `u >= singularity_tol` and the
@@ -1958,7 +1911,6 @@ mod tests {
         assert!(!pseudo_def.contains_point(pole, EFF_ZERO));
 
         let fixes = UpstreamFixes {
-            bend_volume_bbox_contains_wide_angle_and_inf_u: true,
             ..Default::default()
         };
         let mut bx_fix = Extent3d::new();

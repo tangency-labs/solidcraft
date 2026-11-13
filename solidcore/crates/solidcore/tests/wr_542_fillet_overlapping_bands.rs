@@ -19,7 +19,6 @@ use solidcore::Kernel;
 
 fn round_the_end(radius: f64) -> solidcore::Result<()> {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_overlapping_bands = true;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 10.0, 20.0).unwrap();
     // the two vertical edges at x = 40
     let ends: Vec<_> = b

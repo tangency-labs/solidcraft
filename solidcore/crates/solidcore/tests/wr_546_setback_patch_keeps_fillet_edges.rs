@@ -45,7 +45,6 @@ fn face_middle_from_origin(k: &Kernel, b: &Brep, f: FaceId) -> f64 {
 #[test]
 fn wr_546_setback_patch_meets_the_rounds_on_their_own_edges() {
     let mut k = Kernel::default();
-    k.fixes.fillet_patch_keeps_fillet_edges = true;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 40.0).unwrap();
     let edges: Vec<_> = b.edges().ids().collect();
     assert_eq!(edges.len(), 12);

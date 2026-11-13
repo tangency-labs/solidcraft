@@ -66,7 +66,6 @@ const AREA_REL: f64 = 5e-12;
 /// round, `fillet_exact_round_classes`).
 fn plate_and_peg(tau_deg: f64) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = true;
     let plate = create_box(&mut k, Point3::new(-20.0, -20.0, -20.0), 40.0, 40.0, 20.0).unwrap();
     let mut peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, -10.0), R, 25.0).unwrap();
     let tau = tau_deg.to_radians();

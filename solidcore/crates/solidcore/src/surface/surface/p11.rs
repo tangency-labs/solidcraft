@@ -269,7 +269,7 @@ impl Surface {
     ///
     /// Dispatch: `EvaluatePoint`/`EvaluateNormal` are the virtuals of each surface's
     /// own kind ([`Surface::evaluate_point`], [`Surface::evaluate_normal`]). When
-    /// `k.fixes.local_surface_intersect_guards_max_boundary_retry` is `true`, the
+    /// `true` is `true`, the
     /// out-of-bounds boundary retries guard both minimum and maximum boundary tests of
     /// the subsequent parameter branches with `!bFoundSolution` (WR-99).
     ///
@@ -496,7 +496,7 @@ impl Surface {
 
         // build plane containing answers (SE: Unitize status ignored; passed on with the
         // opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         plane_norm = if pass {
             plane_norm.unitize()?
         } else {
@@ -516,7 +516,7 @@ impl Surface {
         );
         let (ls_found, ls_x, termination) = {
             let mut ls = LocalSolveNd::new(&mut eval_fun, Some(&ivls), Some(&periodicities));
-            ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+            ls.set_skips_failed_evaluations(true);
             ls.set_desired_accuracy(EFF_ZERO_SQ);
             ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 3);
             ls.set_maximum_iterations(20);
@@ -586,7 +586,7 @@ impl Surface {
         // 4th - When no Iteration solution was found because boundaries were hit - look
         //       for a surf/BoundaryCurve solution at the iteration stopping point
         if !found_solution && termination == TerminationReason::OutOfBounds && do_boundary {
-            let guard_max = k.fixes.local_surface_intersect_guards_max_boundary_retry;
+            let guard_max = true;
 
             // when solution search stopped on Surface1 U Boundary
             if are_same(sv[0], uv_domain.min().x) || are_same(sv[0], uv_domain.max().x) {
@@ -787,7 +787,7 @@ impl Surface {
                     let r2 = {
                         let mut ls2 =
                             LocalSolveNd::new(&mut eval_fun2, Some(&ivls2), Some(&periodicities2));
-                        ls2.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+                        ls2.set_skips_failed_evaluations(true);
                         ls2.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
 
                         // solve it (SER: checked)
@@ -1077,7 +1077,7 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
             &self.uv_domain,
             patch.u_curve_conts,
             patch.v_curve_conts,
-            k.fixes.query_statuses_pass_on,
+            true,
         )?
         else {
             return Ok(false);
@@ -1094,7 +1094,7 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
             // interest has no answers, WR-663, tangency-labs/smlib 21dcf69)
             ivl = match ivl.intersect(&self.interval) {
                 Ok(i) => i,
-                Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled() => {
+                Err(e) if !e.is_unported_or_cancelled() => {
                     return Ok(false);
                 }
                 Err(e) => return Err(e),
@@ -1511,7 +1511,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
             &self.uv_domain1,
             patch1.u_curve_conts,
             patch1.v_curve_conts,
-            k.fixes.query_statuses_pass_on,
+            true,
         )?
         else {
             return Ok(false);
@@ -1521,7 +1521,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
             &self.uv_domain2,
             patch2.u_curve_conts,
             patch2.v_curve_conts,
-            k.fixes.query_statuses_pass_on,
+            true,
         )?
         else {
             return Ok(false);
@@ -1855,10 +1855,7 @@ impl Surface {
                 let crv_t = ivl.mid();
                 // (SE: status ignored; passed on with the opt-in fix, WR-663,
                 // tangency-labs/smlib 21dcf69)
-                if let Some(p) = ignored_or_pass_on(
-                    other_crv.evaluate_point(k, crv_t),
-                    k.fixes.query_statuses_pass_on,
-                )? {
+                if let Some(p) = ignored_or_pass_on(other_crv.evaluate_point(k, crv_t), true)? {
                     crv_pt = p;
                 }
 
@@ -1890,10 +1887,7 @@ impl Surface {
 
                     // may snap sIvl by tol to existing knots (SE: status ignored; passed
                     // on with the opt-in fix)
-                    ignored_or_pass_on(
-                        copy.trim(k, &mut ivl, TrimMode::Notify),
-                        k.fixes.query_statuses_pass_on,
-                    )?;
+                    ignored_or_pass_on(copy.trim(k, &mut ivl, TrimMode::Notify), true)?;
 
                     out.curves_3d.push(copy);
                     out.deviations.push(drop.gap);
@@ -2381,19 +2375,6 @@ mod tests {
     }
 
     #[test]
-    fn wr99_flag_metadata_and_toggle() {
-        let mut k = Kernel::default();
-        assert!(!k.fixes.local_surface_intersect_guards_max_boundary_retry);
-        assert!(UpstreamFixes::NAMES.contains(&"local_surface_intersect_guards_max_boundary_retry"));
-        assert!(UpstreamFixes::all().local_surface_intersect_guards_max_boundary_retry);
-
-        *k.fixes
-            .flag_mut("local_surface_intersect_guards_max_boundary_retry")
-            .unwrap() = true;
-        assert!(k.fixes.local_surface_intersect_guards_max_boundary_retry);
-    }
-
-    #[test]
     fn wr99_surface1_u_solution_not_lost_on_v_max_retry() {
         // S1(u, v) = (u, 0, v - 1) on [0, 1]^2; S2(u, v) = (u - 0.5, v^2 - 0.25, 0) on
         // [0, 1]^2. From interior guesses with plane normal (1, 0, 0), the 4D Newton
@@ -2451,10 +2432,7 @@ mod tests {
             .unwrap();
         assert!(res_default.is_none());
 
-        let mut k_fixed = Kernel::default();
-        k_fixed
-            .fixes
-            .local_surface_intersect_guards_max_boundary_retry = true;
+        let k_fixed = Kernel::default();
         let hit = s1
             .local_surface_intersect(
                 &k_fixed,
@@ -2486,10 +2464,7 @@ mod tests {
             do_boundary_testing: true,
         };
         let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed
-            .fixes
-            .local_surface_intersect_guards_max_boundary_retry = true;
+        let k_fixed = Kernel::default();
 
         // Branch 3 (`SmSurface.cpp:27804`, Surface 2 U-max):
         // S1(u, v) = (v, u^2 - 0.25, 0), S2(u, v) = (v - 0.5, 0, u - 1).
@@ -2642,10 +2617,7 @@ mod tests {
         let other_uv_guess = Point2::new(0.1, 0.9);
 
         let k_default = Kernel::default();
-        let mut k_fixed = Kernel::default();
-        k_fixed
-            .fixes
-            .local_surface_intersect_guards_max_boundary_retry = true;
+        let k_fixed = Kernel::default();
 
         let hit_default = s1
             .local_surface_intersect(

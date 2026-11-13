@@ -288,7 +288,6 @@ fn cases() -> Vec<Case> {
     // #2388's own fix set: the offset of this body with every fix on is refused
     // (`offset_brep`, status 1001)
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.fillet_round_as_definition = true;
     k.blend_face_log = Some(BlendFaceLog::default());
     let mut b = chamfered_box(&mut k);
     let log = k.blend_face_log.take().unwrap();

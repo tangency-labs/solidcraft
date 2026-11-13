@@ -131,10 +131,7 @@ pub(crate) fn point_or_pass_on<C: CurveEvaluate + ?Sized>(
     curve: &C,
     t: f64,
 ) -> Result<Point3> {
-    Ok(
-        ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
-            .unwrap_or(Vec3::UNDEF),
-    )
+    Ok(ignored_or_pass_on(curve.evaluate_point(k, t), true)?.unwrap_or(Vec3::UNDEF))
 }
 
 /// `EvaluatePoint` whose status upstream ignores ([`Vec3::UNDEF`] on failure), or
@@ -147,7 +144,7 @@ fn point_or_none<C: CurveEvaluate + ?Sized>(
     t: f64,
 ) -> Result<Option<Point3>> {
     match ignored(curve.evaluate_point(k, t))? {
-        None if k.fixes.query_statuses_pass_on => Ok(None),
+        None if true => Ok(None),
         p => Ok(Some(p.unwrap_or(Vec3::UNDEF))),
     }
 }
@@ -169,7 +166,7 @@ fn eval_into<C: CurveEvaluate + ?Sized>(
                 *d = s;
             }
         }
-        None if k.fixes.query_statuses_pass_on => return Ok(false),
+        None if true => return Ok(false),
         None => (),
     }
     Ok(true)
@@ -188,7 +185,7 @@ fn eval_into_or_pass_on<C: CurveEvaluate + ?Sized>(
     pv: &mut [Vec3],
 ) -> Result<()> {
     let r = curve.evaluate(k, t, num_derivs, true, non_zero_tangents);
-    if let Some(v) = ignored_or_pass_on(r, k.fixes.query_statuses_pass_on)? {
+    if let Some(v) = ignored_or_pass_on(r, true)? {
         for (d, s) in pv.iter_mut().zip(v) {
             *d = s;
         }
@@ -474,7 +471,7 @@ pub fn fix_chain_curves_list(
 /// (the fork then ends the chain, tangency-labs/smlib 8311f8e).
 fn reverse_ignored(k: &Kernel, curve: &mut Curve, domain: &Extent1d) -> Result<bool> {
     let reversed = ignored(curve.reverse_parameterization(k, domain))?.is_some();
-    Ok(reversed || !k.fixes.query_statuses_pass_on)
+    Ok(reversed)
 }
 
 // ---- solver helpers -----------------------------------------------------------------------
@@ -1020,7 +1017,7 @@ pub fn has_plane_crossings(k: &Kernel, curve: &Curve, planes: &[Plane]) -> Resul
         // fix a crossing cannot be ruled out then, tangency-labs/smlib 8311f8e)
         let Soft::Kept(solutions) = ignored_or_soft(
             plane_global_curve_intersect(k, plane, curve, &ivl, EFF_ZERO),
-            k.fixes.query_statuses_pass_on,
+            true,
         )?
         else {
             return Ok(true);
@@ -1537,12 +1534,12 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 }
 
                 // (SER(Unitize) with the opt-in fix, tangency-labs/smlib 8311f8e)
-                cpu = unitize_or_pass_on(cpu, self.kernel.fixes.query_statuses_pass_on)?;
+                cpu = unitize_or_pass_on(cpu, true)?;
                 let cpup = c[1].unitized_derivative(c[2]);
                 if c[2].length_squared() < EFF_ZERO {
                     return Err(err());
                 }
-                let cppu = unitize_or_pass_on(c[2], self.kernel.fixes.query_statuses_pass_on)?;
+                let cppu = unitize_or_pass_on(c[2], true)?;
                 let cppup = c[2].unitized_derivative(c[3]);
                 let a = cpu.cross(cppu);
                 if a.length_squared() < EFF_ZERO {
@@ -1570,12 +1567,12 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 }
 
                 // (SER(Unitize) with the opt-in fix, tangency-labs/smlib 8311f8e)
-                cpu = unitize_or_pass_on(cpu, self.kernel.fixes.query_statuses_pass_on)?;
+                cpu = unitize_or_pass_on(cpu, true)?;
                 let cpup = c[1].unitized_derivative(c[2]);
                 if c[2].length_squared() < EFF_ZERO {
                     return Err(err());
                 }
-                let cppu = unitize_or_pass_on(c[2], self.kernel.fixes.query_statuses_pass_on)?;
+                let cppu = unitize_or_pass_on(c[2], true)?;
                 let cppup = c[2].unitized_derivative(c[3]);
                 let a = cpu.cross(cppu);
                 if a.length_squared() < EFF_ZERO {
@@ -2360,8 +2357,7 @@ mod tests {
         let off = fix_chain_curves_list(&Kernel::default(), curves(), 1e-6, true).unwrap();
         assert_eq!(off.chain_starts, vec![0]);
         assert_eq!(off.origin, vec![0, 1]);
-        let mut on_k = Kernel::default();
-        on_k.fixes.query_statuses_pass_on = true;
+        let on_k = Kernel::default();
         let on = fix_chain_curves_list(&on_k, curves(), 1e-6, true).unwrap();
         assert_eq!(on.chain_starts, vec![0, 1]);
         assert_eq!(on.origin, vec![0, 1]);
@@ -2375,8 +2371,7 @@ mod tests {
         // discriminating.
         let empty = || Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::new(3));
         let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
+        let on = Kernel::default();
         let r_off =
             fix_chain_curves_list(&off, vec![Some(empty()), Some(empty())], 1e-6, true).unwrap();
         assert_eq!(r_off.deleted, 1);
@@ -2409,8 +2404,7 @@ mod tests {
         let ivl = Extent1d::from_min_max(0.0, 1.0);
         assert!(empty.evaluate_point(&Kernel::default(), 0.0).is_err());
         let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
+        let on = Kernel::default();
         // IsDegenerate: discriminating
         assert!(is_degenerate_base(&off, &empty, 0.0, Some(&ivl)).unwrap());
         assert!(!is_degenerate_base(&on, &empty, 0.0, Some(&ivl)).unwrap());

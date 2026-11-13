@@ -16,9 +16,8 @@ use solidcore::primitive::api_primitives::create_box;
 use solidcore::{Brep, Kernel};
 
 /// The fuzz case's origin and size (the record's hex floats).
-fn tiny_box(fix: bool) -> solidcore::Result<Brep> {
+fn tiny_box(_fix: bool) -> solidcore::Result<Brep> {
     let mut k = Kernel::default();
-    k.fixes.box_face_failures_propagate = fix;
     create_box(
         &mut k,
         Point3::new(
@@ -52,7 +51,6 @@ fn wr_596_tiny_box_is_a_four_face_success_by_default() {
 fn wr_596_an_ordinary_box_is_unchanged_by_the_fix() {
     for fix in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.box_face_failures_propagate = fix;
         let b = create_box(&mut k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
         assert_eq!(b.face_list().len(), 6, "fix {fix}");
     }

@@ -373,7 +373,7 @@ impl FilletCorner {
             .as_ref()
             .ok_or_else(|| null_deref("side edge without curve"))?;
         // fork 66b02de passes these on (SER)
-        let pass_on = k.fixes.fillet_statuses_pass_on;
+        let pass_on = true;
         let pnt1 = unchecked_point(crate::error::passed_on(
             side_edge_curve.evaluate_point(k, edge_param1),
             pass_on,
@@ -926,12 +926,7 @@ impl FilletCorner {
             ) => Err(e),
             // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean: with the
             // opt-in fix they read as FALSE (WR-254).
-            Err(e)
-                if e.upstream_status().is_some()
-                    && env.k.fixes.analytic_corner_failure_is_false =>
-            {
-                Ok(false)
-            }
+            Err(e) if e.upstream_status().is_some() => Ok(false),
             Err(_) => Ok(true),
         }
     }
@@ -1696,39 +1691,33 @@ impl FilletCorner {
             }
         }
 
-        // Not upstream (WR-645, `fixes.fillet_corner_variable_radius_rail_on_opposite_fillet`):
+        // Not upstream (WR-645, `true`):
         // rail 1 replaces the opposite edge, which also bounds the opposite fillet's
         // face, so it must stay on that fillet's surface as the edge did. Refused as
         // the crossing rail-rail curve is above: the corner gets the patch instead.
-        if env
-            .k
-            .fixes
-            .fillet_corner_variable_radius_rail_on_opposite_fillet
-        {
-            let opposite_fillet = env
-                .pseudo
-                .geom(opposite_fg)?
-                .fillet_surface(None)?
-                .cloned()
-                .ok_or_else(null)?;
-            let rail1_curve = env
-                .pseudo
-                .brep()
-                .edge(rail1)?
-                .curve
-                .clone()
-                .ok_or_else(null)?;
-            if !rail_on_surface(
-                env.k,
-                &rail1_curve,
-                &opposite_fillet,
-                &uv_domain,
-                10.0 * tol,
-            )? {
-                env.pseudo.delete_fillet_edge(rail0)?;
-                env.pseudo.delete_fillet_edge(rail1)?;
-                return Err(sm_err()); // Unable to convert
-            }
+        let opposite_fillet = env
+            .pseudo
+            .geom(opposite_fg)?
+            .fillet_surface(None)?
+            .cloned()
+            .ok_or_else(null)?;
+        let rail1_curve = env
+            .pseudo
+            .brep()
+            .edge(rail1)?
+            .curve
+            .clone()
+            .ok_or_else(null)?;
+        if !rail_on_surface(
+            env.k,
+            &rail1_curve,
+            &opposite_fillet,
+            &uv_domain,
+            10.0 * tol,
+        )? {
+            env.pseudo.delete_fillet_edge(rail0)?;
+            env.pseudo.delete_fillet_edge(rail1)?;
+            return Err(sm_err()); // Unable to convert
         }
 
         // Reset all geometry of corresponding edges: retrieve 3d & uv curves from rails,
@@ -2182,13 +2171,10 @@ mod tests {
     /// either way (WR-254).
     #[test]
     fn analytic_corner_surface_failure_is_false_with_the_fix() {
-        let run = |fixed: bool| {
+        let run = |_fixed: bool| {
             let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 3);
             let before = corner_state(&pseudo, &c);
-            let r = with_env(&mut pseudo, |env| {
-                env.k.fixes.analytic_corner_failure_is_false = fixed;
-                c.make_analytic_corner_surface(env)
-            });
+            let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
             (r, c, pseudo, before)
         };
 
@@ -2214,10 +2200,7 @@ mod tests {
             for n in [2, 5] {
                 let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, n);
                 let before = corner_state(&pseudo, &c);
-                let r = with_env(&mut pseudo, |env| {
-                    env.k.fixes.analytic_corner_failure_is_false = fixed;
-                    c.make_analytic_corner_surface(env)
-                });
+                let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
                 assert!(!r.unwrap(), "flag {fixed}, {n} edges");
                 assert!(c.surfaces.is_empty());
                 assert_eq!(corner_state(&pseudo, &c), before);
@@ -2228,10 +2211,7 @@ mod tests {
             let fe = pseudo.fillet_edge_mut(e).unwrap();
             fe.set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
             fe.set_status(FilStatus::CubicRailRailInterpolate);
-            let r = with_env(&mut pseudo, |env| {
-                env.k.fixes.analytic_corner_failure_is_false = fixed;
-                c.make_analytic_corner_surface(env)
-            });
+            let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
             assert!(!r.unwrap(), "flag {fixed}, cubic rail-rail");
             assert!(c.surfaces.is_empty());
         }
@@ -2248,10 +2228,7 @@ mod tests {
             let e = c.edges[0];
             let circle = Curve::from(create_analytic_circle(&k, Point3::ZERO, 1.0).unwrap());
             pseudo.brep_mut().edge_mut(e).unwrap().curve = Some(circle);
-            let r = with_env(&mut pseudo, |env| {
-                env.k.fixes.analytic_corner_failure_is_false = fixed;
-                c.make_analytic_corner_surface(env)
-            });
+            let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
             assert!(
                 matches!(r, Err(SolidError::InvalidInput { .. })),
                 "flag {fixed}: {r:?}"
@@ -2263,13 +2240,10 @@ mod tests {
     /// the same plane, with the same corner state, at the default and with the flag on.
     #[test]
     fn analytic_corner_surface_failure_flag_does_not_change_a_made_surface() {
-        let run = |fixed: bool| {
+        let run = |_fixed: bool| {
             let (mut pseudo, mut c) = line_chamfer_corner(3);
             let before = corner_state(&pseudo, &c);
-            let r = with_env(&mut pseudo, |env| {
-                env.k.fixes.analytic_corner_failure_is_false = fixed;
-                c.make_analytic_corner_surface(env)
-            });
+            let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
             (r, c, pseudo, before)
         };
 

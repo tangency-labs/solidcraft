@@ -85,10 +85,8 @@ fn brace_start(y_deg: f64) -> Vec3 {
 
 const CHORD_START: Vec3 = Vec3::new(-200.0, 0.0, 0.0);
 
-fn kernel(fixed: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.ellipse_trim_seam_lines_span_cone_height = fixed;
-    k
+fn kernel(_fixed: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {

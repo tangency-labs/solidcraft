@@ -58,7 +58,7 @@ use solidcore::topology::{Brep, FaceId};
 
 /// The issue's flags: every fix on except `geometric_g2_continuity`, with or without
 /// this one.
-fn issue_kernel(fixed: bool) -> Kernel {
+fn issue_kernel(_fixed: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
@@ -66,16 +66,13 @@ fn issue_kernel(fixed: bool) -> Kernel {
             *f.flag_mut(name).unwrap() = true;
         }
     }
-    f.offset_open_edge_second_trim_point = fixed;
     k.fixes = f;
     k
 }
 
 /// The defaults and this fix alone.
 fn only_this_fix() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.offset_open_edge_second_trim_point = true;
-    k
+    Kernel::default()
 }
 
 /// The quarter turn about z.

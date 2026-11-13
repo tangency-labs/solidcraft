@@ -69,10 +69,7 @@ fn evaluate_keep(
     from_left: bool,
     out: &mut [Vec3; 2],
 ) -> Result<()> {
-    if let Some(values) = checked_or_ignored(
-        curve.evaluate(k, t, 1, from_left, true),
-        k.fixes.planar_path_sweep_statuses,
-    )? {
+    if let Some(values) = checked_or_ignored(curve.evaluate(k, t, 1, from_left, true), true)? {
         for (target, value) in out.iter_mut().zip(values) {
             *target = value;
         }
@@ -138,7 +135,7 @@ fn sweep_profiles_along_path(
     move_profile_center_to_path: bool,
     brep: BrepId,
 ) -> Result<()> {
-    let checked = a.kernel(brep)?.fixes.planar_path_sweep_statuses;
+    let checked = true;
     // Not upstream (WR-400, #837): upstream always asks for caps; an open profile bounds
     // no planar region, its cap fails and `CreateCurveSweep` returns before stitching
     // its walls (a failure upstream ignores).
@@ -201,7 +198,7 @@ fn trim_both(
     tol: f64,
 ) -> Result<()> {
     let [before, after] = breps;
-    let checked = a.kernel(before)?.fixes.planar_path_sweep_statuses;
+    let checked = true;
     let [reference1, reference2] = references;
     checked_or_ignored(
         a.project_and_trim(
@@ -264,7 +261,7 @@ impl PrimitiveCreation {
         cap_end: bool,
         move_profile_center_to_path: bool,
     ) -> Result<BrepId> {
-        let checked = a.kernel(context_of)?.fixes.planar_path_sweep_statuses;
+        let checked = true;
         let mut owned = Vec::new();
         let result = Self::create_sweep_along_planar_path_owned(
             a,
@@ -296,7 +293,7 @@ impl PrimitiveCreation {
         move_profile_center_to_path: bool,
         owned: &mut Vec<BrepId>,
     ) -> Result<BrepId> {
-        let checked = a.kernel(context_of)?.fixes.planar_path_sweep_statuses;
+        let checked = true;
         let first_path = paths
             .first()
             .ok_or_else(|| SolidError::invalid_input(OP, "no path curves"))?;
@@ -402,10 +399,7 @@ impl PrimitiveCreation {
                 tol,
                 &Curve::from(extended_path.clone()),
                 &mut new_profiles,
-                checked
-                    || a.kernel(context_of)?
-                        .fixes
-                        .planar_path_profile_placement_statuses,
+                checked || true,
                 paths,
             )?;
 

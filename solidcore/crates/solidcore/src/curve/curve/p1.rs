@@ -198,7 +198,7 @@ where
 {
     let desired_precision = 1.0e-10; // for curve/curve intersection
     let shift_limit = 0.002; // Maximum relative parameter shift allowed.
-    let pass_on = k.fixes.query_statuses_pass_on;
+    let pass_on = true;
 
     for ii in 0..solutions.len() {
         let Some(sol) = solutions.get_mut(ii) else {
@@ -564,10 +564,7 @@ impl Curve {
             let mut curve = Curve::from(degenerate);
             let ivl = Extent1d::from_min_max(first, last);
             // (status ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-            ignore_or_pass_on(
-                curve.edit_parameterization(k, &ivl),
-                k.fixes.query_statuses_pass_on,
-            )?;
+            ignore_or_pass_on(curve.edit_parameterization(k, &ivl), true)?;
             return Ok(CurveApproximation {
                 curve,
                 achieved_tol: None,
@@ -695,7 +692,7 @@ impl Curve {
             &mut ctrl_poly,
             &mut knots,
             opts.create_analytics,
-            k.fixes.query_statuses_pass_on,
+            true,
         )?
         .ok_or(SolidError::invalid_input(
             OP_APPROX,
@@ -789,7 +786,7 @@ impl Curve {
         let mut othr_dom = Extent1d::from_value(sol.start.parameters[1]);
         othr_dom.add_value(sol.end.parameters[1]);
         // (status ignored; the fork passes these statuses on, tangency-labs/smlib 8311f8e)
-        let pass_on = k.fixes.query_statuses_pass_on;
+        let pass_on = true;
         let solved = ignored_or_pass_on(
             self.local_curve_solve::<O>(
                 k,
@@ -1032,7 +1029,7 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
         // init outputs
         let needs_more_subdivision = false;
         // the fork passes on the statuses below (tangency-labs/smlib 8311f8e)
-        let pass_on = k.fixes.query_statuses_pass_on;
+        let pass_on = true;
 
         // locals
         let point_node = self.base.branch_node(branch, 0)?;
@@ -2109,10 +2106,7 @@ impl Curve {
             best_answer_so_far_sq,
             opt_vectors: opts.opt_vectors.unwrap_or(&[]),
         };
-        ignore_or_pass_on(
-            gs.solve_it(&request, &mut solutions),
-            k.fixes.query_statuses_pass_on,
-        )?;
+        ignore_or_pass_on(gs.solve_it(&request, &mut solutions), true)?;
 
         Ok(solutions)
     }

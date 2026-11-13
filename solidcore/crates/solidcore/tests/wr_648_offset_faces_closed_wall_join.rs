@@ -25,11 +25,8 @@ use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::topology::{Brep, FaceId};
 use solidcore::Kernel;
 
-fn kernel(fixed: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.local_operation_step_walls = true;
-    k.fixes.local_operation_closes_walls_to_nothing = fixed;
-    k
+fn kernel(_fixed: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn stepped(k: &mut Kernel) -> Brep {

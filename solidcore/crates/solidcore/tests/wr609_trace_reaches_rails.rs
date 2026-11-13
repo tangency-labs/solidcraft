@@ -30,10 +30,8 @@ use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-fn kernel(fix: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = fix;
-    k
+fn kernel(_fix: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {

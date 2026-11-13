@@ -2193,7 +2193,7 @@ impl Curve {
         ivl2.set_min_max(split_param, ivl2.max())?;
         ivl.set_min_max(ivl.min(), split_param)?;
         // (statuses ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-        let pass_on = k.fixes.query_statuses_pass_on;
+        let pass_on = true;
         ignore_or_pass_on(self.trim(k, &mut ivl, TrimMode::Notify), pass_on)?;
         ignore_or_pass_on(copy.trim(k, &mut ivl2, TrimMode::Notify), pass_on)?;
         Ok(copy)
@@ -2248,11 +2248,8 @@ impl Curve {
             let mut param = interval.evaluate(per);
 
             // (status ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-            let crv_pt = ignored_or_pass_on(
-                self.evaluate_point(k, param),
-                k.fixes.query_statuses_pass_on,
-            )?
-            .unwrap_or(Vec3::UNDEF);
+            let crv_pt =
+                ignored_or_pass_on(self.evaluate_point(k, param), true)?.unwrap_or(Vec3::UNDEF);
             let mut drop = surface_drop_point(k, surface, crv_pt, domain, guess_uv)?;
 
             // If drop failed for first or last point, try moving a small distance from the end.
@@ -2484,7 +2481,7 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
 
     // with the opt-in fix a curve that cannot be evaluated has no length:
     // SM_UNDEF_DOUBLE (tangency-labs/smlib 8311f8e)
-    let no_length = k.fixes.query_statuses_pass_on;
+    let no_length = true;
     let undef = Ok((crate::math::UNDEF_DOUBLE, None));
 
     // switch for turning angles
@@ -2677,9 +2674,7 @@ where
         &eval_left,
         &eval_right,
         continuity_angle_tol,
-        &ContinuityOptions {
-            geometric_g2: k.fixes.geometric_g2_continuity,
-        },
+        &ContinuityOptions { geometric_g2: true },
     )?;
 
     // set outputs
@@ -4192,7 +4187,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
                             // with the opt-in fix an angle that cannot be measured
                             // rules nothing out (tangency-labs/smlib 8311f8e)
                             let cos_theta = match property_angle(prop, o1, o2, vec) {
-                                Err(e) if self.kernel.fixes.query_statuses_pass_on => {
+                                Err(e) if true => {
                                     if e.is_unported_or_cancelled() {
                                         return Err(e);
                                     }
@@ -4926,8 +4921,7 @@ mod tests {
         let empty = Curve::from(BSplineCurve::new(3));
         let ivl = Extent1d::from_min_max(0.0, 1.0);
         let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
+        let on = Kernel::default();
         let (len_off, _) = approximate_length(&off, &empty, &ivl, 5, false).unwrap();
         assert_ne!(len_off, crate::math::UNDEF_DOUBLE);
         let (len_on, turn) = approximate_length(&on, &empty, &ivl, 5, false).unwrap();

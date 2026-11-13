@@ -23,7 +23,7 @@
 //! ([`RailsFit`], `IsConcaveEdge`, `sm_InsideMaterial`), for the executive's choice
 //! between a refusal and a cliff overflow; those judgements run only with that flag. The
 //! fork's `IsKnifeEdge` ([`is_knife_edge`], `e418750`, WR-665) is here too, used by
-//! `SmFilletCorner::Create` with `fixes.fillet_corner_per_vertex_fan`. The
+//! `SmFilletCorner::Create` with `true`. The
 //! nearest-edge search of `sm_InsideMaterial` keeps the first of equally near edges, in
 //! the face's edge order, as the fork's strict `<` does. There is no recursion.
 

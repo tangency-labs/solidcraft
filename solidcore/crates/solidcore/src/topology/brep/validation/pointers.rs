@@ -991,15 +991,7 @@ fn check_edgeuse_geometry(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<()>
     // also fail even though the following distance tests only issue warnings in the
     // release reference.
     eu3::normalized_evaluate(k, b, eu, 0.0, false, false, true)?;
-    eu3::normalized_evaluate(
-        k,
-        b,
-        cw,
-        1.0,
-        true,
-        false,
-        !k.fixes.validation_does_not_make_uv_trims,
-    )?;
+    eu3::normalized_evaluate(k, b, cw, 1.0, true, false, false)?;
     eu3::normalized_evaluate(k, b, cw, 1.0, false, false, true)?;
     let point =
         required(b.face(f)?.surface.as_ref())?.evaluate_point(k, Point2::new(uv.x, uv.y))?;
@@ -1536,7 +1528,7 @@ mod issue_891_tests {
     /// the public `validate_pointers` must not make UV trim curves. [`half_disc`]
     /// starts with only the arc's exact trim, so the default check evaluates the
     /// clockwise chord edge use in UV space and creates its trim.
-    /// `fixes.validation_does_not_make_uv_trims` stops that creation while keeping the
+    /// `true` stops that creation while keeping the
     /// status, the reports and the existing arc trims as they were.
     mod wr446_tests {
         use super::*;
@@ -1602,9 +1594,8 @@ mod issue_891_tests {
         }
 
         /// One `validate_pointers` run on a fresh [`half_disc`].
-        fn run(no_new: bool) -> Run {
+        fn run(_no_new: bool) -> Run {
             let mut k = Kernel::default();
-            k.fixes.validation_does_not_make_uv_trims = no_new;
             let mut b = half_disc(&mut k);
             let before = trimmed_edgeuses(&b);
             let arc_before = before
@@ -1680,9 +1671,8 @@ mod issue_891_tests {
             }
         }
 
-        fn all_present_run(no_new: bool) -> ReversalRun {
+        fn all_present_run(_no_new: bool) -> ReversalRun {
             let mut k = Kernel::default();
-            k.fixes.validation_does_not_make_uv_trims = no_new;
             let mut b = half_disc(&mut k);
             give_every_edgeuse_a_trim(&k, &mut b);
             let all: Vec<_> = b.edgeuses().iter().map(|(id, _)| id).collect();
@@ -1719,9 +1709,8 @@ mod issue_891_tests {
         /// so the flag changes nothing there either.
         #[test]
         fn wr446_no_trims_is_unchanged() {
-            for no_new in [false, true] {
+            for _no_new in [false, true] {
                 let mut k = Kernel::default();
-                k.fixes.validation_does_not_make_uv_trims = no_new;
                 let mut b = half_disc_without_trims(&mut k);
                 assert!(trimmed_edgeuses(&b).is_empty());
                 let before = b.edgeuses().iter().count();

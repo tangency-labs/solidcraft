@@ -1365,7 +1365,6 @@ fn fillet_body(body: Brep) -> (FilletExecutive<Handle>, Access, Result<()>) {
         ..Access::default()
     };
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_non_manifold_result = true;
     let result = executive.do_fillet(&mut k, &mut access);
     (executive, access, result)
 }

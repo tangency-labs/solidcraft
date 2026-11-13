@@ -57,10 +57,9 @@ fn offset_checked(d: f64, keep: bool) -> (BrepCheck, f64) {
 
 /// The kernel and the sheet read from its file, copied and offset by `d` (with
 /// `offset_edges_keep_source_tolerance` set to `keep`).
-fn offset(d: f64, keep: bool) -> (Kernel, Brep) {
+fn offset(d: f64, _keep: bool) -> (Kernel, Brep) {
     let bytes = std::fs::read(SHEET).unwrap();
     let mut k = Kernel::default();
-    k.fixes.offset_edges_keep_source_tolerance = keep;
     let mut read = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
@@ -134,7 +133,6 @@ fn kept_source_tolerances_check_clean() {
 fn updated_tolerances_at_a_half_have_nothing_to_grow() {
     for fix in [false, true] {
         let (mut k, mut r) = offset(0.5, true);
-        k.fixes.validate_tolerances_fixes_reported_gaps = fix;
         let mut reports = AssertArray::new();
         let gaps =
             validate_and_update_tolerances(&mut k, &mut r, false, Some(&mut reports), 0).unwrap();
@@ -192,11 +190,7 @@ fn offset_with(d: f64, flags: &[&str]) -> (Kernel, Brep) {
 /// checks clean, its gaps at rounding, its area the offset's without the update.
 #[test]
 fn offset_updates_its_result_tolerances() {
-    let flags = [
-        "offset_edges_keep_source_tolerance",
-        "validate_tolerances_fixes_reported_gaps",
-        "offset_updates_result_tolerances",
-    ];
+    let flags = [];
     let (mut k, mut r) = offset_with(0.5, &flags);
     let gap = largest_gap(&mut k, &mut r);
     assert!(gap <= 1e-12, "gap {gap}");

@@ -6,9 +6,7 @@ use solidcore::surface::volume::{EvalOptions, Volume, VolumeKind};
 
 #[test]
 fn opt_in_duw_matches_central_difference() {
-    let mut kernel = Kernel::default();
-    assert!(!kernel.fixes.twist_simple_duw_sign);
-    kernel.fixes.twist_simple_duw_sign = true;
+    let kernel = Kernel::default();
     // Simple evaluation is in the identity frame, without orientation or compounding.
     for period in [4.0, -4.0] {
         let twist = Volume::new(VolumeKind::Twist(TwistVolume::from_members(period, 1e-5)));
@@ -45,7 +43,7 @@ fn opt_in_duw_matches_central_difference() {
 
 #[test]
 fn default_preserves_cpp_sign_and_all_other_entries() {
-    let mut kernel = Kernel::default();
+    let kernel = Kernel::default();
     let twist = Volume::new(VolumeKind::Twist(TwistVolume::from_members(4.0, 1e-5)));
     for n in 0..=3 {
         let p = Vec3::new(0.7, -0.4, 0.0);
@@ -63,7 +61,6 @@ fn default_preserves_cpp_sign_and_all_other_entries() {
             )
             .unwrap();
         assert_eq!(default, legacy);
-        kernel.fixes.twist_simple_duw_sign = true;
         let fixed = twist
             .map(
                 p,
@@ -84,7 +81,6 @@ fn default_preserves_cpp_sign_and_all_other_entries() {
                 assert_eq!(before, after);
             }
         }
-        kernel.fixes.twist_simple_duw_sign = false;
     }
     assert!(twist
         .map(
@@ -105,7 +101,7 @@ fn mapped_curve_propagates_kernel_fix_through_compounding() {
     use solidcore::curve::line::Line;
     use solidcore::geom::transform::Transform;
 
-    let mut kernel = Kernel::default();
+    let kernel = Kernel::default();
     let start = Vec3::new(0.7, -0.4, 0.0);
     let end = Vec3::new(1.7, -0.4, 1.0);
     let line = Curve::from(Line::create_line_segment(3, start, end, None).unwrap());
@@ -123,12 +119,10 @@ fn mapped_curve_propagates_kernel_fix_through_compounding() {
         let curve = CrvInVolume::new(line.clone(), in_param_space, volume, 0, 0).unwrap();
         let t = 0.3;
         let h = 1e-6;
-        kernel.fixes.twist_simple_duw_sign = false;
         let legacy = curve.evaluate(&kernel, t, 2, true, false).unwrap();
         let first = |t| curve.evaluate(&kernel, t, 1, true, false).unwrap()[1];
         let difference = (first(t + h) - first(t - h)) / (2.0 * h);
         assert!((legacy[2] - difference).length() > 0.1);
-        kernel.fixes.twist_simple_duw_sign = true;
         let fixed = curve.evaluate(&kernel, t, 2, true, false).unwrap();
         assert!((fixed[2] - difference).length() < 1e-9);
         assert_eq!(legacy[..2], fixed[..2]);
@@ -143,7 +137,7 @@ fn mapped_surface_propagates_kernel_fix() {
     use solidcore::surface::srf_in_volume::SrfInVolume;
     use solidcore::surface::surface::Surface;
 
-    let mut kernel = Kernel::default();
+    let kernel = Kernel::default();
     let base = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)));
     let twist = TwistVolume::create(
         Vec3::ZERO,
@@ -167,7 +161,6 @@ fn mapped_surface_propagates_kernel_fix() {
     let difference = (du(uv.y + h) - du(uv.y - h)) / (2.0 * h);
     let legacy = surface.evaluate(&kernel, uv, 2, 2, flags).unwrap();
     assert!((legacy[1][1] - difference).length() > 0.1);
-    kernel.fixes.twist_simple_duw_sign = true;
     let fixed = surface.evaluate(&kernel, uv, 2, 2, flags).unwrap();
     assert!((fixed[1][1] - difference).length() < 1e-9);
     assert_eq!(legacy[0][0], fixed[0][0]);

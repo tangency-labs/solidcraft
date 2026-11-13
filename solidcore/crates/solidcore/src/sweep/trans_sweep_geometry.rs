@@ -173,7 +173,7 @@ impl TranslationalSweepGeometry {
         let mut curve = original.copy(k)?;
         let mut ivl = edge::interval(b, e)?;
         // fork c8f6a31 (WR-662): SER(pNewEdgeCurve->Trim(sIvl)).
-        let p = k.fixes.sweep_statuses_pass_on;
+        let p = true;
         ignore_status(passed_on(curve.trim(k, &mut ivl, TrimMode::Notify), p)?)?;
         curve.transform(k, &self.sweep_transform(), None)?;
         Ok((curve, tol))
@@ -230,7 +230,7 @@ impl TranslationalSweepGeometry {
             &options,
             &mut analysis,
         );
-        ignore_status(passed_on(analysis_status, k.fixes.sweep_statuses_pass_on)?)?;
+        ignore_status(passed_on(analysis_status, true)?)?;
         Ok(if analysis.solutions.is_empty() {
             SweepCheckType::Okay
         } else {

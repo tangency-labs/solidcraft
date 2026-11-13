@@ -68,10 +68,8 @@ fn drilled_box(k: &mut Kernel) -> Brep {
 
 /// The drilled box shelled 2 inward, open at the top or at x = 0, with WR-531's `fixed`
 /// and WR-454's `refuse_open`.
-fn shelled(fixed: bool, refuse_open: bool, open_top: bool) -> solidcore::Result<(Kernel, Brep)> {
+fn shelled(_fixed: bool, _refuse_open: bool, open_top: bool) -> solidcore::Result<(Kernel, Brep)> {
     let mut k = Kernel::default();
-    k.fixes.offset_point_vertex_caps = fixed;
-    k.fixes.shell_empty_cavity_fails = refuse_open;
     let part = drilled_box(&mut k);
     let open = if open_top {
         planar_faces_at(&k, &part, 2, 20.0)
@@ -127,7 +125,6 @@ fn wr_531_without_a_tip_cap_the_shell_is_refused_and_keeps_the_input() {
         for refuse_open in [false, true] {
             let case = format!("open_top={open_top} refuse_open={refuse_open}");
             let mut k = Kernel::default();
-            k.fixes.shell_empty_cavity_fails = refuse_open;
             let mut part = drilled_box(&mut k);
             let open = if open_top {
                 planar_faces_at(&k, &part, 2, 20.0)

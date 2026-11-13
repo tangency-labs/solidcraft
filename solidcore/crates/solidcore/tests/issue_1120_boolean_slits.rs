@@ -44,9 +44,8 @@ fn half_arc(k: &Kernel, start: f64, end: f64) -> Curve {
 }
 
 /// A cylinder r 30, z -6..0, united with a disc r 30, z 0..5, extruded from two half arcs.
-fn joined(remove_slits: bool) -> Brep {
+fn joined(_remove_slits: bool) -> Brep {
     let mut k = Kernel::default();
-    k.fixes.boolean_cleanup_removes_slits = remove_slits;
     let flange = create_cylinder(&mut k, Point3::new(0.0, 0.0, -6.0), R, 6.0).unwrap();
     let a = half_arc(&k, 0.0, 180.0);
     let b = half_arc(&k, 180.0, 360.0);

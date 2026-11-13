@@ -46,10 +46,8 @@ const L: f64 = 10.0;
 const R: f64 = 2.0;
 const N: usize = 40;
 
-fn kernel(definition: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = definition;
-    k
+fn kernel(_definition: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn plane_a() -> Surface {

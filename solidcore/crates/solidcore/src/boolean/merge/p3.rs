@@ -917,7 +917,7 @@ fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<
             // MergeBrep's ordinary status is ignored upstream.
             ignored(crate::error::passed_on(
                 combine_brep(k, &mut result, source, None, None, true),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
         }
         (result, false)
@@ -1193,13 +1193,13 @@ pub fn boolean_lists_with_notifications(
                         }
                         ignored(crate::error::passed_on(
                             stitch_and_orient(k, &mut component, -0.1, false, None, None),
-                            k.fixes.brep_edit_statuses_pass_on,
+                            true,
                         )?)?;
                         output.breps.push(component);
                         result.set_editing_enabled(true);
                         ignored(crate::error::passed_on(
                             remove_faces(k, &mut result, &connected),
-                            k.fixes.brep_edit_statuses_pass_on,
+                            true,
                         )?)?;
                         let next = bp::faces(&result, None)?;
                         if next.len() >= faces.len() {

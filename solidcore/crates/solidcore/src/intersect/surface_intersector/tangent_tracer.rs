@@ -5,8 +5,7 @@
 //!
 //! Not upstream: the fork's `SmTangentCurveTracer.cpp` (tangency-labs/smlib@ef4ab25,
 //! @e9fde8f, @d8c61db, @1693c9d), its anonymous namespace. The pass that uses it,
-//! `SmSurfaceIntersector::FindTangentCurves`, runs only with
-//! `Kernel::fixes.ssi_tangent_curve_tracer` (WR-75).
+//! `SmSurfaceIntersector::FindTangentCurves` (WR-75).
 //!
 //! | Rust                          | Fork                         |
 //! |-------------------------------|------------------------------|

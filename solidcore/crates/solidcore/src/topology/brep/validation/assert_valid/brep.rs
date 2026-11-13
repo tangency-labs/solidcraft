@@ -297,7 +297,7 @@ fn validate_and_update_body(
 
     // a gap is bad past the whole vertex tolerance upstream; past half of it (as the
     // report below checks them) with the fix (WR-679)
-    let half_bad = k.fixes.validate_tolerances_fixes_reported_gaps;
+    let half_bad = true;
     let bad_vertex_gap = |gap: Option<f64>, tol: f64| {
         let limit = if half_bad { tol / 2.0 } else { tol };
         gap.is_some_and(|g| g > limit)

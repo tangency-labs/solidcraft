@@ -70,9 +70,8 @@ fn coaxial_face_uv_box(k: &Kernel, s: &Surface, r: f64, z0: f64, z1: f64) -> Ext
 
 /// The merged face's STEP domain (degrees by length) after each of the test's two passes,
 /// and whether its trims lie inside its domain, for the broad (or face-sized) inputs.
-fn merged_domains(fix: bool, broad: bool, reverse: bool) -> Vec<(Extent2d, bool)> {
+fn merged_domains(_fix: bool, broad: bool, reverse: bool) -> Vec<(Extent2d, bool)> {
     let mut k = Kernel::default();
-    k.fixes.cover_wraps_across_closed_seam = fix;
     let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
     for ii in 0..3 {
         let face = if reverse { 2 - ii } else { ii };

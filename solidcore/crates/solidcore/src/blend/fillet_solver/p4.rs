@@ -70,7 +70,7 @@
 //! - **Iteration.** No recursion. Loops are bounded: two surfaces, two rails of two
 //!   edge uses, the G1 knots and points, ten trace passes, twenty cusp skips, three
 //!   drop tolerances.
-//! - **Exact round classes (WR-669, #2085).** With `fixes.fillet_exact_round_classes`, the
+//! - **Exact round classes (WR-669, #2085).** With `true`, the
 //!   try-chain (`c3_try_analytic`) is replaced by the SolidCraft fork's classification
 //!   (tangency-labs/smlib@b5f2867, 7ac037e): `ClassifyExactBlend` and
 //!   `CalcExactFilletGeom` (`blend::fillet_exact`), whose failures are errors.
@@ -467,7 +467,7 @@ impl FilletSolver {
         c2_clean_ends(ops, &mut cx, &mut st)?;
 
         // :1955-2011 analytic fillet (WR-669, opt-in: the round's exact class instead)
-        let exact = if cx.k.fixes.fillet_exact_round_classes {
+        let exact = if true {
             c3_exact_by_class(ops, &mut cx, &mut st)?
         } else {
             c3_try_analytic(ops, &mut cx, &mut st)?
@@ -1447,7 +1447,7 @@ fn c2_offset_point_ignored(
     // fork 66b02de passes this on (SER)
     Ok(crate::error::ignored(crate::error::passed_on(
         surface.surface.evaluate_point_extending(k, uv),
-        k.fixes.fillet_statuses_pass_on,
+        true,
     )?)?
     .unwrap_or(Vec3::UNDEF))
 }
@@ -1975,9 +1975,6 @@ fn c3_try_analytic(
 
     // WR-420 (fork addition, opt-in): where the centre line collapses to a point, the
     // corner ball's patch
-    if !cx.k.fixes.fillet_corner_ball_patch {
-        return Ok(false);
-    }
     let tsects = st.store.snapshot(cx.fillets, &st.tsect_pnts)?;
     match FilletSolver::calc_sphere_fillet_geom(ops, cx.k, cx.target, cx.fillets, &tsects, None) {
         Ok(()) => Ok(true),
@@ -1987,7 +1984,7 @@ fn c3_try_analytic(
 }
 
 /// Not upstream (WR-669, the SolidCraft fork's tangency-labs/smlib@b5f2867 and 7ac037e,
-/// opt-in `fixes.fillet_exact_round_classes`): in place of the try-chain, the round's exact
+/// opt-in `true`): in place of the try-chain, the round's exact
 /// class from its faces' kinds and placement at the first point
 /// (`ClassifyExactBlend(*sTsectPnts[0])`), and its exact surface by that class
 /// (`CalcExactFilletGeom(.., NULL, FALSE)`); a round of no exact class is traced. Every
@@ -2083,7 +2080,7 @@ fn c3_make_intersector<'s>(
     // closed oval) without repeating its UV: an extension stops where it comes back onto
     // the curve traced, compared in 3D, or it runs round past the trace's own span and the
     // fillet surface covers that span twice.
-    fi.base.base.extension_stops_on_closure = k.fixes.offset_extension_as_itself;
+    fi.base.base.extension_stops_on_closure = true;
 
     // If we need to trace beyond the end and we are tracing along an arc, put a stop
     // tracing criterion to avoid possible infinite looping (`IsArc` only runs when an
@@ -3102,7 +3099,7 @@ fn c5_split_rail(
     // fork 66b02de passes this on (SER)
     ignore_status(crate::error::passed_on(
         trim_ivl.set_min_max(trim_ivl.min(), split_at_param),
-        cx.k.fixes.fillet_statuses_pass_on,
+        true,
     )?)?;
     cx.fillets
         .brep_mut()
@@ -3115,7 +3112,7 @@ fn c5_split_rail(
     // fork 66b02de passes this on (SER)
     ignore_status(crate::error::passed_on(
         new_trim_ivl.set_min_max(split_at_param, new_trim_ivl.max()),
-        cx.k.fixes.fillet_statuses_pass_on,
+        true,
     )?)?;
     cx.fillets
         .brep_mut()
@@ -3259,7 +3256,7 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
                     true,
                 )?
                 .status,
-                cx.k.fixes.fillet_statuses_pass_on,
+                true,
             )?;
             let (uv_curve, uv_owner) = eu::uv_trim_curve(cx.fillets.brep(), mate_eu)?;
             let (Some(_), Some(uv_owner)) = (uv_curve, uv_owner) else {
@@ -3728,13 +3725,13 @@ fn c6_compute_point_values(
         compute_uv_vectors(point)?;
 
         // :3604 static double sdStaticStep = TANGENT ? 1e-3 : 1e-5 (latched once; with
-        // `fixes.fillet_point_step_per_point` chosen for this point, ND-3)
+        // `true` chosen for this point, ND-3)
         let first = if point.point_type == IntersectionPointType::TangentPoint {
             1.0e-3
         } else {
             1.0e-5
         };
-        let mut step = if k.fixes.fillet_point_step_per_point {
+        let mut step = if true {
             first
         } else {
             k.latch_fillet_point_step(first)
@@ -3869,10 +3866,7 @@ fn c6_compute_point_values(
 
     // :3764 ComputeUVVectors, status ignored
     // fork 66b02de passes this on (SER)
-    ignore_status(crate::error::passed_on(
-        compute_uv_vectors(point),
-        k.fixes.fillet_statuses_pass_on,
-    )?)?;
+    ignore_status(crate::error::passed_on(compute_uv_vectors(point), true)?)?;
 
     Ok(())
 }
@@ -4148,8 +4142,7 @@ mod tests_c6 {
         *prev.crv_deriv_mut() = Vec3::new(0.0, 3.0, 0.0);
         // distance of the first guess from the point's uv, for the fix on/off and a latch
         let first_guess = |fixed: bool, latched: Option<f64>| {
-            let mut k = Kernel::default();
-            k.fixes.fillet_point_step_per_point = fixed;
+            let k = Kernel::default();
             k.fillet_point_step.set(latched);
             let mut ops = Probe {
                 inner: Variable(solver(&k, &a, &b)),
@@ -4497,7 +4490,7 @@ pub(crate) fn point_intersection_on_surfaces(
     // closed oval) without repeating its UV: an extension stops where it comes back onto
     // the curve traced, compared in 3D, or it runs round past the trace's own span and the
     // fillet surface covers that span twice.
-    fi.base.base.extension_stops_on_closure = k.fixes.offset_extension_as_itself;
+    fi.base.base.extension_stops_on_closure = true;
     let mut cx = Cx {
         k,
         target,
@@ -4818,24 +4811,23 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         let radii = self.ops.constant_radii();
         // (a variable round between NURBS faces is its definition too, the fork's 0d43b4c;
         // read only where the circle generator may take it)
-        let law = if k.fixes.fillet_round_as_definition
-            && solver_type == crate::blend::fillet_solver::p1::FilletSolverType::VariableRadius
-        {
-            let has_edgeuse = matches!(self.ops.solver().edgeuse(0), Ok(Some(_)));
-            match self.ops.variable_radius_mut() {
-                Some(v) => Some(crate::blend::fillet_standard_solver::p2::LawBall {
-                    has_edgeuse,
-                    edge: v.curve_based.base_b_spline_curve()?,
-                    law: v.fillet_law().clone(),
-                    interval: v.fillet_law_interval(),
-                    reverse: v.fillet_law_orientation(),
-                    span: None,
-                }),
-                None => None,
-            }
-        } else {
-            None
-        };
+        let law =
+            if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::VariableRadius {
+                let has_edgeuse = matches!(self.ops.solver().edgeuse(0), Ok(Some(_)));
+                match self.ops.variable_radius_mut() {
+                    Some(v) => Some(crate::blend::fillet_standard_solver::p2::LawBall {
+                        has_edgeuse,
+                        edge: v.curve_based.base_b_spline_curve()?,
+                        law: v.fillet_law().clone(),
+                        interval: v.fillet_law_interval(),
+                        reverse: v.fillet_law_orientation(),
+                        span: None,
+                    }),
+                    None => None,
+                }
+            } else {
+                None
+            };
         // a chamfer's chord and sizes, for the linear generator's definition (#2486)
         let chord = if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::ConstDist {
             self.ops.constant_distance().ok()

@@ -41,9 +41,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// The cube [0,10]^3 united with the bar (-10,-2,-2) 20 x 4 x 4 tilted `alpha` about y,
 /// turned `beta` about z and moved by (5, 5, 8), as the fixture.
-fn union(fix: bool, alpha: f64, beta: f64) -> (Kernel, Brep) {
+fn union(_fix: bool, alpha: f64, beta: f64) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.boolean_vertex_by_best_crossing = fix;
     let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let mut b = create_box(&mut k, Point3::new(-10.0, -2.0, -2.0), 20.0, 4.0, 4.0).unwrap();
     let o = Point3::new(0.0, 0.0, 0.0);

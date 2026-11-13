@@ -16,7 +16,7 @@
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Open`] | `SmFilletOpenCorner::SmFilletOpenCorner`           |
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Degenerate`] | `SmFilletDegenerateCorner::SmFilletDegenerateCorner` |
 //! | [`FilletCorner::corner_type`], [`FilletCornerKind::name`] | `GetCornerType`, `GetName` (per derived class)   |
-//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with `fixes.fillet_corner_per_vertex_fan`, the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665; with `fixes.fillet_refuse_mixed_corner_crossing_rails`, not upstream, the refusal of a 3x2 mixed-convexity corner whose rails cross, WR-710) |
+//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with `true`, the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665; with `true`, not upstream, the refusal of a 3x2 mixed-convexity corner whose rails cross, WR-710) |
 //! | [`FilletCorner::is_mitre`], [`FilletCorner::filleted_edgeuses`] | the fork's `SmFilletNx2Corner::IsMitre`, `GetFilletedEdgeuses` (`9ba2b12`, WR-634) |
 //! | [`FilletCorner::create_with_solver_lookup`] | `Create` with borrowed executive solvers |
 //! | [`FilletCorner::calc_corner_geom`]                 | `SmFilletCorner::CalcCornerGeom`                      |
@@ -289,7 +289,7 @@ pub struct FilletCorner {
     /// the constructor): a bevel (mitre) whose rails meet the side edge at two places, the
     /// gap between them on the side face's continuation filled by a patch
     /// (`SmFilletNx2Corner::AdjustTopology`). Set only with
-    /// `fixes.fillet_mitre_gap_patch`.
+    /// `true`.
     pub bevel_gap_patch: bool,
     /// `m_bExtendedSurfacePatch`.
     pub extended_surface_patch: bool,
@@ -325,7 +325,7 @@ pub struct FilletCorner {
     /// The fork's Ball's own members (`m_pBallSurface` and its loop; smlib#79 step 4c,
     /// WR-697): set by its topology on a blend corner that is a Ball.
     pub ball: Option<crate::blend::blend_corner::ball::BallCorner>,
-    /// The blend corner's chamfer event (WR-716, #2345, `fixes.fillet_chamfer_corner`): its
+    /// The blend corner's chamfer event (WR-716, #2345, `true`): its
     /// corner type, exact points and, until the patch takes it, the facet's face; set
     /// with [`Self::blend`] on a 3x3 chamfer corner that is the event.
     pub chamfer_corner: Option<crate::blend::blend_corner::chamfer::ChamferCorner>,
@@ -726,7 +726,7 @@ impl FilletCorner {
     /// solver (or a solver id past `solvers`) or a solver without surface generator
     /// (upstream dereferences them), and a walk that does not close; those of the
     /// sector convexity test; [`SolidError::Unported`] (module docs). With
-    /// `fixes.fillet_refuse_mixed_corner_crossing_rails` (WR-710, not upstream),
+    /// `true` (WR-710, not upstream),
     /// [`SolidError::Unsupported`] with the reason [`MIXED_CORNER_RAILS_CROSS`] for a 3x2
     /// mixed-convexity corner whose two filleted edges leave the vertex along one
     /// tangent, so their rails cross before the corner.
@@ -991,25 +991,23 @@ impl FilletCorner {
                 // as where a hole's wall touches the bottom face along a line): the
                 // corners take its faces to meet at an angle.
                 let mut knife = false;
-                if k.fixes.fillet_corner_per_vertex_fan {
-                    let e0 = edge_of(b, eu0)?;
-                    let e1 = edge_of(b, eu1_)?;
-                    for &other in &all_eus {
-                        if knife {
-                            break;
-                        }
-                        let e = edge_of(b, other)?;
-                        if e != e0
-                            && e != e1
-                            && crate::blend::fillet_solver::p5::is_knife_edge(
-                                k,
-                                b,
-                                e,
-                                tangency_tol_radians,
-                            )?
-                        {
-                            knife = true;
-                        }
+                let e0 = edge_of(b, eu0)?;
+                let e1 = edge_of(b, eu1_)?;
+                for &other in &all_eus {
+                    if knife {
+                        break;
+                    }
+                    let e = edge_of(b, other)?;
+                    if e != e0
+                        && e != e1
+                        && crate::blend::fillet_solver::p5::is_knife_edge(
+                            k,
+                            b,
+                            e,
+                            tangency_tol_radians,
+                        )?
+                    {
+                        knife = true;
                     }
                 }
                 if knife {
@@ -1081,16 +1079,14 @@ impl FilletCorner {
                                 // their common face closes to a cusp there and the rails
                                 // cross before the corner; the corner patch built across
                                 // them leaves the faces, so the corner is refused.
-                                if k.fixes.fillet_refuse_mixed_corner_crossing_rails
-                                    && mixed_corner_rails_cross(
-                                        k,
-                                        b,
-                                        vertex,
-                                        edge_of(b, eu0)?,
-                                        edge_of(b, eu1_)?,
-                                        tan_tol_deg,
-                                    )?
-                                {
+                                if mixed_corner_rails_cross(
+                                    k,
+                                    b,
+                                    vertex,
+                                    edge_of(b, eu0)?,
+                                    edge_of(b, eu1_)?,
+                                    tan_tol_deg,
+                                )? {
                                     return Err(SolidError::Unsupported {
                                         operation: OP_CREATE,
                                         reason: MIXED_CORNER_RAILS_CROSS,
@@ -1410,12 +1406,10 @@ impl FilletCorner {
                             .0
                             .and_then(bspline_part);
                         base_surface.clone_from(&env.target.face(orig_face)?.surface);
-                        if env.k.fixes.corner_patch_face_side_twist {
-                            face_sides |= u32::try_from(ii)
-                                .ok()
-                                .and_then(|ii| 1u32.checked_shl(ii))
-                                .unwrap_or(0);
-                        }
+                        face_sides |= u32::try_from(ii)
+                            .ok()
+                            .and_then(|ii| 1u32.checked_shl(ii))
+                            .unwrap_or(0);
                     } else {
                         // no Original Face branch - curve is only connected to filletSurfaces
                         // use primaryEdgeuse to get (neighborFace,UVTrimCurve) pair
@@ -2095,7 +2089,7 @@ impl FilletCorner {
                 .ok_or_else(|| invalid(OP_TOPO, "side edge without curve"))?;
 
             // fork 66b02de passes these on (SER)
-            let pass_on = k.fixes.fillet_statuses_pass_on;
+            let pass_on = true;
             let pnt1 = unchecked_point(crate::error::passed_on(
                 side_edge_curve.evaluate_point(k, edge_param1),
                 pass_on,
@@ -2127,15 +2121,14 @@ impl FilletCorner {
             }
 
             // The fork's (WR-644, tangency-labs/smlib@2223108, opt-in
-            // `fixes.fillet_mitre_gap_patch`): two rounds mitred at the common face's
+            // `true`): two rounds mitred at the common face's
             // concave corner whose rails meet the side edge at two places. The larger
             // round cut by the side face, and the smaller round's rail, run on past the
             // side edge onto the side face's continuation, where they meet the mitre's
             // curve: the gap is filled by a patch on the side face's extended surface, as
             // at a corner of mixed convexity whose rounds are swept, the mitre's curve
             // taking the place of the swept face (`CreateCornerPatch`).
-            if k.fixes.fillet_mitre_gap_patch
-                && self.all_eus.as_ref().map_or(0, Vec::len) == 3
+            if self.all_eus.as_ref().map_or(0, Vec::len) == 3
                 && p1::check_face_complimentary_corner_concavity(
                     k,
                     target,

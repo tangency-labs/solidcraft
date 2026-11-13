@@ -567,8 +567,8 @@ impl Plane {
     /// [`Plane::is_parallel_to_vector`] with kernel opt-in fixes applied
     /// (`IsParallelToVector`).
     #[must_use]
-    pub fn is_parallel_to_vector_with_kernel(&self, k: &Kernel, vector: Vec3) -> bool {
-        self.is_parallel_to_vector_opt_in(vector, k.fixes.surface_parallel_to_vector_checks)
+    pub fn is_parallel_to_vector_with_kernel(&self, _k: &Kernel, vector: Vec3) -> bool {
+        self.is_parallel_to_vector_opt_in(vector, true)
     }
 
     /// [`Plane::is_parallel_to_vector`], optionally returning `false` when `vector`
@@ -882,8 +882,12 @@ impl Plane {
     ///
     /// Those of [`BSplineSurface::reparameterize`] (`SM_ERR_NULL_POINTER` when no
     /// NURB can be made).
-    pub fn reparameterize_with_kernel(&mut self, k: &Kernel, trim_domain: &Extent2d) -> Result<()> {
-        self.reparameterize_opt_in(trim_domain, k.fixes.plane_reparameterize_moves_origin)
+    pub fn reparameterize_with_kernel(
+        &mut self,
+        _k: &Kernel,
+        trim_domain: &Extent2d,
+    ) -> Result<()> {
+        self.reparameterize_opt_in(trim_domain, true)
     }
 
     /// Maps the domain onto `trim_domain` (`Reparameterize`): the NURB is
@@ -2857,8 +2861,7 @@ mod tests {
         );
         let old_mid_pt = p.evaluate_point(Point2::new(0.5, 0.5));
 
-        let mut k = Kernel::default();
-        k.fixes.plane_reparameterize_moves_origin = true;
+        let k = Kernel::default();
 
         let new_domain = Extent2d::from_bounds(2.0, 3.0, 5.0, 7.0);
         p.reparameterize_with_kernel(&k, &new_domain).unwrap();
@@ -2914,8 +2917,7 @@ mod tests {
             Vec2::new(1.0, 1.0),
             &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
         ));
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.plane_reparameterize_moves_origin = true;
+        let k_fixed = Kernel::default();
         s_fixed.reparameterize(&k_fixed, &domain).unwrap();
         if let SurfaceKind::Plane(plane) = s_fixed.kind() {
             assert_ne!(plane.position().origin(), Point3::new(5.0, 5.0, 5.0));

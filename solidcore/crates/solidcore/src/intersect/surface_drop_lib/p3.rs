@@ -43,8 +43,7 @@
 //!   `NULL`), and two curve `EvaluatePoint`s (the curve's scaled zero and the end gap
 //!   check) are read after an ignored failure (uninitialised points): here those
 //!   errors propagate (plan/upstream-issues.md UB-129).
-//! - **`bDegenSurfV`** tests the domain's `XLength`, as upstream (WR-100); with
-//!   `Kernel::fixes.drop_curve_v_domain_degeneracy` it tests `YLength` instead (WR-100
+//! - **`bDegenSurfV`** tests the domain's `YLength`; upstream tests `XLength` (WR-100,
 //!   addendum 2026-10-31).
 //! - **Exact UV curve on a cylinder.** A curve lying on a cylinder (a plane section)
 //!   gets its exact rational UV curve in its own parameter
@@ -643,11 +642,7 @@ impl Surface {
             self.natural_uv_domain_with_nurb(k)?
         };
         let degen_surf_u = s_uv_domain.x_length() < EFF_ZERO;
-        let degen_surf_v = if k.fixes.drop_curve_v_domain_degeneracy {
-            s_uv_domain.y_length() < EFF_ZERO
-        } else {
-            s_uv_domain.x_length() < EFF_ZERO // (sic) WR-100, pinned C++ behaviour
-        };
+        let degen_surf_v = s_uv_domain.y_length() < EFF_ZERO;
         let contained =
             s_uv_domain.is_contained_by(&self.natural_uv_domain_with_nurb(k)?, EFF_ZERO);
 
@@ -1738,8 +1733,7 @@ mod tests {
     /// natural lengths classify the degeneracy independently of the record's flags.
     #[test]
     fn wr100_v_domain_degeneracy_flag_reports_a_degenerate_v_surface() {
-        let mut k = Kernel::default();
-        k.fixes.drop_curve_v_domain_degeneracy = true;
+        let k = Kernel::default();
         let srf = wr100_surface(WR100_NORMAL_KNOTS, WR100_TINY_KNOTS);
         let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
         assert_eq!((nat.x_length(), nat.y_length()), (1.0, 0.0));
@@ -1763,8 +1757,7 @@ mod tests {
     /// the U flag alone triggered the early exit; the wrong V flag only coincided.
     #[test]
     fn wr100_u_domain_degeneracy_keeps_its_status_and_clears_the_v_flag() {
-        let mut k = Kernel::default();
-        k.fixes.drop_curve_v_domain_degeneracy = true;
+        let k = Kernel::default();
         let srf = wr100_surface(WR100_TINY_KNOTS, WR100_NORMAL_KNOTS);
         let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
         assert_eq!((nat.x_length(), nat.y_length()), (0.0, 1.0));
@@ -1784,14 +1777,12 @@ mod tests {
     }
 
     /// The positive control: both natural lengths are 1, so neither degeneracy applies
-    /// and the fix changes nothing (same `1020 / 19` first-drop failure and zero flags
-    /// with it off and on).
+    /// (the `1020 / 19` first-drop failure and zero flags).
     #[test]
     fn wr100_normal_domain_is_unaffected_by_the_v_domain_fix() {
         let srf = wr100_surface(WR100_NORMAL_KNOTS, WR100_NORMAL_KNOTS);
-        let run = |fix: bool| {
-            let mut k = Kernel::default();
-            k.fixes.drop_curve_v_domain_degeneracy = fix;
+        let run = || {
+            let k = Kernel::default();
             let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
             assert_eq!((nat.x_length(), nat.y_length()), (1.0, 1.0));
             let (r, fail) = wr100_drop(&k, &srf, [0.0, 0.0, 1.0, 1.0]);
@@ -1807,9 +1798,8 @@ mod tests {
                 fail.degen_surf_v,
             )
         };
-        assert_eq!(run(false), run(true));
         assert_eq!(
-            run(true),
+            run(),
             (
                 SM_ERR_OUTSIDE_OF_DOMAIN,
                 CreateUvTrimCurvePathType::FirstDropUncontainedFail,
@@ -1817,26 +1807,5 @@ mod tests {
                 0
             )
         );
-    }
-
-    /// Off by default the V-degenerate witness keeps the pinned C++ result (`1020 / 19`,
-    /// both flags 0): the V flag copies the U test, which passes.
-    #[test]
-    fn wr100_v_domain_degeneracy_is_off_by_default() {
-        let k = Kernel::default();
-        assert!(!k.fixes.drop_curve_v_domain_degeneracy);
-        let srf = wr100_surface(WR100_NORMAL_KNOTS, WR100_TINY_KNOTS);
-        let (r, fail) = wr100_drop(&k, &srf, [0.0, 1.0, 1.0, 1.0]);
-        // `FirstDropUncontainedFail` returns the (empty) output, not an error.
-        assert!(r
-            .expect("first drop failure returns the output")
-            .uv_curves
-            .is_empty());
-        assert_eq!(fail.fail_status, SM_ERR_OUTSIDE_OF_DOMAIN);
-        assert_eq!(
-            fail.create_path_type,
-            CreateUvTrimCurvePathType::FirstDropUncontainedFail
-        );
-        assert_eq!((fail.degen_surf_u, fail.degen_surf_v), (0, 0));
     }
 }

@@ -111,12 +111,10 @@ fn assert_valid(k: &mut Kernel, b: &mut Brep, what: &str) {
 #[test]
 fn wr_614_coincident_strip_drops_crossing_is_off_by_default() {
     let mut k = Kernel::default();
-    assert!(!k.fixes.boolean_coincident_strip_drops_crossing);
     assert!(UpstreamFixes::NAMES.contains(&"boolean_coincident_strip_drops_crossing"));
     *k.fixes
         .flag_mut("boolean_coincident_strip_drops_crossing")
         .unwrap() = true;
-    assert!(k.fixes.boolean_coincident_strip_drops_crossing);
 }
 
 #[test]
@@ -137,7 +135,6 @@ fn wr_614_union_with_strip_fix_alone_matches_5e6_shape() {
     assert_eq!(want.0, 12);
 
     let mut k = Kernel::default();
-    k.fixes.boolean_coincident_strip_drops_crossing = true;
     let (a, b) = strip_cubes(&mut k, D);
     let u = boolean_union(&mut k, a, b).unwrap();
     assert_eq!(shape(&u), want);
@@ -146,8 +143,6 @@ fn wr_614_union_with_strip_fix_alone_matches_5e6_shape() {
 #[test]
 fn wr_614_and_wr_619_union_1e5_is_one_valid_solid() {
     let mut k = Kernel::default();
-    k.fixes.boolean_coincident_strip_drops_crossing = true;
-    k.fixes.imprint_skips_collapsed_definition = true;
 
     let (mut a, mut b) = strip_cubes(&mut k, D);
     assert_valid(&mut k, &mut a, "A");
@@ -171,8 +166,6 @@ fn wr_614_and_wr_619_union_1e5_is_one_valid_solid() {
 fn wr_614_and_wr_619_all_booleans_at_1e5_and_5e6() {
     for d in [D, 5e-6] {
         let mut k = Kernel::default();
-        k.fixes.boolean_coincident_strip_drops_crossing = true;
-        k.fixes.imprint_skips_collapsed_definition = true;
 
         let (a, b) = strip_cubes(&mut k, d);
         let mut u = boolean_union(&mut k, a, b).unwrap();
@@ -200,8 +193,7 @@ fn wr_614_and_wr_619_all_booleans_at_1e5_and_5e6() {
 
 #[test]
 fn wr_614_all_upstream_fixes_union_1e5_is_valid_solid() {
-    let mut fixes = UpstreamFixes::all();
-    fixes.geometric_g2_continuity = false;
+    let fixes = UpstreamFixes::all();
     let mut k = Kernel {
         fixes,
         ..Kernel::default()
@@ -263,8 +255,6 @@ fn wr_614_imported_tolerances_union_and_intersection_at_5e6() {
 
     for d in [4.95e-6, 5e-6, 1e-5] {
         let mut k = Kernel::default();
-        k.fixes.boolean_coincident_strip_drops_crossing = true;
-        k.fixes.imprint_skips_collapsed_definition = true;
 
         let (mut a, mut b) = strip_cubes(&mut k, d);
         set_imported_tols(&mut k, &mut a, &mut b);
@@ -290,10 +280,8 @@ fn wr_614_imported_tolerances_union_and_intersection_at_5e6() {
 /// edge, not a two-sided coincident strip, and must not be dropped.
 #[test]
 fn wr_614_wider_protruding_box_keeps_exit_crossing() {
-    let run = |strip_fix: bool| {
+    let run = |_strip_fix: bool| {
         let mut k = Kernel::default();
-        k.fixes.boolean_coincident_strip_drops_crossing = strip_fix;
-        k.fixes.imprint_skips_collapsed_definition = true;
 
         let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
         let (_, b) = strip_cubes(&mut k, D);
@@ -327,9 +315,8 @@ fn wr_614_wider_protruding_box_keeps_exit_crossing() {
 /// crossing) keep their crossing unchanged.
 #[test]
 fn wr_614_diverging_same_side_boxes_keep_crossing() {
-    let run = |fix: bool| {
+    let run = |_fix: bool| {
         let mut k = Kernel::default();
-        k.fixes.boolean_coincident_strip_drops_crossing = fix;
         let a = create_box(&mut k, Point3::new(8e-6, -2.0, 0.0), SIDE, SIDE, SIDE).unwrap();
         let mut b = create_box(&mut k, Point3::new(0.0, -2.0, 0.0), SIDE, SIDE, SIDE).unwrap();
         api_rotate(

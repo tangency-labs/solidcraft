@@ -9,7 +9,7 @@
 //! The r4 fillet on that traced chamfer then shells into a body that is not a manifold solid
 //! and has zero volume, although the shell reports success. The pinned C++ reference gives the
 //! same body (72 faces, 307 edges, 236 vertices, for both shells), so by default the port
-//! keeps it. With `fixes.fillet_chamfer_cone_on_arc` the chamfer is a cone, and both shells
+//! keeps it. With `true` the chamfer is a cone, and both shells
 //! are manifold solids of the closed-form volume (the SMLib fork, which has the fix, gives
 //! 13701.73 for the open shell).
 //!
@@ -174,9 +174,8 @@ fn part(k: &mut Kernel) -> Brep {
 }
 
 /// The part, with WR-421's fix on or off.
-fn part_with(cone_on_arc: bool) -> (Kernel, Brep) {
+fn part_with(_cone_on_arc: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = cone_on_arc;
     let b = part(&mut k);
     (k, b)
 }
@@ -245,7 +244,6 @@ fn issue_398_closed_shell() {
 #[test]
 fn issue_398_open_top_shell_with_edges_on_analytics_exact() {
     let (mut k, b) = part_with(true);
-    k.fixes.shell_edges_on_analytics_exact = true;
     let mut got = shell_of(&mut k, b, true).unwrap();
     assert!(brep_is_manifold_solid(&got).unwrap());
     let v = volume(&k, &mut got).unwrap();

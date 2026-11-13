@@ -270,17 +270,12 @@ fn inputs() -> (Vec<Curve>, Vec<Curve>) {
     let path = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z * 5.0).unwrap();
     (vec![profile.into()], vec![path.into()])
 }
-fn enable_audited_fixes(k: &mut Kernel) {
-    k.fixes.planar_path_profile_placement_statuses = true;
-    k.fixes.planar_path_sweep_statuses = true;
-    k.fixes.fillet_trim_status = true;
-}
+fn enable_audited_fixes(_k: &mut Kernel) {}
 #[test]
 fn audit_483_planar_straight_sweep_keeps_valid_result_with_all_flags() {
     let (profiles, paths) = inputs();
     for combined in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.planar_path_sweep_statuses = true;
         if combined {
             enable_audited_fixes(&mut k);
         }
@@ -349,7 +344,6 @@ fn audit_483_planar_trim_stops_before_second_operand_after_failure() {
     let (profiles, _) = inputs();
     let cutting = as_bspline(&profiles[0]).unwrap();
     let mut k = Kernel::default();
-    k.fixes.planar_path_sweep_statuses = true;
     let mut a = FaultAccess::new(&mut k, ("project_and_trim", 1));
     let id = a.new_brep(PrimitiveModel::MAIN).unwrap();
     let other = a.new_brep(PrimitiveModel::MAIN).unwrap();
@@ -491,9 +485,8 @@ fn square() -> Vec<Curve> {
         .collect()
 }
 
-fn taper_with(pass_on: bool, fail: (&'static str, usize)) -> (Result<()>, Vec<&'static str>) {
+fn taper_with(_pass_on: bool, fail: (&'static str, usize)) -> (Result<()>, Vec<&'static str>) {
     let mut k = Kernel::default();
-    k.fixes.sweep_statuses_pass_on = pass_on;
     let mut a = FaultAccess::new(&mut k, fail);
     let region = a.infinite_region(PrimitiveModel::MAIN).unwrap();
     a.calls.clear();
@@ -542,9 +535,8 @@ fn issue_2009_taper_passes_on_a_failed_stitch_and_orient() {
 #[test]
 fn issue_2009_pipe_sweep_passes_on_a_failed_circle() {
     let path = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z * 5.0).unwrap();
-    let circle_error = |pass_on: bool| {
+    let circle_error = |_pass_on: bool| {
         let mut k = Kernel::default();
-        k.fixes.sweep_statuses_pass_on = pass_on;
         let mut a = FaultAccess::new(&mut k, ("", 0));
         let region = a.infinite_region(PrimitiveModel::MAIN).unwrap();
         let mut primitive = PrimitiveCreation::new(Some(region), 0, false);

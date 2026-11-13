@@ -684,7 +684,7 @@ impl RingFilletRemoval {
     /// `DoRemoval`: the fillet goes, its rails become the sharp edge.
     #[allow(clippy::too_many_lines)]
     fn do_removal(&mut self, k: &mut Kernel, b: &mut Brep) -> Result<()> {
-        let every_region = k.fixes.glue_vertices_joins_every_region;
+        let every_region = true;
         let new_edge_curve = ner(self.new_edge_curve.take())?;
         with_kernel_callbacks(k, b, |_k, b, env| {
             let this = Some(NotifyArg::Object(brep_p2::brep_ref(b)));

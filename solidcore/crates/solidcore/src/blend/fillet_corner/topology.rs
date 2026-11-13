@@ -551,7 +551,7 @@ impl FilletCorner {
         // the one reached past it round the vertex (tangency-labs/smlib@d5ebcb3, WR-457).
         let mut corner_sides = sides;
         let mut corner_total = total;
-        if k.fixes.fillet_nx1_tangent_side_edge && !closed_side && total > 3 {
+        if !closed_side && total > 3 {
             let tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
             for kk in 0..2 {
                 let other = 1 - kk;
@@ -585,9 +585,6 @@ impl FilletCorner {
                         // continuing a boss's base circle past a wall. The rail on the side
                         // face runs alongside it and never meets it; the round ends on
                         // the end face past it (tangency-labs/smlib@420e47d, WR-499).
-                        if !k.fixes.fillet_nx1_opposite_continuation_side_edge {
-                            break;
-                        }
                         let filleted_edge = edge_of(target, filleted)?;
                         let next_edge = edge_of(target, next)?;
                         if passed_continuation
@@ -626,8 +623,7 @@ impl FilletCorner {
                     // end, below a wall the bar's top meets) has no convexity: it is never
                     // of the opposite one, so it is the corner's edge
                     // (tangency-labs/smlib@1ff7353, WR-593).
-                    if (k.fixes.fillet_nx1_tangent_corner_edge
-                        && check_tangential_edgeuse_at_vertex(k, target, next, vertex, tol_deg)?)
+                    if (check_tangential_edgeuse_at_vertex(k, target, next, vertex, tol_deg)?)
                         || same_convexity_edges_round_vertex(k, target, filleted, next_edge)?
                     {
                         *need(corner_sides.get_mut(kk), "side index")? = next;
@@ -996,11 +992,7 @@ impl FilletCorner {
             // mixed convexity case (with `fillet_mitre_concave_face_corners`, WR-642, the
             // fork's tangency-labs/smlib@4f06e72: mitred as at a corner of uniform
             // convexity, below)
-            if !k.fixes.fillet_mitre_concave_face_corners
-                && mixed_convexity
-                && !self.bevel
-                && angle()? > 5.0
-            {
+            if false && mixed_convexity && !self.bevel && angle()? > 5.0 {
                 // Mixed-convexity 3x2 corner, will create a 3-sided corner face.
                 self.blending = true;
                 {

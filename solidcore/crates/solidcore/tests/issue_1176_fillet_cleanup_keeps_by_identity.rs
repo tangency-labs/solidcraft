@@ -132,7 +132,6 @@ struct Case306 {
 
 /// Case 306 filleted with the clean-up keeping the target's faces.
 fn case_306(k: &mut Kernel) -> Option<Case306> {
-    k.fixes.fillet_cleanup_keeps_target_faces = true;
     let mut b = read(k, "Fillet/extrusion0210.smb")?;
     let before: BTreeSet<EdgeId> = p1::edges(&b, None).unwrap().into_iter().collect();
     // (arena ids are never reused: every id past the target's highest is a new record)

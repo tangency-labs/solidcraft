@@ -103,10 +103,8 @@ fn edge_through(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
     found[0]
 }
 
-fn round_the_ends(r: f64, fixed: bool) -> Result<(usize, f64), String> {
+fn round_the_ends(r: f64, _fixed: bool) -> Result<(usize, f64), String> {
     let mut k = Kernel::default();
-    k.fixes.fillet_mitre_concave_face_corners = true;
-    k.fixes.fillet_refuse_overlapping_bands = fixed;
     let mut b = part(&mut k);
     let mut ids = Vec::new();
     for x in [23.5, 9.5] {

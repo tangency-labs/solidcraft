@@ -38,9 +38,8 @@ use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel};
 
-fn kernel(definition: bool) -> Kernel {
-    let mut fixes = UpstreamFixes::default();
-    fixes.fillet_round_as_definition = definition;
+fn kernel(_definition: bool) -> Kernel {
+    let fixes = UpstreamFixes::default();
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes;
     k
@@ -610,7 +609,6 @@ fn the_offset_of_a_round_is_the_offset_of_its_definition() {
 fn a_plane_section_of_a_round_is_within_its_tolerance() {
     use solidcore::topology::brep::planar_section::face_planar_section_curves;
     let mut k = kernel(true);
-    k.fixes.planar_section_face_tolerance = true;
     let mut b = chamfered_box(&mut k);
     let rounds = reopen(&k, &mut b);
     let (mut on, mut worst, mut s_vs_b) = (0, 0.0_f64, 0.0_f64);
@@ -831,14 +829,13 @@ fn a_reopened_round_measurably_off_its_net_is_the_operand_on_s() {
 
 /// The kernel SolidCraft runs: every fix on but `geometric_g2_continuity`, with the round
 /// as its definition or as a plain B-spline.
-fn solidcraft_kernel(definition: bool) -> Kernel {
+fn solidcraft_kernel(_definition: bool) -> Kernel {
     let mut fixes = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
         if name != "geometric_g2_continuity" {
             *fixes.flag_mut(name).unwrap() = true;
         }
     }
-    fixes.fillet_round_as_definition = definition;
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes;
     k

@@ -516,7 +516,7 @@ fn a_knife_edge_chamfer_too_large_names_its_distance() {
     assert!((v - (before - removed)).abs() < 1e-9 * v, "{v} vs {}", before - removed);
 }
 
-/// A cliff overflow the fork refuses too (`fixes.fillet_cliff_overflow`, solidcore#960): the
+/// A cliff overflow the fork refuses too (`true`, solidcore#960): the
 /// three edges at a 20 mm cube's corner rounded r20, their fillet's boundary on two faces'
 /// surfaces, has no room, as on the fork, not "not supported": too large, the largest radius that
 /// builds 19.99 (the whole edge less solidcore's fit margin), which builds.
@@ -572,7 +572,7 @@ fn overflow_goes_first() {
     }
 }
 
-/// The capi's `rounds_at_a_concave_face_corner_are_mitred` (`fixes.fillet_mitre_concave_face_corners`,
+/// The capi's `rounds_at_a_concave_face_corner_are_mitred` (`true`,
 /// fork 4f06e72): each edge loses (convex) or gains (concave) the spandrel r²(1 - π/4) along its
 /// length, and in the quadrant beyond both walls the mitred rounds take or add r³(5/3 - π/2): a
 /// 60 x 40 x 10 plate's 30 x 20 x 5 pocket rim at r2 (15 faces) and r5 (11), a 60 x 60 x 5 plate's
@@ -694,10 +694,6 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
     }
     let p = Point3::new;
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
-    k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
     let block = create_box(&mut k, Point3::ZERO, 40.0, 30.0, 10.0).unwrap();
     let notch = create_box(&mut k, p(35.0, -1.0, -1.0), 6.0, 6.0, 4.0).unwrap();
     let mut b = boolean_difference(&mut k, block, notch).unwrap();
@@ -733,13 +729,6 @@ fn pocket_chamfer_on_a_boolean_body() {
     use solidcore::{Kernel, Point3};
     let p = Point3::new;
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
-    k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
-    k.fixes.keep_operand_uv_trims = true;
-    k.fixes.fillet_run_on_bspline_trims = true;
     let plate = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 10.0).unwrap();
     let cut = create_box(&mut k, p(15.0, 10.0, 5.0), 30.0, 20.0, 6.0).unwrap();
     let mut b = boolean_difference(&mut k, plate, cut).unwrap();

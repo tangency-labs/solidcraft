@@ -186,8 +186,7 @@ fn the_patch_meets_the_rounds_tangentially_within_tolerance() {
 /// N x N patch has not.
 #[test]
 fn with_round_definitions_the_six_patches_are_the_setback_fill() {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
+    let k = Kernel::default();
     let (_, b) = build_with(k);
     let setback = b
         .face_list()

@@ -2997,18 +2997,18 @@ fn delete_face_in(
         }
         ignore_soft(crate::error::passed_on(
             shell::region_remove_shell(b, del_region, os),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         shell::destroy(k, b, os, env)?;
         other_shell = None;
         for s in region_shells(b, del_region)? {
             ignore_soft(crate::error::passed_on(
                 shell::region_remove_shell(b, del_region, s),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             ignore_soft(crate::error::passed_on(
                 shell::region_post_insert_shell(b, surviving, s),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
         }
         if Some(del_region) == b.infinite_region() {
@@ -3032,7 +3032,7 @@ fn delete_face_in(
         // Remove and Delete the DelRegion
         ignore_soft(crate::error::passed_on(
             b.remove_region_from_list(del_region),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         b.remove_region_record(del_region)?;
     }
@@ -3154,12 +3154,12 @@ fn delete_face_in(
     // Take care of face and faceuses - remove from lists
     ignore_soft(crate::error::passed_on(
         shell::shell_remove_faceuse(b, shell, fu),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     if let Some(os) = other_shell {
         ignore_soft(crate::error::passed_on(
             shell::shell_remove_faceuse(b, os, other_fu),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
     }
 
@@ -3214,7 +3214,7 @@ fn delete_face_in(
                     ),
                     None => delete_edge(k, b, env, e, None),
                 },
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
         }
 
@@ -3233,7 +3233,7 @@ fn delete_face_in(
                         ),
                         None => delete_vertex(k, b, env, v),
                     },
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
         }
@@ -3264,7 +3264,7 @@ fn delete_face_nesting(
         let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
         ignore_soft(crate::error::passed_on(
             shell::region_remove_shell(b, r, shell),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         // delete pShell
         shell::destroy(k, b, shell, env)?;
@@ -3410,7 +3410,7 @@ fn delete_face_nesting(
         for &x in &faceuses {
             ignore_soft(crate::error::passed_on(
                 shell::shell_remove_faceuse(b, shell, x),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             shell::shell_post_insert_faceuse(b, new_shell, x)?;
         }
@@ -3436,11 +3436,11 @@ fn delete_face_nesting(
     let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
     ignore_soft(crate::error::passed_on(
         shell::transfer_children(k, b, last, shell, None),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     ignore_soft(crate::error::passed_on(
         shell::region_remove_shell(b, r, last),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     shell::destroy(k, b, last, env)
 }
@@ -4386,7 +4386,7 @@ fn turn_to_nurbs_in(
                     Ok(boxes) => boxes.normal_box.unwrap_or_else(Extent3d::new),
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     // (fork 60a8a51 passes this status on: `SER`)
-                    Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
+                    Err(e) if true => return Err(e),
                     Err(_) => Extent3d::new(),
                 };
             let mut size = srf_bbox.size().length();
@@ -4655,7 +4655,7 @@ fn orient_body(
             // (no SER upstream; fork 60a8a51 passes the status on)
             ignore_soft(crate::error::passed_on(
                 face1::swap_uv_with_notifications(k, b, face, env),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
         }
 
@@ -6249,7 +6249,6 @@ mod tests {
         for pass_on in [false, true] {
             for on_axis in [false, true] {
                 let mut k = Kernel::default();
-                k.fixes.brep_edit_statuses_pass_on = pass_on;
                 // the face's own swap on a second, equal body: its error, if refused
                 let (mut direct, f2) = cylinder(&mut k, on_axis);
                 let swapped = face1::swap_uv(&k, &mut direct, f2);

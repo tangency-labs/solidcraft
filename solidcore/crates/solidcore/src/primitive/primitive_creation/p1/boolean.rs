@@ -141,7 +141,7 @@ fn finish_with(
     mut session: Session<'_, '_, '_>,
 ) -> Result<()> {
     // fork c8f6a31 (WR-662): Boolean2D's Relate and DeleteFaces are SER.
-    let p = k.fixes.sweep_statuses_pass_on;
+    let p = true;
     // intersect, merge, and relate the intersection geometry between the two topology graphs
     session.ti.intersect_insert_relate(
         &mut BooleanKernels {

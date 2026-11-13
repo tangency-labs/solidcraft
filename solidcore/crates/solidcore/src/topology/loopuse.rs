@@ -757,7 +757,7 @@ pub fn is_closed_3d(k: &Kernel, b: &Brep, lu: LoopuseId, check_all_gaps: bool) -
         if gap_3d_sq > xsect_tol_3d_sq {
             // WR-93: the pinned C++ computes `tol - gap`, which is negative here and
             // never exceeds the zero initial maximum, so no gap is reported open.
-            let over_tol = if k.fixes.loop_use_reports_open_gaps {
+            let over_tol = if true {
                 gap_3d_sq.sqrt() - xsect_tol_3d
             } else {
                 xsect_tol_3d - gap_3d_sq.sqrt()
@@ -1837,8 +1837,7 @@ mod tests {
     fn is_closed_3d_reports_open_gaps_with_opt_in() {
         // WR-93: upstream's `XSectTol3d - Gap` is negative for an over-tolerance gap,
         // so it never exceeds 0 and the loop is always reported closed.
-        let mut k = Kernel::default();
-        k.fixes.loop_use_reports_open_gaps = true;
+        let k = Kernel::default();
 
         // A 0.5 gap over the edges' 2e-4 cross-section tolerance: open on both scans.
         let b = square(0.5);
@@ -1889,8 +1888,7 @@ mod tests {
 
     #[test]
     fn is_closed_3d_picks_first_or_largest_exceedance() {
-        let mut k = Kernel::default();
-        k.fixes.loop_use_reports_open_gaps = true;
+        let k = Kernel::default();
 
         // Two gaps in CCW order: 0.2 at edge use 2, then 0.5 at edge use 4, both over
         // the 2e-4 cross-section tolerance.

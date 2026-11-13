@@ -20,9 +20,8 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Kernel, Vec3};
 
 /// The failed report lines of SMLib's check (level 0) of the cut.
-fn check_lines(fixed: bool) -> Vec<String> {
+fn check_lines(_fixed: bool) -> Vec<String> {
     let mut k = Kernel::default();
-    k.fixes.edge_check_orders_tangent_faces = fixed;
     let block = create_box(&mut k, Vec3::new(20.0, 5.0, 5.0), 15.0, 15.0, 27.5).unwrap();
     let pin = create_cylinder(&mut k, Vec3::new(25.0, 12.5, 22.5), 5.0, 25.0).unwrap();
     let mut cut = boolean_difference(&mut k, block, pin).unwrap();

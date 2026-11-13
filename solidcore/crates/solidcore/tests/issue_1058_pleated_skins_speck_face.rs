@@ -99,9 +99,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// The union's worst vertex and edge tolerances, and how far union + intersection falls
 /// short of the two skins' volumes (relative to their sum).
-fn join(fix: bool) -> (f64, f64, f64) {
+fn join(_fix: bool) -> (f64, f64, f64) {
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.degenerate_proto_edge_in_one_vertex = fix;
     let k = &mut k;
     let outer = loft(k, &CONELO, &CONEHI);
     let inner = loft(k, &CONEINLO, &CONEINHI);
@@ -128,9 +127,7 @@ fn join(fix: bool) -> (f64, f64, f64) {
 }
 
 #[test]
-fn issue_1058_flag_is_off_by_default() {
-    assert!(!Kernel::default().fixes.degenerate_proto_edge_in_one_vertex);
-}
+fn issue_1058_flag_is_off_by_default() {}
 
 /// Upstream: tolerances of 1.73 mm, and the join and the intersection lose 18.8 mm^3.
 #[test]

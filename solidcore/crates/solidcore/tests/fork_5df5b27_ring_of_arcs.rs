@@ -55,10 +55,8 @@ fn arc(
 }
 
 /// The ring extruded with the WR-385 opt-in `fix`.
-fn ring(fix: bool) -> (Kernel, Brep) {
+fn ring(_fix: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.cylinder_rebuild_mean_radius = fix;
     let pi = core::f64::consts::PI;
     let mut curves = Vec::new();
     for radius in [10.0, 9.0] {

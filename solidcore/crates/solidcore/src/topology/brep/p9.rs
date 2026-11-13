@@ -190,7 +190,7 @@ pub fn find_infinite_region(
             Some(bounds) => bounds,
             None => crate::error::ignored(crate::error::passed_on(
                 qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?
             .unwrap_or_else(crate::geom::extent3d::Extent3d::new),
         };
@@ -541,10 +541,7 @@ pub fn orient_sheet_surfaces(
     if is_oriented_sheet(k, b)? {
         if !same {
             // Status ignored upstream (SmBrep.cpp:11644).
-            ignore_status(crate::error::passed_on(
-                swap_brep_uv(k, b, env),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            ignore_status(crate::error::passed_on(swap_brep_uv(k, b, env), true)?)?;
         }
         return Ok(None);
     }
@@ -1214,10 +1211,8 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
         );
         // `SER(sIvl1.SetMinMax(..))`, `SER(sIvl2.SetMinMax(..))` (fork 60a8a51): a split
         // parameter outside the edge's interval fails here instead of being swapped in
-        if k.fixes.brep_edit_statuses_pass_on {
-            interval.clone().set_min_max(interval.min(), parameter)?;
-            interval.clone().set_min_max(parameter, interval.max())?;
-        }
+        interval.clone().set_min_max(interval.min(), parameter)?;
+        interval.clone().set_min_max(parameter, interval.max())?;
         let mut ivl1 = Extent1d::from_min_max(interval.min(), parameter);
         let mut ivl2 = Extent1d::from_min_max(parameter, interval.max());
         let primary = required(
@@ -1275,7 +1270,7 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
                     &mut ivl1,
                     crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
                 ),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             split_parameter = ivl1.max();
             ignore_status(crate::error::passed_on(
@@ -1288,7 +1283,7 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
                     &mut ivl2,
                     crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
                 ),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             b.edge_mut(edge_id)?.interval = ivl1;
             b.edge_mut(new_edge)?.interval = ivl2;
@@ -1303,7 +1298,7 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
                     &mut ivl2,
                     crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
                 ),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             split_parameter = ivl2.min();
             ignore_status(crate::error::passed_on(
@@ -1316,7 +1311,7 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
                     &mut ivl1,
                     crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
                 ),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             b.edge_mut(edge_id)?.interval = ivl2;
             b.edge_mut(new_edge)?.interval = ivl1;
@@ -1423,7 +1418,7 @@ pub(crate) fn make_vertex_split_edge_with_curve_identity_state(
                             for_tessellation,
                         },
                     ),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
         }
@@ -1746,7 +1741,7 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             transform.translate(translation);
             ignore_status(crate::error::passed_on(
                 copy.transform(k, &transform, None),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
         }
         let bottom = if b.edgeuse(eu4)?.orientation == OrientType::Same {
@@ -1985,7 +1980,7 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         redistribute_seam_trims(k, b, edge_id, original_trim_owner, seam, &domain)?;
         ignore_status(crate::error::passed_on(
             fp1::remove_loop(b, face, delete),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         delete_loop_records(b, delete, env)?;
     }
@@ -2023,18 +2018,16 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     vertex::refresh_tolerance(b, start_vertex, false)?;
     vertex::refresh_tolerance(b, end_vertex, false)?;
     // Opt-in (WR-469): each vertex's tolerance grows to twice its gap to the new edge's end.
-    if k.fixes.new_edge_vertex_tolerance_covers_gap {
-        let record = b.edge(edge_id)?;
-        let curve = required(record.curve.as_ref(), "new edge without curve")?;
-        let (curve_start, curve_end) = (
-            curve.evaluate_point(k, t_start)?,
-            curve.evaluate_point(k, t_end)?,
-        );
-        let start_gap = curve_start.distance(vertex::point(b, start_vertex)?);
-        let end_gap = curve_end.distance(vertex::point(b, end_vertex)?);
-        vertex::set_tolerance(b, start_vertex, 2.0 * start_gap, true, true)?;
-        vertex::set_tolerance(b, end_vertex, 2.0 * end_gap, true, true)?;
-    }
+    let record = b.edge(edge_id)?;
+    let curve = required(record.curve.as_ref(), "new edge without curve")?;
+    let (curve_start, curve_end) = (
+        curve.evaluate_point(k, t_start)?,
+        curve.evaluate_point(k, t_end)?,
+    );
+    let start_gap = curve_start.distance(vertex::point(b, start_vertex)?);
+    let end_gap = curve_end.distance(vertex::point(b, end_vertex)?);
+    vertex::set_tolerance(b, start_vertex, 2.0 * start_gap, true, true)?;
+    vertex::set_tolerance(b, end_vertex, 2.0 * end_gap, true, true)?;
     // These skeleton caches are derived from the authoritative use lists.
     sync_face_cache(b, face)?;
     if let Some(face) = output.face {
@@ -2341,7 +2334,7 @@ fn redistribute_inner_loops(
     // Opt-in (WR-527, #1526/#1527): on a plane the region a loop bounds lies within the
     // loop's box, so an inner loop sampled outside the box of the new face's outer loop
     // is not in the new face and stays: only when every edge has a box.
-    let new_outer_box = if k.fixes.boolean_skips_faces_apart {
+    let new_outer_box = if true {
         new_face_outer_box(k, b, face, new_face)?
     } else {
         None
@@ -2387,7 +2380,7 @@ fn redistribute_inner_loops(
                     &surface.natural_uv_domain_with_nurb(k)?,
                     &crate::surface::surface::p5::DropPointOptions::default(),
                 ),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?
             .map_or(crate::geom::vector2d::Vec2::UNDEF, |drop| drop.result_uv);
             new_domain.contains_point(uv, 0.0)
@@ -2465,11 +2458,11 @@ fn redistribute_inner_loops(
             face_notify(b, new_face, env, NotifyOperation::PreEdit)?;
             ignore_status(crate::error::passed_on(
                 fp1::remove_loop(b, face, loop_),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             ignore_status(crate::error::passed_on(
                 fp1::insert_loop(b, new_face, loop_),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             let refreshed = fp2::loops(b, face, false, None)?;
             if refreshed.len() >= loops.len() {
@@ -2567,7 +2560,7 @@ fn computed_uv_domain(
         crate::topology::face::p1::calculate_uv_domain_from_uv_trim_curves(
             k, b, face, true, false, false,
         ),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?
     .map_or(initial, |out| out.domain))
 }
@@ -3437,10 +3430,9 @@ mod tests {
     /// `new_edge_vertex_tolerance_covers_gap` set to `fix`. Returns the far corner's
     /// tolerance before and after and the end gap, or `None` when a dependency the
     /// success path needs is still unported.
-    fn diagonal_overshooting_its_corner(fix: bool) -> Option<(f64, f64, f64)> {
+    fn diagonal_overshooting_its_corner(_fix: bool) -> Option<(f64, f64, f64)> {
         use crate::topology::edgeuse::p1 as eu1;
         let k = &mut Kernel::default();
-        k.fixes.new_edge_vertex_tolerance_covers_gap = fix;
         let mut b = crate::primitive::api_primitives::create_box(k, Point3::ZERO, 10.0, 10.0, 10.0)
             .unwrap();
         b.set_editing_enabled(true);

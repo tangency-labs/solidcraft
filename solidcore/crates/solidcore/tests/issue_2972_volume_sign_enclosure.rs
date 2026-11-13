@@ -399,7 +399,6 @@ fn the_solid_test_names_the_test_a_body_fails() {
         use solidcore::geom::extent1d::Extent1d;
         use solidcore::sweep::api_brep::create_rotational_sweep;
         let mut k = Kernel::default();
-        k.fixes.internal_pole_row_through_knot = false;
         let frame = Axis2Placement::new(Point3::new(0.0, 0.0, 20.0), Vec3::X, Vec3::Y);
         let circle = Curve::from(
             Ellipse::create_canonical_circle(

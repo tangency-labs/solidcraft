@@ -65,7 +65,6 @@ fn boolean_union_of_crossing_creases_has_no_dangling_vertex_refs() {
     for d in [3e-6, 1e-5, 3e-5, 1e-4] {
         for fix in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.degenerate_proto_edge_in_one_vertex = fix;
             let (a, b) = operands(&mut k, d);
             if let Ok(u) = boolean_union(&mut k, a, b) {
                 let bad = dangling_vertex_refs(&u);

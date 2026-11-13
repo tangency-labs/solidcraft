@@ -666,7 +666,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             if new_e.is_some() && other_new_e.is_some() {
                 ignore_soft(crate::error::passed_on(
                     self.remove_relationship(new_e, other_new_e),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
         }
@@ -978,7 +978,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         fixed = true;
                         ignore_soft(crate::error::passed_on(
                             self.remove_relationship(Some(e1o), Some(e2)),
-                            k.fixes.brep_edit_statuses_pass_on,
+                            true,
                         )?)?;
                         squeezed.deleted_edges.push(e1o);
                         brep.brep_delete_edge(k, brep_h, e1o)?;
@@ -1017,7 +1017,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         fixed = true;
                         ignore_soft(crate::error::passed_on(
                             self.remove_relationship(Some(e1), Some(e2o)),
-                            k.fixes.brep_edit_statuses_pass_on,
+                            true,
                         )?)?;
                         squeezed.deleted_edges.push(e2o);
                         brep.brep_delete_edge(k, brep_h, e2o)?;

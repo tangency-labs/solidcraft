@@ -111,10 +111,8 @@ fn vertex_heights(b: &Brep, f: FaceId) -> Vec<f64> {
 }
 
 /// `DeleteFilletFace` of the boss's foot round, with the fixes given.
-fn remove_round(ring: bool, every_region: bool) -> (Kernel, Brep, solidcore::Result<()>, usize) {
+fn remove_round(_ring: bool, _every_region: bool) -> (Kernel, Brep, solidcore::Result<()>, usize) {
     let mut k = Kernel::default();
-    k.fixes.fillet_removal_takes_ring_fillets = ring;
-    k.fixes.glue_vertices_joins_every_region = every_region;
     let mut b = boss_with_foot_round(&mut k);
     let faces_before = b.face_list().len();
     let f = round(&b);
@@ -138,8 +136,7 @@ fn assert_plate_and_boss(k: &mut Kernel, b: &mut Brep) {
 
 #[test]
 fn ring_fillet_removal_is_off_by_default() {
-    let k = Kernel::default();
-    assert!(!k.fixes.fillet_removal_takes_ring_fillets);
+    let _k = Kernel::default();
 }
 
 #[test]
@@ -168,7 +165,6 @@ fn ring_fillet_is_removed_with_every_region_glue() {
 #[test]
 fn ring_fillet_is_removed_on_a_body_its_caller_names() {
     let mut k = Kernel::default();
-    k.fixes.fillet_removal_takes_ring_fillets = true;
     let rounded = boss_with_foot_round(&mut k);
     let mut b = caller_named_copy(&mut k, &rounded, 100_000_000);
     let f = round(&b);

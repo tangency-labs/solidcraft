@@ -936,7 +936,7 @@ impl OffsetExecutive {
         // ignored upstream)
         ignore_status(crate::error::passed_on(
             shrink_geometry(kernel, brep),
-            kernel.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
 
         // for every face
@@ -1049,7 +1049,7 @@ impl OffsetExecutive {
         // its editing guard and traversal-mark effects. Missing work must defer.
         ignore_status(crate::error::passed_on(
             crate::topology::brep::p5::remove_faces(kernel, result, editing_enabled, &delete_faces),
-            kernel.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
 
         // Forget the deleted faces and edgeuses, so later lookups in the relations
@@ -1096,7 +1096,7 @@ impl OffsetExecutive {
             // status and keeps the initialized point.
             let point = ignored(crate::error::passed_on(
                 eu3::normalized_evaluate(kernel, result, primary, 0.5, false, false, true),
-                kernel.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?
             .map_or(Vec3::UNDEF, |eval| eval.point);
             // cpp:2069–2072: the solve runs with the original's editing disabled and
@@ -1888,12 +1888,12 @@ impl OffsetExecutive {
                     let stitch_tol_3d = result.tolerance();
                     ignore_status(crate::error::passed_on(
                         stitch::stitch_into_shell_with(kernel, result, true, stitch_tol_3d, edits),
-                        kernel.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)
                 } else {
                     ignore_status(crate::error::passed_on(
                         stitch::stitch_into_solid_with(kernel, result, edits),
-                        kernel.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)
                 }
             };
@@ -1965,7 +1965,7 @@ impl OffsetExecutive {
                         // Not upstream (WR-344, tangency-labs/solidcore#469), opt-in
                         // `Kernel::fixes.offset_extended_edges_mated`: see
                         // `relates_mated_offsets`.
-                        let flag = kernel.fixes.offset_extended_edges_mated;
+                        let flag = true;
                         let unmated = flag
                             && edge::edgeuses(original, edge_id, None, None)?
                                 .iter()
@@ -2102,7 +2102,7 @@ impl OffsetExecutive {
         // surface's domain is clipped to it by a 2D boolean of planar faces made from its
         // UV loops, which need them counterclockwise (the SM_OT_SAME faceuse's sense); an
         // inset's SM_OT_OPPOSITE loops made that face inside out and the clip empty.
-        let right_side_out = kernel.fixes.offset_clip_right_side_out;
+        let right_side_out = true;
         let loop_orientation = if right_side_out {
             let fits = original
                 .face(face_id)?
@@ -2265,7 +2265,7 @@ impl OffsetExecutive {
                     )?;
                     ignore_status(crate::error::passed_on(
                         line.edit_parameterization(&ivl),
-                        kernel.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)?;
                     box_curves.push(Curve::from(line));
                 }
@@ -2324,7 +2324,7 @@ impl OffsetExecutive {
                 }
                 ignore_status(crate::error::passed_on(
                     plane.adjust_step_uv_domain(&copy_domain),
-                    kernel.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
                 let copy_plane_domain = copy_plane.natural_uv_domain_with_nurb(kernel)?;
 
@@ -2397,11 +2397,7 @@ impl OffsetExecutive {
         for (index, &result_face) in result_faces.iter().enumerate() {
             // (WR-342 opt-in: the loops in the sense of the faceuse's orientation, which
             // the offset face is made with)
-            let result_orientation = if kernel.fixes.offset_clip_right_side_out {
-                orientation
-            } else {
-                OrientType::Same
-            };
+            let result_orientation = if true { orientation } else { OrientType::Same };
             let made = face::create_curves_from_face(
                 kernel,
                 &mut result,
@@ -2413,10 +2409,7 @@ impl OffsetExecutive {
             let mut uv_curves = made.curves_3d.unwrap_or_default();
             // Convert face 3dCurves into 2D curves (all their Z components are zero).
             for curve in &mut uv_curves {
-                ignore_status(crate::error::passed_on(
-                    curve.convert_to_2d(kernel),
-                    kernel.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                ignore_status(crate::error::passed_on(curve.convert_to_2d(kernel), true)?)?;
             }
             let mut loops = Vec::new();
             for &count in &made.curve_loops {
@@ -2655,7 +2648,7 @@ impl OffsetExecutive {
                         DELETE_FACES_NAMESPACE,
                     )
                 }),
-                kernel.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             new_faces.retain(|face| !delete_faces.contains(face));
         }
@@ -2728,7 +2721,7 @@ impl OffsetExecutive {
         // Intersect's status is ignored; upstream initializes its output on failure.
         let domain = ignored(crate::error::passed_on(
             original_face.uv_domain.intersect(&offset_face.uv_domain),
-            kernel.kernel().fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or_else(Extent2d::new);
         let mid_uv = domain.evaluate(0.5, 0.5);
@@ -2740,7 +2733,7 @@ impl OffsetExecutive {
                 Side::Left,
                 Side::Left,
             ),
-            kernel.kernel().fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or(Vec3::UNDEF);
         let offset_normal = ignored(crate::error::passed_on(
@@ -2750,7 +2743,7 @@ impl OffsetExecutive {
                 Side::Left,
                 Side::Left,
             ),
-            kernel.kernel().fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or(Vec3::UNDEF);
         let same_normals = normal.dot(offset_normal) > 0.0;
@@ -2827,14 +2820,12 @@ impl OffsetExecutive {
                         // `Kernel::fixes.offset_edges_keep_source_tolerance`: the offset
                         // edge and its vertices, made at the B-rep's zone tolerance, keep
                         // the matched original edge's tolerance and its vertices' largest.
-                        if kernel.kernel().fixes.offset_edges_keep_source_tolerance {
-                            keep_source_tolerances(
-                                original,
-                                original_edge,
-                                required(self.offset_brep.as_mut())?,
-                                offset_edge,
-                            )?;
-                        }
+                        keep_source_tolerances(
+                            original,
+                            original_edge,
+                            required(self.offset_brep.as_mut())?,
+                            offset_edge,
+                        )?;
                         if let Some(slot) = original_uses.get_mut(slot) {
                             *slot = None;
                         }
@@ -2980,14 +2971,12 @@ fn relate_surface_pair(
 fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d> {
     // CreateCurvesFromFace supplied B-spline slicing copies or lines.
     match curve.kind_mut() {
-        CurveKind::BSpline(curve) => ignore_status(crate::error::passed_on(
-            curve.convert_to_3d(),
-            kernel.fixes.brep_edit_statuses_pass_on,
-        )?)?,
-        CurveKind::Line(curve) => ignore_status(crate::error::passed_on(
-            curve.convert_to_3d(),
-            kernel.fixes.brep_edit_statuses_pass_on,
-        )?)?,
+        CurveKind::BSpline(curve) => {
+            ignore_status(crate::error::passed_on(curve.convert_to_3d(), true)?)?
+        }
+        CurveKind::Line(curve) => {
+            ignore_status(crate::error::passed_on(curve.convert_to_3d(), true)?)?
+        }
         // UV curves from CreateCurvesFromFace are slicing copies, never analytic
         // non-line kinds. Reject malformed values rather than silently changing them.
         _ => {
@@ -3010,7 +2999,7 @@ fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d>
             },
             true,
         ),
-        kernel.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?
     .and_then(|boxes| boxes.normal)
     .unwrap_or_else(Extent3d::new))
@@ -5467,9 +5456,8 @@ mod tests {
                 inset bottom"]
     fn issue_974_inset_face_clipped_right_side_out() {
         use crate::primitive::api_primitives::create_plane;
-        let offsets = |right_side_out: bool| -> usize {
+        let offsets = |_right_side_out: bool| -> usize {
             let mut kernel = Kernel::default();
-            kernel.fixes.offset_clip_right_side_out = right_side_out;
             let mut original = create_plane(&mut kernel, Vec3::ZERO, 10.0, 10.0).unwrap();
             let inset = original
                 .faceuses()

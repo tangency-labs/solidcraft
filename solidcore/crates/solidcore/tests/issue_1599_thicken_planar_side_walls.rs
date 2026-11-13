@@ -79,9 +79,8 @@ fn cylinder_sheet(k: &mut Kernel) -> Brep {
     b
 }
 
-fn thicken(fix: bool, distance: f64) -> (Kernel, Brep) {
+fn thicken(_fix: bool, distance: f64) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.thicken_planar_side_walls = fix;
     let mut sheet = cylinder_sheet(&mut k);
     assert_eq!(sheet.face_list().len(), 1);
     let mut notifications = Notifications::new(&mut sheet);

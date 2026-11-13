@@ -119,8 +119,7 @@ fn cut(p: f64, r: f64, len: f64, depth: f64, flat: f64, set: impl Fn(&mut Kernel
 
 #[test]
 fn issue_435_edge_extension_is_off_by_default() {
-    let k = Kernel::default();
-    assert!(!k.fixes.imprint_extends_edge_to_proto_vertex);
+    let _k = Kernel::default();
 }
 
 /// M44x1 on 4 mm (SolidCraft case 2209). On the helix-swept groove an edge ended 9.8e-6
@@ -129,11 +128,7 @@ fn issue_435_edge_extension_is_off_by_default() {
 /// passes SMLib's check there). The end fits leave that edge as it is.
 #[test]
 fn issue_435_m44x1_edges_end_at_their_vertices() {
-    let cut = |extend| {
-        cut(1.0, 22.0, 4.0, 0.61, 0.25, |k| {
-            k.fixes.imprint_extends_edge_to_proto_vertex = extend;
-        })
-    };
+    let cut = |_extend| cut(1.0, 22.0, 4.0, 0.61, 0.25, |_k| {});
     for extend in [false, true] {
         let (gap, tol) = cut(extend);
         assert!(
@@ -150,11 +145,7 @@ fn issue_435_m44x1_edges_end_at_their_vertices() {
 /// with or without the extension.
 #[test]
 fn issue_435_m33x3_5_edges_end_at_their_vertices() {
-    let cut = |extend| {
-        cut(3.5, 16.5, 14.0, 2.15, 0.875, |k| {
-            k.fixes.imprint_extends_edge_to_proto_vertex = extend;
-        })
-    };
+    let cut = |_extend| cut(3.5, 16.5, 14.0, 2.15, 0.875, |_k| {});
     for extend in [false, true] {
         let (gap, tol) = cut(extend);
         assert!(

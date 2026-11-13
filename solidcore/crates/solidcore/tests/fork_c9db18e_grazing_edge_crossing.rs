@@ -133,11 +133,8 @@ fn grazing_join(fixes: &UpstreamFixes) -> (usize, f64, f64, f64, f64) {
 }
 
 /// The fork's imprint end fits and, as `best` says, WR-410's best crossing.
-fn fixes(best: bool) -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.imprint_extends_edge_to_proto_vertex = true;
-    f.boolean_vertex_by_best_crossing = best;
-    f
+fn fixes(_best: bool) -> UpstreamFixes {
+    UpstreamFixes::default()
 }
 
 #[test]
@@ -165,10 +162,8 @@ fn fork_c9db18e_grazing_join_fails_the_check_by_the_first_crossing() {
 /// an intersection edge stops short of its vertex and the check fails; with it the join
 /// is sound, every edge ending within the body tolerance of its vertex (the fork's thread
 /// test's measure: no vertex needs a tolerance past the body's 1e-5 to hold a gap).
-fn trims_and_best(extends: bool) -> UpstreamFixes {
-    let mut f = fixes(true);
-    f.imprint_extends_edge_to_proto_vertex = extends;
-    f
+fn trims_and_best(_extends: bool) -> UpstreamFixes {
+    fixes(true)
 }
 
 #[test]

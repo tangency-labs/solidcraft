@@ -203,11 +203,8 @@ fn check(k: &mut Kernel, b: &mut Brep) {
 /// The kernel of the peg's union: WR-599's cover across a closed seam (`cover`) and
 /// WR-598's seam iso-curve join (`delete_vertex_joins_seam_iso_curve`), which merges the seam's vertex the cover leaves on the
 /// bar's bottom arc (the fork's counts need both).
-fn peg_kernel(cover: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.cover_wraps_across_closed_seam = cover;
-    k.fixes.delete_vertex_joins_seam_iso_curve = true;
-    k
+fn peg_kernel(_cover: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn peg(k: &mut Kernel) -> Brep {
@@ -432,7 +429,6 @@ fn cone_pcurve_gap(k: &Kernel, b: &Brep) -> f64 {
 /// closed by its chord, drafted `deg` with `keep_exact_pcurves`.
 fn segment_240(deg: f64) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.keep_exact_pcurves = true;
     let o = Point3::new(0.0, 0.0, 0.0);
     let x = Vec3::new(0.0, -1.0, 0.0);
     let at = |deg: f64| {

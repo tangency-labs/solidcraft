@@ -2457,9 +2457,7 @@ pub fn calc_exact_fillet_geom(
             None => ops.solver().first_fillet_geom()?,
         };
         pseudo.geom_mut(g)?.exact_class = true;
-        if k.fixes.fillet_round_as_definition {
-            keep_definition(ops, k, pseudo, blend, fillet_geom)?;
-        }
+        keep_definition(ops, k, pseudo, blend, fillet_geom)?;
     }
     Ok(built)
 }
@@ -2593,9 +2591,7 @@ fn exact_fillet_geom_of_class(
         }
         BlendSpine::Circle => {
             // not the fork: a linear section's revolution stays behind WR-421's flag
-            if section(ops)? == FilletSurfaceGeneratorType::Linear
-                && !k.fixes.fillet_chamfer_cone_on_arc
-            {
+            if section(ops)? == FilletSurfaceGeneratorType::Linear && false {
                 return Ok(false);
             }
             FilletSolver::calc_circle_spine_fillet_geom(

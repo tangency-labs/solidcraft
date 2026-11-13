@@ -37,14 +37,8 @@ use solidcore::topology::edge;
 use solidcore::Kernel;
 
 /// The flags of the fork's cliff overflow (#960), with or without WR-630's.
-fn kernel(rail_end_on_continued_surface: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
-    k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_run_on_bspline_trims = true;
-    k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_rail_end_on_continued_surface = rail_end_on_continued_surface;
-    k
+fn kernel(_rail_end_on_continued_surface: bool) -> Kernel {
+    Kernel::default()
 }
 
 /// The area of the section a round of radius `r` removes between perpendicular faces `w`

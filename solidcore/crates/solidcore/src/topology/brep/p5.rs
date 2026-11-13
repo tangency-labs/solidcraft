@@ -324,7 +324,7 @@ pub fn combine_with_notifications(
         ))?;
         crate::error::ignore_status(crate::error::passed_on(
             delete_vertex(k, b, deleted, notifications.as_deref_mut()),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         return Ok(());
     } else if edges.is_empty() {
@@ -333,21 +333,21 @@ pub fn combine_with_notifications(
         for vu in first_uses {
             crate::error::ignore_status(crate::error::passed_on(
                 remove_vertexuse(b, survivor, vu),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             crate::error::ignore_status(crate::error::passed_on(
                 post_insert_vertexuse(b, deleted, vu),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
         }
         for vu in last_uses {
             crate::error::ignore_status(crate::error::passed_on(
                 remove_vertexuse(b, deleted, vu),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             crate::error::ignore_status(crate::error::passed_on(
                 post_insert_vertexuse(b, survivor, vu),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
         }
         // Upstream ignores Notify's status here.
@@ -368,7 +368,7 @@ pub fn combine_with_notifications(
         ))?;
         crate::error::ignore_status(crate::error::passed_on(
             delete_vertex(k, b, deleted, notifications.as_deref_mut()),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         return Ok(());
     }
@@ -401,7 +401,7 @@ pub fn combine_with_notifications(
                 target.tolerance,
                 Some(record.tolerance),
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or(0.0);
         if length > target.minimum_edge_length {
@@ -477,7 +477,7 @@ pub fn combine_with_notifications(
                 None,
                 notifications.as_deref_mut(),
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
     }
     set_vertex_point(k, b, survivor, target.point, notifications.as_deref_mut())?;
@@ -707,7 +707,7 @@ fn create_wire_edge_from_curve_in(
     if start.distance(end) < b.tolerance() {
         crate::error::ignore_status(crate::error::passed_on(
             glue_with_notifications(k, b, Some(first), Some(last), None, Some(&mut *env)),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
     }
     Ok(edge)
@@ -850,7 +850,7 @@ pub fn delete_topological_vertex_with_notifications(
                     Some(JoinCurve::Survivor(survivor_range)),
                 ],
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         if let Some(coincidence) = coincidence {
             if let [solution] = coincidence.solutions.as_slice() {
@@ -901,7 +901,7 @@ pub fn delete_topological_vertex_with_notifications(
                             // SM_UNDEF_DOUBLE sentinel remains explicit when an ordinary evaluation fails.
                             let evaluated = crate::error::ignored(crate::error::passed_on(
                                 survive_curve.evaluate_point(k, far),
-                                k.fixes.brep_edit_statuses_pass_on,
+                                true,
                             )?)?
                             .unwrap_or(Vec3::UNDEF);
                             if evaluated.closer_than(max_gap, point) {
@@ -1031,9 +1031,6 @@ fn exact_bspline_of_edge(
             crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
         )?;
         return Ok(Some(copy));
-    }
-    if !k.fixes.delete_vertex_joins_seam_iso_curve {
-        return Ok(None);
     }
     let CurveKind::CrvOnSurf(cos) = curve.kind() else {
         return Ok(None);
@@ -1578,7 +1575,7 @@ fn glue_with_notification_identity(
     }
     let distance = b.vertex(survivor)?.point.distance(b.vertex(deleted)?.point);
     let mut pair = None;
-    // Not upstream (WR-607, `fixes.glue_vertices_joins_every_region`; SolidCraft change,
+    // Not upstream (WR-607, `true`; SolidCraft change,
     // tangency-labs/smlib 661f79c): every region both vertices are in has its pair of
     // shells, all of which the glue joins (a solid's vertex is in a shell of the solid's
     // region and one of the infinite region's); one pair is kept apart below for the
@@ -1629,7 +1626,7 @@ fn glue_with_notification_identity(
             .ok_or_else(|| SolidError::topology_missing(OP, "the shell's region"))?;
         crate::error::ignore_status(crate::error::passed_on(
             remove_region_shell(b, region, shell),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         destroy_shell(k, b, notifications.as_deref_mut(), shell)?;
         first = None;
@@ -1646,18 +1643,16 @@ fn glue_with_notification_identity(
     };
     // WR-607: the other regions' pairs of shells, and their wire edges, likewise.
     let mut others = Vec::new();
-    if k.fixes.glue_vertices_joins_every_region {
-        for (surv, del) in pairs {
-            if del == last || surv == del || b.shell(del)?.is_vertex_shell() {
-                continue;
-            }
-            let other_wires = if let Some(given) = wire_edges {
-                given.to_vec()
-            } else {
-                shell_wire_edges(k, b, del)?
-            };
-            others.push((surv, del, other_wires));
+    for (surv, del) in pairs {
+        if del == last || surv == del || b.shell(del)?.is_vertex_shell() {
+            continue;
         }
+        let other_wires = if let Some(given) = wire_edges {
+            given.to_vec()
+        } else {
+            shell_wire_edges(k, b, del)?
+        };
+        others.push((surv, del, other_wires));
     }
     for vu in vertex::vertexuses(b, deleted)? {
         remove_vertexuse(b, deleted, vu)?;
@@ -1673,7 +1668,7 @@ fn glue_with_notification_identity(
                 .ok_or_else(|| SolidError::topology_missing(OP, "the shell vertex use's vertex"))?;
             crate::error::ignore_status(crate::error::passed_on(
                 remove_vertexuse(b, vertex, vu),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             clear_shell_list(b, last)?;
             destroy_topology_record(b, crate::error::EntityRef::Vertexuse(vu))?;
@@ -1686,7 +1681,7 @@ fn glue_with_notification_identity(
             .ok_or_else(|| SolidError::topology_missing(OP, "the shell's region"))?;
         crate::error::ignore_status(crate::error::passed_on(
             remove_region_shell(b, region, last),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         destroy_shell(k, b, notifications.as_deref_mut(), last)?;
     }
@@ -2733,7 +2728,7 @@ pub fn stitch_and_orient_with_identity(
             &mut lamina,
             identity,
         ),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     if lamina > 1 {
         tolerance = if options.stitch_tolerance <= 0.0 {
@@ -2750,7 +2745,7 @@ pub fn stitch_and_orient_with_identity(
                 &mut lamina,
                 identity,
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
     }
     plain_edit(k, b, |k, b, env| {
@@ -2763,7 +2758,7 @@ pub fn stitch_and_orient_with_identity(
                 options.just_unify.unwrap_or(lamina > 0),
                 options.faces_to_swap.as_deref(),
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         Ok(())
     })
@@ -2799,7 +2794,7 @@ pub(crate) fn stitch_and_orient_notified(
             env,
             curve_identity,
         ),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     if lamina > 1 {
         tolerance = if options.stitch_tolerance <= 0.0 {
@@ -2817,7 +2812,7 @@ pub(crate) fn stitch_and_orient_notified(
                 env,
                 curve_identity,
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
     }
     crate::error::ignore_status(crate::error::passed_on(
@@ -2829,7 +2824,7 @@ pub(crate) fn stitch_and_orient_notified(
             options.just_unify.unwrap_or(lamina > 0),
             options.faces_to_swap.as_deref(),
         ),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     Ok(())
 }
@@ -3241,7 +3236,7 @@ fn transform_in(
     }) {
         crate::error::ignore_status(crate::error::passed_on(
             turn_to_nurbs(k, b, notifications.as_deref_mut()),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
     }
     let mut bbox = Extent3d::new();
@@ -3344,12 +3339,12 @@ fn transform_in(
             swap_reflection_shells(b, face)?;
         }
     }
-    let fixes = k.fixes;
+    let _fixes = k.fixes;
     // WR-507 (#1520): under the opt-in fix a scale of 1 (a rotation or reflection) is no
     // scale, and a scale s keeps each tolerance at least its own times s; upstream sets
     // every one to the body tolerance whenever a scale is given.
     let tol_scale = scale.map_or(1.0, |s| max2(s.x.abs(), max2(s.y.abs(), s.z.abs())));
-    let scales_tolerances = if fixes.transform_scales_each_tolerance {
+    let scales_tolerances = if true {
         scale_tolerances && (tol_scale - 1.0).abs() > crate::math::EFF_ZERO
     } else {
         scale.is_some() && scale_tolerances
@@ -3357,7 +3352,7 @@ fn transform_in(
     if scales_tolerances {
         // WR-508 (#1521): under the opt-in fix the size is the scaled body's bounding box,
         // so a body without vertices (a lone torus) is not sized from an empty box.
-        let size = if fixes.transform_model_size_from_body_box {
+        let size = if true {
             let model_box = crate::query::brep::calculate_bounding_box(
                 k,
                 &mut *b,
@@ -3374,7 +3369,7 @@ fn transform_in(
         let zone = b.set_this_model_size_estimate(k, size);
         crate::geom::tol::set_context_model_size_estimate(&mut k.context, size);
         for vertex in vertices {
-            let tol = if fixes.transform_scales_each_tolerance {
+            let tol = if true {
                 max2(zone, vertex::tolerance(b, vertex)? * tol_scale)
             } else {
                 zone
@@ -3382,7 +3377,7 @@ fn transform_in(
             crate::error::ignore_status(vertex::set_tolerance(b, vertex, tol, false, false))?;
         }
         for edge in brep_edges(b)? {
-            let tol = if fixes.transform_scales_each_tolerance {
+            let tol = if true {
                 max2(zone, crate::topology::edge::tolerance(b, edge)? * tol_scale)
             } else {
                 zone
@@ -3392,7 +3387,7 @@ fn transform_in(
             ))?;
         }
         for face in brep_faces(b)? {
-            let tol = if fixes.transform_scales_each_tolerance {
+            let tol = if true {
                 max2(
                     zone,
                     crate::topology::face::p2::tolerance(b, face)? * tol_scale,
@@ -3628,7 +3623,6 @@ mod tests {
     fn stitch_and_orient_passes_on_a_failed_stitch() {
         for pass_on in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.brep_edit_statuses_pass_on = pass_on;
             let mut b = status_box(&mut k);
             let e = *b.edge_list().first().expect("edge");
             b.edge_mut(e).expect("edge").curve = None;
@@ -3659,7 +3653,6 @@ mod tests {
     fn stitch_and_orient_passes_on_a_failed_region_box() {
         for pass_on in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.brep_edit_statuses_pass_on = pass_on;
             let mut b = status_box(&mut k);
             let f = *b.face_list().first().expect("face");
             b.face_mut(f).expect("face").surface = None;
@@ -3919,7 +3912,6 @@ mod tests {
         for (name, placement, scale, wide, narrow) in cases {
             for fixed in [true, false] {
                 let mut k = Kernel::default();
-                k.fixes.transform_scales_each_tolerance = fixed;
                 let (mut b, [wide_edge, narrow_edge], v, f) = box_with_tolerances(&mut k);
                 transform(&mut k, &mut b, &placement, Some(scale), true).unwrap();
                 let body = b.tolerance();
@@ -3966,7 +3958,6 @@ mod tests {
         for scale in [2.0, 0.5] {
             for fixed in [true, false] {
                 let mut k = Kernel::default();
-                k.fixes.transform_model_size_from_body_box = fixed;
                 let mut torus =
                     crate::primitive::api_primitives::create_torus(&mut k, Point3::ZERO, 6.0, 2.0)
                         .unwrap();

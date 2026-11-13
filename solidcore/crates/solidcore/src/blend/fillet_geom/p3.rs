@@ -56,7 +56,7 @@
 //! - **Analytic fillets.** `CalcConeFilletGeom` / `CalcTorusFilletGeom`
 //!   (`blend.fillet_solver_p2`) read copies of the sorted vertex uses' points
 //!   (`SmTArray<SmTsectPnt*>` upstream; the builders only read them).
-//!   With `fixes.fillet_exact_round_classes` (WR-669, the SolidCraft fork's
+//!   With `true` (WR-669, the SolidCraft fork's
 //!   tangency-labs/smlib@b5f2867 and 7ac037e) they are `ClassifyExactBlend` and
 //!   `CalcExactFilletGeom(.., TRUE)` instead (`blend::fillet_exact`), with errors passed on,
 //!   and only when there are points.
@@ -405,11 +405,7 @@ impl FilletBrep {
         if !self.fillet_vertex(main_fv)?.is_processed() {
             // fork 9b7cd48 passes this on (SER)
             match main(self, target, solvers, main_fv) {
-                Err(e)
-                    if e.is_unported_or_cancelled()
-                        || is_depth_error(&e)
-                        || k.fixes.fillet_statuses_pass_on =>
-                {
+                Err(e) if e.is_unported_or_cancelled() || is_depth_error(&e) || true => {
                     return Err(e)
                 }
                 _ => {} // status ignored
@@ -969,10 +965,7 @@ impl FilletBrep {
         // trim 3DCurve and UVTrimCurves to dropPoint parameter values
         // (SetMinMax's status is ignored: an inverted pair leaves the interval); fork
         // 9b7cd48 passes this on (SER)
-        let _ = crate::error::passed_on(
-            trim_ivl.set_min_max(param1, param2),
-            k.fixes.fillet_statuses_pass_on,
-        )?;
+        let _ = crate::error::passed_on(trim_ivl.set_min_max(param1, param2), true)?;
         // each Trim reads SmTol::GetZoneTol3d of the curve's holding edge (the 3D curve's
         // owner is this edge, set by every producer with SetOwner; a UV trim curve's is
         // its edge use, whose owner is the edge)
@@ -1289,7 +1282,7 @@ impl FilletBrep {
         } // end loop on both main rails, sorting SmTsectPnts
 
         let mut fillet_created = false;
-        let exact_classes = k.fixes.fillet_exact_round_classes;
+        let exact_classes = true;
         if exact_classes
             && is_analytic_fillet
             && geom_type != FilletGeomType::TangentRollover
@@ -1452,7 +1445,7 @@ impl FilletBrep {
                         // fork 9b7cd48 passes this on (SER)
                         ignore_status(crate::error::passed_on(
                             move_tsp(&mut tsect_pnts, 0, last_tsp_idx, |vu| self.tsect_of(*vu)),
-                            k.fixes.fillet_statuses_pass_on,
+                            true,
                         )?)?;
                         continue;
                     }
@@ -1469,7 +1462,7 @@ impl FilletBrep {
                         // fork 9b7cd48 passes this on (SER)
                         ignore_status(crate::error::passed_on(
                             move_tsp(&mut tsect_pnts, last_tsp_idx, 0, |vu| self.tsect_of(*vu)),
-                            k.fixes.fillet_statuses_pass_on,
+                            true,
                         )?)?;
                         continue;
                     }
@@ -1480,7 +1473,7 @@ impl FilletBrep {
                         // fork 9b7cd48 passes this on (SER)
                         ignore_status(crate::error::passed_on(
                             move_tsp(&mut tsect_pnts, 0, last_tsp_idx, |vu| self.tsect_of(*vu)),
-                            k.fixes.fillet_statuses_pass_on,
+                            true,
                         )?)?;
                         continue;
                     }
@@ -1498,7 +1491,7 @@ impl FilletBrep {
                     // fork 9b7cd48 passes this on (SER)
                     ignore_status(crate::error::passed_on(
                         move_tsp(&mut tsect_pnts, last_tsp_idx, 0, |vu| self.tsect_of(*vu)),
-                        k.fixes.fillet_statuses_pass_on,
+                        true,
                     )?)?;
                     continue;
                 }
@@ -2156,8 +2149,7 @@ mod tests {
     #[test]
     fn fillet_statuses_pass_on_mate_returns_a_failed_main_vertex() {
         for pass_on in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.fillet_statuses_pass_on = pass_on;
+            let k = Kernel::default();
             let mut fb = FilletBrep::new();
             let a = vertex(&mut fb, &k, Point3::new(0.0, 0.0, 0.0));
             let b = vertex(&mut fb, &k, Point3::new(1.0, 0.0, 0.0));

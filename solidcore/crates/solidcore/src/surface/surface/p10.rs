@@ -275,10 +275,7 @@ fn set_p(end: &mut SolutionEnd, i: usize, v: f64) -> Result<()> {
 /// `EvaluatePoint` whose status upstream ignores: `Vec3::UNDEF` on failure.
 fn point_or_undef(k: &Kernel, curve: &Curve, t: f64) -> Result<Point3> {
     // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-    Ok(
-        ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
-            .unwrap_or(Vec3::UNDEF),
-    )
+    Ok(ignored_or_pass_on(curve.evaluate_point(k, t), true)?.unwrap_or(Vec3::UNDEF))
 }
 
 /// The count and parameters of an `IntersectLine` whose status upstream ignores (an
@@ -469,7 +466,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // with the opt-in fix a branch outside the domain or interval of interest has no
         // answers and the box intersections pass on their statuses (WR-663,
         // tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
 
         // when SurfaceLeafDomain is partially intersected by the IntersectionDomain
         if !uv_domain.is_contained_by(&self.uv_domain, EFF_ZERO) {
@@ -1001,7 +998,7 @@ fn is_coincident_point<O>(
             t,
             edge_tolerance,
         ),
-        k.fixes.query_statuses_pass_on,
+        true,
     )?;
     Ok(class.is_some_and(|c| c.point_type == TsectCurveType::Coincident))
 }
@@ -1507,7 +1504,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
             // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
             if let Some((degenerate, point)) = ignored_or_pass_on(
                 classify_intersecting_range_solution(k, surface, curve, &curr),
-                k.fixes.query_statuses_pass_on,
+                true,
             )? {
                 is_degenerate = degenerate;
                 if let Some(pt) = point {

@@ -540,7 +540,7 @@ impl SweepAccess for PrimitiveModel<'_> {
         )?;
         hcr.set_hcr_for_silhouettes(silhouettes);
         // fork c8f6a31 (WR-662): SER(sHCR.ComputeGlobalVisibility()).
-        let p = self.k.fixes.sweep_statuses_pass_on;
+        let p = true;
         crate::error::ignore_or_pass_on(hcr.compute_global_visibility(self.k), p)?;
         let id = self.retain_hcr(brep, hcr)?;
         if id != scene {

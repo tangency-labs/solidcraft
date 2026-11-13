@@ -1764,13 +1764,11 @@ impl OffsetGeometryCreation {
         // offset that shrinks the surface onto its spine or past it is no surface, as the
         // surface says, asked before the offset is made (an exact offset that refuses to pass
         // its centre, a ball patch's, is never asked for); any other miss has failed.
-        if k.fixes.offset_missing_surface_fails
-            && brep.surface(sur)?.offset_collapses(
-                k,
-                sign * self.offset_distance,
-                self.this_approx_tol_3d / 10.0,
-            )?
-        {
+        if brep.surface(sur)?.offset_collapses(
+            k,
+            sign * self.offset_distance,
+            self.this_approx_tol_3d / 10.0,
+        )? {
             return Ok((None, self_intersections));
         }
 
@@ -1783,10 +1781,7 @@ impl OffsetGeometryCreation {
             self.this_approx_tol_3d / 10.0,
         )?
         else {
-            if k.fixes.offset_missing_surface_fails {
-                return Err(sm_err(OP_FACEUSE));
-            }
-            return Ok((None, self_intersections));
+            return Err(sm_err(OP_FACEUSE));
         };
         let offset_h = brep.insert_surface(offset)?;
         let mut new_surface: Option<O> = Some(offset_h);
@@ -2023,9 +2018,7 @@ impl OffsetGeometryCreation {
                         ref_frame.z_axis(),
                         ref_frame.x_axis(),
                     );
-                    if k.fixes.brep_edit_statuses_pass_on {
-                        set?;
-                    }
+                    set?;
                 }
             } // end 1 bounding edge check
 
@@ -2442,7 +2435,7 @@ impl OffsetGeometryCreation {
                     .ok_or(dangling("curve handle cannot be resolved"))?;
                 let _ = ignore_soft(crate::error::passed_on(
                     c.reverse_parameterization(k, &ivl),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
                 let uv = uv_curve.ok_or(dangling("null UV curve reversed"))?;
                 let ivl = curve_of(brep, uv)?.natural_interval();
@@ -2451,7 +2444,7 @@ impl OffsetGeometryCreation {
                     .ok_or(dangling("curve handle cannot be resolved"))?;
                 let _ = ignore_soft(crate::error::passed_on(
                     c.reverse_parameterization(k, &ivl),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             } // end Edge and Input curve running in opposite directions check
 
@@ -2900,7 +2893,7 @@ impl OffsetGeometryCreation {
                     let undef = Vec3::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
                     let pv = ignore_soft(crate::error::passed_on(
                         curve_of(brep, curve_3d)?.evaluate(k, sol.start.param(0)?, 1, true, true),
-                        k.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)?;
                     let uv = Point2::new(sol.start.param(1)?, sol.start.param(2)?);
                     let normal = ignore_soft(crate::error::passed_on(
@@ -2910,7 +2903,7 @@ impl OffsetGeometryCreation {
                             Side::Left,
                             Side::Left,
                         ),
-                        k.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)?
                     .unwrap_or(undef);
                     let tangent = pv
@@ -2994,9 +2987,7 @@ impl OffsetGeometryCreation {
             // (the whole offset circle lifted for half a sphere cap's rim) the first point's
             // twin across the curve's seam is another parameter but the same point: taken,
             // it gave the half edge the whole circle and the loop a gap.
-            let open_second = k.fixes.offset_open_edge_second_trim_point
-                && i == 1
-                && !brep.edge_is_closed(base_edge)?;
+            let open_second = i == 1 && !brep.edge_is_closed(base_edge)?;
             let first = if open_second {
                 Some(curve_of(brep, curve_3d)?.evaluate_point(k, trim_ivl.min())?)
             } else {
@@ -3745,8 +3736,7 @@ impl OffsetGeometryCreation {
             // new surface (a local operation moving a face beside a blend, or one piece of a
             // split face), the drop crosses the gap between them and the faces no longer
             // meet there
-            if k.fixes.local_operation_refuses_loose_tangent_edges && executive.is_local_operation()
-            {
+            if executive.is_local_operation() {
                 let meet_tol = 10.0 * smos_max(off_tol, self.this_approx_tol_3d());
                 if dropped.max_drop_to_surf > meet_tol {
                     return Err(sm_err(OP_EXTEND));
@@ -4022,68 +4012,66 @@ impl OffsetGeometryCreation {
         // both extended surfaces as the exact curve between the same ends (within the
         // analytic surfaces, not on a tangent extension) is replaced by that curve, its
         // UV curves dropped from it.
-        if k.fixes.offset_analytic_mate_edges {
-            let upstream = self.offset_distance().abs() * 5.0;
-            let margin1 = executive.analytic_extension_margin(surf1, upstream);
-            let margin2 = executive.analytic_extension_margin(surf2, upstream);
-            let analytic1 = create_analytic_extension(k, surface_of(brep, surf1)?, margin1)?;
-            let analytic2 = create_analytic_extension(k, surface_of(brep, surf2)?, margin2)?;
-            if let (Some(analytic1), Some(analytic2)) = (&analytic1, &analytic2) {
-                if !ssi.curves_3d.is_empty() {
-                    let exact = analytic1.global_surface_intersect(
-                        k,
-                        &analytic1.natural_uv_domain_with_nurb(k)?,
-                        analytic2,
-                        &analytic2.natural_uv_domain_with_nurb(k)?,
-                        use_surface_edges,
-                        Some(ssi_tol),
-                        Some(deg20_rad),
-                    )?;
-                    let tol = brep.brep_tolerance(edge)?;
-                    for ii in 0..ssi.curves_3d.len() {
-                        let marched = ssi.curves_3d.get(ii).ok_or(dangling("curve index"))?;
-                        if marched.is_degenerate(k, EFF_ZERO, None)? {
-                            continue;
-                        }
-                        let Some(piece) = exact_piece(k, marched, &exact.curves_3d, tol)? else {
-                            continue;
+        let upstream = self.offset_distance().abs() * 5.0;
+        let margin1 = executive.analytic_extension_margin(surf1, upstream);
+        let margin2 = executive.analytic_extension_margin(surf2, upstream);
+        let analytic1 = create_analytic_extension(k, surface_of(brep, surf1)?, margin1)?;
+        let analytic2 = create_analytic_extension(k, surface_of(brep, surf2)?, margin2)?;
+        if let (Some(analytic1), Some(analytic2)) = (&analytic1, &analytic2) {
+            if !ssi.curves_3d.is_empty() {
+                let exact = analytic1.global_surface_intersect(
+                    k,
+                    &analytic1.natural_uv_domain_with_nurb(k)?,
+                    analytic2,
+                    &analytic2.natural_uv_domain_with_nurb(k)?,
+                    use_surface_edges,
+                    Some(ssi_tol),
+                    Some(deg20_rad),
+                )?;
+                let tol = brep.brep_tolerance(edge)?;
+                for ii in 0..ssi.curves_3d.len() {
+                    let marched = ssi.curves_3d.get(ii).ok_or(dangling("curve index"))?;
+                    if marched.is_degenerate(k, EFF_ZERO, None)? {
+                        continue;
+                    }
+                    let Some(piece) = exact_piece(k, marched, &exact.curves_3d, tol)? else {
+                        continue;
+                    };
+                    let mut uv: [Option<Curve>; 2] = [None, None];
+                    for (i_surf, slot) in uv.iter_mut().enumerate() {
+                        let (ext, dom) = if i_surf == 0 {
+                            (&s1, &domain1)
+                        } else {
+                            (other, &domain2)
                         };
-                        let mut uv: [Option<Curve>; 2] = [None, None];
-                        for (i_surf, slot) in uv.iter_mut().enumerate() {
-                            let (ext, dom) = if i_surf == 0 {
-                                (&s1, &domain1)
-                            } else {
-                                (other, &domain2)
-                            };
-                            let dropped = ext.drop_curve::<NoObject>(
-                                k,
-                                dom,
-                                &piece,
-                                &piece.natural_interval(),
-                                ssi_tol,
-                                true,
-                                None,
-                                true,
-                            )?;
-                            if dropped.uv_curves.len() == 1 && dropped.max_drop_to_surf <= tol {
-                                *slot = dropped.uv_curves.into_iter().next();
-                            }
+                        let dropped = ext.drop_curve::<NoObject>(
+                            k,
+                            dom,
+                            &piece,
+                            &piece.natural_interval(),
+                            ssi_tol,
+                            true,
+                            None,
+                            true,
+                        )?;
+                        if dropped.uv_curves.len() == 1 && dropped.max_drop_to_surf <= tol {
+                            *slot = dropped.uv_curves.into_iter().next();
                         }
-                        let [Some(uv1), Some(uv2)] = uv else {
-                            // The piece leaves an extended surface where it is a tangent
-                            // (G1R) extension, not the analytic surface: there the marched
-                            // piece is these surfaces' intersection.
-                            continue;
-                        };
-                        if let Some(c) = ssi.curves_3d.get_mut(ii) {
-                            *c = piece;
-                        }
-                        if let Some(c) = ssi.surface1_uv_curves.get_mut(ii) {
-                            *c = Some(uv1);
-                        }
-                        if let Some(c) = ssi.surface2_uv_curves.get_mut(ii) {
-                            *c = Some(uv2);
-                        }
+                    }
+                    let [Some(uv1), Some(uv2)] = uv else {
+                        // The piece leaves an extended surface where it is a tangent
+                        // (G1R) extension, not the analytic surface: there the marched
+                        // piece is these surfaces' intersection.
+                        continue;
+                    };
+                    if let Some(c) = ssi.curves_3d.get_mut(ii) {
+                        *c = piece;
+                    }
+                    if let Some(c) = ssi.surface1_uv_curves.get_mut(ii) {
+                        *c = Some(uv1);
+                    }
+                    if let Some(c) = ssi.surface2_uv_curves.get_mut(ii) {
+                        *c = Some(uv2);
                     }
                 }
             }
@@ -4630,11 +4618,7 @@ impl OffsetGeometryCreation {
             // tangency-labs/smlib 5d428ae): a local operation that moved only one of two
             // tangent faces along its normal leaves them parallel, one step apart: a wall
             // between their edges closes the body.
-            if k.fixes.local_operation_step_walls
-                && tan_sec
-                && !lamina
-                && executive.is_local_operation()
-            {
+            if tan_sec && !lamina && executive.is_local_operation() {
                 if let (Some(off), Some(other_off)) = (offset_edgeuse, other_offset_edgeuse) {
                     if self.is_step_across_edge(k, brep, off, other_off)? {
                         out.surface = Some(self.create_step_wall(k, brep, off, other_off)?);
@@ -4658,9 +4642,7 @@ impl OffsetGeometryCreation {
                 );
                 // Opt-in (WR-530): a local operation has no later step that would close
                 // the gap: it fails
-                if k.fixes.local_operation_refuses_loose_tangent_edges
-                    && executive.is_local_operation()
-                {
+                if executive.is_local_operation() {
                     extended?;
                 } else {
                     let _ = ignore_soft(extended)?;
@@ -4693,7 +4675,7 @@ impl OffsetGeometryCreation {
             };
             // Not upstream (WR-344 refinement, #1795): the merge must still intersect the
             // offsets of an edge that could not be mated
-            if mated.is_none() && k.fixes.offset_extended_edges_mated {
+            if mated.is_none() {
                 executive.note_unmated_edgeuse(original_edgeuse);
             }
             return Ok(out);
@@ -4996,11 +4978,11 @@ impl OffsetGeometryCreation {
                 // snap sCenterIvl by tol to existing knots)
                 let _ = ignore_soft(crate::error::passed_on(
                     center_ivl.set_min_max(dropped.parameter, center_ivl.max()),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
                 let _ = ignore_soft(crate::error::passed_on(
                     center_line.trim(k, &mut center_ivl, TrimMode::Notify),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
         } // end Rail1/CenterLine StartPoint gapSize check
@@ -5033,11 +5015,11 @@ impl OffsetGeometryCreation {
                 // Trim CenterLine to End dropPoint
                 let _ = ignore_soft(crate::error::passed_on(
                     center_ivl.set_min_max(center_ivl.min(), dropped.parameter),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
                 let _ = ignore_soft(crate::error::passed_on(
                     center_line.trim(k, &mut center_ivl, TrimMode::Notify),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
         } // end Rail1/CenterLine EndPoint gapSize check
@@ -6044,7 +6026,7 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
                     .ok_or(dangling("surface handle cannot be resolved"))?;
                 let _ = ignore_soft(crate::error::passed_on(
                     s.reparameterize(k, &old_domain),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
             // Copy pS, when possible as an analytic surface (the listed surface is deleted)

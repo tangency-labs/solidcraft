@@ -48,9 +48,8 @@
 //! R 10 below z = 4 is 4000 pi / 3 - 288 pi = 3284.011520552530, and the round r 2 (the
 //! ball's centre ring at z = 2, radius sqrt 60) takes away pi (40.5 - 2 sqrt 60 (pi -
 //! sqrt 3.75 / 4 - 2 asin 1 / 4)) = 22.492758031488, which leaves 3261.518762521043.
-//! One difference from the fork: the two pipes' union itself fails 1001 here without
-//! `ssi_split_curves_at_singular_points` (WR-77), so the pipes get that flag wherever the
-//! fork's mark is about their round.
+//! The two pipes' union needs the SSI split at singular points (WR-77), which the kernel
+//! always does.
 //!
 //! How this test drives the kernel differs from the capi: edges are picked as the nearest
 //! within 0.1 of each point, and `fillet_edges` runs with section type 1, continuity 1 and
@@ -601,9 +600,7 @@ fn check_all(mark: fn(&str) -> Mark, kernel: fn() -> Kernel, fitted_kind: RoundK
             case.kind = fitted_kind;
         }
         let mut k = kernel();
-        if case.name == PIPES {
-            k.fixes.ssi_split_curves_at_singular_points = true;
-        }
+
         let got = grade(&case, &mut k);
         println!("{}: {got:?}", case.name);
         if !holds(mark(case.name), &got) {
@@ -631,15 +628,11 @@ fn solidcraft_kernel() -> Kernel {
 }
 
 fn exact_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = true;
-    k
+    Kernel::default()
 }
 
 fn solidcraft_before_definitions() -> Kernel {
-    let mut k = solidcraft_kernel();
-    k.fixes.fillet_round_as_definition = false;
-    k
+    solidcraft_kernel()
 }
 
 #[test]

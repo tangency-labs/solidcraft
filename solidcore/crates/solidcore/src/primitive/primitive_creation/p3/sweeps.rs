@@ -101,7 +101,7 @@ fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -
         let k = a.kernel(b)?;
         let pieces = ignored(passed_on(
             curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5),
-            k.fixes.sweep_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or_default();
         if pieces.len() > 1 {
@@ -399,7 +399,7 @@ impl PrimitiveCreation {
                     for _ in 0..options.repetitions {
                         // fork c8f6a31 (WR-662): SER_DELETE(pEndCurve->Transform(sStep)).
                         let k = a.kernel(brep)?;
-                        let p = k.fixes.sweep_statuses_pass_on;
+                        let p = true;
                         ignore_status(passed_on(end_curve.transform(k, &step, None), p)?)?;
                     }
                     end_curves.push(Some(end_curve));
@@ -418,7 +418,7 @@ impl PrimitiveCreation {
             } else {
                 // unrelated clean up - we didn't use the tmp faces (if any - delete them)
                 // fork c8f6a31 (WR-662): SER(pBrep->DeleteFace(..)).
-                let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+                let p = true;
                 for face in faces {
                     ignore_status(passed_on(a.delete_primitive_face((brep, face)), p)?)?;
                 }
@@ -444,11 +444,11 @@ impl PrimitiveCreation {
         self.init_entity_maps();
         let _ = target(self, brep)?;
         a.set_editing(brep, true)?;
-        // Not upstream (#1491, with `fixes.revolve_analytic_profile_faces`): fork
+        // Not upstream (#1491, with `true`): fork
         // 9853e54 deletes the one-curve special case (sm_CreateAnalyticRotationalSweep),
         // whose whole-circle torus puts its seam a quarter turn from the profile; the
         // per-curve rule below covers a one-curve profile too
-        let one_curve_special_case = !a.kernel(brep)?.fixes.revolve_analytic_profile_faces;
+        let one_curve_special_case = false;
         if let (true, [Some(curve)]) = (one_curve_special_case, &mut *curves) {
             if ignored(a.with_primitive_brep(brep, |k, b| {
                 analytic_rotational_sweep(k, b, curve, axis_base, axis)
@@ -467,7 +467,7 @@ impl PrimitiveCreation {
                 .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?;
             // fork c8f6a31 (WR-662): SER(Length(..)), SER(SetCanonical(..)).
             let k = a.kernel(brep)?;
-            let p = k.fixes.sweep_statuses_pass_on;
+            let p = true;
             let length = ignored(passed_on(
                 curve.length(k, &curve.natural_interval(), 0.001),
                 p,
@@ -528,7 +528,7 @@ impl PrimitiveCreation {
                 if let Some(curve) = slot.as_ref() {
                     // Not upstream (WR-448, #545): the curve's cylinder, cone,
                     // sphere or torus, else the surface of revolution
-                    let analytic = if a.kernel(brep)?.fixes.revolve_analytic_profile_faces {
+                    let analytic = if true {
                         let tolerance = a.brep(brep)?.tolerance();
                         analytic_revolution(
                             a.kernel(brep)?,
@@ -566,14 +566,12 @@ impl PrimitiveCreation {
             }
         }
         // fork c8f6a31 (WR-662): SER(pBrep->StitchAndOrient()).
-        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+        let p = true;
         ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
         // not upstream (WR-442, #478, opt-in): a closed shell inside another is its cavity
-        if a.kernel(brep)?.fixes.revolve_nested_shells_as_cavities {
-            a.with_brep_mut(brep, |k, b, _, env| {
-                crate::topology::brep::p6::nest_closed_shells_as_cavities(k, b, env)
-            })?;
-        }
+        a.with_brep_mut(brep, |k, b, _, env| {
+            crate::topology::brep::p6::nest_closed_shells_as_cavities(k, b, env)
+        })?;
         a.set_editing(brep, false)?;
         Ok(())
     }
@@ -610,9 +608,7 @@ impl PrimitiveCreation {
             let tolerance = a.brep(brep)?.tolerance();
             // Not upstream (WR-590, opt-in): no curve meets the axis inside itself
             // (CheckCurveSweep's SM_SC_ROT_ON_CURVE)
-            if a.kernel(brep)?.fixes.revolve_splits_curves_on_axis {
-                split_curves_on_axis(a.kernel(brep)?, curves, axis_base, axis, tolerance)?;
-            }
+            split_curves_on_axis(a.kernel(brep)?, curves, axis_base, axis, tolerance)?;
             a.set_editing(brep, true)?;
             let mut faces = Vec::new();
             let mut edges = Vec::new();
@@ -651,7 +647,7 @@ impl PrimitiveCreation {
             }
             let mut rotation = RotationalSweepGeometry::new(axis_base, axis, angle_deg, tolerance);
             // Not upstream (WR-448, #545): analytic side faces
-            rotation.set_analytic_revolutions(a.kernel(brep)?.fixes.revolve_analytic_profile_faces);
+            rotation.set_analytic_revolutions(true);
             let geometry = SweepGeometry::Rotation(rotation);
             let mut sweep = TopologySweep {
                 repetitions: options.repetitions,
@@ -668,7 +664,7 @@ impl PrimitiveCreation {
                 sweep.do_stitching = false;
                 sweep.do_sweep(a, &geometry, Some(brep), Some(region), &mut selected)?;
                 // fork c8f6a31 (WR-662): SER(sTI.DeleteFaces(aFaces)).
-                let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+                let p = true;
                 ignore_status(passed_on(a.delete_primitive_faces(brep, &faces), p)?)?;
                 a.stitch(brep, &mut sweep, tolerance, false)?;
             }
@@ -721,7 +717,6 @@ mod tests {
         let profile = segment(p0, p1);
         for analytic in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.revolve_analytic_profile_faces = analytic;
             let sheet = create_rotational_sweep(
                 &mut k,
                 &[Some(&profile)],
@@ -779,7 +774,6 @@ mod tests {
         let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
 
         let mut k = Kernel::default();
-        k.fixes.revolve_nested_shells_as_cavities = true;
         let mut ball = create_rotational_sweep(&mut k, &curves, o, x, 360.0, true).unwrap();
         let store = AttributeStore::default();
         let key_of = |_| ObjectKey(0);
@@ -850,8 +844,6 @@ mod tests {
         let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
 
         let mut k = Kernel::default();
-        k.fixes.revolve_nested_shells_as_cavities = true;
-        k.fixes.revolve_holed_profile_void = true;
         let mut ring = create_rotational_sweep(&mut k, &curves, o, z, 360.0, true).unwrap();
         let store = AttributeStore::default();
         let key_of = |_| ObjectKey(0);

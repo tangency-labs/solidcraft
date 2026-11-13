@@ -1,6 +1,6 @@
 //! WR-501 (tangency-labs/solidcore#1470, #1954): the public torus recogniser
 //! `Torus::is_nurb_surface_torus` reports a torus's major radius from the NURB's first
-//! sweep circle (upstream) or from the torus origin (`fixes.torus_major_radius_from_origin`).
+//! sweep circle (upstream) or from the torus origin (`true`).
 //!
 //! A whole-turn revolve of two half circles is a public torus construction whose torus
 //! NURB runs its tube from -90 to 90 degrees, so the first sweep circle sits at the bottom
@@ -74,14 +74,12 @@ fn revolved_tori(k: &mut Kernel) -> Vec<Torus> {
 fn wr501_revolved_torus_reports_its_major_radius_from_the_torus_origin() {
     let mut build = Kernel::default();
     // the public option that makes the revolve build an analytic torus face
-    build.fixes.revolve_analytic_profile_faces = true;
     let tori = revolved_tori(&mut build);
     assert_eq!(tori.len(), 2, "both half circles give a torus");
 
     // the reader kernels differ only in the WR-501 guard
     let off = Kernel::default();
-    let mut on = Kernel::default();
-    on.fixes.torus_major_radius_from_origin = true;
+    let on = Kernel::default();
 
     let upstream_major = (MAJOR * MAJOR + MINOR * MINOR).sqrt();
     for (i, t) in tori.iter().enumerate() {

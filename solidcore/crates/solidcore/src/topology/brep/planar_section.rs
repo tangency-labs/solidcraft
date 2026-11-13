@@ -294,7 +294,7 @@ pub fn face_planar_section_curves(
     ang_tol_rad: Option<f64>,
 ) -> Result<SurfaceSection> {
     let approx_tol_3d = match approx_tol_3d {
-        None if k.fixes.planar_section_face_tolerance => Some(face2::tolerance(b, f)?),
+        None if true => Some(face2::tolerance(b, f)?),
         tol => tol,
     };
     let bbox = surface_bounding_box(k, b, f, surface, uv_domain)?;

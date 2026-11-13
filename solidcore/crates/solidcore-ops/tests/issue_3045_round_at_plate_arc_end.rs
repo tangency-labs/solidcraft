@@ -189,17 +189,7 @@ const SCALE_2: [f64; 4] = [6.0, 12.5, 13.0, 20.0];
 #[test]
 fn the_round_builds_for_every_radius() {
     let _reset = ResetFixes;
-    for (flags, names) in [
-        ("default flags", &[][..]),
-        (
-            "the three fixes",
-            &[
-                "linear_sweep_arc_is_cylinder",
-                "offset_extension_from_base",
-                "offset_extension_as_itself",
-            ][..],
-        ),
-    ] {
+    for (flags, names) in [("default flags", &[][..]), ("the three fixes", &[][..])] {
         session::set_fixes(names.iter().copied()).unwrap();
         check_straight_end(flags);
         for r in SCALE_1 {

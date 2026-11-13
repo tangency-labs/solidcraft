@@ -64,9 +64,7 @@ fn section(z: f64) -> Vec<Curve> {
 }
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.geometric_g2_continuity = true;
-    k
+    Kernel::default()
 }
 
 /// The capped prism lofted between the two sections: one side face across all six

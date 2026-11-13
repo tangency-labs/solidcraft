@@ -279,7 +279,7 @@ fn evaluate_3x3_into(
     uv: Point2,
     out: &mut [[Vec3; 3]; 3],
 ) -> Result<()> {
-    let pass = k.fixes.query_statuses_pass_on;
+    let pass = true;
     // bOnlyUpperHalf = TRUE: only the entries with i + j <= 2 are written
     let flags = EvaluateFlags {
         only_upper_half: true,
@@ -305,11 +305,7 @@ fn evaluate_3x3_into(
 /// the opt-in `Kernel::fixes.query_statuses_pass_on` the failure is returned (WR-663,
 /// tangency-labs/smlib 21dcf69).
 fn point_or_undef(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Point3> {
-    Ok(ignored_or_pass_on(
-        surface.evaluate_point(k, uv),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .unwrap_or(Vec3::UNDEF))
+    Ok(ignored_or_pass_on(surface.evaluate_point(k, uv), true)?.unwrap_or(Vec3::UNDEF))
 }
 
 /// The B-spline part of a curve of a kind derived from `SmBSplineCurve`.
@@ -430,7 +426,7 @@ fn trim_curves(k: &Kernel, surface: &Surface, domain: &Extent2d) -> Result<Vec<O
     // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
     let t = ignored_or_pass_on(
         surface.create_natural_uv_trim_curves(k, domain, SurfParamType::V, false),
-        k.fixes.query_statuses_pass_on,
+        true,
     )?;
     Ok(t.map(|t| t.curves_3d.into_iter().map(Some).collect())
         .unwrap_or_default())
@@ -922,7 +918,7 @@ impl Surface {
 
         // Check bounding boxes (statuses ignored; passed on with the opt-in fix,
         // WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         let box_of = |s: &Self, d: &Extent2d| -> Result<Extent3d> {
             Ok(ignored_or_pass_on(
                 s.calculate_bounding_box(k, d, [true, false, false], true),
@@ -1143,7 +1139,7 @@ impl Surface {
         mut res: Coincidence,
     ) -> Result<Coincidence> {
         // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         // First collect the corner points: Eval Surfaces at normalized domain corners
         let mut pts1 = [[Vec3::UNDEF; 2]; 2];
         let mut pts2 = [[Vec3::UNDEF; 2]; 2];
@@ -1432,7 +1428,7 @@ impl Surface {
             },
         )?;
         // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         ignore_or_pass_on(start_status, pass)?;
 
         // Get Sample Values from Face2/Edge2 using edge1 as tangentReference
@@ -2192,7 +2188,7 @@ impl Surface {
                 // When line tangent not perp to surfNormal - can't be coincident (the
                 // fork's `SER(SetUV)` passes the evaluation's status on with the opt-in
                 // fix, WR-663, tangency-labs/smlib 21dcf69)
-                ignore_or_pass_on(sr_eval.eval_normal(k), k.fixes.query_statuses_pass_on)?;
+                ignore_or_pass_on(sr_eval.eval_normal(k), true)?;
                 let normal = sr_eval.values()[2][2];
                 if line_vector.is_perpendicular_to(normal, EFF_ZERO_RAD) {
                     // if SurfaceNormalSection curvature is far from linear - can't be
@@ -2225,10 +2221,7 @@ impl Surface {
             let Ok(mut line) = BSplineCurve::create_line_segment(3, line_start, line_end) else {
                 return Ok(sols);
             };
-            ignore_or_pass_on(
-                line.edit_parameterization(&line_interval_used),
-                k.fixes.query_statuses_pass_on,
-            )?;
+            ignore_or_pass_on(line.edit_parameterization(&line_interval_used), true)?;
             let line = Curve::from(line);
 
             // Check Surface/LineSegment Coincidence (its point solve reaches the
@@ -2680,10 +2673,7 @@ impl Surface {
                 )
             };
             // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-            let _ = super::p1::ignore_native_classification(passed_on(
-                solve,
-                k.fixes.query_statuses_pass_on,
-            )?)?;
+            let _ = super::p1::ignore_native_classification(passed_on(solve, true)?)?;
 
             // set output values
             for ii in 0..sols.len() {
@@ -2976,7 +2966,7 @@ impl Surface {
                 },
                 &mut sols,
             ),
-            k.fixes.query_statuses_pass_on,
+            true,
         )?;
         Ok(sols)
     }
@@ -3063,7 +3053,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             // tangency-labs/smlib 21dcf69)
             match ignored(uv_domain.intersect(&self.uv_domain))? {
                 Some(d) => uv_domain = d,
-                None if k.fixes.query_statuses_pass_on => return Ok(false),
+                None if true => return Ok(false),
                 None => (),
             }
             // Check for zero in either domain bound
@@ -3215,7 +3205,7 @@ impl Surface {
 
         // (the statuses SMLib drops here are passed on with the opt-in fix, WR-663,
         // tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         let (srf_pt, su, sv) = ignored_or_pass_on(
             self.evaluate_1st_derivatives(k, uv_guess, false, false),
             pass,
@@ -3676,7 +3666,7 @@ pub fn extract_iso_curve(
     // interval by tol to existing knots).
     // (with the opt-in fix an iso curve that cannot be trimmed, reversed or
     // reparameterized is no output curve, WR-663, tangency-labs/smlib 1612a7d)
-    let no_curve = k.fixes.query_statuses_pass_on;
+    let no_curve = true;
     let mut trim = trim_ivl;
     if ignored(iso.trim(k, &mut trim, TrimMode::default()))?.is_none() && no_curve {
         return Ok(None);

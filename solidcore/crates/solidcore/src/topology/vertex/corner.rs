@@ -66,8 +66,8 @@ const OP: &str = "topology::vertex::corner";
 /// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 7a35f33):
 /// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
 /// handed on to the site's own ignore otherwise.
-fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
-    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
+fn pass<T>(_k: &Kernel, r: Result<T>) -> Result<Result<T>> {
+    crate::error::passed_on(r, true)
 }
 
 fn null(reason: &'static str) -> SolidError {
@@ -196,7 +196,7 @@ pub struct ParallelFaces {
 /// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], one cannot be evaluated: the
 /// fork compares no such pair (tangency-labs/smlib 7a35f33).
 fn gap_point_normal(k: &Kernel, surface: &Surface, uv: Point2, pn: &mut [Vec3; 2]) -> Result<bool> {
-    let skip = k.fixes.query_statuses_pass_on;
+    let skip = true;
     match ignored(surface.evaluate_point(k, uv))? {
         Some(p) => pn[0] = p,
         None if skip => return Ok(false),
@@ -276,7 +276,7 @@ pub fn has_parallel_faces(
             // AngleBetween reports 0 for a zero-length normal (status ignored; with the
             // opt-in fix the pair is not compared, tangency-labs/smlib 7a35f33)
             let dihedral_ang_rad = match pn1[1].angle_between(pn2[1]) {
-                Err(_) if k.fixes.query_statuses_pass_on => continue,
+                Err(_) if true => continue,
                 r => r.unwrap_or(0.0),
             };
             let dihedral_ang_deg = rad_to_deg(dihedral_ang_rad);
@@ -412,7 +412,7 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
         // FALSE = Use GlobalSolve without touching UVTrimCurve (status ignored). With
         // the opt-in fix the fork's order: faces without surface are skipped before the
         // drop, whose status is passed on (tangency-labs/smlib 7a35f33).
-        let pass_on = k.fixes.query_statuses_pass_on;
+        let pass_on = true;
         if !pass_on {
             if let Some(p) = ignored(vertexuse::compute_uv_point(k, b, vu, false))? {
                 uv = p;
@@ -596,7 +596,7 @@ pub fn is_on_face_corner(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<(bool,
         // the opt-in fix any failure is no best point (tangency-labs/smlib 7a35f33)
         Err(e)
             if (e.operation() == OP && e.upstream_status().is_some())
-                || (k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled()) =>
+                || (!e.is_unported_or_cancelled()) =>
         {
             FaceCorner {
                 found_point: false,
@@ -698,8 +698,7 @@ mod tests {
             crate::nurbs::b_spline_surface::BSplineSurface::default(),
         ));
         let off = has_parallel_faces(&k, &mut b, v, None).unwrap();
-        let mut on_k = Kernel::default();
-        on_k.fixes.query_statuses_pass_on = true;
+        let on_k = Kernel::default();
         let on = has_parallel_faces(&on_k, &mut b, v, None).unwrap();
         assert!(!on.parallel, "{on:?}");
         assert!((on.min_dihedral_ang_deg - 90.0).abs() < 1e-9, "{on:?}");

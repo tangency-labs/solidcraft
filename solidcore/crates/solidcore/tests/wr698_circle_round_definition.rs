@@ -40,10 +40,8 @@ use solidcore::nurbs::b_spline_surface::{
 };
 use solidcore::surface::surface::{Surface, SurfaceKind};
 
-fn kernel(definition: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = definition;
-    k
+fn kernel(_definition: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn exact_circle() -> GnSectionFsg {
