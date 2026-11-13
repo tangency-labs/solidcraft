@@ -894,17 +894,16 @@ pub fn section_frames_outward(
         }
     }
     let (_, face) = best.ok_or_else(|| frames_invalid("no face bounds the whole chain"))?;
-    let mut leaves = Vec::with_capacity(at.len());
-    for s in &at {
-        leaves.push(outward(k, b, s.edge, face, s.t)?);
-    }
+    let leaves = at
+        .iter()
+        .map(|s| outward(k, b, s.edge, face, s.t))
+        .collect::<Result<Vec<_>>>()?;
     let surf = crate::topology::face::p2::surface(b, face)?
         .ok_or_else(|| frames_invalid("the support face has no surface"))?;
-    let mut out = Vec::with_capacity(at.len());
-    for (s, w) in at.iter().zip(leaves) {
-        out.push(frame_at(k, surf, s.p, w)?);
-    }
-    Ok(out)
+    at.iter()
+        .zip(leaves)
+        .map(|(s, w)| frame_at(k, surf, s.p, w))
+        .collect()
 }
 
 /// Face `f`'s direction out across edge `e` at the edge's parameter `t`: the binormal of `f`'s
