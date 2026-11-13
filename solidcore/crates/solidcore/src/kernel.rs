@@ -557,7 +557,9 @@ pub struct UpstreamFixes {
     /// it always reports closed). The reported gap is the actual gap, with its edge use
     /// and tolerance; `bCheckAllGaps == FALSE` still stops at the first over-tolerance
     /// gap (WR-93). Off by default for pinned C++ parity; callers inherit the kernel's
-    /// setting.
+    /// setting. With it, a gap is measured against at least the zone tolerance of the
+    /// vertex the two ends share, as `CheckLoop` measures it (WR-381): a gap the
+    /// widened vertex covers is not an open loop (WR-784).
     pub loop_use_reports_open_gaps: bool,
     /// `SmEdge::AssertValid` test 9 orders the faces round an edge by the direction to each face's point 20 edge tolerances into it (square to the edge) where two of them leave the edge within `SM_ANG_TOL_DEG` of each other, instead of by the binormals alone, which tie for faces tangent along the edge (a cylinder resting on a plane, kept by a boolean as a four-face edge) and fail the valid order (WR-540, #383; the fork's tangency-labs/smlib@5533bbb).
     pub edge_check_orders_tangent_faces: bool,
