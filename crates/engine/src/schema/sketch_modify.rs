@@ -1507,6 +1507,10 @@ pub struct MoveResult {
     /// The constraints tying the moved geometry to what stays that the move let go, as
     /// `{id, kind}`.
     pub released: Vec<Value>,
+    /// The parallel and perpendicular relations a rotation put in place of the horizontal and
+    /// vertical ones it could not keep, as `{id, kind}`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added: Vec<Value>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
