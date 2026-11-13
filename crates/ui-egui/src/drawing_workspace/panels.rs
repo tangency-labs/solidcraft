@@ -52,7 +52,7 @@ impl Tool {
     }
 }
 
-fn tr(id: &str) -> &'static str {
+fn tr(id: &'static str) -> &'static str {
     solidcraft_ui_text::tr(id)
 }
 
@@ -102,7 +102,7 @@ pub(super) fn tool_body(app: &SolveApp, ui: &mut egui::Ui, tool: Tool) {
     match tool {
         Tool::Base | Tool::Projected => base_view(ui, &app.session.doc.name, tool == Tool::Projected),
         Tool::Edit(view) => edit_view(ui, drawing, sheet, view),
-        Tool::Dimension(dimension) => dimension(ui, drawing, sheet, dimension),
+        Tool::Dimension(selected) => dimension(ui, drawing, sheet, selected),
         Tool::Note => {
             ui.add_enabled_ui(false, |ui| {
                 text(ui, tr("ui.drawing_panel.text"), "");
@@ -162,7 +162,14 @@ fn scale(ui: &mut egui::Ui, scale: Option<String>) {
 }
 
 fn visual_style(ui: &mut egui::Ui, label: &str, style: VisualStyle) {
-    let options = ["visible", "hidden", "shaded", "shaded_visible", "shaded_hidden"].map(|style| tr(&format!("ui.drawing_panel.{style}")));
+    let options = [
+        "ui.drawing_panel.visible",
+        "ui.drawing_panel.hidden",
+        "ui.drawing_panel.shaded",
+        "ui.drawing_panel.shaded_visible",
+        "ui.drawing_panel.shaded_hidden",
+    ]
+    .map(tr);
     let selected = VisualStyle::ALL.iter().position(|candidate| *candidate == style).unwrap_or_default();
     choice(ui, label, selected, &options);
 }
