@@ -140,7 +140,6 @@ crates/engine/src/cmd/measure_sel.rs:resolve_pick resolves a face or edge pick b
 crates/engine/src/cmd/motion.rs:centres centres occurrences by meshes
 crates/engine/src/cmd/motion.rs:overlap measures how deep bodies overlap by meshes
 crates/engine/src/cmd/motion.rs:tris reads mesh triangles for motion contact
-crates/engine/src/cmd/motion_analysis.rs:shared_volume measures the volume parts share by the display mesh
 crates/engine/src/cmd/sketch.rs:face_contains decides whether a face contains a point by mesh triangles
 crates/engine/src/cmd/sketch.rs:face_triangles groups mesh triangles by face for sketch picks
 crates/engine/src/cmd/sketch_face.rs:capture_impl captures a face for a sketch by a mesh
