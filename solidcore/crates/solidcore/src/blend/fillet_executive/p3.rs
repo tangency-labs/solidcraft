@@ -3816,14 +3816,28 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // Not the fork's (#16156): at the radius named, the refused solver's ball may have
         // every position on its edge's faces past an end of the edge, which
         // `refuse_balls_past_an_end` refuses at that radius: the refusal names the radius at
-        // which it first has a section between the ends where that is smaller.
+        // which it first has a section between the ends where that is smaller. The refusal
+        // stands whatever this finds: an ordinary failure judging it leaves the irregular
+        // ball's size named (port defects and cancellation propagate).
         if let Some((solver, _)) = worst_solver {
             if self.fit_radius > 0.0 && self.fit_kind == FitKind::Radius {
                 let named = self.fit_radius;
-                if let Some(past) = access.creation_ball_past_an_end(k, solver, Some(named))? {
+                let past = crate::error::native_failure(access.creation_ball_past_an_end(
+                    k,
+                    solver,
+                    Some(named),
+                ))?
+                .flatten();
+                if let Some(past) = past {
                     if past.radius < named {
-                        self.note_open_fit(access, true, past.radius, FitKind::Radius, solver)?;
-                        if self.fit_radius < named {
+                        let noted = crate::error::native_failure(self.note_past_end_fit(
+                            k,
+                            access,
+                            solver,
+                            past.radius,
+                        ))?
+                        .unwrap_or(false);
+                        if noted {
                             self.error.comment = format!("{}; but at that radius every position of the rolling ball on the edge's faces lies past an end of the edge (at ({}, {}, {})): a radius below {} has a section between the edge's ends", self.error.comment, g(past.at.x), g(past.at.y), g(past.at.z), g(past.radius));
                         }
                     }
@@ -3955,10 +3969,49 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             };
             self.error.no_room = Some(NoRoomReason::OffsetCollapses);
             self.error.no_room_without_site = true;
-            self.note_open_fit(access, true, radius, FitKind::Radius, solver)?;
+            if let Some(p) = past {
+                self.note_past_end_fit(k, access, solver, p.radius)?;
+            } else {
+                self.note_open_fit(access, true, radius, FitKind::Radius, solver)?;
+            }
             return Err(failure());
         }
         Ok(())
+    }
+
+    /// Not the fork's (#16156): notes the size the past-an-end refusal names for `solver`,
+    /// `radius` less the fit margin (open: at `radius` the far ball's section is the end's),
+    /// where it is the least noted so far and that refusal does not refuse it too
+    /// ([`ball_past_an_end`](crate::blend::fillet_exact::ball_past_an_end) judged at that
+    /// size). Otherwise nothing is noted, so no size is named that the refusal itself would
+    /// refuse. Returns whether it was noted.
+    ///
+    /// # Errors
+    /// Those of the fit lookup and the judging.
+    fn note_past_end_fit(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+        solver: O,
+        radius: f64,
+    ) -> Result<bool> {
+        let Some(fit) = access.creation_solver_fit(solver)? else {
+            return Ok(false);
+        };
+        let size = smos_max(0.0, radius - fit.fit_margin);
+        if !crate::geom::certified::above(size, 0.0)
+            || (self.fit_radius >= 0.0 && size >= self.fit_radius)
+        {
+            return Ok(false);
+        }
+        if access
+            .creation_ball_past_an_end(k, solver, Some(size))?
+            .is_some()
+        {
+            return Ok(false);
+        }
+        self.note_fit_radius(size, Some(fit.edge), FitKind::Radius);
+        Ok(true)
     }
 
     /// Not the fork's (#14846): after the collapsed offsets, a constant ball every one of whose
@@ -3990,7 +4043,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self.error.comment = format!("Fillet Error: every position of the rolling ball on the edge's faces lies past an end of the edge (its rail leaves the face it rolls on before either end, at ({}, {}, {})): a radius below {} has a section between the edge's ends", g(past.at.x), g(past.at.y), g(past.at.z), g(past.radius));
             self.error.no_room = Some(NoRoomReason::EndRollsIntoSmoothEnd);
             self.error.no_room_without_site = true;
-            self.note_open_fit(access, true, past.radius, FitKind::Radius, solver)?;
+            self.note_past_end_fit(k, access, solver, past.radius)?;
             return Err(failure());
         }
         Ok(())

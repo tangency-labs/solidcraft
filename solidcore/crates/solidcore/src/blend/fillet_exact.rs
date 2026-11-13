@@ -2317,7 +2317,7 @@ pub fn ball_past_an_end(
         let sign = |x: f64| if x < 0.0 { -1.0 } else { 1.0 };
         // F as a chart of its feet, with the centres of the balls of radius r on them
         let chart = if face.kind == QuadricKind::Plane {
-            past_end::FaceChart::plane(face.point, na, sign(off) * r)
+            past_end::FaceChart::plane(&face, na, sign(off) * r)
         } else {
             past_end::FaceChart::cylinder(&face, ta.vertex, na, sign(off) * r)
         };
@@ -2346,6 +2346,7 @@ pub fn ball_past_an_end(
             // every ball on F past the plane, not only those on its tangent edges
             let proven = match &chart {
                 Some(chart) => past_end::every_ball_on_face_past_plane(
+                    k,
                     b,
                     topo_face,
                     chart,

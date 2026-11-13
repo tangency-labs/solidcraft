@@ -16,14 +16,19 @@ use core::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use super::{BlendQuadric, QuadricKind};
 use crate::blend::fillet_section::interval::Ivl;
-use crate::blend::fillet_section::tay::wide;
 use crate::error::Result;
+use crate::geom::certified::{gamma, next_up};
+use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::topology::{edge, face, vertex, Brep, FaceId};
+
+const OP: &str = "blend::fillet_exact::past_end";
 
 /// The most boxes the subdivision judges before it gives up (nothing proven). The refusals of
 /// fuzz body b27's edge 28 close in at most 221 (MEASURED).
 const BUDGET: usize = 1 << 16;
+/// The boxes judged between polls of the kernel's cancellation.
+const POLL: usize = 256;
 /// The cells the parameter range across F is first cut into, each judged on the bound of
 /// F's other parameter that the boundary pieces over it give.
 const CELLS: u32 = 64;
@@ -37,9 +42,75 @@ type Box3 = [Ivl; 3];
 /// A boundary piece's chart coordinates: its `s` range (`None`: every angle) and `h` range.
 type Piece = (Option<Ivl>, Ivl);
 
+/// A vector enclosed coordinate by coordinate.
+type IVec = [Ivl; 3];
+
+fn ivec(v: Vec3) -> IVec {
+    [Ivl::from(v.x), Ivl::from(v.y), Ivl::from(v.z)]
+}
+
+fn idot(a: IVec, b: IVec) -> Ivl {
+    let ([a0, a1, a2], [b0, b1, b2]) = (a, b);
+    a0 * b0 + a1 * b1 + a2 * b2
+}
+
+fn icross(a: IVec, b: IVec) -> IVec {
+    let ([a0, a1, a2], [b0, b1, b2]) = (a, b);
+    [a1 * b2 - a2 * b1, a2 * b0 - a0 * b2, a0 * b1 - a1 * b0]
+}
+
+/// An enclosure of `a / |a|` for every vector `a` in the enclosure; `None` where it may hold
+/// the zero vector.
+fn iunit(a: IVec) -> Option<IVec> {
+    let length = idot(a, a).sqrt();
+    if !(length.is_finite() && length.lo > 0.0) {
+        return None;
+    }
+    Some(a.map(|x| x / length))
+}
+
+/// The exact unit frame `(x, y, n / |n|)` of the float vector `n`: `x` the unit vector along
+/// `n x e`, `e` the coordinate axis `n` is least along (its coordinates are `n`'s, exactly),
+/// and `y = (n / |n|) x x`, each enclosed.
+fn unit_frame(n: Vec3) -> Option<[IVec; 3]> {
+    let (ax, ay, az) = (n.x.abs(), n.y.abs(), n.z.abs());
+    // n x e_x = (0, z, -y), n x e_y = (-z, 0, x), n x e_z = (y, -x, 0): no rounding
+    let across = if ax <= ay && ax <= az {
+        Vec3::new(0.0, n.z, -n.y)
+    } else if ay <= az {
+        Vec3::new(-n.z, 0.0, n.x)
+    } else {
+        Vec3::new(n.y, -n.x, 0.0)
+    };
+    let z = iunit(ivec(n))?;
+    let x = iunit(ivec(across))?;
+    Some([x, icross(z, x), z])
+}
+
+/// `2pi`, enclosed (`TAU` is the double below it).
+fn two_pi() -> Ivl {
+    Ivl::new(TAU, next_up(TAU))
+}
+
+/// `pi`, enclosed (`PI` is the double below it).
+fn pi() -> Ivl {
+    Ivl::new(PI, next_up(PI))
+}
+
+/// The value `v` of `cos`, `sin` or `atan2`, enclosed: the platform's libm returns them
+/// within one ulp of the true value (the convention of [`crate::geom::certified`]: two
+/// roundings), and one ulp of a normal `v` is at most `2u |v|` = `gamma(2) |v|` to first
+/// order; `f64::MIN_POSITIVE` covers a subnormal's ulp.
+fn libm(v: f64) -> Ivl {
+    let e = gamma(2) * v.abs() + f64::MIN_POSITIVE;
+    Ivl::checked(v - e, v + e)
+}
+
 /// F's surface as a chart `(s, h)` of its feet, with the centre of the ball whose foot is
 /// there: on a plane `s`, `h` are lengths along two directions in it; on a cylinder `s` is
-/// the angle about the axis and `h` the length along it.
+/// the angle about the axis and `h` the length along it. The chart's frame is the exact unit
+/// frame of the quadric's direction, enclosed ([`unit_frame`]), so the chart is the quadric
+/// itself, with no allowance for a frame that is unit or square only to rounding.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum FaceChart {
     /// The foot `origin + s x + h y`; the centre that moved by `shift` along the unit
@@ -48,11 +119,11 @@ pub(super) enum FaceChart {
         /// A point of the plane.
         origin: Point3,
         /// A unit direction in the plane.
-        x: Vec3,
+        x: IVec,
         /// The unit direction in the plane square to `x`.
-        y: Vec3,
+        y: IVec,
         /// The face's unit normal.
-        n: Vec3,
+        n: IVec,
         /// The ball centre's signed offset along `n`.
         shift: f64,
     },
@@ -63,11 +134,11 @@ pub(super) enum FaceChart {
         /// A point of the axis.
         axis: Point3,
         /// A unit direction square to the axis.
-        u: Vec3,
+        u: IVec,
         /// `w x u`.
-        v: Vec3,
+        v: IVec,
         /// The unit axis.
-        w: Vec3,
+        w: IVec,
         /// The cylinder's radius.
         radius: f64,
         /// +1 where the face's normal points away from the axis, -1 toward it.
@@ -77,26 +148,14 @@ pub(super) enum FaceChart {
     },
 }
 
-/// A unit vector square to the unit `n`, from the coordinate axis it is least along.
-fn square_to(n: Vec3) -> Option<Vec3> {
-    let (ax, ay, az) = (n.x.abs(), n.y.abs(), n.z.abs());
-    let e = if ax <= ay && ax <= az {
-        Vec3::new(1.0, 0.0, 0.0)
-    } else if ay <= az {
-        Vec3::new(0.0, 1.0, 0.0)
-    } else {
-        Vec3::new(0.0, 0.0, 1.0)
-    };
-    n.cross(e).unitize().ok()
-}
-
 impl FaceChart {
-    /// The chart of the plane through `origin` with the face's unit normal `n`.
-    pub(super) fn plane(origin: Point3, n: Vec3, shift: f64) -> Option<Self> {
-        let x = square_to(n)?;
-        let y = n.cross(x);
+    /// The chart of a plane quadric (its point and normal), the normal turned to the face's
+    /// own normal `n` (the side the ball's offset is signed by).
+    pub(super) fn plane(q: &BlendQuadric, n: Vec3, shift: f64) -> Option<Self> {
+        let dir = if q.dir.dot(n) < 0.0 { -q.dir } else { q.dir };
+        let [x, y, n] = unit_frame(dir)?;
         Some(Self::Plane {
-            origin,
+            origin: q.point,
             x,
             y,
             n,
@@ -106,11 +165,9 @@ impl FaceChart {
 
     /// The chart of a cylinder quadric, the face's unit normal at its point `at` being `n`.
     pub(super) fn cylinder(q: &BlendQuadric, at: Point3, n: Vec3, shift: f64) -> Option<Self> {
-        let w = q.dir;
-        let u = square_to(w)?;
-        let v = w.cross(u);
+        let [u, v, w] = unit_frame(q.dir)?;
         let rel = at - q.point;
-        let radial = (rel - w * rel.dot(w)).unitize().ok()?;
+        let radial = (rel - q.dir * rel.dot(q.dir)).unitize().ok()?;
         let along = n.dot(radial);
         // the face's normal is radial on a cylinder: anything else is not this cylinder
         if along.abs() < 0.5 || !crate::geom::certified::above(q.radius, 0.0) {
@@ -133,43 +190,47 @@ impl FaceChart {
     }
 
     /// An enclosure of the chart coordinates `(s, h)` of every point of `bx` (an angle range
-    /// for a cylinder, `None` where the box holds the axis and so every angle).
-    fn coordinates(&self, bx: Box3) -> Option<(Option<Ivl>, Ivl)> {
-        let rel = |o: Point3, d: Vec3| -> Ivl { dot_box(sub_point(bx, o), d) };
+    /// for a cylinder, `None` for every angle: where the box holds the axis or comes near a
+    /// half turn round it).
+    fn coordinates(&self, bx: Box3) -> Option<Piece> {
         match *self {
             Self::Plane { origin, x, y, .. } => {
-                let (s, h) = (rel(origin, x), rel(origin, y));
-                (s.is_finite() && h.is_finite()).then_some((Some(pad_rel(s)), pad_rel(h)))
+                let rel = sub_point(bx, origin);
+                let (s, h) = (idot(rel, x), idot(rel, y));
+                (s.is_finite() && h.is_finite()).then_some((Some(s), h))
             }
             Self::Cylinder { axis, u, v, w, .. } => {
-                let (px, py, h) = (rel(axis, u), rel(axis, v), rel(axis, w));
+                let rel = sub_point(bx, axis);
+                let (px, py, h) = (idot(rel, u), idot(rel, v), idot(rel, w));
                 if !(px.is_finite() && py.is_finite() && h.is_finite()) {
                     return None;
                 }
                 if px.lo <= 0.0 && px.hi >= 0.0 && py.lo <= 0.0 && py.hi >= 0.0 {
-                    return Some((None, pad_rel(h)));
+                    return Some((None, h));
                 }
                 // a box clear of the axis is seen from it within less than a half turn,
-                // spanned by its corners
+                // spanned by its corners; each corner's angle is taken within half a turn of
+                // the box's middle, which is decided only well inside that half turn
                 let mid = py.mid().atan2(px.mid());
-                let (mut lo, mut hi) = (0.0_f64, 0.0_f64);
+                let mut arc: Option<Ivl> = None;
                 for (cx, cy) in [
                     (px.lo, py.lo),
                     (px.lo, py.hi),
                     (px.hi, py.lo),
                     (px.hi, py.hi),
                 ] {
-                    let mut d = cy.atan2(cx) - mid;
-                    if d > PI {
-                        d -= TAU;
-                    } else if d < -PI {
-                        d += TAU;
+                    let mut d = libm(cy.atan2(cx)) - Ivl::from(mid);
+                    if d.mid() > PI {
+                        d = d - two_pi();
+                    } else if d.mid() < -PI {
+                        d = d + two_pi();
                     }
-                    lo = lo.min(d);
-                    hi = hi.max(d);
+                    if !(d.is_finite() && d.lo > 0.1 - PI && d.hi < PI - 0.1) {
+                        return Some((None, h));
+                    }
+                    arc = Some(arc.map_or(d, |a| a.hull(d)));
                 }
-                // atan2 is within an ulp or two: a wide margin
-                Some((Some(Ivl::new(mid + lo - 1e-9, mid + hi + 1e-9)), pad_rel(h)))
+                Some((arc.map(|a| Ivl::from(mid) + a), h))
             }
         }
     }
@@ -189,11 +250,10 @@ impl FaceChart {
         }
     }
 
-    /// An enclosure of the centres of the balls whose feet are at `(s, h)` in the box, and
-    /// a bound on how far the chart's frame (unit and square to rounding only) can move a
-    /// centre from the true one, added to every coordinate.
+    /// An enclosure of the centres of the balls whose feet are at `(s, h)` in the box.
     fn centres(&self, s: Ivl, h: Ivl) -> Option<Box3> {
-        let c = match *self {
+        let point = |o: Point3| ivec(o);
+        Some(match *self {
             Self::Plane {
                 origin,
                 x,
@@ -202,14 +262,11 @@ impl FaceChart {
                 shift,
             } => {
                 let shift = Ivl::from(shift);
-                let at = |o: f64, xi: f64, yi: f64, ni: f64| {
-                    Ivl::from(o) + s * Ivl::from(xi) + h * Ivl::from(yi) + Ivl::from(ni) * shift
-                };
-                [
-                    at(origin.x, x.x, y.x, n.x),
-                    at(origin.y, x.y, y.y, n.y),
-                    at(origin.z, x.z, y.z, n.z),
-                ]
+                let o = point(origin);
+                core::array::from_fn(|i| {
+                    let at = |a: IVec| a.get(i).copied().unwrap_or(Ivl::whole());
+                    at(o) + s * at(x) + h * at(y) + at(n) * shift
+                })
             }
             Self::Cylinder {
                 axis,
@@ -222,35 +279,14 @@ impl FaceChart {
             } => {
                 let (cs, sn) = cos_sin(s)?;
                 let rho = Ivl::from(radius) + Ivl::from(side * shift);
-                let at = |o: f64, ui: f64, vi: f64, wi: f64| {
-                    Ivl::from(o)
-                        + rho * (cs * Ivl::from(ui) + sn * Ivl::from(vi))
-                        + h * Ivl::from(wi)
-                };
-                [
-                    at(axis.x, u.x, v.x, w.x),
-                    at(axis.y, u.y, v.y, w.y),
-                    at(axis.z, u.z, v.z, w.z),
-                ]
+                let o = point(axis);
+                core::array::from_fn(|i| {
+                    let at = |a: IVec| a.get(i).copied().unwrap_or(Ivl::whole());
+                    at(o) + rho * (cs * at(u) + sn * at(v)) + h * at(w)
+                })
             }
-        };
-        // the frame's directions are unit and square to each other to a few roundings: the
-        // point it reaches for a foot's coordinates is within 1e-14 of its size of the true one
-        let size = s.mag() + h.mag() + 1.0;
-        let size = match *self {
-            Self::Plane { shift, .. } => size + shift.abs(),
-            Self::Cylinder { radius, shift, .. } => size * (radius + shift.abs() + 1.0),
-        };
-        let frame = Ivl::new(-1e-14 * size, 1e-14 * size);
-        Some(c.map(|ci| ci + frame))
+        })
     }
-}
-
-/// `[lo, hi]` widened by `1e-12` of its magnitude plus `1e-12`: the projections of a box onto
-/// a frame unit and square to rounding only.
-fn pad_rel(x: Ivl) -> Ivl {
-    let e = 1e-12 * (x.mag() + 1.0);
-    Ivl::new(x.lo - e, x.hi + e)
 }
 
 fn sub_point(bx: Box3, o: Point3) -> Box3 {
@@ -259,8 +295,7 @@ fn sub_point(bx: Box3, o: Point3) -> Box3 {
 }
 
 fn dot_box(bx: Box3, d: Vec3) -> Ivl {
-    let [x, y, z] = bx;
-    x * Ivl::from(d.x) + y * Ivl::from(d.y) + z * Ivl::from(d.z)
+    idot(bx, ivec(d))
 }
 
 /// `x^2` over `x`, never below 0.
@@ -270,24 +305,24 @@ fn sqr(x: Ivl) -> Ivl {
 }
 
 /// Enclosures of `cos` and `sin` over `s` (a span below a quarter turn within three turns of
-/// 0): the hull of their values at its ends and of the extremes it holds, widened past the
-/// library's error. `None` elsewhere.
+/// 0): the hull of their values at its ends ([`libm`]) and of the extremes it holds, `+-1` at
+/// each `k pi` (cos) and `pi/2 + k pi` (sin) whose enclosure meets the span. `None`
+/// elsewhere.
 fn cos_sin(s: Ivl) -> Option<(Ivl, Ivl)> {
-    if !(s.is_finite() && s.hi - s.lo <= FRAC_PI_2 && s.lo >= -3.0 * PI && s.hi <= 3.0 * PI) {
+    if !(s.is_finite() && s.hi - s.lo <= FRAC_PI_2 && s.lo >= -9.0 && s.hi <= 9.0) {
         return None;
     }
-    let (ca, cb, sa, sb) = (s.lo.cos(), s.hi.cos(), s.lo.sin(), s.hi.sin());
-    let mut c = wide(ca.min(cb), ca.max(cb));
-    let mut n = wide(sa.min(sb), sa.max(sb));
-    // cos is +-1 at k pi and sin at pi/2 + k pi: taken where within 1e-9 of the span
+    let mut c = libm(s.lo.cos()).hull(libm(s.hi.cos()));
+    let mut n = libm(s.lo.sin()).hull(libm(s.hi.sin()));
+    let half = pi() * Ivl::from(0.5);
     for k in -4_i32..=4 {
-        let t = f64::from(k) * PI;
+        let t = Ivl::from(f64::from(k)) * pi();
         let sign = if k % 2 == 0 { 1.0 } else { -1.0 };
-        if t >= s.lo - 1e-9 && t <= s.hi + 1e-9 {
+        if t.hi >= s.lo && t.lo <= s.hi {
             c = c.hull(Ivl::from(sign));
         }
-        let t = t + FRAC_PI_2;
-        if t >= s.lo - 1e-9 && t <= s.hi + 1e-9 {
+        let t = t + half;
+        if t.hi >= s.lo && t.lo <= s.hi {
             n = n.hull(Ivl::from(sign));
         }
     }
@@ -328,9 +363,8 @@ fn offset_value(q: &BlendQuadric, dist: f64, c: Box3) -> Option<Ivl> {
         QuadricKind::Cone => {
             // the normal away from the axis is cos(a) radial - sin(a) d: the apex moves back
             // along d by side dist / sin(a) (`BlendQuadric::offset`)
-            let (sa, ca) = (q.angle.sin(), q.angle.cos());
-            let (sa, ca) = (wide(sa, sa), wide(ca, ca));
-            let back = Ivl::from(q.side * dist) / sa;
+            let (sa, ca) = (libm(q.angle.sin()), libm(q.angle.cos()));
+            let back = Ivl::from(q.side * dist) / (sa * dd.sqrt());
             let [a, b, e] = delta(q.point);
             let x = [
                 a + Ivl::from(d.x) * back,
@@ -391,9 +425,10 @@ fn meets(periodic: bool, a: Option<Ivl>, s: Ivl) -> bool {
     } else {
         &[0.0]
     };
-    turns
-        .iter()
-        .any(|&k| a.lo + k * TAU <= s.hi && s.lo <= a.hi + k * TAU)
+    turns.iter().any(|&k| {
+        let shifted = a + Ivl::from(k) * two_pi();
+        shifted.lo <= s.hi && s.lo <= shifted.hi
+    })
 }
 
 /// Whether every ball touching F (the face `f`, charted by `chart`) at a foot within F, and
@@ -405,9 +440,9 @@ fn meets(periodic: bool, a: Option<Ivl>, s: Ivl) -> bool {
 /// constant (a line of the plane, a ruling of the cylinder) that meets F meets it in a set
 /// whose ends lie on F's boundary, so the `s` that F covers, and at each the range of `h`, lie
 /// within those of the boundary's points there. Each boundary edge's curve is enclosed by
-/// outward-rounded interval arithmetic and grown by its tolerance
-/// ([`crate::heal::stitch::bounds::curve_enclosure`]); its chart coordinates enclose the
-/// face's boundary points it stands for. The range of `s` is cut into [`CELLS`] cells, each
+/// outward-rounded boxes and grown by its tolerance
+/// ([`crate::heal::stitch::bounds::curve_cover`]); their chart coordinates enclose the
+/// face's boundary points they stand for. The range of `s` is cut into [`CELLS`] cells, each
 /// given the hull of the `h` ranges of the pieces that meet it, and each box `(s, h)` is
 /// judged by interval arithmetic on the centres of every foot in it: no ball is there where
 /// the moved quadric's value excludes 0, and every ball there lies past where the plane's
@@ -416,7 +451,13 @@ fn meets(periodic: bool, a: Option<Ivl>, s: Ivl) -> bool {
 ///
 /// The quadrics are the faces as the kernel reads them ([`BlendQuadric::from_surface`]); the
 /// moved quadric holds every ball centre touching that surface on the given side.
+///
+/// # Errors
+///
+/// Those of the topology lookups; [`crate::SolidError::Cancelled`] when the kernel's
+/// operation is cancelled (polled every [`POLL`] boxes and every cell).
 pub(super) fn every_ball_on_face_past_plane(
+    k: &Kernel,
     b: &Brep,
     f: FaceId,
     chart: &FaceChart,
@@ -426,21 +467,34 @@ pub(super) fn every_ball_on_face_past_plane(
     margin: f64,
     tol: f64,
 ) -> Result<bool> {
-    let (at, dir) = plane;
-    if margin.is_nan() || margin < 0.0 {
-        return Ok(false);
-    }
     let Some(pieces) = boundary_pieces(b, f, chart, tol)? else {
         return Ok(false);
     };
+    every_ball_over_pieces(k, &pieces, chart, other, other_dist, plane, margin)
+}
+
+/// [`every_ball_on_face_past_plane`] over F's boundary pieces `pieces`.
+fn every_ball_over_pieces(
+    k: &Kernel,
+    pieces: &[Piece],
+    chart: &FaceChart,
+    other: &BlendQuadric,
+    other_dist: f64,
+    plane: (Point3, Vec3),
+    margin: f64,
+) -> Result<bool> {
+    let (at, dir) = plane;
+    if margin.is_nan() || margin < 0.0 || pieces.is_empty() {
+        return Ok(false);
+    }
     let periodic = chart.periodic();
-    // the range of s the cells cut
+    // the range of s the cells cut: on a cylinder a little over a whole turn
     let range = if periodic {
         match pieces.iter().find_map(|(s, _)| *s) {
             Some(s) if pieces.iter().all(|(s, _)| s.is_some()) => {
-                Ivl::new(s.mid() - PI, s.mid() + PI)
+                Ivl::new(s.mid() - 3.15, s.mid() + 3.15)
             }
-            _ => Ivl::new(-PI, PI),
+            _ => Ivl::new(-3.15, 3.15),
         }
     } else {
         let mut range: Option<Ivl> = None;
@@ -462,8 +516,9 @@ pub(super) fn every_ball_on_face_past_plane(
             range.lo + width * f64::from(i + 1) / f64::from(CELLS)
         };
         let s = Ivl::new(lo, hi);
+        k.check_cancelled(OP)?;
         let mut h: Option<Ivl> = None;
-        for (ps, ph) in &pieces {
+        for (ps, ph) in pieces {
             if meets(periodic, *ps, s) {
                 h = Some(h.map_or(*ph, |x| x.hull(*ph)));
             }
@@ -477,6 +532,9 @@ pub(super) fn every_ball_on_face_past_plane(
         judged += 1;
         if judged > BUDGET {
             return Ok(false);
+        }
+        if judged % POLL == 0 {
+            k.check_cancelled(OP)?;
         }
         let Some(c) = chart.centres(s, h) else {
             return Ok(false);
@@ -517,7 +575,7 @@ mod tests {
     use super::*;
 
     /// The enclosures of cos and sin hold the values at 10,001 points of spans across the
-    /// extremes and the turns.
+    /// extremes and the turns (sampled: a check of the construction, not its proof).
     #[test]
     fn cos_sin_holds_every_value_in_the_span() {
         for (lo, hi) in [
@@ -538,33 +596,102 @@ mod tests {
         assert!(cos_sin(Ivl::new(0.0, 2.0)).is_none());
     }
 
+    fn axis_frame() -> FaceChart {
+        let q = BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            point: Point3::new(0.0, 0.0, 0.0),
+            dir: Vec3::new(0.0, 0.0, 1.0),
+            radius: 1.0,
+            side: 1.0,
+            ..BlendQuadric::default()
+        };
+        FaceChart::cylinder(
+            &q,
+            Point3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            0.5,
+        )
+        .unwrap()
+    }
+
+    /// The angle about the axis of the world point `(x, y)` in the chart's own frame.
+    fn chart_angle(chart: &FaceChart, x: f64, y: f64) -> f64 {
+        let FaceChart::Cylinder { u, v, .. } = chart else {
+            panic!("not a cylinder")
+        };
+        let p = ivec(Vec3::new(x, y, 0.0));
+        idot(p, *v).mid().atan2(idot(p, *u).mid())
+    }
+
     /// A box clear of the axis has the angle range its corners span, across the turn too.
     #[test]
     fn a_box_off_the_axis_is_seen_within_its_corners_angles() {
-        let chart = FaceChart::Cylinder {
-            axis: Point3::new(0.0, 0.0, 0.0),
-            u: Vec3::new(1.0, 0.0, 0.0),
-            v: Vec3::new(0.0, 1.0, 0.0),
-            w: Vec3::new(0.0, 0.0, 1.0),
-            radius: 1.0,
-            side: 1.0,
-            shift: 0.5,
-        };
-        // straddling the negative x axis, where atan2 jumps from pi to -pi
+        let chart = axis_frame();
+        // a box whose angles about the axis run either side of the chart's own half turn
+        let back = chart_angle(&chart, -1.0, 0.0);
+        let (bc, bs) = (back.cos(), back.sin());
         let bx = [
-            Ivl::new(-2.0, -1.0),
-            Ivl::new(-0.5, 0.5),
+            Ivl::new(1.5 * bc - 0.5, 1.5 * bc + 0.5),
+            Ivl::new(1.5 * bs - 0.5, 1.5 * bs + 0.5),
             Ivl::new(3.0, 4.0),
         ];
         let (s, h) = chart.coordinates(bx).unwrap();
         let s = s.unwrap();
-        for t in [PI - 0.46, PI, PI + 0.46] {
+        for (x, y) in [
+            (bx[0].lo, bx[1].lo),
+            (bx[0].lo, bx[1].hi),
+            (bx[0].hi, bx[1].lo),
+            (bx[0].hi, bx[1].hi),
+        ] {
+            let t = chart_angle(&chart, x, y);
             assert!(meets(true, Some(s), Ivl::new(t, t)), "{t} in {s:?}");
         }
-        assert!(!meets(true, Some(s), Ivl::new(0.0, 0.0)));
+        let front = chart_angle(&chart, 1.0, 0.0);
+        assert!(!meets(true, Some(s), Ivl::new(front, front)));
         assert!(h.lo <= 3.0 && h.hi >= 4.0);
         let around = [Ivl::new(-1.0, 1.0), Ivl::new(-1.0, 1.0), Ivl::new(0.0, 1.0)];
         assert_eq!(chart.coordinates(around).unwrap().0, None);
+    }
+
+    /// The certificate on a unit square of the plane z = 0, the balls of radius 0.5 above it
+    /// touching the plane x = 0.3: their centres are (0.3, y, 0.5), y in [0, 1]. Against the
+    /// plane through (0, -d, 0) facing -y, the nearest lies -d from it: proven past a margin
+    /// of 1e-3 for d = 0.01; not for d = 0.0009 (the ball at y = 0 lies within the margin, a
+    /// near miss) nor for d = -0.5 (the plane cuts the square).
+    #[test]
+    fn the_certificate_proves_only_what_holds_past_the_margin() {
+        let k = Kernel::default();
+        let plane = BlendQuadric {
+            kind: QuadricKind::Plane,
+            point: Point3::new(0.0, 0.0, 0.0),
+            dir: Vec3::new(0.0, 0.0, 1.0),
+            ..BlendQuadric::default()
+        };
+        let chart = FaceChart::plane(&plane, Vec3::new(0.0, 0.0, 1.0), 0.5).unwrap();
+        let edge = |x: [f64; 2], y: [f64; 2]| {
+            chart
+                .coordinates([Ivl::new(x[0], x[1]), Ivl::new(y[0], y[1]), Ivl::from(0.0)])
+                .unwrap()
+        };
+        let pieces = [
+            edge([0.0, 1.0], [0.0, 0.0]),
+            edge([1.0, 1.0], [0.0, 1.0]),
+            edge([0.0, 1.0], [1.0, 1.0]),
+            edge([0.0, 0.0], [0.0, 1.0]),
+        ];
+        let other = BlendQuadric {
+            kind: QuadricKind::Plane,
+            point: Point3::new(0.3, 0.0, 0.0),
+            dir: Vec3::new(1.0, 0.0, 0.0),
+            ..BlendQuadric::default()
+        };
+        let past = |d: f64| {
+            let at = (Point3::new(0.0, -d, 0.0), Vec3::new(0.0, -1.0, 0.0));
+            every_ball_over_pieces(&k, &pieces, &chart, &other, 0.0, at, 1e-3).unwrap()
+        };
+        assert!(past(0.01));
+        assert!(!past(0.0009));
+        assert!(!past(-0.5));
     }
 
     /// The moved quadrics vanish on the centres they stand for: a sphere moved out, a
