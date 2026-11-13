@@ -1189,7 +1189,8 @@ fn apply_dogbone_editor(mut h: Harness, id: u64) {
     assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()));
 }
 
-/// A bit diameter and gap typed as bare numbers in an inch design are inches: OK hands the
+/// The stored bare diameter 3 (millimetres) refills as "3 mm" in an inch design, not "3", which OK
+/// would read as 3 in. A bit diameter and gap typed as bare numbers there are inches: OK hands the
 /// command 3.175 mm and 0.254 mm, not 0.125 mm and 0.01 mm.
 #[test]
 fn dogbone_editor_reads_bare_lengths_in_the_design_unit() {
@@ -1198,6 +1199,7 @@ fn dogbone_editor_reads_bare_lengths_in_the_design_unit() {
     h.app.run("document.units", json!({"units":"in"})).unwrap();
     h.app.edit_feature(id);
     let Some(crate::dialogs::Kind::Dogbone(k)) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no Dogbone editor") };
+    assert_eq!(k.diameter, "3 mm");
     k.diameter = "0.125".into();
     // Minimal, the style with a gap.
     k.style = 1;
