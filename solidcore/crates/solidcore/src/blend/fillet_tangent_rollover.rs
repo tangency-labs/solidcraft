@@ -203,17 +203,18 @@ pub fn tangent_rollover_supports(
     Ok(out)
 }
 
-/// The point of the smooth edge a rail rolled over nearest `point`: where a ball of radius 0
+/// The nearest point to `point` on the smooth edge a rail rolled over: where a ball of radius 0
 /// rolling on the face beyond touches it, so the section of the rolled ball is searched from
 /// there (the filleted edge's point lies off the face beyond, and a drop onto that face's
-/// surface may land on another sheet of it, the far side of a cylinder). The edge is the one
-/// `from` (the face the rail rolled off) and `onto` (the face beyond) share that meets
-/// `onto` tangentially within `tangency_tol_rad`. `None` where they share no such edge, or the
-/// point does not drop onto it.
+/// surface may land on another sheet of it, the far side of a cylinder). The edges are those
+/// `from` (the face the rail rolled off) and `onto` (the face beyond) share that meet tangentially
+/// within `tangency_tol_rad`; of these, the one whose nearest point is nearest `point` (two
+/// half cylinders share two seams), the first of equally near ones in `onto`'s edge order.
+/// `None` where they share no such edge, or the point drops onto none of them.
 ///
 /// # Errors
 ///
-/// Those of the topology queries, the tangency test and the drop.
+/// Those of the topology queries, the tangency test and the drops.
 pub fn rolled_edge_point(
     k: &Kernel,
     target: &mut Brep,
@@ -222,6 +223,7 @@ pub fn rolled_edge_point(
     point: Point3,
     tangency_tol_rad: f64,
 ) -> Result<Option<Point3>> {
+    let mut best: Option<(Point3, f64)> = None;
     for e in face_p4::edges(target, onto, None, false, None)? {
         if !edge::faces(target, e, None)?.contains(&from) {
             continue;
@@ -242,11 +244,16 @@ pub fn rolled_edge_point(
             None,
             SolverOperation::Minimize,
         )?;
-        if dropped.success {
-            return Ok(Some(curve.evaluate_point(k, dropped.parameter)?));
+        if !dropped.success {
+            continue;
+        }
+        let on = curve.evaluate_point(k, dropped.parameter)?;
+        let distance = (on - point).length();
+        if best.is_none_or(|(_, d)| distance < d) {
+            best = Some((on, distance));
         }
     }
-    Ok(None)
+    Ok(best.map(|(p, _)| p))
 }
 
 /// Whether the offset of `face`'s surface by `offset` (along its surface normal) folds across the

@@ -660,8 +660,8 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
 /// the edge's `t`, on the faces' surfaces extended as the trace extends them; its guess
 /// is the edge point dropped on each face, or where that finds none, `guess`'s contacts.
 /// Not the fork's: for a rail rolled over a smooth far edge of its face, the whole length
-/// (`fillet_tangent_rollover`), the point dropped is that edge's point in the section
-/// ([`rolled_edge_point`]), on the face beyond: the edge point lies off that face, and
+/// (`fillet_tangent_rollover`), the point dropped is that edge's point nearest the edge
+/// point ([`rolled_edge_point`]), on the face beyond: the edge point lies off that face, and
 /// dropped on its surface extended it may land on another sheet of it (the far side of a
 /// boss), where the solve finds the ball rolling there (#15767).
 ///
@@ -706,8 +706,8 @@ pub(crate) fn ball_section_at(
     }
     let normal = tangent.unitize()?;
     // where a ball of radius 0 touches each face: the edge's point, or for a rail rolled over a
-    // smooth far edge of its face (`fillet_tangent_rollover`) the point of that edge in the
-    // section, on the face beyond
+    // smooth far edge of its face (`fillet_tangent_rollover`) that edge's point nearest it, on
+    // the face beyond
     let mut seeds = [point; 2];
     let tangency = ops.solver().tangency_tolerance;
     for (rail, seed) in seeds.iter_mut().enumerate() {
