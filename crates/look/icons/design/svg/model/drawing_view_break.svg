@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Break view</title>
+  <path d="M7 18L28 18L24 27L28 34L24 46L7 46ZM36 18L57 18L57 46L36 46L40 34L36 27Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M27 15L22 27L27 34L22 49M42 15L37 27L42 34L37 49" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

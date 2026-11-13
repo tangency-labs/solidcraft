@@ -240,21 +240,69 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "DRAWING LAYOUT",
         panel: "VIEWS",
-        promoted: 3,
-        ids: &["drawing.view.base.planned", "drawing.view.projected.planned", "drawing.view.section", "drawing.view.detail"],
+        promoted: 4,
+        ids: &[
+            "drawing.view.base.planned",
+            "drawing.view.section",
+            "drawing.view.detail",
+            "drawing.view.break",
+            "drawing.view.auxiliary",
+            "drawing.view.pictorial",
+            "drawing.view.draft",
+            "drawing.view.flat_pattern",
+        ],
     },
-    Section { tab: "DRAWING LAYOUT", panel: "ARRANGE", promoted: 1, ids: &["drawing.views.align"] },
-    Section { tab: "DRAWING LAYOUT", panel: "INSERT", promoted: 1, ids: &["drawing.image", "drawing.line"] },
-    Section { tab: "DRAWING LAYOUT", panel: "RESOURCES", promoted: 1, ids: &["drawing.resources"] },
-    Section { tab: "DRAWING ANNOTATE", panel: "MEASURE", promoted: 2, ids: &["drawing.dimension", "drawing.hole_callout"] },
-    Section { tab: "DRAWING ANNOTATE", panel: "NOTES", promoted: 2, ids: &["drawing.note", "drawing.leader"] },
-    Section { tab: "DRAWING ANNOTATE", panel: "SYMBOLS", promoted: 2, ids: &["drawing.datum", "drawing.centre_mark"] },
-    Section { tab: "DRAWING ANNOTATE", panel: "ARRANGE", promoted: 2, ids: &["drawing.annotations.align", "drawing.annotations.space"] },
-    Section { tab: "DRAWING PARTS", panel: "ASSEMBLY", promoted: 2, ids: &["drawing.parts_list", "drawing.balloon"] },
-    Section { tab: "DRAWING PARTS", panel: "TABLES", promoted: 2, ids: &["drawing.table.edit", "drawing.revision_table"] },
-    Section { tab: "DRAWING PARTS", panel: "SOURCE", promoted: 2, ids: &["assembly.bom", "sheet.flat_pattern"] },
-    Section { tab: "DRAWING REVIEW", panel: "CHANGES", promoted: 2, ids: &["drawing.update.planned", "drawing.check.planned"] },
-    Section { tab: "DRAWING REVIEW", panel: "REVISION", promoted: 2, ids: &["drawing.revision", "drawing.revision_table"] },
+    Section {
+        tab: "DRAWING LAYOUT",
+        panel: "ARRANGE",
+        promoted: 1,
+        ids: &["drawing.views.align", "drawing.view.move_to_sheet.planned", "drawing.view.copy_to_sheet.planned"],
+    },
+    Section { tab: "DRAWING LAYOUT", panel: "INSERT", promoted: 3, ids: &["drawing.image", "drawing.sheet_sketch", "drawing.hatch"] },
+    Section {
+        tab: "DRAWING ANNOTATE",
+        panel: "MEASURE",
+        promoted: 3,
+        ids: &[
+            "drawing.dimension",
+            "drawing.dimension.from_model.planned",
+            "drawing.hole_callout",
+            "drawing.dimension.chain",
+            "drawing.dimension.suggest",
+        ],
+    },
+    Section { tab: "DRAWING ANNOTATE", panel: "NOTES", promoted: 2, ids: &["drawing.note", "drawing.leader", "drawing.note.chamfer"] },
+    Section {
+        tab: "DRAWING ANNOTATE",
+        panel: "SYMBOLS",
+        promoted: 4,
+        ids: &["drawing.centre_mark", "drawing.gdt", "drawing.surface_texture", "drawing.weld"],
+    },
+    Section {
+        tab: "DRAWING ANNOTATE",
+        panel: "ARRANGE",
+        promoted: 3,
+        ids: &["drawing.dimension.tidy", "drawing.annotations.align", "drawing.annotations.space"],
+    },
+    Section {
+        tab: "DRAWING PARTS",
+        panel: "ASSEMBLY",
+        promoted: 3,
+        ids: &["drawing.parts_list", "drawing.balloon", "drawing.balloon.auto", "assembly.bom", "drawing.parts_list.renumber"],
+    },
+    Section { tab: "DRAWING PARTS", panel: "TABLES", promoted: 2, ids: &["drawing.revision_table", "drawing.table.edit.planned"] },
+    Section {
+        tab: "DRAWING REVIEW",
+        panel: "CHANGES",
+        promoted: 3,
+        ids: &["drawing.update.planned", "drawing.check.planned", "drawing.replace_model"],
+    },
+    Section {
+        tab: "DRAWING REVIEW",
+        panel: "REVISION",
+        promoted: 3,
+        ids: &["drawing.revision", "drawing.revise.planned", "drawing.revision.tag.add.planned"],
+    },
     Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export.planned", "drawing.print"] },
     Section {
         tab: "MODEL",
@@ -572,22 +620,24 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("contact.check", "Contact"),
     ("contact.enable_sets", "Contact Sets"),
     ("document.inspect", "Inspect"),
-    ("drawing.annotations.align", "Align Notes"),
-    ("drawing.annotations.space", "Space Notes"),
+    ("drawing.annotations.align", "Align"),
+    ("drawing.annotations.space", "Space"),
     ("drawing.check.planned", "Check Drawing"),
     ("drawing.dimension", "Dimension"),
+    ("drawing.dimension.from_model.planned", "Model Dims."),
     ("drawing.export.planned", "Export"),
     ("drawing.hole_callout", "Hole Callout"),
     ("drawing.image", "Image"),
-    ("drawing.leader", "Leader"),
+    ("drawing.leader", "Leader Note"),
     ("drawing.note", "Note"),
-    ("drawing.print", "Print Drawing"),
-    ("drawing.resources", "Resources"),
+    ("drawing.print", "Print"),
+    ("drawing.revise.planned", "Issue Rev."),
     ("drawing.revision", "Add Revision"),
     ("drawing.revision_table", "Revision Tbl."),
-    ("drawing.table.edit", "Edit Table"),
+    ("drawing.surface_texture", "Surface Text."),
+    ("drawing.table.edit.planned", "Edit Table"),
     ("drawing.update.planned", "Update"),
-    ("drawing.view.projected.planned", "Projected"),
+    ("drawing.view.flat_pattern", "Flat Pattern"),
     ("drawing.view.section", "Section View"),
     ("document.units", "Units"),
     ("inspect.accessibility", "Access"),
@@ -645,18 +695,6 @@ pub fn ribbon_button_label(command: &CommandSpec) -> &str {
 /// Families keep their full menu title while using the first command's compact ribbon name.
 pub fn ribbon_family_label(family: &crate::sketch_families::Family) -> &'static str {
     family.commands.first().and_then(|first| RIBBON_LABELS.iter().find(|(id, _)| id == first)).map_or(family.label, |(_, label)| *label)
-}
-
-/// Source utilities retain their Design names; Drawing makes the inspected scope explicit.
-pub fn ribbon_button_label_in<'a>(tab: &str, command: &'a CommandSpec) -> &'a str {
-    if drawing_tab(tab) {
-        match command.id {
-            "assembly.bom" => return "Source BOM",
-            "sheet.flat_pattern" => return "Source Flat",
-            _ => {}
-        }
-    }
-    ribbon_button_label(command)
 }
 
 /// Registry placement → default ribbon destination, after explicit id overrides.
@@ -1099,16 +1137,47 @@ mod tests {
         assert!(h.app.run("drawing.view.base.planned", json!({})).is_err(), "the preview never enables engine execution");
         h.step(&json!({"click":{"handle":"drawing:settings:close"}})).unwrap();
         h.step(&json!({"click":{"handle":"tab:DRAWING PARTS"}})).unwrap();
-        h.step(&json!({"click":{"handle":"button:assembly.bom"}})).unwrap();
-        h.frames(2);
-        assert!(h.app.bom.is_some(), "Source BOM opens the existing inspector");
+        assert!(crate::scenario::handle_at("button:assembly.bom").is_none(), "BOM stays in the Assembly list");
+        assert!(
+            layout("DRAWING PARTS", "ASSEMBLY", &solidcraft_engine::command_specs())
+                .is_some_and(|(commands, _)| commands.iter().any(|command| command.id == "assembly.bom"))
+        );
         assert_eq!(h.app.ui.tab, "DRAWING PARTS");
         assert_eq!(h.app.session.doc, before);
         assert_eq!(h.app.session.revision, revision);
-        h.app.bom = None;
         h.call("ui.workspace", json!({"workspace":"design"}));
         h.frames(2);
         assert_eq!(h.app.ui.tab, "SURFACE", "return restores the source workspace context");
+    }
+
+    #[test]
+    fn drawing_ribbon_has_the_designed_views_and_planned_commands_do_not_run() {
+        let mut h = crate::scenario::Harness::new();
+        let specs = solidcraft_engine::command_specs();
+        let (views, count) = layout("DRAWING LAYOUT", "VIEWS", &specs).unwrap();
+        let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
+        assert_eq!(
+            buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
+            ["drawing.view.base.planned", "drawing.view.section", "drawing.view.detail", "drawing.view.break"]
+        );
+        assert!(views.iter().any(|command| command.id == "drawing.view.flat_pattern"));
+        assert!(!views.iter().any(|command| command.id == "drawing.view.projected.planned"));
+        assert_eq!(panels("DRAWING LAYOUT"), ["VIEWS", "ARRANGE", "INSERT"]);
+        assert_eq!(panels("DRAWING ANNOTATE"), ["MEASURE", "NOTES", "SYMBOLS", "ARRANGE"]);
+        assert_eq!(panels("DRAWING PARTS"), ["ASSEMBLY", "TABLES"]);
+        assert_eq!(panels("DRAWING REVIEW"), ["CHANGES", "REVISION", "OUTPUT"]);
+        let (tables, _) = layout("DRAWING PARTS", "TABLES", &specs).unwrap();
+        assert_eq!(tables.iter().map(|command| command.id).collect::<Vec<_>>(), ["drawing.revision_table", "drawing.table.edit.planned"]);
+        assert!(tables.iter().all(|command| command.planned.is_some() && !command.info(&h.app.session).enabled));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"name":"Sheet", "body_name":"Sheet"})).unwrap();
+        let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
+        assert_eq!(
+            buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
+            ["drawing.view.base.planned", "drawing.view.section", "drawing.view.detail", "drawing.view.flat_pattern"]
+        );
     }
 
     #[test]
@@ -1183,12 +1252,7 @@ mod tests {
                     continue;
                 }
                 if command.label.chars().count() > 12 || command.label.split_whitespace().any(|word| word.chars().count() > 9) {
-                    assert!(
-                        RIBBON_LABELS.iter().any(|(id, _)| *id == command.id)
-                            || ribbon_button_label_in(section.tab, command) != ribbon_button_label(command),
-                        "missing compact label for {}",
-                        command.id
-                    );
+                    assert!(RIBBON_LABELS.iter().any(|(id, _)| *id == command.id), "missing compact label for {}", command.id);
                 }
             }
         }
@@ -1202,13 +1266,6 @@ mod tests {
         let construction = crate::sketch_families::family("sketch.construction_line").unwrap();
         assert_eq!(ribbon_family_label(construction), "X-Lines");
         assert_eq!(construction.label, "Construction Line");
-        for (id, design, drawing) in [("assembly.bom", "Bill of Materials", "Source BOM"), ("sheet.flat_pattern", "Flat Pattern", "Source Flat")] {
-            let command = solidcraft_engine::find_command(id).unwrap();
-            assert_eq!(ribbon_button_label(command), design);
-            assert_eq!(ribbon_button_label_in("MODEL", command), design);
-            assert_eq!(ribbon_button_label_in("DRAWING PARTS", command), drawing);
-            assert!(drawing.chars().count() <= 13);
-        }
     }
 
     #[test]
