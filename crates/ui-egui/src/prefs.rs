@@ -1273,6 +1273,10 @@ preference_settings! {
     /// edits wait in the dialog until Apply or OK sets them together, in one rebuild and one undo
     /// step. Its checkbox is in the dialog itself.
     parameters_apply_live: bool = true;
+    /// Cancel and Escape in the Parameters dialog put back the expressions it applied live since
+    /// it opened, in one undo step (#15377). Off: they only close the dialog and the applied
+    /// changes stay, as before. The close button always keeps them.
+    parameters_cancel_reverts: bool = true, PAGE_DESIGN => check_id("prefs.parameters_cancel_reverts");
     /// A design coming back to its tab reads again the linked designs whose files changed since
     /// it last read them. Off: they wait for Update Links, as before.
     update_changed_links: bool = true, PAGE_DESIGN => check_id("settings.update_changed_links");
