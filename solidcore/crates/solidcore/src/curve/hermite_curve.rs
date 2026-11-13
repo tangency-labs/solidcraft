@@ -74,6 +74,18 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQ};
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
 
+/// Bound the distance of an entire cubic Bezier from its finite endpoint segment.
+/// The convex hull property puts every curve point within the larger distance of
+/// the two inner controls to the segment. Unlike distance to the infinite line,
+/// this also bounds overshoot and cubics whose endpoints coincide.
+/// Coordinates must be finite and small enough for segment distance arithmetic.
+#[must_use]
+pub fn cubic_chord_bound([a, c, d, b]: [Point3; 4]) -> f64 {
+    let (c_distance, _) = segment_point_distance(a, b, c);
+    let (d_distance, _) = segment_point_distance(a, b, d);
+    max2(c_distance, d_distance)
+}
+
 /// A cubic Hermite curve on `[0, 1]` (`SmHermiteCurve`):
 ///
 /// ```text
@@ -401,9 +413,7 @@ impl HermiteCurve {
         if self.p1.distance_squared(self.p2) < EFF_ZERO_SQ {
             self.p1.distance(pnt1) + pnt1.distance(pnt2) + pnt2.distance(self.p2)
         } else {
-            let (dist, _) = segment_point_distance(self.p1, self.p2, pnt1);
-            let (dist2, _) = segment_point_distance(self.p1, self.p2, pnt2);
-            max2(dist, dist2)
+            cubic_chord_bound([self.p1, pnt1, pnt2, self.p2])
         }
     }
 
@@ -541,6 +551,24 @@ impl HermiteCurve {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cubic_chord_bound_covers_closed_and_overshooting_control_hulls() {
+        let p = |x, y, z| Point3::new(x, y, z);
+        assert_eq!(
+            cubic_chord_bound([p(0., 0., 0.), p(1., 2., 0.), p(2., -1., 0.), p(3., 0., 0.)]),
+            2.
+        );
+        assert_eq!(
+            cubic_chord_bound([p(0., 0., 0.), p(-2., 0., 0.), p(4., 0., 0.), p(3., 0., 0.)]),
+            2.
+        );
+        assert_eq!(
+            cubic_chord_bound([p(0., 0., 0.), p(0., 3., 0.), p(0., 0., 4.), p(0., 0., 0.)]),
+            4.
+        );
+        assert_eq!(cubic_chord_bound([p(1., 2., 3.); 4]), 0.);
+    }
+
     #[test]
     fn hermite_trait_rejects_order_above_evaluation_bound() {
         use crate::curve::curve::p2::CurveEvaluate;
