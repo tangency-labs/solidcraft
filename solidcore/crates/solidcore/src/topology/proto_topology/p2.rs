@@ -103,10 +103,11 @@
 //!   tolerance and the definition's own, when another definition of its proto edge is
 //!   imprinted between two distinct vertices in each B-rep (`collapsed_beside_sibling`);
 //!   upstream makes a closed edge on that vertex.
-//! - **Opt-in fixes (WR-452, WR-453, #435, #410).** With `Kernel::fixes.imprint_trims_edge_to_proto_vertex` and
-//!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`, [`ProtoTopologyManager::imprint_edge_definition`]
-//!   first fits each end of the definition's interval to its proto vertex (`imprint_ends`: the SMLib
-//!   fork's thread-groove fixes, tangency-labs/smlib b43876f, a8caccd).
+//! - **Not upstream: ends fitted to proto vertices (WR-452, WR-453, #435, #410).**
+//!   [`ProtoTopologyManager::imprint_edge_definition`] first fits each end of the definition's
+//!   interval to its proto vertex where `imprint_ends`'s checks pass (the SMLib fork's
+//!   thread-groove fixes, tangency-labs/smlib b43876f; the continuation a8caccd is opt-in,
+//!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`).
 //! - **Not upstream: one trim interval** (WR-767, tangency-labs/solidcore#3214).
 //!   [`ProtoTopologyManager::create_proto_edge`] trims the 3D curve and its uv curves to the
 //!   one interval none of their trims snaps (`exact_pieces::common_trim_interval`); upstream
@@ -1040,19 +1041,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
 
-        // not upstream (WR-452, WR-453, #435, #410; opt-in): fit the ends to the proto vertices
-        if k.fixes.imprint_trims_edge_to_proto_vertex
-            || k.fixes.imprint_extends_edge_to_proto_vertex
-        {
-            self.fit_edge_def_ends_to_proto_vertices(
-                k,
-                brep,
-                ed,
-                start_pv,
-                end_pv,
-                [(start_vtx1, start_vtx2), (end_vtx1, end_vtx2)],
-            )?;
-        }
+        // not upstream (WR-452, WR-453, #435, #410): fit the ends to the proto vertices
+        self.fit_edge_def_ends_to_proto_vertices(
+            k,
+            brep,
+            ed,
+            start_pv,
+            end_pv,
+            [(start_vtx1, start_vtx2), (end_vtx1, end_vtx2)],
+        )?;
 
         let d = self.ed_ref(ed)?;
         let type1 = d.src_topo_type(1);

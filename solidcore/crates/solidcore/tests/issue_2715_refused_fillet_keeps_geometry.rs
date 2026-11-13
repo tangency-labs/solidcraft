@@ -225,7 +225,6 @@ fn keep_kernel() -> Kernel {
     fixes.fillet_cliff_overflow = true;
     fixes.fillet_overflow_trim_at_creases = true;
     fixes.linear_sweep_arc_is_cylinder = true;
-    fixes.precise_properties_body_length_scale = true;
     k.fixes = fixes;
     k
 }

@@ -207,7 +207,7 @@ sampled: a 6 × 6 grid of points dropped onto the other for whole surfaces, and 
 boundary curve of one meeting one of the other where the surfaces agree to second order, or the
 middle of one dropping onto the other. A sampled check is not a proof; deciding coincidence from the
 definitions (two quadrics by their coefficients, a definition against its own copy by identity, a
-B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is open work. Only the merge gate decides from definitions: `faces_coincide` (`merge/p1.rs`) decides cone (a cylinder is a cone of semi-angle 0), sphere and torus pairs by `Surface::same_analytic_surface`. Two planes, two different kinds (tangent, they can stay within the tolerance over a patch) and any pair with an offset, B-spline, extrusion or revolution keep the sector's answer.
+B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is open work. Only the merge gate decides from definitions: `faces_coincide` (`merge/p1.rs`) decides cone (a cylinder is a cone of semi-angle 0), sphere and torus pairs by `Surface::same_analytic_surface`. Two cones or two spheres that are not one surface (axes or centres apart) still count as one over the two faces' boxes when an enclosed bound keeps them within the tolerance there: the box is halved across the axes until a Lipschitz bound on their separation decides each part that can hold either surface (`revolved_within`, `surface/surface/p8.rs`; two arcs through the same corners about centres 8.4e-5 apart stay within 1e-10 over the sliver they share). The intersector's coincidence check is still the sampled one. The sector test also tells two planes apart from their faces (`faces_on_other_surfaces`, `query/face/p1.rs`): two planes closer than 0.001° at a common edge are not coincident when a point of either face is proved to lie farther than the two faces' tolerance band from the other's plane (walls through a common edge at a tiny angle, within tolerance near it and apart beyond). The gap is read on each edge curve dropped onto its face's own plane, since the exact edge lies on the plane within the edge's tolerance τ_e of the curve while the curve may stand τ_e + τ_f off it; the band grows by τ_e times the sine of the planes' angle for that. The proof is an enclosure, never samples: a line's ends, and on a B-spline or conic edge the ends of its Bézier pieces, halved by de Casteljau while their hull leaves the band. Two planes, two different kinds (tangent, they can stay within the tolerance over a patch) and any pair with an offset, B-spline, extrusion or revolution keep the sector's answer.
 
 **Near-coincident strips.** Two planar faces crossing at a small angle θ meet in a line fixed only
 to tol / sin θ. Where one face has an edge lying on the other, parallel to and covering the crossing,
@@ -242,6 +242,16 @@ What the port does today:
   `is_outward_touching_solids` (§3).
 - **The sector test near tangency** steps off the edge and compares binormals until they separate
   (§4.2); where they never do within the face, it returns the coincident or zero-sector class.
+  Tangent faces part as the square of the step over their relative radius, so fixed steps and
+  angle thresholds read the faces of a large enough part as parallel. Two readings therefore step
+  on, three times further each round, until the faces are more than the tolerance apart: a sector
+  whose own two faces look parallel (a zero sector), and a classified face that looks coincident
+  with a face the definitions show to lie on another surface (`query/face/p1.rs`,
+  `faces_on_other_surfaces`: two different analytic kinds, or two quadrics of one kind that
+  `Surface::same_analytic_surface` tells apart). A tangent pair with no definitions to compare (a
+  B-spline on a plane) is still read as coincident once its relative radius passes about 1.7e7
+  times the sum of the two edges' tolerances, 330 mm at 1e-5 each (`query/edge.rs`, the 0.01°
+  rule over eight rounds).
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
@@ -344,8 +354,9 @@ A reviewer can check each of these on a change to the boolean.
 - Point solves on S with ε-grown cache boxes (§4.3).
 - Definitions carried through face splits and copies (§7), tested on a round.
 - The ops entry points with the result contract (`solidcore-ops/src/boolean.rs`).
-- The rig: 124 boolean cases in `solidcore/tests/kernel_cases/booleans/`, none listed in
-  `known_failing.json`.
+- The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
+  `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
+  returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - Opt-in fixes for the cases in §5, §6 and §8: `boolean_coincident_strip_drops_crossing`,
   `boolean_union_refuses_solid_leak`, `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`,
   `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing`,

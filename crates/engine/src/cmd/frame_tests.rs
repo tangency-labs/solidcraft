@@ -242,6 +242,73 @@ fn members_follow_every_line_of_a_rectangle() {
 }
 
 #[test]
+fn members_are_made_of_a_standard_size_by_name() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": {"size": "RSC 203x89"}}));
+    let bs = bodies(&mut s);
+    let names: Vec<&str> = bs.iter().map(|b| b.0.as_str()).collect();
+    assert_eq!(names, ["RSC 203x89", "RSC 203x89 (2)", "RSC 203x89 (3)", "RSC 203x89 (4)"]);
+    // Each member is the size's section, 37.9 cm² in the BS 4 table, the length of its line.
+    let props = run(&mut s, "frame.profile.properties", json!({"profile": {"size": "RSC 203x89"}}));
+    let area = f(&props["area"]);
+    assert!(rel(area, 3790.0) < 0.005, "{props}");
+    assert_eq!(props["size"], json!("RSC 203x89"));
+    assert_eq!(props["profile"]["flange_slope"], json!(5.0), "{props}");
+    let v = total_volume(&mut s);
+    assert!(rel(v, area * 2000.0) < MEASURED, "{v} vs {}", area * 2000.0);
+    // The bottom line runs along +X: the channel, 88.9 wide and 203.2 deep, is centred on it.
+    assert!(bs.iter().any(|b| near3(b.2, [0.0, -44.45, -101.6]) && near3(b.3, [600.0, 44.45, 101.6])), "{bs:?}");
+    // The design keeps the size's name and dimensions, and reopens to the same members.
+    let saved = s.doc.to_json();
+    assert!(saved.contains("RSC 203x89") && saved.contains("5 deg"), "{saved}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let after = bodies(&mut reopened);
+    assert_eq!(after.iter().map(|b| b.0.as_str()).collect::<Vec<_>>(), names);
+    assert!(rel(total_volume(&mut reopened), v) < 1e-9);
+    // The reported profile, slope in degrees, is the same section given by its dimensions.
+    let again = run(&mut s, "frame.profile.properties", json!({"profile": props["profile"]}));
+    assert!(rel(f(&again["area"]), area) < 1e-12 && rel(f(&again["iyy"]), f(&props["iyy"])) < 1e-12, "{again}");
+    // In an inch design the size is still in millimetres.
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let inch = run(&mut s, "frame.profile.properties", json!({"profile": {"size": "SHS 100x100x5"}}));
+    assert!((f(&inch["width"]) - 100.0).abs() < 1e-9, "{inch}");
+}
+
+#[test]
+fn standard_sizes_are_listed_and_refused_with_the_reason() {
+    let mut s = Session::default();
+    let out = run(&mut s, "frame.profile.list", json!({}));
+    let sizes = out["sizes"].as_array().unwrap();
+    for family in sizes {
+        let names = family["names"].as_array().unwrap();
+        assert!(!names.is_empty() && !family["source"].as_str().unwrap_or_default().is_empty(), "{family}");
+        // The first and last size of each family make a section of their kind.
+        for name in [&names[0], &names[names.len() - 1]] {
+            let r = run(&mut s, "frame.profile.properties", json!({"profile": {"size": name}}));
+            assert_eq!(r["profile"]["kind"], family["kind"], "{r}");
+        }
+    }
+    let rsc = sizes.iter().find(|f| f["family"] == "RSC").unwrap();
+    for name in ["RSC 203x89", "RSC 152x76"] {
+        assert!(rsc["names"].as_array().unwrap().contains(&json!(name)), "{rsc}");
+    }
+    let only = run(&mut s, "frame.profile.list", json!({"family": "SHS"}));
+    assert_eq!(only["sizes"].as_array().map(Vec::len), Some(1));
+    assert!(s.execute("frame.profile.list", &json!({"family": "XYZ"})).unwrap_err().to_string().contains("`family`"));
+    rectangle_frame(&mut s);
+    for (profile, why) in [
+        (json!({"size": "RSC 203x89", "height": 200}), "brings its own dimensions"),
+        (json!({"size": "RSC 999x99"}), "unknown size"),
+        (json!({"size": "RSC 203x89", "kind": "rect_tube"}), "is a channel profile"),
+    ] {
+        let err = s.execute("frame.member", &json!({"sketch": "Frame", "profile": profile})).unwrap_err().to_string();
+        assert!(err.contains(why), "{profile}: {err}");
+    }
+    assert!(bodies(&mut s).is_empty());
+}
+
+#[test]
 fn members_follow_a_parameter_edit() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "W", "expression": "600 mm"}));
@@ -324,6 +391,55 @@ fn anchor_angle_and_mirror_place_the_profile() {
     let m = place(json!({"mirror": true}));
     assert!(near3(m.2, [0.0, 0.0, 0.0]) && near3(m.3, [1000.0, 60.0, 40.0]), "{m:?}");
     assert!(plain.4[1] < 30.0 && m.4[1] > 30.0, "{plain:?} {m:?}");
+}
+
+#[test]
+fn a_located_member_keeps_its_profile_point_on_the_line_when_the_section_changes() {
+    let place = |width: f64, height: f64, locate: Value| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rail"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [1000, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let p = json!({"sketch": "Rail", "profile": {"kind": "angle", "width": width, "height": height, "thickness": 5}, "locate": locate});
+        run(&mut s, "frame.member", p);
+        bodies(&mut s).remove(0)
+    };
+    // The angle is drawn about its heel: locate [0, 0] puts the heel on the line, as the
+    // bottom_left anchor does, and it stays there when the legs grow.
+    let small = place(60.0, 40.0, json!([0, 0]));
+    assert!(near3(small.2, [0.0, 0.0, 0.0]) && near3(small.3, [1000.0, 60.0, 40.0]), "{small:?}");
+    let large = place(80.0, 50.0, json!([0, 0]));
+    assert!(near3(large.2, [0.0, 0.0, 0.0]) && near3(large.3, [1000.0, 80.0, 50.0]), "{large:?}");
+    // A point 10 across and 5 up from the heel on the line moves the profile back by that much.
+    let off = place(60.0, 40.0, json!([10, 5]));
+    assert!(near3(off.2, [0.0, -10.0, -5.0]) && near3(off.3, [1000.0, 50.0, 35.0]), "{off:?}");
+    // A bad point is refused with the reason.
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    for bad in [json!([1]), json!(["a", 0]), json!([0, 1e9])] {
+        let err = s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube(), "locate": bad})).unwrap_err().to_string();
+        assert!(err.contains("`locate`"), "{bad}: {err}");
+    }
+    // A design file with a point the command would refuse fails the feature, with the reason.
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "locate": [0, 0]}));
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    fn far(v: &mut Value) {
+        match v {
+            Value::Object(o) => {
+                if let Some(l) = o.get_mut("locate") {
+                    *l = json!([1e8, 0.0]);
+                }
+                o.values_mut().for_each(far);
+            }
+            Value::Array(a) => a.iter_mut().for_each(far),
+            _ => {}
+        }
+    }
+    far(&mut saved);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    let fid = reopened.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMember { .. })).unwrap().id;
+    let failing = reopened.model.result(fid).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(failing.contains("`locate`"), "{failing}");
 }
 
 #[test]
@@ -933,4 +1049,33 @@ fn end_caps_refuse_bad_picks_and_values_atomically() {
     run(&mut s, "frame.end_cap", json!({"faces": [end], "thickness": 2, "ratio": 0.5}));
     let v = measured(&mut s, "Post End Cap").1;
     assert!(rel(v, 38.0 * 38.0 * 2.0) < 1e-9, "{v}");
+}
+
+/// A frame member feature mirrors and patterns as a feature: each copy is every member it made,
+/// placed by the mirror or the pattern, and the copies follow the member's lines. Mirroring the
+/// feature was refused ("cannot be patterned or mirrored yet").
+#[test]
+fn a_member_feature_mirrors_and_patterns_and_follows_its_lines() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "700 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rails"}));
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [100, "L"]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Rails", "profile": square_tube(), "name": "Rail member", "body_name": "Rail"}));
+    run(&mut s, "solid.mirror", json!({"features": ["Rail member"], "plane": "YZ"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Rail member"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 300}));
+    let check = |s: &mut Session, length: f64| {
+        let bs = bodies(s);
+        assert_eq!(bs.len(), 3, "{bs:?}");
+        for b in &bs {
+            assert!(rel(b.1, 444.0 * length) < 1e-9, "{b:?}");
+        }
+        let at = |lo: [f64; 3], hi: [f64; 3]| bs.iter().any(|b| near3(b.2, lo) && near3(b.3, hi));
+        assert!(at([80.0, 0.0, -20.0], [120.0, length, 20.0]), "the rail: {bs:?}");
+        assert!(at([-120.0, 0.0, -20.0], [-80.0, length, 20.0]), "its mirror in x = 0: {bs:?}");
+        assert!(at([80.0, 0.0, 280.0], [120.0, length, 320.0]), "its copy 300 up: {bs:?}");
+    };
+    check(&mut s, 700.0);
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "760 mm"}));
+    check(&mut s, 760.0);
 }

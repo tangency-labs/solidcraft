@@ -589,24 +589,15 @@ pub fn boundary_properties(
     if let Some(s) = scale.first_mut() {
         *s = area_scale;
     }
-    // Scale volume and moment errors by a length per extra dimension. sqrt(area) is
-    // a tenth of the body size; grow it once the origin is farther than the body.
-    // With `fixes.precise_properties_body_length_scale` (WR-472; the SolidCraft
-    // fork's tangency-labs/smlib@073d4740) the length is the body size, ten times
-    // sqrt(area), or the origin's distance when larger: each component is then held
-    // to the area's share of its own size, where 1.0.1's tenth holds each extra power
-    // ten times tighter, below roundoff at tight accuracies.
-    let length = if k.fixes.precise_properties_body_length_scale {
+    // Scale volume and moment errors by a length per extra dimension (WR-472; the
+    // SolidCraft fork's tangency-labs/smlib@073d4740): the body size, ten times
+    // sqrt(area), or the origin's distance when larger. Each component is then held
+    // to the area's share of its own size, where 1.0.1's tenth (sqrt(area), or a
+    // tenth of the origin's distance) holds each extra power ten times tighter, below
+    // roundoff at tight accuracies.
+    let length = {
         let a = 10.0 * estimated_area.sqrt();
         let b = origin_distance;
-        if a > b {
-            a
-        } else {
-            b
-        }
-    } else {
-        let a = estimated_area.sqrt();
-        let b = origin_distance / 10.0;
         if a > b {
             a
         } else {
@@ -1876,7 +1867,6 @@ mod tests {
     #[test]
     fn centroidal_mass_properties_of_a_sphere() {
         let mut k = Kernel::default();
-        k.fixes.precise_properties_body_length_scale = true;
         let c = Point3::new(1.0, 2.0, -3.0);
         let mut b = crate::primitive::api_primitives::create_sphere(&mut k, c, 2.0).unwrap();
         let r = estimated(&k, &mut b, &MassPropertyRequest::centroidal()).unwrap();
@@ -1888,35 +1878,6 @@ mod tests {
         for m in [r.inertia.x, r.inertia.y, r.inertia.z] {
             assert!(near(m, i, 1e-6), "{r:?}");
         }
-    }
-
-    /// #2545: a whole sphere at 1e-8 with WR-472's error scale off did not converge (its
-    /// steps crossed the NURB sphere's double knots). Integrated between the surface's knots
-    /// (WR-494, #1435) it converges, both entries, and holds the closed forms: area and
-    /// volume 4 pi r^2 = 4/3 pi r^3 (r 3), inertia 2/5 m r^2. The typing of a failure that
-    /// does not converge is `integration_failures_are_typed_by_cause`'s.
-    #[test]
-    fn a_sphere_without_the_length_scale_converges_between_knots() {
-        let mut k = Kernel::default();
-        k.fixes.precise_properties_body_length_scale = false;
-        let mut b =
-            crate::primitive::api_primitives::create_sphere(&mut k, Point3::ZERO, 3.0).unwrap();
-        let exact = 36.0 * PI;
-        let inertia = 0.4 * exact * 9.0;
-        let typed = estimated(&k, &mut b, &MassPropertyRequest::centroidal()).unwrap();
-        assert!(near(typed.area, exact, 1e-9), "{typed:?}");
-        assert!(near(typed.volume, exact, 1e-9), "{typed:?}");
-        for m in [typed.inertia.x, typed.inertia.y, typed.inertia.z] {
-            assert!(near(m, inertia, 1e-9), "{typed:?}");
-        }
-        let store = no_attributes();
-        let attrs = PropertyAttributes {
-            store: &store,
-            key_of: &|_| ObjectKey(0),
-        };
-        let api = brep_mass_properties(&k, &mut b, 1e-8, 1.0, Point3::ZERO, &attrs).unwrap();
-        assert!(near(api.properties.area, exact, 1e-9), "{api:?}");
-        assert!(near(api.properties.volume, exact, 1e-9), "{api:?}");
     }
 
     /// The estimated entry types each integration failure by its cause, and only step
@@ -1979,7 +1940,6 @@ mod tests {
     #[test]
     fn brep_area_about_a_point_or_each_face() {
         let mut k = Kernel::default();
-        k.fixes.precise_properties_body_length_scale = true;
         let mut b = crate::primitive::api_primitives::create_torus(
             &mut k,
             Point3::new(3.0, 0.0, -1.0),
@@ -2064,7 +2024,6 @@ mod tests {
     fn a_fin_inside_the_material_is_counted_once() {
         use crate::primitive::api_primitives::{create_box, create_plane};
         let mut k = Kernel::default();
-        k.fixes.precise_properties_body_length_scale = true;
         let a = create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
         let fin = create_plane(&mut k, Point3::new(0.25, 0.5, 1.5), 0.5, 0.5).unwrap();
         let mut b = crate::boolean::api_brep::boolean_merge(&mut k, a, fin).unwrap();

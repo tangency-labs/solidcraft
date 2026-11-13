@@ -10,7 +10,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - No GPL/LGPL/AGPL code, not even reading it (OpenCASCADE, FreeCAD, SolveSpace, CadQuery, LibreCAD, QCAD): `cargo xtask licences --check`.
 - Every asset is original or openly licensed with a row in ATTRIBUTION.md; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.
 - Never crash: no unwrap/expect/panic/unsafe in non-test code, errors are `Result`, input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
-- Model decisions (what an operation does, which bodies it touches, which face or edge a point or name means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
+- Model decisions use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
 - Everything is a command and programmatic calls never open dialogs: `skills/solidcraft-commands/SKILL.md`.
 - Layering; only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`; see `docs/layers.md`.
 - One outer UI container, one camera path (`navigation::handle`), colours from theme tokens: `cargo xtask ui-containers`.
@@ -18,7 +18,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - The product name is SolidCraft; the old name lives in `docs/compatibility.md`.
 - Sorted lists (message catalogs, `mod` lines, languages) stay sorted: `cargo xtask lists`. Never edit generated files (`docs/features.md`, `THIRD-PARTY-LICENSES.txt`) in a PR.
 - A design-format change is ONE new file in `crates/doc/src/format/pending/`: `scripts/test-format-pending.sh`.
-- A new command has input and output schemas: `skills/solidcraft-commands/SKILL.md`.
+- A command has I/O schemas (soon required; `crates/engine/src/schema/unconverted.txt` only shrinks): `skills/solidcraft-commands/SKILL.md`.
 - New UI strings go in `assets/locales/pending/<slug>.json`, ATTRIBUTION rows in `attribution/pending/<slug>.md`: `cargo xtask lists`.
 - A changed default (existing UI, not kernel results) keeps the old behaviour behind a preference; fill the PR's `Changes a default:` line.
 - A regression test goes in the area's existing test file, never a per-bug file (#3226).

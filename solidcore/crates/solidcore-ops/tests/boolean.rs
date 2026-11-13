@@ -125,6 +125,68 @@ fn a_cube_on_a_void_is_kept_out_by_a_difference_and_shares_nothing_with_it() {
         .is_none());
 }
 
+/// A cylinder lying along a box's edge, tangent there to the box's face. The two faces leave the
+/// edge together and part as the square of the distance over the cylinder's diameter, by less
+/// the larger the cylinder, so the fixed steps off the edge took a large one's faces for
+/// parallel (a zero sector, from 10 times the size) and for one surface (coincident faces,
+/// from 100 times). The union is the two solids touching along that line, at 1 to 1000 times
+/// the size, in either order.
+#[test]
+fn a_large_cylinder_resting_on_a_box_edge_unions() {
+    all_fixes();
+    for k in [1.0, 10.0, 40.0, 100.0, 1000.0] {
+        let cylinder =
+            || solidcore_ops::make_cylinder([0.0, 15.0 * k, 2.5 * k], 7.5 * k, 25.0 * k).unwrap();
+        let block = || make_box([0.0, 0.0, 0.0], [5.0 * k, 7.5 * k, 5.0 * k]).unwrap();
+        let want = (PI * 7.5 * 7.5 * 25.0 + 5.0 * 7.5 * 5.0) * (k * k * k);
+        for (a, b) in [(cylinder(), block()), (block(), cylinder())] {
+            let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+            let report = u.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{k}: {}", report.text);
+            assert_eq!(u.solid_count().unwrap(), 2, "{k}");
+            assert!(
+                near(volume(&u), want),
+                "{k}: {}, closed form {want}",
+                volume(&u)
+            );
+            u.to_record().unwrap();
+        }
+    }
+}
+
+/// Two equal cylinders side by side, touching along a line. Their faces leave the line
+/// together and part as the square of the distance over the radius, so the fixed steps off
+/// the line took two large ones for one surface, and the union failed (100 times the size)
+/// or the intersection was a whole cylinder (1000 times). The union is the two solids
+/// touching along the line and nothing is common, in either order.
+#[test]
+fn two_large_cylinders_touching_along_a_line_union() {
+    all_fixes();
+    for k in [1.0, 100.0, 1000.0] {
+        let left = || solidcore_ops::make_cylinder([0.0; 3], 7.5 * k, 25.0 * k).unwrap();
+        let right =
+            || solidcore_ops::make_cylinder([15.0 * k, 0.0, 2.5 * k], 7.5 * k, 25.0 * k).unwrap();
+        let want = 2.0 * PI * 7.5 * 7.5 * 25.0 * (k * k * k);
+        for (a, b) in [(left(), right()), (right(), left())] {
+            let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+            let report = u.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{k}: {}", report.text);
+            assert_eq!(u.solid_count().unwrap(), 2, "{k}");
+            assert!(
+                near(volume(&u), want),
+                "{k}: {}, closed form {want}",
+                volume(&u)
+            );
+        }
+        assert!(
+            boolean(left(), right(), BooleanOp::Intersect)
+                .unwrap()
+                .is_none(),
+            "{k}"
+        );
+    }
+}
+
 #[test]
 fn an_imprint_cuts_the_faces_the_tool_crosses() {
     all_fixes();
@@ -444,5 +506,164 @@ fn a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid() {
             "d {d}: {} vs {exact}",
             volume(&r)
         );
+    }
+}
+
+/// A 120 degree sector of height 119 with its apex at the origin, its legs ending at the
+/// sketch point (±74.0452, 42.75) (85.5 at 30 and 150 degrees, rounded to four decimals, so
+/// each leg turns 1.636e-7 rad outward), its arc about the origin, turned `turn` degrees
+/// about z.
+#[allow(clippy::disallowed_methods)] // the test's operands and closed form, not ops geometry
+fn sector_of_rounded_sketch(turn: f64) -> Body {
+    let (x, y) = (74.0452, 42.75);
+    let profile = [
+        Curve::Line {
+            start: [0.0; 3],
+            end: [x, y, 0.0],
+        },
+        Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: x.hypot(y),
+            start: y.atan2(x),
+            end: y.atan2(-x),
+        },
+        Curve::Line {
+            start: [-x, y, 0.0],
+            end: [0.0; 3],
+        },
+    ];
+    let b = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        119.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let (s, c) = turn.to_radians().sin_cos();
+    b.transform(&[
+        [c, -s, 0.0, 0.0],
+        [s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    b
+}
+
+/// Two copies of the sector of a sketch whose leg points were rounded, turned 120 degrees
+/// apart (SolidCraft, a case joined from three such sectors): the legs that should coincide
+/// cross at 3.3e-7 rad along the z axis, so the sectors overlap in a sliver, and the arc of
+/// one runs 2.8e-5 past the other's leg. The imprint splits that arc there; once the leg is
+/// gone the split vertex is redundant and its two arc pieces are joined back. The join kept
+/// the split as a knot, a span of 1.6e-7 of the arc whose control points coincide, and the
+/// cap faces' trim curves made from it failed the check (`SmBSplineCurve` test 15, the
+/// polar conversion test): the union was refused as not a solid. Joined into one span, the
+/// arc is the operand's again and the union is one valid solid of 6 faces, 12 edges and 8
+/// vertices, V = (2α - 2d)/2 · r² · 119 for the sector angle α = 120° + 2d and the overlap
+/// 2d, d = 30° - atan2(42.75, 74.0452).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn sectors_of_a_rounded_sketch_turned_120_degrees_union() {
+    session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    let r = 74.0452_f64.hypot(42.75);
+    let d = 30_f64.to_radians() - 42.75_f64.atan2(74.0452);
+    let alpha = 2.0 * PI / 3.0 + 2.0 * d;
+    let want = (2.0 * alpha - 2.0 * d) / 2.0 * r * r * 119.0;
+    let u = boolean(
+        sector_of_rounded_sketch(0.0),
+        sector_of_rounded_sketch(120.0),
+        BooleanOp::Union,
+    )
+    .unwrap()
+    .unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [6, 12, 8]);
+    let v = volume(&u);
+    let off = (v - want).abs() / want;
+    assert!(!(off.is_nan() || off > 1e-9), "{v}, closed form {want}");
+}
+
+/// A 120° pie slice of height 119 symmetric about +y, turned by `turn` about z: its legs run
+/// from the origin at 90° ∓ (60° + `widen`) to corners `rho` away, its arc is the circle about
+/// (0, `c`) through the corners (SolidCraft draws the arc through its rounded end points, so
+/// its centre can miss the apex).
+#[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
+fn sector(widen: f64, rho: f64, c: f64, turn: f64) -> Body {
+    let half = PI / 3.0 + widen;
+    let p0 = [rho * (PI / 2.0 - half).cos(), rho * (PI / 2.0 - half).sin()];
+    let p1 = [-p0[0], p0[1]];
+    let (ct, st) = (turn.cos(), turn.sin());
+    let at = |p: [f64; 2]| [ct * p[0] - st * p[1], st * p[0] + ct * p[1], 0.0];
+    let profile = [
+        Curve::Line {
+            start: [0.0; 3],
+            end: at(p0),
+        },
+        Curve::Arc {
+            center: at([0.0, c]),
+            axis: [0.0, 0.0, 1.0],
+            reference: at([1.0, 0.0]),
+            radius: (p0[0].powi(2) + (p0[1] - c).powi(2)).sqrt(),
+            start: (p0[1] - c).atan2(p0[0]),
+            end: (p1[1] - c).atan2(p1[0]),
+        },
+        Curve::Line {
+            start: at(p1),
+            end: [0.0; 3],
+        },
+    ];
+    extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        119.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap()
+}
+
+/// Two pie slices side by side, the second turned by 120° + `apart` about the apex: their
+/// facing walls meet at the apex edge and part linearly, `apart` · 85.5 at the arc. Within
+/// the 1e-5 tolerance across the wall (`apart` <= 1e-7) the walls are one and the slices join
+/// into one solid; 3.3e-7 rad (2.8e-5 at the arc) and 1e-6 rad apart they are two walls, and
+/// the union is the two slices touching along the apex edge, V = 2 · r²/2 · 2π/3 · h exactly.
+/// Before, the radial sector read the two walls (closer than 0.001°) as coincident and merged
+/// their corner edges 2.8e-5 apart: not a closed solid. Overlapping slices (`apart` < 0) join
+/// into one solid of V = r²/2 · (4π/3 + apart) · h.
+#[test]
+fn pie_slices_whose_walls_part_beyond_tolerance_join_along_the_apex() {
+    all_fixes();
+    let (r, h) = (85.5, 119.0);
+    let slice = r * r / 2.0 * (2.0 * PI / 3.0) * h;
+    for apart in [0.0, 1e-8, 1e-7, 3.3e-7, 1e-6, -1e-8, -1e-7, -3.3e-7, -1e-6] {
+        let a = sector(0.0, r, 0.0, 0.0);
+        let b = sector(0.0, r, 0.0, 2.0 * PI / 3.0 + apart);
+        let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+        let report = u.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{apart}: {}", report.text);
+        let v = volume(&u);
+        // the wedge between the walls, which a join within tolerance may absorb or keep
+        let wedge = r * r * h * apart.abs();
+        if apart > 2e-7 {
+            assert_eq!(u.solid_count().unwrap(), 2, "{apart}");
+            assert_eq!(u.counts().unwrap(), [10, 17, 10], "{apart}");
+            assert!(near(v, 2.0 * slice), "{apart}: {v}");
+        } else {
+            assert_eq!(u.solid_count().unwrap(), 1, "{apart}");
+            assert_eq!(u.counts().unwrap(), [6, 12, 8], "{apart}");
+            let want = 2.0 * slice + r * r / 2.0 * apart.min(0.0) * h;
+            let err = (v - want).abs();
+            assert!(
+                !(err.is_nan() || err > wedge + 1e-7 * want),
+                "{apart}: {v}, closed form {want}"
+            );
+        }
     }
 }

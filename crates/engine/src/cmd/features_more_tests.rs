@@ -2772,6 +2772,41 @@ fn an_emboss_that_works_has_no_warning() {
     }
 }
 
+/// #6612: a converted mesh's faces have no history that can keep an attachment, so extruding
+/// one is refused, and the refusal offers `fixed:true`. Extrude takes it: the sketch goes on the
+/// face's plane as a fixed plane and the face extrudes. A 20 x 20 x 10 block with a bore of
+/// radius 3, through STL and Convert Mesh, joined 5 up from its top face.
+#[test]
+fn a_converted_meshs_face_extrudes_on_a_fixed_plane_when_asked() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-6612-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Block.stl");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 30, "base": [10, 10, -5], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let [name] = names.as_slice() else { panic!("{names:?}") };
+    run(&mut s, "mesh.convert", json!({"body": name}));
+    let before = body_volume(&s, name);
+    let top = json!({"face": [2, 2, 10], "distance": 5, "operation": "join"});
+    let refused = s.execute("solid.extrude", &top).expect_err("the face keeps no attachment").to_string();
+    assert!(refused.contains("fixed:true"), "{refused}");
+    let mut fixed = top.clone();
+    fixed["fixed"] = json!(true);
+    run(&mut s, "solid.extrude", fixed);
+    let area = 400.0 - std::f64::consts::PI * 9.0;
+    let grown = body_volume(&s, name) - before;
+    assert!((grown - area * 5.0).abs() < 1e-3 * area * 5.0, "the join added {grown}, not {}", area * 5.0);
+    let not_a_bool =
+        s.execute("solid.extrude", &json!({"face": [2, 2, 15], "distance": 5, "fixed": "yes"})).expect_err("fixed is a boolean").to_string();
+    assert!(not_a_bool.contains("`fixed` must be true or false"), "{not_a_bool}");
+}
+
 /// A 40 x 10 stadium (two lines, two tangent arcs) extruded 10 mm. The top rim runs on smoothly
 /// through the points where a line meets an arc, so picking one of those points names the rim,
 /// not an ambiguous corner (#12215).
@@ -2907,4 +2942,107 @@ fn a_sketch_coil_cut_follows_its_profile_and_target() {
     run(&mut s, "timeline.edit", json!({"feature": "ShaftFeature", "set": {"radius": "18"}}));
     let removed = PI * 18.0 * 18.0 * 40.0 - volume(&mut s);
     assert!(rel(removed, 2.0 * PI * 3.0 * 17.5) < 1e-3, "the groove kept the old shaft: {removed}");
+}
+
+/// On a body in a placed component, an origin (as a list or as x/y/z keys) and a matrix are read
+/// in world coordinates and land the plate in the same place.
+#[test]
+fn move_origin_and_matrix_use_world_coordinates_for_placed_bodies() {
+    use solidcore_record::Vec3;
+    for transform in [
+        json!({"origin": ["110 mm", "15 mm", 0], "angle": "90 deg", "translate": ["0 mm", "0 mm", "7 mm"]}),
+        json!({"matrix": [0,-1,0,125, 1,0,0,-95, 0,0,1,7]}),
+        json!({"origin": {"x": "110 mm", "y": 15, "z": 0}, "angle": "90 deg", "translate": {"x": 0, "y": 0, "z": "7 mm"}}),
+    ] {
+        let mut s = Session::default();
+        placed_plate(&mut s, "Plate", 100.0, 90.0);
+        let mut p = transform;
+        p["bodies"] = json!(["Plate"]);
+        run(&mut s, "solid.move", p);
+        let b = world_bounds(&s, "Plate");
+        assert!(b.min.dist(Vec3::new(95.0, 5.0, 7.0)) < 1e-6 && b.max.dist(Vec3::new(125.0, 25.0, 15.0)) < 1e-6, "{b:?}");
+    }
+}
+
+/// A matrix turn of bodies in two differently placed components turns each about the world
+/// origin, in one undo step.
+#[test]
+fn a_matrix_turn_maps_each_translated_component_about_the_world_origin() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    for (name, x) in [("A", 100), ("B", 200)] {
+        let component = run(&mut s, "component.create", json!({"name": name, "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": name}));
+        run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [x, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+    }
+    let undo = s.undo.len();
+    run(&mut s, "solid.move", json!({"bodies": ["A", "B"], "matrix": [0,-1,0,0, 1,0,0,0, 0,0,1,0]}));
+    for (name, y) in [("A", 100.0), ("B", 200.0)] {
+        let bounds = world_bounds(&s, name);
+        assert!(bounds.min.dist(Vec3::new(-10.0, y, 0.0)) < 1e-6 && bounds.max.dist(Vec3::new(0.0, y + 10.0, 10.0)) < 1e-6, "{name}: {bounds:?}");
+    }
+    assert_eq!(s.undo.len(), undo + 1);
+}
+
+/// A turn with no `origin` on a body in a placed component keeps its old default, the
+/// component's own origin, with or without an axis; `origin: [0, 0, 0]` asks for the world
+/// origin instead. The component here is only shifted 100 mm along X.
+#[test]
+fn a_turn_with_no_pivot_keeps_the_components_origin_in_a_placed_component() {
+    use solidcore_record::Vec3;
+    let about_component = (Vec3::new(90.0, 0.0, 0.0), Vec3::new(100.0, 10.0, 10.0));
+    let about_world = (Vec3::new(-10.0, 100.0, 0.0), Vec3::new(0.0, 110.0, 10.0));
+    for (extra, (min, max)) in [
+        (json!({}), about_component),
+        (json!({"axis": [0, 0, 1]}), about_component),
+        (json!({"origin": [0, 0, 0]}), about_world),
+        (json!({"origin": [0, 0, 0], "axis": [0, 0, 1]}), about_world),
+    ] {
+        let mut s = Session::default();
+        let component = run(&mut s, "component.create", json!({"name": "Offset", "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [100, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let mut turn = extra.clone();
+        turn["bodies"] = json!(["Cube"]);
+        turn["angle"] = json!("90 deg");
+        run(&mut s, "solid.move", turn);
+        let bounds = world_bounds(&s, "Cube");
+        assert!(bounds.min.dist(min) < 1e-6 && bounds.max.dist(max) < 1e-6, "{extra}: {bounds:?}");
+    }
+}
+
+/// A turn with no `axis` on a body in a turned component keeps its old default, the
+/// component's own Z: the plate stood up by +90° about X has its Z along world −Y.
+#[test]
+fn a_turn_with_no_axis_keeps_the_components_z_in_a_turned_component() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    placed_plate(&mut s, "Plate", 0.0, 90.0);
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "angle": "90 deg"}));
+    // A quarter turn about −Y through the origin: (x, z) → (−z, x). About world Z it would
+    // lie at x −30..0, y 0..20 instead.
+    let b = world_bounds(&s, "Plate");
+    assert!(b.min.dist(Vec3::new(-8.0, 0.0, 0.0)) < 1e-6 && b.max.dist(Vec3::new(0.0, 30.0, 20.0)) < 1e-6, "{b:?}");
+}
+
+/// An origin or a matrix moves each repeated placement of one part alike, in one undo step.
+#[test]
+fn move_origin_and_matrix_apply_to_each_repeated_placement() {
+    use solidcore_record::Vec3;
+    for transform in [json!({"origin": ["50 mm", 0, 0], "angle": "90 deg"}), json!({"matrix": [0,-1,0,50, 1,0,0,-50, 0,0,1,0]})] {
+        let mut s = Session::default();
+        let (a, b) = twice_placed_blade(&mut s);
+        let mut p = transform;
+        p["bodies"] = json!([a, b]);
+        let undo = s.undo.len();
+        let result = run(&mut s, "solid.move", p);
+        assert_eq!(result["placements"].as_array().unwrap().len(), 2);
+        let a = placed_bounds(&s, &a);
+        let b = placed_bounds(&s, &b);
+        assert!(a.min.dist(Vec3::new(42.0, -50.0, 0.0)) < 1e-6 && a.max.dist(Vec3::new(50.0, -30.0, 30.0)) < 1e-6, "{a:?}");
+        assert!(b.min.dist(Vec3::new(50.0, 50.0, 0.0)) < 1e-6 && b.max.dist(Vec3::new(80.0, 70.0, 8.0)) < 1e-6, "{b:?}");
+        assert_eq!(s.undo.len(), undo + 1);
+    }
 }

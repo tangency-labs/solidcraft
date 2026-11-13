@@ -1,8 +1,6 @@
 //! WR-406 (tangency-labs/solidcore#891) through the public check: a bored plate's
-//! exact hole trims are straightened by `check_brep` by default, and the body it has
-//! just changed is then reported as kinked; with
-//! `Kernel::fixes.uv_trim_reversal_on_surface` the trims are left exact and the check
-//! passes.
+//! exact hole trims are left exact by `check_brep` and the check passes. Upstream
+//! straightens them, and then reports the body it has just changed as kinked.
 //!
 //! The plate is built only through public operations: a 60 x 10 profile swept 4 up
 //! (`create_linear_sweep`), bored through the 4 thickness by a radius-1 cylinder
@@ -137,14 +135,13 @@ struct Measured {
     after: Vec<(EdgeuseId, Vec<Vec3>)>,
 }
 
-fn measure(flag: bool) -> Measured {
-    measure_turn(flag, 35.0_f64.to_radians())
+fn measure() -> Measured {
+    measure_turn(35.0_f64.to_radians())
 }
 
-/// The measurement for one flag setting and one bore turn about its own axis.
-fn measure_turn(flag: bool, turn: f64) -> Measured {
+/// The measurement for one bore turn about its own axis.
+fn measure_turn(turn: f64) -> Measured {
     let mut k = Kernel::default();
-    k.fixes.uv_trim_reversal_on_surface = flag;
     let mut body = bored_plate_turn(&mut k, turn);
     assert_eq!(
         faces(&body, None).unwrap().len(),
@@ -157,7 +154,7 @@ fn measure_turn(flag: bool, turn: f64) -> Measured {
     let lines = check.lines();
     let after = hole_trims(&body);
     eprintln!(
-        "flag {flag}: pointers_status {} assert_valid {:?}, {} line(s) {:#?}",
+        "pointers_status {} assert_valid {:?}, {} line(s) {:#?}",
         check.pointers_status,
         check.assert_valid,
         lines.len(),
@@ -177,14 +174,8 @@ fn measure_turn(flag: bool, turn: f64) -> Measured {
     }
 }
 
-/// The kink report the default check emits after straightening a trim.
-const KINK: &str = "SmBSplineCurve::Test #7 Bad CurveKink";
-
 #[test]
-fn wr406_bored_plate_check_reverses_or_keeps_the_hole_trims() {
-    // the flag is opt-in: the default is the pinned C++ raw (u, v) test
-    assert!(!Kernel::default().fixes.uv_trim_reversal_on_surface);
-
+fn wr406_bored_plate_check_keeps_the_hole_trims() {
     // every trimmed face is one of the plate's 60 x 4 sides
     let mut k = Kernel::default();
     let body = bored_plate(&mut k);
@@ -196,55 +187,24 @@ fn wr406_bored_plate_check_reverses_or_keeps_the_hole_trims() {
         );
     }
 
-    // default: the check straightens each hole trim's first-end control point onto
-    // the chord and then reports the body it changed as kinked (twice, one per trim)
-    let off = measure(false);
-    assert_eq!(off.pointers_status, 1000);
-    assert_eq!(off.assert_valid, Some(false));
-    assert_eq!(off.lines.len(), 2, "{:#?}", off.lines);
-    for line in &off.lines {
-        assert!(line.starts_with(KINK), "{line}");
-    }
-    assert_eq!(off.before.len(), off.after.len());
-    for ((eu, before), (eu2, after)) in off.before.iter().zip(&off.after) {
-        assert_eq!(eu, eu2);
-        let moved: Vec<usize> = (0..before.len())
-            .filter(|&i| before[i] != after[i])
-            .collect();
-        assert_eq!(moved, vec![1], "eu {eu:?} moved {moved:?}");
-        assert_eq!(after[1].x, (before[0].x + before[2].x) / 2.0);
-        assert_eq!(after[1].y, (before[0].y + before[2].y) / 2.0);
-        assert_eq!(before[0], after[0]);
-        assert_eq!(before[2], after[2]);
-    }
-
-    // with the flag: the same body's trims are judged on the faces' surfaces, left
-    // exact, and the check passes with no report
-    let on = measure(true);
+    // the trims are judged on the faces' surfaces, left exact, and the check passes
+    // with no report (upstream moves each one's first-end control point onto the chord
+    // and reports two kinks)
+    let on = measure();
     assert_eq!(on.pointers_status, 1000);
     assert_eq!(on.assert_valid, Some(true));
     assert!(on.lines.is_empty(), "{:#?}", on.lines);
-    assert_eq!(on.before, on.after, "the flag left the trims alone");
-    assert_eq!(off.before, on.before, "both runs start from the same trims");
-    assert_eq!(off.before, on.after, "the flag's run is the untouched body");
+    assert_eq!(on.before, on.after, "the check left the trims alone");
 }
 
 /// The control: with an axis-aligned bore (`turn = 0`) the same plate builds, bores
-/// and checks identically with the flag off and on (the 35-degree turn is what folds
-/// the raw (u, v) reversal test).
+/// and checks clean (the 35-degree turn is what folds upstream's raw (u, v) reversal
+/// test).
 #[test]
 fn wr406_axis_aligned_bore_keeps_the_check_clean() {
-    let mut results = Vec::new();
-    for flag in [false, true] {
-        let m = measure_turn(flag, 0.0);
-        assert_eq!(m.pointers_status, 1000, "flag {flag}");
-        assert_eq!(m.assert_valid, Some(true), "flag {flag}");
-        assert!(m.lines.is_empty(), "flag {flag}: {:#?}", m.lines);
-        assert_eq!(m.before, m.after, "the check did not touch the trims");
-        results.push(m);
-    }
-    assert_eq!(
-        results[0].before, results[1].before,
-        "the flag did not touch the axis-aligned trims"
-    );
+    let m = measure_turn(0.0);
+    assert_eq!(m.pointers_status, 1000);
+    assert_eq!(m.assert_valid, Some(true));
+    assert!(m.lines.is_empty(), "{:#?}", m.lines);
+    assert_eq!(m.before, m.after, "the check did not touch the trims");
 }
