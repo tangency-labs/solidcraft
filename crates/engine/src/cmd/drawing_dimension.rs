@@ -516,7 +516,7 @@ fn drag_asked(set: &DimensionSet) -> Result<Option<Drag>> {
 /// inspect's layout and the sheet are. Refused in their words when its view isn't drawn or it has no
 /// place there, and when the drag can't place it.
 fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag) -> Result<(f64, TextPlace)> {
-    let dimension = d.dimension(id).ok_or_else(|| bad(EDIT, format!("the drawing has no dimension {}", ids::encode(id))))?;
+    let dimension = d.dimension(id).ok_or_else(|| no_dimension(EDIT, id))?;
     let read = crate::drawing_view::ViewSessions::new(s)
         .read_on(d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
         .map_err(|e| bad(EDIT, e.to_string()))?;

@@ -11,7 +11,7 @@ use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind, LabelKind, Resolved, TextPlace};
-use solidcraft_doc::drawing::line_maths::{LineCoords, covers, spread_along};
+use solidcraft_doc::drawing::line_maths::{LineCoords, covers, side_of, spread_along};
 use solidcraft_doc::drawing::measure::LinearDirection;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::annotate::{ArrowShape, Terminator};
@@ -309,13 +309,11 @@ pub(crate) fn dragged(
         // the outermost point on the offset's side: on the side whose outermost point gives that sign.
         (DimensionKind::Baseline { direction, .. } | DimensionKind::Ordinate { direction, .. }, points, Drag::Line(p)) => {
             let coords = ends_coords(points, *direction).ok_or(NotDragged::NoPlace)?;
-            for side in [1.0, -1.0] {
+            let past = |side| {
                 let offset = coords.across(p) - coords.reach(points, side);
-                if (offset >= 0.0) == (side > 0.0) {
-                    return Ok((offset, place));
-                }
-            }
-            Err(NotDragged::WithinSet)
+                Ok((offset, place))
+            };
+            on_its_side(past, NotDragged::WithinSet)
         }
         // Its arc is the offset's size round the vertex, its text towards its place.
         (DimensionKind::Angle { .. } | DimensionKind::Cone { .. }, &[a0, a1, b0, b1], _) => {
@@ -365,14 +363,23 @@ fn across_dragged(
     drag: Drag,
     half: &dyn Fn() -> Result<Vec2, NotDragged>,
 ) -> Result<(f64, TextPlace), NotDragged> {
-    for positive in [true, false] {
-        let (p, q, coords) = across_ends(a, b, direction, positive).ok_or(NotDragged::NoPlace)?;
-        let (offset, place) = linear_dragged(p, q, coords, place, drag, half)?;
-        if (offset >= 0.0) == positive {
-            return Ok((offset, place));
+    let between = |side| {
+        let (p, q, coords) = across_ends(a, b, direction, side).ok_or(NotDragged::NoPlace)?;
+        linear_dragged(p, q, coords, place, drag, half)
+    };
+    on_its_side(between, NotDragged::BetweenEnds)
+}
+
+/// A layout turned round ([`dragged`]) on the first side, 1 then -1, whose offset (from `offset_on`
+/// that side) is on it by [`side_of`]; `refused` when neither is.
+fn on_its_side(offset_on: impl Fn(f64) -> Result<(f64, TextPlace), NotDragged>, refused: NotDragged) -> Result<(f64, TextPlace), NotDragged> {
+    for side in [1.0, -1.0] {
+        let found = offset_on(side)?;
+        if side_of(found.0) == side {
+            return Ok(found);
         }
     }
-    Err(NotDragged::BetweenEnds)
+    Err(refused)
 }
 
 /// A line from `a` to `b` along `coords`, `across` from their middle. Its text is at its `place`, or
@@ -413,7 +420,7 @@ fn baseline(
 ) -> Option<Vec<Piece>> {
     let (origin, targets) = points.split_first()?;
     let coords = ends_coords(points, direction)?;
-    let side = if offset < 0.0 { -1.0 } else { 1.0 };
+    let side = side_of(offset);
     let outer = coords.reach(points, side);
     let value = |i: usize| resolved.members.get(i).map_or(0.0, |m| m.measured.value);
     let mut nearest_first: Vec<usize> = (0..targets.len()).collect();
@@ -442,7 +449,7 @@ fn ordinate(
 ) -> Option<()> {
     let (_, targets) = points.split_first()?;
     let coords = ends_coords(points, direction)?;
-    let side = if offset < 0.0 { -1.0 } else { 1.0 };
+    let side = side_of(offset);
     let end = coords.reach(points, side) + offset;
     let numbers = std::iter::once(Some("0")).chain((0..targets.len()).map(|i| resolved.members.get(i).map(|m| m.text.as_str())));
     let mut places: Vec<(Vec2, Text)> = points.iter().copied().zip(numbers.map(set)).collect();
@@ -476,17 +483,17 @@ fn ends_coords(points: &[Vec2], direction: LinearDirection) -> Option<LineCoords
 /// A line between two silhouettes or faces, each from one end to the other, at the ends on the side `offset`
 /// is on, so a positive one clears what it measures. `Aligned` runs straight across them.
 fn across(a: [Vec2; 2], b: [Vec2; 2], direction: LinearDirection, offset: f64, place: &TextPlace, text: Text) -> Option<Vec<Piece>> {
-    let (p, q, coords) = across_ends(a, b, direction, offset >= 0.0)?;
+    let (p, q, coords) = across_ends(a, b, direction, side_of(offset))?;
     Some(vec![linear(p, q, coords, offset, place, text)])
 }
 
 /// The ends a line across two silhouettes or faces (each from one end to the other) runs between: on
-/// the side a `positive` offset is on, or a negative one. With the line's coordinates.
-fn across_ends(a: [Vec2; 2], b: [Vec2; 2], direction: LinearDirection, positive: bool) -> Option<(Vec2, Vec2, LineCoords)> {
+/// `side` (1 or -1, [`side_of`]). With the line's coordinates.
+fn across_ends(a: [Vec2; 2], b: [Vec2; 2], direction: LinearDirection, side: f64) -> Option<(Vec2, Vec2, LineCoords)> {
     let [a0, a1] = a;
     let square = (a1 - a0).normalized()?.perp();
     let coords = LineCoords::forward(direction, square)?;
-    let end = |[p, q]: [Vec2; 2]| if (coords.across(p) >= coords.across(q)) == positive { p } else { q };
+    let end = |[p, q]: [Vec2; 2]| if (coords.across(p) >= coords.across(q)) == (side > 0.0) { p } else { q };
     Some((end(a), end(b), coords))
 }
 

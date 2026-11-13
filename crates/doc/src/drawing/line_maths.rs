@@ -49,12 +49,19 @@ impl LineCoords {
         p.dot(self.normal)
     }
 
-    /// How far across the line the farthest of `points` lies on the side of `side`'s sign (the
-    /// normal's side when it is 0 or more): the line a set's dimensions stand off from.
+    /// How far across the line the farthest of `points` lies on `side`'s side ([`side_of`]): the line
+    /// a set's dimensions stand off from.
     pub fn reach(&self, points: &[Vec2], side: f64) -> f64 {
-        let side = if side < 0.0 { -1.0 } else { 1.0 };
+        let side = side_of(side);
         side * points.iter().map(|p| side * self.across(*p)).fold(f64::NEG_INFINITY, f64::max)
     }
+}
+
+/// The side of its line an offset puts a dimension on: 1 for 0 or more (the normal's side, above the
+/// line or to its left, as [`LineCoords::forward`] turns it), -0.0 included, and -1 for less. One rule
+/// for a dimension's layout and its drag.
+pub fn side_of(offset: f64) -> f64 {
+    if offset < 0.0 { -1.0 } else { 1.0 }
 }
 
 /// Whether `by` already draws `line`, both polylines on paper: the same line point for point

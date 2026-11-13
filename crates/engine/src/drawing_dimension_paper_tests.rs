@@ -896,6 +896,17 @@ fn a_dragged_dimension_lays_out_where_it_was_dragged() {
     assert_eq!(dragged(&chain, &holes, &frame, &fonts, Drag::Text(p)), Err(NotDragged::MemberTexts));
 }
 
+/// A drag keeps the first side, positive then negative, whose offset is on it ([`side_of`]: -0.0 is on
+/// the positive side), and is refused when neither is.
+#[test]
+fn a_drag_keeps_the_first_side_its_offset_is_on() {
+    let kept = on_its_side(|side| Ok((-0.0 * side, TextPlace::Centred)), NotDragged::WithinSet);
+    assert_eq!(kept.map(|(offset, _)| (offset, offset.is_sign_negative())), Ok((0.0, true)), "-0.0 on the positive side");
+    let negative = on_its_side(|side| Ok((side - 3.0, TextPlace::Centred)), NotDragged::WithinSet);
+    assert_eq!(negative, Ok((-4.0, TextPlace::Centred)));
+    assert_eq!(on_its_side(|side| Ok((-side, TextPlace::Centred)), NotDragged::BetweenEnds), Err(NotDragged::BetweenEnds));
+}
+
 /// A set's line dragged through a point ([`dragged`]) runs through it past what it measures: a
 /// baseline's nearest member's line, above the holes or below them, and every ordinate leader's end.
 /// A point between the highest hole and the lowest is refused, as is a text drag, whose numbers sit

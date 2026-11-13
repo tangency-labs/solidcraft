@@ -48,6 +48,17 @@ fn the_reach_is_the_farthest_point_on_the_side_asked() {
     assert_eq!(line.reach(&[v(4.0, 7.0)], -1.0), 7.0);
 }
 
+/// An offset of 0 or more puts a dimension on its line's positive side, -0.0 too; less, on the
+/// negative side. The reach asks the same rule, so an offset of -0.0 reaches the positive side.
+#[test]
+fn an_offset_of_zero_or_more_is_on_the_positive_side() {
+    let sides = [0.0, -0.0, 1e-300, 5.0, -1e-300, -5.0, f64::NEG_INFINITY].map(side_of);
+    assert_eq!(sides, [1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0]);
+    let line = LineCoords::forward(LinearDirection::Horizontal, v(1.0, 0.0)).unwrap();
+    let points = [v(0.0, 2.0), v(5.0, -3.0)];
+    assert_eq!((line.reach(&points, -0.0), line.reach(&points, -1e-300)), (2.0, -3.0));
+}
+
 #[test]
 fn a_line_on_a_longer_one_is_covered_within_its_ends() {
     let by = [v(0.0, 0.0), v(10.0, 0.0)];
