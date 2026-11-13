@@ -51,7 +51,7 @@ const TOLERANCE_PX: f64 = 0.2;
 /// How close the pointer must come to an object's box to be over it, in points.
 const HOVER_BAND: f64 = 6.0;
 /// The paper's corner radius on screen, in points: very slight (D29).
-const PAPER_CORNER: u8 = 2;
+const PAPER_CORNER: u8 = 4;
 
 /// The sheet's colour on screen (Preferences › Design › Drawings › Sheet colour).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
