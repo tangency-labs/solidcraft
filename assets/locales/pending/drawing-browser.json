@@ -53,5 +53,38 @@
     "ui.drawing_browser_table": "表格 {number}",
     "ui.drawing_browser_image": "图像 {number}",
     "ui.drawing_browser_revision_tag": "修订标记 {number}"
+  },
+  "ar": {
+    "ui.drawing_browser_count_one": "{count} عنصر",
+    "ui.drawing_browser_count_other": "{count} عناصر",
+    "ui.drawing_browser_view": "مسقط {number}",
+    "ui.drawing_browser_dimension": "بُعد {number}",
+    "ui.drawing_browser_balloon": "بالون {number}",
+    "ui.drawing_browser_note": "ملاحظة {number}",
+    "ui.drawing_browser_table": "جدول {number}",
+    "ui.drawing_browser_image": "صورة {number}",
+    "ui.drawing_browser_revision_tag": "علامة مراجعة {number}"
+  },
+  "he": {
+    "ui.drawing_browser_count_one": "עצם אחד ({count})",
+    "ui.drawing_browser_count_other": "{count} עצמים",
+    "ui.drawing_browser_view": "מבט {number}",
+    "ui.drawing_browser_dimension": "מידה {number}",
+    "ui.drawing_browser_balloon": "בלון {number}",
+    "ui.drawing_browser_note": "הערה {number}",
+    "ui.drawing_browser_table": "טבלה {number}",
+    "ui.drawing_browser_image": "תמונה {number}",
+    "ui.drawing_browser_revision_tag": "תג גרסה {number}"
+  },
+  "vi": {
+    "ui.drawing_browser_count_one": "{count} đối tượng",
+    "ui.drawing_browser_count_other": "{count} đối tượng",
+    "ui.drawing_browser_view": "Hình chiếu {number}",
+    "ui.drawing_browser_dimension": "Kích thước {number}",
+    "ui.drawing_browser_balloon": "Bóng chú thích {number}",
+    "ui.drawing_browser_note": "Ghi chú {number}",
+    "ui.drawing_browser_table": "Bảng {number}",
+    "ui.drawing_browser_image": "Ảnh {number}",
+    "ui.drawing_browser_revision_tag": "Nhãn sửa đổi {number}"
   }
 }

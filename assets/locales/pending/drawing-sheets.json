@@ -48,5 +48,35 @@
     "ui.drawing_sheets.off": "关闭",
     "ui.drawing_sheets.title": "图纸",
     "ui.drawing_sheets.visibility": "图纸区域"
+  },
+  "ar": {
+    "ui.drawing_sheets.active": "اللوحة النشطة",
+    "ui.drawing_sheets.add": "إضافة لوحة",
+    "ui.drawing_sheets.always": "دائمًا",
+    "ui.drawing_sheets.legacy": "الشريط العائم",
+    "ui.drawing_sheets.multiple": "عند وجود عدة لوحات",
+    "ui.drawing_sheets.off": "إيقاف",
+    "ui.drawing_sheets.title": "اللوحات",
+    "ui.drawing_sheets.visibility": "قسم اللوحات"
+  },
+  "he": {
+    "ui.drawing_sheets.active": "גיליון פעיל",
+    "ui.drawing_sheets.add": "הוספת גיליון",
+    "ui.drawing_sheets.always": "תמיד",
+    "ui.drawing_sheets.legacy": "סרגל צף",
+    "ui.drawing_sheets.multiple": "כשיש כמה גיליונות",
+    "ui.drawing_sheets.off": "כבוי",
+    "ui.drawing_sheets.title": "גיליונות",
+    "ui.drawing_sheets.visibility": "מקטע גיליונות"
+  },
+  "vi": {
+    "ui.drawing_sheets.active": "Tờ đang mở",
+    "ui.drawing_sheets.add": "Thêm tờ",
+    "ui.drawing_sheets.always": "Luôn hiện",
+    "ui.drawing_sheets.legacy": "Thanh nổi",
+    "ui.drawing_sheets.multiple": "Khi có nhiều tờ",
+    "ui.drawing_sheets.off": "Tắt",
+    "ui.drawing_sheets.title": "Các tờ",
+    "ui.drawing_sheets.visibility": "Mục các tờ"
   }
 }
