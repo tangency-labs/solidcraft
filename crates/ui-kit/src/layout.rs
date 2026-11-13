@@ -308,6 +308,19 @@ pub fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usize, opti
     row(ui, label, |ui| super::dropdown(ui, id, selected, options))
 }
 
+/// A card row whose control is one action: the kit's [`super::button_at`] across the control
+/// column, under an empty label column so it lines up with the rows' fields, its text the
+/// catalog's for `label`. Returns whether it was clicked. Published as `dialog:action:{key}`.
+/// Tokens: `row, button`.
+pub fn action_row(ui: &mut Ui, key: &str, label: &str) -> bool {
+    row(ui, "", |ui| {
+        let rect = ui.max_rect();
+        let response = super::button_at(ui, &format!("action_row:{key}"), rect, solidcraft_ui_text::tr_label(label), super::Button::Normal);
+        solidcraft_ui_registry::publish_target(&format!("dialog:action:{key}"), response.rect);
+        response.clicked()
+    })
+}
+
 /// Internal form geometry for controls which need several lines (e.g. text areas).
 pub fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
     row_with(ui, text, height, false, |ui, _| control(ui))
