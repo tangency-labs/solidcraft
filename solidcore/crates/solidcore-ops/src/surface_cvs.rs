@@ -16,7 +16,7 @@ use solidcore::nurbs::srf_basic::{
     falloff_weight as kernel_falloff, Direction, FalloffShape, Surface as NurbSurface,
 };
 use solidcore::nurbs::srf_deviation::certified_distance;
-use solidcore::nurbs::srf_match::match_boundary;
+use solidcore::nurbs::srf_match::{match_boundary, match_plane as kernel_match_plane};
 pub use solidcore::nurbs::srf_match::{MatchOrder, MatchRows, SeamBounds};
 use solidcore::SolidError;
 use solidcore::Vec3;
@@ -489,6 +489,89 @@ pub fn match_edge(
         ));
     }
     let made = record(run("surface_cvs::match_edge", |k| {
+        sheet_of(k, BSplineSurface::from_gw_nurb(&matched.surface))
+    }))?;
+    Ok((made, after))
+}
+
+/// A plane a sheet's edge is matched to as its plane of symmetry ([`match_plane`]): a point on
+/// it and its normal (any length but none).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MirrorPlane {
+    /// A point on the plane.
+    pub origin: [f64; 3],
+    /// Its normal.
+    pub normal: [f64; 3],
+}
+
+/// `sheet` with the control rows next to its record edge `edge` moved so the sheet meets its own
+/// mirror image in `plane` at `order` (the kernel's
+/// [`solidcore::nurbs::srf_match::match_plane`]: the edge row put on the plane, at G1 and G2 the
+/// next row square to it, which makes the sheet curvature continuous with its mirror too; at
+/// most `rows.rows` rows from the edge move, the rows the order does not fix following by
+/// `rows.blend`), and the seam with the mirror after, measured at the edge's stations. The sheet
+/// is one untrimmed face (as [`control_net`] reads it), the edge a side of its face's box.
+/// Refused when the seam would be worse than before in a measure the order holds, past both what
+/// it was and `held`, as [`match_edge`] refuses.
+///
+/// # Errors
+/// As [`control_net`]; [`Error::Argument`] for an edge past the record's list or not a side of
+/// its face's box, a plane not finite or past the coordinate bound, a floor in `held` negative or
+/// not finite, and the kernel's refusals of the input (a normal of no length, an edge that does
+/// not leave the plane to one side, rows outside 1..=3 or below what the order fixes, a blend
+/// outside 0..=1, knots not clamped); [`Error::Unsupported`] for a match that would leave the seam
+/// worse; the kernel's status otherwise.
+pub fn match_plane(
+    sheet: &Brep,
+    edge: usize,
+    plane: MirrorPlane,
+    order: MatchOrder,
+    rows: MatchRows,
+    held: SeamBounds,
+) -> Result<(Brep, SeamBounds)> {
+    if ![held.gap, held.angle, held.curvature]
+        .iter()
+        .all(|t| t.is_finite() && *t >= 0.0)
+        || !coord_ok(&plane.origin)
+        || !coord_ok(&plane.normal)
+    {
+        return Err(Error::Argument);
+    }
+    let side = side_of(sheet, edge)?;
+    let ((u, v), points) = untrimmed(sheet)?;
+    if points.is_rational() {
+        return Err(Error::Argument);
+    }
+    let surface = kernel_surface(u, v, points)?;
+    let v3 = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+    let matched = run("surface_cvs::match_plane", |_| {
+        Ok(
+            match kernel_match_plane(
+                &surface,
+                side,
+                v3(plane.origin),
+                v3(plane.normal),
+                order,
+                rows,
+            ) {
+                Ok(m) => Ok(m),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })??;
+    let (before, after) = (matched.before, matched.after);
+    let worse = |now: f64, was: f64, floor: f64| now > was.max(floor);
+    let k = order.order();
+    if worse(after.gap, before.gap, held.gap)
+        || (k >= 1 && worse(after.angle, before.angle, held.angle))
+        || (k >= 2 && worse(after.curvature, before.curvature, held.curvature))
+    {
+        return Err(Error::Unsupported(
+            "the match would leave the seam worse than it was",
+        ));
+    }
+    let made = record(run("surface_cvs::match_plane", |k| {
         sheet_of(k, BSplineSurface::from_gw_nurb(&matched.surface))
     }))?;
     Ok((made, after))

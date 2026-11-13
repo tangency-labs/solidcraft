@@ -194,3 +194,120 @@ fn degenerate_targets_and_bad_rows_are_refused() {
         rows(1, 1.5),
     )));
 }
+
+// ---- a boundary matched to its own mirror ------------------------------------------------------
+
+/// The plane `y = 0`, the side plane of a car: its point and normal.
+const SIDE: (Vec3, Vec3) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+
+/// A deck coming up to `y = 0` (its `u = 0` side) 20 degrees off square to the plane: its first
+/// column of control points on the plane, the next rising 20 degrees from the plane's normal.
+fn leaning_deck() -> Surface {
+    let a = 20.0_f64.to_radians();
+    let (c, s) = (10.0 * a.cos(), 10.0 * a.sin());
+    bezier(&[
+        &[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]],
+        &[[0.0, c, s], [10.0, c, s], [20.0, c, s]],
+        &[
+            [0.0, 2.0 * c, 2.0 * s + 1.0],
+            [10.0, 2.0 * c, 2.0 * s + 2.0],
+            [20.0, 2.0 * c, 2.0 * s + 1.0],
+        ],
+    ])
+}
+
+/// The deck leaves the plane 20 degrees off square, so it meets its mirror at a 40 degree
+/// crease. Matched at G1 the next row leaves square to the plane: the seam with the mirror has no
+/// gap, no crease and no curvature jump (a surface square to its mirror plane is curvature
+/// continuous with its mirror), and the edge row stays where it was.
+#[test]
+fn a_boundary_leaning_off_its_mirror_plane_is_made_square_to_it() {
+    let (o, n) = SIDE;
+    let m = match_plane(
+        &leaning_deck(),
+        Boundary::Left,
+        o,
+        n,
+        MatchOrder::G1,
+        rows(2, 0.5),
+    )
+    .unwrap();
+    assert!(
+        (m.before.angle - 40.0_f64.to_radians()).abs() < 1e-9,
+        "{:?}",
+        m.before
+    );
+    assert!(m.after.gap < 1e-12, "{:?}", m.after);
+    assert!(m.after.angle < 1e-12, "{:?}", m.after);
+    assert!(m.after.curvature < 1e-9, "{:?}", m.after);
+    assert!(
+        m.moved[0] < 1e-12,
+        "the edge stays on the plane: {:?}",
+        m.moved
+    );
+    assert!(m.moved[1] > 0.0, "{:?}", m.moved);
+}
+
+/// A curved deck, its edge 1 off the plane and leaning: matched at G2 (the same rows as G1, the
+/// curvature following by symmetry) the edge is on the plane and the seam with its mirror holds
+/// G2, measured.
+#[test]
+fn a_curved_boundary_off_its_plane_meets_its_mirror_at_g2() {
+    let deck = bezier(&[
+        &[[0.0, 1.0, 0.0], [10.0, 1.5, 2.0], [20.0, 1.0, 0.0]],
+        &[[2.0, 6.0, 1.0], [10.0, 6.0, 3.0], [18.0, 6.0, 1.0]],
+        &[[3.0, 12.0, 0.0], [10.0, 12.0, 2.0], [17.0, 12.0, 0.0]],
+    ]);
+    let (o, n) = SIDE;
+    let m = match_plane(&deck, Boundary::Left, o, n, MatchOrder::G2, rows(3, 0.5)).unwrap();
+    assert!(m.before.gap > 0.9, "{:?}", m.before);
+    assert!(m.after.gap < 1e-12, "{:?}", m.after);
+    assert!(m.after.angle < 1e-12, "{:?}", m.after);
+    assert!(m.after.curvature < 1e-9, "{:?}", m.after);
+}
+
+/// The refusals: a normal of no length, a boundary that runs along the plane without leaving it
+/// (a sheet lying in its mirror plane has no seam with its mirror), a boundary that leaves the
+/// plane to both sides, and rows below what the order fixes.
+#[test]
+fn degenerate_planes_and_boundaries_are_refused() {
+    let refused = |r| matches!(r, Err(SolidError::InvalidInput { .. }));
+    let (o, n) = SIDE;
+    assert!(refused(match_plane(
+        &leaning_deck(),
+        Boundary::Left,
+        o,
+        Vec3::new(0.0, 0.0, 0.0),
+        MatchOrder::G1,
+        rows(2, 0.5),
+    )));
+    // flat(0) lies in z = 0: its x = 0 side runs along the plane z = 0 without leaving it
+    assert!(refused(match_plane(
+        &flat(0.0),
+        Boundary::Left,
+        o,
+        Vec3::new(0.0, 0.0, 1.0),
+        MatchOrder::G1,
+        rows(2, 0.5),
+    )));
+    let crossing = bezier(&[
+        &[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+        &[[0.0, 5.0, 0.0], [10.0, -5.0, 0.0]],
+    ]);
+    assert!(refused(match_plane(
+        &crossing,
+        Boundary::Left,
+        o,
+        n,
+        MatchOrder::G1,
+        rows(2, 0.5)
+    )));
+    assert!(refused(match_plane(
+        &leaning_deck(),
+        Boundary::Left,
+        o,
+        n,
+        MatchOrder::G1,
+        rows(1, 0.5)
+    )));
+}
