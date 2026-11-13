@@ -663,6 +663,60 @@ pub struct EditResult {
     pub changed: Vec<String>,
     /// The other views whose resolved settings changed with it: the views projected from it.
     pub followers: Vec<String>,
+    /// It and the views lined up with it, when the edit moved it or changed its size and their
+    /// boundary leaves the sheet's drawing space or lies over its title block; none is moved back in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<OutsideResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `drawing.view.standard` takes: the sheet, and how its standard views are drawn and spaced.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct StandardParams {
+    /// The sheet, by id or name.
+    #[serde(deserialize_with = "super::drawing_sheet::sheet_ref")]
+    pub sheet: String,
+    /// Which way the main view looks (front when not given); the other two are projected from it.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ViewParam")]
+    pub view: Option<ViewParam>,
+    /// The scale they are all drawn at (when not given, the largest preset at which all of them lie
+    /// inside the sheet's drawing space and off its title block); saved either way.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ScaleParam")]
+    pub scale: Option<ScaleParam>,
+    /// The paper gap between neighbouring views, 0 to 1000 mm (20 when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64")]
+    pub gap_mm: Option<f64>,
+    /// Whether an isometric view goes in the fourth corner (true when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub iso: Option<bool>,
+}
+
+/// What `drawing.view.standard` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct StandardResult {
+    /// The main view, a base view.
+    pub view: String,
+    /// The view above or below it, lined up with it: its top view in the drawing's projection.
+    pub top: String,
+    /// The view beside it, lined up with it: its right view in the drawing's projection.
+    pub right: String,
+    /// The isometric view, a base view of its own, when one was asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iso: Option<String>,
+    pub sheet: String,
+    /// The scale they all draw at.
+    pub scale: ScaleResult,
+    /// Those whose boundary leaves the sheet's drawing space or lies over its title block, at a
+    /// given scale that doesn't fit; none is moved back in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<OutsideResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
