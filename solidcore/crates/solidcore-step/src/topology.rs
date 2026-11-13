@@ -1149,7 +1149,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         for l in loops {
             match l {
                 LoopB::Edges(es) => {
-                    let mut walk = Vec::with_capacity(8 * es.len() + 1);
+                    let mut walk = Vec::new();
                     for &(e, forward) in es {
                         *count.entry(e).or_default() += 1;
                         let edge = self.edges.get(e as usize).ok_or("edge reference")?;

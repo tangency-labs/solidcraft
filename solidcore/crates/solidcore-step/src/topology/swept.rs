@@ -199,7 +199,7 @@ fn span(ts: &[f64], seam: &[f64], walks: &[Vec<f64>], closed: bool) -> R<Span> {
         if let Some(s) = common_angle(seam) {
             return Ok(Span::Turn { start: s });
         }
-        let mut arcs = Vec::with_capacity(walks.len() + ts.len());
+        let mut arcs = Vec::new();
         for w in walks {
             let Some(&first) = w.first() else { continue };
             let (mut at, mut lo, mut hi) = (first, first, first);
