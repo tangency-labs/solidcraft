@@ -16,6 +16,8 @@ pub struct PanelContext {
     pub flow: Flow,
     pub size_class: SizeClass,
     pub focused: bool,
+    /// Paint-only geometry during a live drag; do not publish measurements or input.
+    pub preview_geometry: bool,
     pub direction: Direction,
     pub motion: Motion,
 }
@@ -210,6 +212,8 @@ pub enum ContentSlot {
 /// owner for this paint without storing that borrow in a retained controller.
 /// The host supplies the same bounded slot and focus services as ordinary content.
 pub trait FramePanelContent {
+    fn header_action_context_menu(&mut self, _instance: &InstanceId, _at: egui::Pos2) {}
+
     fn render(
         &mut self,
         slot: ContentSlot,

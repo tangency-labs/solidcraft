@@ -75,7 +75,7 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.ui.show_browser = true;
-        h.app.preferences.timeline_left = left_history;
+        h.app.run("view.history_layout", json!({"dock":if left_history { "left" } else { "bottom" }})).unwrap();
         h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned Sketch"})).unwrap();
         let sketch = h.app.session.active_sketch.unwrap();
         h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
@@ -143,7 +143,7 @@ mod tests {
                     let mut h = Harness::new();
                     h.app.home.open = false;
                     h.app.ui.show_browser = true;
-                    h.app.preferences.timeline_left = left_history;
+                    h.app.run("view.history_layout", json!({"dock":if left_history { "left" } else { "bottom" }})).unwrap();
                     h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned Sketch"})).unwrap();
                     let sketch = h.app.session.active_sketch.unwrap();
                     h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();

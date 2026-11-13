@@ -47,6 +47,7 @@ fn schemas_and_the_key_check_agree() {
             "body_name",
             "exact_regions",
             "lines",
+            "locate",
             "mirror",
             "name",
             "names",

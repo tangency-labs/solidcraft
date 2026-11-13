@@ -19,21 +19,25 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
     let mut h = Harness::new();
     crate::keymap::bind(&mut h.app, "panel.sash.left", "Ctrl+Left", false).unwrap();
     crate::keymap::bind(&mut h.app, "panel.sash.right", "", false).unwrap();
+    h.app.preferences.live_panel_drag_preview = false;
     run(&mut h, "settings.profile.save", json!({"name":"Panels"}));
     let profile = run(&mut h, "settings.profile.export", json!({"name":"Panels"}))["profile"].clone();
     assert_eq!(profile["shortcuts"]["panel.sash.left"], "Ctrl+Left");
     assert_eq!(profile["shortcuts"]["panel.sash.right"], "");
+    assert_eq!(profile["preferences"]["live_panel_drag_preview"], false);
+    h.app.preferences.live_panel_drag_preview = true;
     crate::keymap::reset(&mut h.app, None);
     run(&mut h, "settings.profile.import", json!({"profile":profile,"name":"Imported panels"}));
     run(&mut h, "settings.profile.apply", json!({"name":"Imported panels"}));
     assert_eq!(crate::keymap::keys(&h.app, "panel.sash.left"), ["Ctrl+Left"]);
     assert!(crate::keymap::keys(&h.app, "panel.sash.right").is_empty());
+    assert!(!h.app.preferences.live_panel_drag_preview);
 }
 
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 107, "Appearance system-theme slots and Maya zoom are included");
+    assert_eq!(keys.len(), 97, "include the live panel drag preference among the current portable settings");
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -87,7 +91,7 @@ fn profile_panel_layout_is_checked_separately_from_ordinary_preferences() {
 
     let h = Harness::new();
     let mut doc = capture(&h.app, "Layout");
-    assert!(doc.get("panel_layout").is_none(), "Classic does not acquire an opt-in layout through profile capture");
+    assert_eq!(doc["panel_layout"]["version"], 2, "Classic captures the shared workspace layout");
     let envelope = LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()));
     let bytes = encode(&envelope, &PanelRegistry::default()).unwrap();
     let layout = json!({"version":1,"envelope":String::from_utf8(bytes).unwrap()});
@@ -795,19 +799,13 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
 }
 
 #[test]
-fn profile_keys_preserve_the_baseline_and_explicit_additions() {
+fn profile_keys_cover_the_current_portable_preferences() {
     let expected = [
         "browser_bodies_folders",
-        "browser_collapsed",
         "browser_eye_left",
-        "browser_float",
-        "browser_share",
-        "browser_show",
-        "browser_width",
         "center_arc_follows_cursor",
         "color_vision",
         "dialog_buttons",
-        "dialog_place",
         "direct_interaction",
         "escape_twice_finishes_sketch",
         "free_orbit",
@@ -825,6 +823,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "layout",
         "line_drag_draws_one",
         "line_hover_tangent_arc",
+        "live_panel_drag_preview",
         "logo_accent",
         "look_at_anim",
         "look_at_speed",
@@ -881,12 +880,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "theme_follow",
         "theme_night",
         "theme_options",
-        "timeline_collapsed",
-        "timeline_left",
-        "timeline_left_browser_collapsed",
-        "timeline_left_width",
         "timeline_origin_bodies",
-        "timeline_under_browser",
         "toast_place",
         "trackpad_pan",
         "trackpad_twist_turns",
@@ -907,7 +901,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 107);
+    assert_eq!(expected.len(), 97);
     assert_eq!(actual, expected);
 }
 

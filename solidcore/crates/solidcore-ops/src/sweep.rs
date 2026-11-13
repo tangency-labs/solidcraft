@@ -520,6 +520,15 @@ fn parse(k: &Kernel, curves: &[Curve]) -> Out<Made> {
     Ok(made)
 }
 
+/// The kernel's curves of a curve list, as [`parse`] makes them, for the families outside this
+/// module that take one (a face trimmed along curves on it, `crate::trim`).
+pub(crate) fn kernel_curves(
+    k: &Kernel,
+    curves: &[Curve],
+) -> std::result::Result<Vec<KCurve>, Error> {
+    parse(k, curves).map(|made| made.curves)
+}
+
 /// Runs a call that makes a new body.
 fn making(
     call: &'static str,
@@ -1207,8 +1216,9 @@ fn face_of(b: &Brep, order: &Order, i: usize) -> Result<FaceId> {
     }
 }
 
-/// The curve tolerance of [`project_curves`] and [`face_section`].
-fn tolerance_ok(tolerance: f64) -> bool {
+/// The curve tolerance of [`project_curves`] and [`face_section`], and of the curves a face is
+/// trimmed along (`crate::trim`).
+pub(crate) fn tolerance_ok(tolerance: f64) -> bool {
     tolerance.is_finite() && (1e-9..1e3).contains(&tolerance)
 }
 

@@ -588,6 +588,12 @@ pub struct FrameMemberKeys {
     /// The profile point that sits on each line. Default: origin.
     #[serde(default)]
     pub anchor: Option<AnchorParam>,
+    /// The profile point that sits on each line, [x, y] in mm from the profile's own origin (a
+    /// bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of
+    /// other profiles). Takes precedence over `anchor`; the member stays attached at that point
+    /// when the profile's size changes.
+    #[serde(default)]
+    pub locate: Option<[f64; 2]>,
     /// How far the profile turns about the line, a number of degrees or an expression. Default:
     /// 0, which puts its y as near world up as the line allows (a vertical member's x along
     /// world X).

@@ -150,6 +150,35 @@ fn channel_and_i_beam_sharp_match_rectangles() {
 }
 
 #[test]
+fn profiles_name_the_point_they_were_drawn_about() {
+    let angle = profile(serde_json::json!({"kind": "angle", "width": 20, "height": 20, "thickness": 3}));
+    assert_eq!(angle.origin(), Vec2::new(-10.0, -10.0));
+    let channel = profile(serde_json::json!({"kind": "channel", "height": 100, "width": 50, "web": 6, "flange": 8}));
+    assert_eq!(channel.origin(), Vec2::new(-25.0, 0.0));
+    let tube = profile(serde_json::json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}));
+    assert_eq!(tube.origin(), Vec2::ZERO);
+}
+
+#[test]
+fn a_located_member_keeps_its_profile_point_when_the_section_grows() {
+    // A member placed at a profile point (here 3 mm across and 4 mm down from the channel's web
+    // back) keeps that point on its line when the section is made larger: the point on the line
+    // is the profile's origin plus `locate`, and the origin moves with the size in the
+    // bounding-box-centred coordinates the region is drawn in.
+    let locate = Vec2::new(3.0, -4.0);
+    for (width, height) in [(50.0, 100.0), (75.0, 150.0)] {
+        let p = Profile::Channel { height, width, web: 6.0, flange: 8.0, root_radius: None, toe_radius: None };
+        p.region().expect("a channel");
+        let at = p.origin() + locate;
+        close(at.x, -width / 2.0 + 3.0, "point on the line, x");
+        close(at.y, -4.0, "point on the line, y");
+        // Measured from the web back, the point on the line is the same for both sizes.
+        close((at - p.origin()).x, locate.x, "locate x");
+        close((at - p.origin()).y, locate.y, "locate y");
+    }
+}
+
+#[test]
 fn i_beam_root_radii_add_four_spandrels() {
     let (h, b, tw, tf, r) = (100.0, 50.0, 4.5, 7.0, 7.0);
     let s = sec(&profile(serde_json::json!({"kind": "i_beam", "height": h, "width": b, "web": tw, "flange": tf, "root_radius": r})));
