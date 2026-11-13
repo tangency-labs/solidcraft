@@ -15,11 +15,20 @@
 //! `u_l`, and `T` is the tensor-product surface through the crossing points `Q_kl` at
 //! `(u_l, v_k)`. Each u-curve then lies on `S` at `v = v_k` and each v-curve at `u = u_l`
 //! provided the network is compatible: every v-curve crosses all the u-curves at one `u_l`
-//! of theirs, and every u-curve all the v-curves at one `v_k`. This module takes the compatible
-//! networks only: the crossings are found by the kernel's curve intersector
-//! ([`intersect_curves`]), `u_l` and `v_k` are their means (the outer curves' at the curves'
-//! ends), and every crossing is proved within the tolerance at those common parameters, else
-//! the network is refused naming the pair. The cross degrees are `min(3, count - 1)` with
+//! of theirs, and every u-curve all the v-curves at one `v_k`. The crossings are found by the
+//! kernel's curve intersector ([`intersect_curves`]), `u_l` and `v_k` are their means (the
+//! outer curves' at the curves' ends), and every crossing is proved within the tolerance at
+//! those common parameters. A network whose crossings are not there (two curves through the
+//! same stations at different heights, each parameterised by its own chord lengths) is
+//! refitted first: each curve of a family that is off is sampled along its monotone map from
+//! the common parameters to its own crossing parameters (Fritsch and Butland's monotone cubic)
+//! and interpolated at the common ones, so its crossings land there exactly; the surface is
+//! built from the refits, and each input curve is proved within the bound of the surface span
+//! by span between its crossings ([`crate::nurbs::certificate::span_bound`], geometric: no
+//! parametric correspondence trusted), the refit's points doubled where a span is past the
+//! tolerance. A compatible network is built exactly as before. Refused, naming why: a pair not
+//! crossing once, crossings out of order along a family or a curve, an outer curve crossing
+//! short of a curve's end (the gap at the common parameters), past the tolerance. The cross degrees are `min(3, count - 1)` with
 //! averaged knots; the three surfaces are made compatible (degree elevation, knot insertion)
 //! and their nets combined.
 //!
@@ -38,6 +47,7 @@ use core::cmp::Ordering;
 use crate::curve::curve::Curve as KCurve;
 use crate::error::intersect::IntersectFailure;
 use crate::error::{Result, SolidError};
+use crate::geom::vector2d::Point2;
 use crate::intersect::api_intersectors::intersect_curves;
 use crate::kernel::Kernel;
 use crate::limits::try_reserve_total;
@@ -45,6 +55,7 @@ use crate::math::Vec3;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::basis_basic::COMPATIBLE_KNOT_TOL;
+use crate::nurbs::certificate::{span_bound, Node, RailSpans};
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::crv_deviation::{certified_distance, interpolation_bound};
 use crate::nurbs::crv_fit::p1::{interp_given_params, interp_knot_vector};
@@ -230,27 +241,26 @@ pub(crate) fn within(x: f64, tol: f64) -> bool {
     matches!(x.partial_cmp(&tol), Some(Ordering::Less | Ordering::Equal))
 }
 
-/// The Gordon surface of the u-curves `us` and the v-curves `vs` (module docs), its crossings
-/// and its curves proved within `tol` of it.
-///
-/// # Errors
-///
-/// `InvalidInput` for fewer than [`MIN_CURVES`] or more than [`MAX_CURVES`] curves a family, a
-/// curve without its NURB or `tol` not finite and positive; those of the intersector, the
-/// interpolation, the compatibility and the certificates.
-pub fn gordon(
+/// A network prepared for its Gordon surface: each family on one degree, knot vector and
+/// domain; the crossings (on u-curve `kk` at `u_cross[kk][l]`, on v-curve `l` at
+/// `v_cross[kk][l]`); and the common parameters (the means, the outer curves' at the families'
+/// ends), in order.
+struct Network {
+    cu: Vec<Curve>,
+    dv: Vec<Curve>,
+    u_cross: Vec<Vec<f64>>,
+    v_cross: Vec<Vec<f64>>,
+    u_at: Vec<f64>,
+    v_at: Vec<f64>,
+}
+
+/// The network of `us` and `vs` ([`Network`]), or why it has no Gordon surface: a rational
+/// curve, a pair not crossing once, crossings out of order.
+fn network(
     k: &Kernel,
     us: &[BSplineCurve],
     vs: &[BSplineCurve],
-    tol: f64,
-) -> Result<std::result::Result<Gordon, NetworkRefusal>> {
-    let family = MIN_CURVES..=MAX_CURVES;
-    if !family.contains(&us.len()) || !family.contains(&vs.len()) {
-        return Err(bad("a family of fewer than two or more than 64 curves"));
-    }
-    if !(tol.is_finite() && tol > 0.0) {
-        return Err(bad("a tolerance not finite and positive"));
-    }
+) -> Result<std::result::Result<Network, NetworkRefusal>> {
     let mut cu: Vec<Curve> = us.iter().map(nurb_of).collect::<Result<_>>()?;
     let mut dv: Vec<Curve> = vs.iter().map(nurb_of).collect::<Result<_>>()?;
     if cu.iter().chain(&dv).any(Curve::is_rational) {
@@ -313,6 +323,73 @@ pub fn gordon(
         return Ok(Err(NetworkRefusal::Order));
     }
 
+    Ok(Ok(Network {
+        cu,
+        dv,
+        u_cross,
+        v_cross,
+        u_at,
+        v_at,
+    }))
+}
+
+/// The Gordon surface of the u-curves `us` and the v-curves `vs` (module docs), its crossings
+/// and its curves proved within `tol` of it. A network crossing at common parameters is built
+/// as it is ([`build`]); one whose crossings are not at common parameters (a gap there, though
+/// each pair crosses once and in order) is built from its families refitted so that they are
+/// ([`refitted`]), each input curve then proved within the bound of the surface.
+///
+/// # Errors
+///
+/// `InvalidInput` for fewer than [`MIN_CURVES`] or more than [`MAX_CURVES`] curves a family, a
+/// curve without its NURB or `tol` not finite and positive; those of the intersector, the
+/// interpolation, the compatibility and the certificates.
+pub fn gordon(
+    k: &Kernel,
+    us: &[BSplineCurve],
+    vs: &[BSplineCurve],
+    tol: f64,
+) -> Result<std::result::Result<Gordon, NetworkRefusal>> {
+    match build(k, us, vs, tol)? {
+        Err(gap @ NetworkRefusal::Gap { .. }) => refitted(k, us, vs, tol, gap),
+        other => Ok(other),
+    }
+}
+
+/// The Gordon surface of a network crossing at its common parameters (module docs): refused
+/// with [`NetworkRefusal::Gap`] where a crossing is not within `tol` there.
+///
+/// # Errors
+///
+/// As [`gordon`].
+fn build(
+    k: &Kernel,
+    us: &[BSplineCurve],
+    vs: &[BSplineCurve],
+    tol: f64,
+) -> Result<std::result::Result<Gordon, NetworkRefusal>> {
+    let family = MIN_CURVES..=MAX_CURVES;
+    if !family.contains(&us.len()) || !family.contains(&vs.len()) {
+        return Err(bad("a family of fewer than two or more than 64 curves"));
+    }
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(bad("a tolerance not finite and positive"));
+    }
+    let Network {
+        cu,
+        dv,
+        u_cross: _,
+        v_cross: _,
+        u_at,
+        v_at,
+    } = match network(k, us, vs)? {
+        Ok(n) => n,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    let (r, s) = (cu.len() - 1, dv.len() - 1);
+    let (Some(c0), Some(d0)) = (cu.first(), dv.first()) else {
+        return Err(bad("an empty family"));
+    };
     // The certificates are counted in the network's own frame (minus the first u-curve's
     // first control point), so their rounding follows the network's size, not its distance
     // from the origin: each moved coordinate rounds once (`γ_1` of the moved value), moving a
@@ -452,6 +529,298 @@ pub fn gordon(
         surface: made,
         bound,
     }))
+}
+
+/// The most points a span between two crossings is refitted through, doubling from
+/// [`REFIT_FIRST`]: a resource bound.
+const REFIT_MOST: usize = 64;
+/// The points a span between two crossings is first refitted through.
+const REFIT_FIRST: usize = 8;
+
+/// The monotone cubic through `(xs[i], ys[i])` (both increasing) at `t`: Hermite pieces with
+/// the Fritsch-Butland slopes (F. N. Fritsch and J. Butland, "A method for constructing local
+/// monotone piecewise cubic interpolants", SIAM J. Sci. Stat. Comput. 5 (1984)), which keep
+/// it increasing, C1. `t` is within `xs` (the callers sample between its ends).
+fn monotone(xs: &[f64], ys: &[f64], t: f64) -> Result<f64> {
+    let n = xs.len();
+    if n < 2 || ys.len() != n {
+        return Err(bad("a reparameterisation of fewer than two points"));
+    }
+    // the piece holding t
+    let mut i = 0;
+    while i + 2 < n && xs.get(i + 1).is_some_and(|&x| t > x) {
+        i += 1;
+    }
+    let at = |j: usize| -> Result<(f64, f64)> {
+        match (xs.get(j), ys.get(j)) {
+            (Some(&x), Some(&y)) => Ok((x, y)),
+            _ => Err(bad("a reparameterisation's point")),
+        }
+    };
+    let secant = |j: usize| -> Result<(f64, f64)> {
+        let ((x0, y0), (x1, y1)) = (at(j)?, at(j + 1)?);
+        Ok((x1 - x0, (y1 - y0) / (x1 - x0)))
+    };
+    // the slope at point j: the secant at the ends; inside, zero where the secants differ in
+    // sign, else Fritsch-Butland's weighted harmonic mean
+    let slope = |j: usize| -> Result<f64> {
+        if j == 0 {
+            return Ok(secant(0)?.1);
+        }
+        if j + 1 == n {
+            return Ok(secant(j - 1)?.1);
+        }
+        let ((h0, d0), (h1, d1)) = (secant(j - 1)?, secant(j)?);
+        if d0 * d1 <= 0.0 {
+            return Ok(0.0);
+        }
+        Ok(3.0 * (h0 + h1) / ((2.0 * h1 + h0) / d0 + (h1 + 2.0 * h0) / d1))
+    };
+    let ((x0, y0), (x1, y1)) = (at(i)?, at(i + 1)?);
+    let h = x1 - x0;
+    let s = (t - x0) / h;
+    let (m0, m1) = (slope(i)?, slope(i + 1)?);
+    let (s2, s3) = (s * s, s * s * s);
+    Ok((2.0 * s3 - 3.0 * s2 + 1.0) * y0
+        + (s3 - 2.0 * s2 + s) * h * m0
+        + (-2.0 * s3 + 3.0 * s2) * y1
+        + (s3 - s2) * h * m1)
+}
+
+/// One family refitted so its crossings sit at the common parameters `at`: each curve `c` of
+/// `curves` (its own crossing parameters `own[c]`, the ends its domain's) sampled at its
+/// monotone map from `at` to its own ([`monotone`]), `per_span` points to each span between two
+/// common parameters, and interpolated at the common side's parameters at its own degree with
+/// averaged knots: the crossings are interpolation sites, so they land on the common
+/// parameters exactly, and every curve of the family gets the same knots.
+fn refit_family(
+    curves: &[Curve],
+    own: &[Vec<f64>],
+    at: &[f64],
+    per_span: usize,
+) -> Result<Vec<BSplineCurve>> {
+    let mut params = Vec::new();
+    for w in at.windows(2) {
+        if let [a, b] = w {
+            let (a, b) = (*a, *b);
+            for i in 0..per_span {
+                #[allow(clippy::cast_precision_loss)] // at most REFIT_MOST
+                let f = i as f64 / per_span as f64;
+                params.push(a + (b - a) * f);
+            }
+        }
+    }
+    params.push(
+        at.last()
+            .copied()
+            .ok_or_else(|| bad("no common parameters"))?,
+    );
+    let mut out = Vec::new();
+    for (c, ys) in curves.iter().zip(own) {
+        let p = c.degree();
+        let knots = interp_knot_vector(&params, p)?;
+        let mut points = Vec::new();
+        for &t in &params {
+            points.push(c.eval(monotone(at, ys, t)?, Side::Left)?);
+        }
+        out.push(BSplineCurve::from_gw_nurb(
+            3,
+            &through(&points, &params, &knots, p)?,
+        ));
+    }
+    Ok(out)
+}
+
+/// The Gordon surface of a network whose crossings are not at its common parameters (each
+/// pair crossing once, in order, the outer curves crossing at their ends): each family whose
+/// crossings are off its common parameters refitted to them ([`refit_family`]), the surface
+/// built from the refits ([`build`]), and each INPUT curve proved within the bound of the
+/// surface between its crossings, geometrically ([`span_bound`]: no parametric correspondence
+/// trusted). A span past `tol` doubles the refit's points, up to [`REFIT_MOST`] a span.
+/// `gap` is the refusal the network had at its common parameters, returned where it cannot be
+/// refitted (an outer curve crossing short of a curve's end).
+///
+/// # Errors
+///
+/// As [`gordon`].
+fn refitted(
+    k: &Kernel,
+    us: &[BSplineCurve],
+    vs: &[BSplineCurve],
+    tol: f64,
+    gap: NetworkRefusal,
+) -> Result<std::result::Result<Gordon, NetworkRefusal>> {
+    let Network {
+        cu,
+        dv,
+        u_cross,
+        v_cross,
+        u_at,
+        v_at,
+    } = match network(k, us, vs)? {
+        Ok(n) => n,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    let (Some(c0), Some(d0)) = (cu.first(), dv.first()) else {
+        return Err(bad("an empty family"));
+    };
+    let ((ua, ub), (va, vb)) = (c0.param_bounds(), d0.param_bounds());
+    // each curve's own crossing parameters, its domain's ends at the outer curves, where the
+    // outer curves must cross it
+    let ends_on = |c: &Curve, t: f64, end: f64| -> Result<bool> {
+        Ok(within(
+            (c.eval(t, Side::Left)? - c.eval(end, Side::Left)?).length(),
+            tol,
+        ))
+    };
+    let mut u_own: Vec<Vec<f64>> = Vec::new();
+    for (c, row) in cu.iter().zip(&u_cross) {
+        let (Some(&first), Some(&last)) = (row.first(), row.last()) else {
+            return Err(bad("a curve without crossings"));
+        };
+        if !ends_on(c, first, ua)? || !ends_on(c, last, ub)? {
+            return Ok(Err(gap));
+        }
+        let mut own = row.clone();
+        if let Some(x) = own.first_mut() {
+            *x = ua;
+        }
+        if let Some(x) = own.last_mut() {
+            *x = ub;
+        }
+        if !increasing(&own) {
+            return Ok(Err(NetworkRefusal::Order));
+        }
+        u_own.push(own);
+    }
+    let mut v_own: Vec<Vec<f64>> = Vec::new();
+    for (l, d) in dv.iter().enumerate() {
+        let column: Vec<f64> = v_cross
+            .iter()
+            .filter_map(|row| row.get(l).copied())
+            .collect();
+        let (Some(&first), Some(&last)) = (column.first(), column.last()) else {
+            return Err(bad("a curve without crossings"));
+        };
+        if !ends_on(d, first, va)? || !ends_on(d, last, vb)? {
+            return Ok(Err(gap));
+        }
+        let mut own = column;
+        if let Some(x) = own.first_mut() {
+            *x = va;
+        }
+        if let Some(x) = own.last_mut() {
+            *x = vb;
+        }
+        if !increasing(&own) {
+            return Ok(Err(NetworkRefusal::Order));
+        }
+        v_own.push(own);
+    }
+    // a family whose crossings are all at the common parameters is kept as it is
+    let off = |own: &[Vec<f64>], at: &[f64]| own.iter().any(|row| row.as_slice() != at);
+    let (u_off, v_off) = (off(&u_own, &u_at), off(&v_own, &v_at));
+
+    let mut reached = f64::INFINITY;
+    let mut per_span = REFIT_FIRST;
+    while per_span <= REFIT_MOST {
+        let ru = if u_off {
+            refit_family(&cu, &u_own, &u_at, per_span)?
+        } else {
+            us.to_vec()
+        };
+        let rv = if v_off {
+            refit_family(&dv, &v_own, &v_at, per_span)?
+        } else {
+            vs.to_vec()
+        };
+        let made = match build(k, &ru, &rv, tol)? {
+            Ok(made) => made,
+            Err(NetworkRefusal::PastTolerance { bound }) => {
+                reached = bound;
+                per_span *= 2;
+                continue;
+            }
+            Err(refusal) => return Ok(Err(refusal)),
+        };
+        let bound = inputs_on(
+            k,
+            &made.surface,
+            &cu,
+            &dv,
+            &u_own,
+            &v_own,
+            &u_at,
+            &v_at,
+            tol,
+        )?;
+        if within(bound, tol) {
+            return Ok(Ok(Gordon {
+                surface: made.surface,
+                bound: bound.max(made.bound),
+            }));
+        }
+        reached = bound;
+        per_span *= 2;
+    }
+    Ok(Err(NetworkRefusal::PastTolerance { bound: reached }))
+}
+
+/// The largest proved distance between the surface and each input curve, span by span between
+/// its crossings ([`span_bound`]): u-curve `kk` from `(u_at[l], v_at[kk])` to
+/// `(u_at[l + 1], v_at[kk])` at its own parameters `u_own[kk][l]`, `u_own[kk][l + 1]`, and each
+/// v-curve likewise.
+#[allow(clippy::too_many_arguments)]
+fn inputs_on(
+    k: &Kernel,
+    surface: &BSplineSurface,
+    cu: &[Curve],
+    dv: &[Curve],
+    u_own: &[Vec<f64>],
+    v_own: &[Vec<f64>],
+    u_at: &[f64],
+    v_at: &[f64],
+    tol: f64,
+) -> Result<f64> {
+    let surf = crate::surface::surface::Surface::from(surface.clone());
+    let mut worst = 0.0_f64;
+    // one family: each curve, its own parameters, and per crossing the surface's (u, v)
+    let mut family = |curves: &[Curve],
+                      own: &[Vec<f64>],
+                      uv: &dyn Fn(usize, usize) -> Option<Point2>|
+     -> Result<()> {
+        for (i, (c, ts)) in curves.iter().zip(own).enumerate() {
+            let rail = kernel_curve(c);
+            let start = c.eval(ts.first().copied().unwrap_or(0.0), Side::Left)?;
+            let spans = RailSpans::about(c, start)?;
+            for j in 0..ts.len().saturating_sub(1) {
+                let (Some(&ta), Some(&tb), Some(a), Some(b)) =
+                    (ts.get(j), ts.get(j + 1), uv(i, j), uv(i, j + 1))
+                else {
+                    return Err(bad("a crossing without its parameters"));
+                };
+                let bound = span_bound(
+                    k,
+                    &surf,
+                    &rail,
+                    &spans,
+                    start,
+                    Node { t: ta, uv: a },
+                    Node { t: tb, uv: b },
+                    tol,
+                )?;
+                worst = worst.max(bound);
+            }
+        }
+        Ok(())
+    };
+    family(cu, u_own, &|kk, l| {
+        Some(Point2::new(*u_at.get(l)?, *v_at.get(kk)?))
+    })?;
+    family(dv, v_own, &|l, kk| {
+        Some(Point2::new(*u_at.get(l)?, *v_at.get(kk)?))
+    })?;
+    Ok(worst)
 }
 
 #[cfg(test)]
@@ -812,5 +1181,66 @@ mod tests {
             gordon(&k, &us, &vs, 1e-6).unwrap().unwrap_err(),
             NetworkRefusal::Crossings { u: 0, v: 1, count } if count >= 2
         ));
+    }
+
+    /// A network crossing at its common parameters takes the compatible path as it is: the
+    /// same surface (net, degrees, knots) and the same bound as building it directly.
+    #[test]
+    fn a_compatible_network_is_built_as_before() {
+        let k = Kernel::default();
+        let z = |x: f64, y: f64| (x - 5.0) * (y - 5.0) / 10.0;
+        let u_curve = |y: f64| {
+            spline(
+                &[
+                    [0.0, y, z(0.0, y)],
+                    [5.0, y, z(5.0, y)],
+                    [10.0, y, z(10.0, y)],
+                ],
+                1,
+            )
+        };
+        let v_curve = |x: f64| {
+            spline(
+                &[
+                    [x, 0.0, z(x, 0.0)],
+                    [x, 5.0, z(x, 5.0)],
+                    [x, 10.0, z(x, 10.0)],
+                ],
+                1,
+            )
+        };
+        let us = [u_curve(0.0), u_curve(5.0), u_curve(10.0)];
+        let vs = [v_curve(0.0), v_curve(5.0), v_curve(10.0)];
+        let g = gordon(&k, &us, &vs, 1e-6).unwrap().unwrap();
+        let direct = build(&k, &us, &vs, 1e-6).unwrap().unwrap();
+        assert_eq!(g.bound.to_bits(), direct.bound.to_bits());
+        let (a, b) = (
+            g.surface.nurb.as_ref().unwrap(),
+            direct.surface.nurb.as_ref().unwrap(),
+        );
+        assert_eq!(a.degrees(), b.degrees());
+        assert_eq!(a.u_knots(), b.u_knots());
+        assert_eq!(a.v_knots(), b.v_knots());
+        let bits = |s: &Surface| -> Vec<[u64; 4]> {
+            s.rows()
+                .flatten()
+                .map(|c| [c.x.to_bits(), c.y.to_bits(), c.z.to_bits(), c.w.to_bits()])
+                .collect()
+        };
+        assert_eq!(bits(a), bits(b));
+    }
+
+    #[test]
+    fn the_monotone_map_goes_through_its_points_and_increases() {
+        let (xs, ys) = ([0.0, 0.3, 0.7, 1.0], [0.0, 0.5, 0.6, 1.0]);
+        for (x, y) in xs.iter().zip(ys) {
+            assert!((monotone(&xs, &ys, *x).unwrap() - y).abs() < 1e-15);
+        }
+        let mut last = f64::NEG_INFINITY;
+        for i in 0..=100 {
+            let y = monotone(&xs, &ys, f64::from(i) / 100.0).unwrap();
+            assert!(y >= last, "{y} after {last}");
+            last = y;
+        }
     }
 }
