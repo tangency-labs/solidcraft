@@ -1130,6 +1130,57 @@ fn v_on_a_selected_profile_toggles_its_sketch() {
     assert!(crate::browser::sketch_visible(&app, sk), "and shows it again");
 }
 
+/// A construction plane, axis or point picked as a feature (its Features row or its timeline
+/// step) shows and hides with V and with its Features row's menu, as from the Construction folder.
+#[test]
+fn construction_picked_as_a_feature_shows_and_hides() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut app = sample_app();
+    app.run("construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Lid"})).unwrap();
+    app.run("construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"})).unwrap();
+    app.run("construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"})).unwrap();
+    let names = ["Lid", "Pin", "Spine"];
+    let ids: Vec<u64> = names.iter().map(|n| app.session.doc.find_feature(n).unwrap().id).collect();
+    let hidden = |app: &SolveApp| {
+        let mut h = app.session.visibility.hidden_origin.clone();
+        h.sort();
+        h
+    };
+    let items: Vec<serde_json::Value> = ids.iter().map(|id| json!({"type": "feature", "id": id})).collect();
+    app.run("select.set", json!({ "items": items })).unwrap();
+    context_menu::toggle_visibility(&mut app);
+    assert_eq!(hidden(&app), names, "V hides the picked construction features");
+    context_menu::toggle_visibility(&mut app);
+    assert!(hidden(&app).is_empty(), "and shows them again");
+
+    for (id, name) in ids.iter().zip(names) {
+        let t = Target::Feature { id: *id };
+        assert_eq!(find(&context_menu::items(&app, &t), "Show/Hide").shortcut, "V");
+        act(&mut app, &t, "Show/Hide");
+        assert_eq!(hidden(&app), [name], "the Features row's Show/Hide hides {name}");
+        act(&mut app, &t, "Show/Hide");
+        assert!(hidden(&app).is_empty(), "and shows {name} again");
+    }
+    // Other features' rows keep their menu without Show/Hide.
+    let other = app
+        .session
+        .doc
+        .features
+        .iter()
+        .find(|f| {
+            !matches!(
+                f.kind,
+                FeatureKind::Sketch { .. }
+                    | FeatureKind::ConstructionPlane { .. }
+                    | FeatureKind::ConstructionAxis { .. }
+                    | FeatureKind::ConstructionPoint { .. }
+            )
+        })
+        .map(|f| f.id)
+        .unwrap();
+    assert!(!context_menu::items(&app, &Target::Feature { id: other }).iter().any(|i| i.label == "Show/Hide"));
+}
+
 #[test]
 fn v_toggles_what_is_selected() {
     let mut app = sample_app();
