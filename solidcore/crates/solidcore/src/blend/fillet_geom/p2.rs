@@ -559,6 +559,15 @@ fn solver_surface<'s>(
         .ok_or_else(|| SolidError::blend_missing(op, "the solver's offset surface"))
 }
 
+/// Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a stage of a
+/// corner with a rail rolled over a smooth far edge of its face that failed with no reason the
+/// kernel names (a defect, [`crate::error::blend::BlendFailure::StageFailed`]). Its origin is
+/// the caller's line.
+#[track_caller]
+fn rolled_stage_failed(op: &'static str) -> SolidError {
+    SolidError::blend(op, BlendFailure::StageFailed)
+}
+
 /// Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): the face beyond
 /// that rail `rail` of geometry `g`'s solver rolls on, where it rolls over a smooth far edge of
 /// its face (its section's parameters there are on that face's surface), else `None`.
@@ -3261,8 +3270,9 @@ impl FilletBrep {
                 if let Some(onto) = fs.rolled_faces.get(ii).copied().flatten() {
                     let tangency = fs.tangency_tolerance;
                     let foot = b.point + bin;
-                    let from = eu1::face(target, side_eu)?
-                        .ok_or_else(|| nul("the side edge use's face"))?;
+                    let Some(from) = eu1::face(target, side_eu)? else {
+                        return Err(rolled_stage_failed(OP));
+                    };
                     let seed = crate::blend::fillet_tangent_rollover::rolled_edge_point(
                         k, target, from, onto, foot, tangency,
                     )?
@@ -3275,10 +3285,8 @@ impl FilletBrep {
                         &crate::surface::surface::p5::DropPointOptions::default(),
                     )?;
                     if !dropped.success {
-                        return Err(SolidError::blend_failed(
-                            OP,
-                            "the rolled rail's foot does not drop onto the face beyond",
-                        ));
+                        // the rolled rail's foot does not drop onto the face beyond
+                        return Err(rolled_stage_failed(OP));
                     }
                     *slot = dropped.result_uv;
                     continue;
@@ -3369,10 +3377,8 @@ impl FilletBrep {
             }
         }
         if any_rolled && !ended {
-            return Err(SolidError::blend_failed(
-                OP,
-                "no blend of the join rolls on the two faces its shared section ends on",
-            ));
+            // no blend of the join rolls on the two faces its shared section ends on
+            return Err(rolled_stage_failed(OP));
         }
         Ok(())
     }

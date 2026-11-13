@@ -37,13 +37,21 @@ use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3};
+use crate::math::{Point2, Point3, EFF_ZERO};
 use crate::surface::offset_surface::SS_UNKNOWN;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p4 as face_p4;
 use crate::topology::{edge, Brep, EdgeId, FaceId};
 
 const OP: &str = "blend::fillet_executive::session::tangent_rollover";
+
+/// A stage of the rollover that failed with no reason the kernel names (a defect,
+/// [`crate::error::blend::BlendFailure::StageFailed`]): a solver the session does not hold.
+/// Its origin is the caller's line.
+#[track_caller]
+fn stage_failed() -> SolidError {
+    SolidError::blend(OP, crate::error::blend::BlendFailure::StageFailed)
+}
 
 /// The intervals a round's edge is cut into to tell where its ball's contacts lie: the ball's
 /// section is solved at each cut, the edge's ends among them.
@@ -97,12 +105,14 @@ impl FilletSession<'_> {
                     inputs.tangency,
                 )?
             } else {
-                let solver = self
+                let Some(solver) = self
                     .objects
                     .solvers
                     .get_mut(id.0 as usize)
                     .and_then(Option::as_mut)
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the live solver"))?;
+                else {
+                    return Err(stage_failed());
+                };
                 rails_wholly_past(k, &mut *self.objects.target, solver, &inputs)?
             };
             for (rail, rollover) in rollovers.into_iter().enumerate() {
@@ -255,11 +265,13 @@ fn roll_solver_surface(
 }
 
 /// The ball's sections of `solver` at each of `ts` along `curve`, its filleted edge's curve
-/// (each solved from the one before as its fallback guess), or `None` where one is not found.
+/// (each solved from the one before as its fallback guess), or `None` where one is not found
+/// or is not the ball of radii `offsets` there ([`is_ball_at`]).
 fn sections(
     k: &Kernel,
     target: &mut Brep,
     solver: &mut SolverObject,
+    offsets: &[f64; 2],
     curve: &Curve,
     ts: &[f64],
 ) -> Result<Option<Vec<TsectPnt>>> {
@@ -268,9 +280,67 @@ fn sections(
         let Some(section) = ball_section_at(k, target, solver, curve, t, out.last())? else {
             return Ok(None);
         };
+        if !is_ball_at(k, target, solver, offsets, curve, t, &section)? {
+            return Ok(None);
+        }
         out.push(section);
     }
     Ok(Some(out))
+}
+
+/// Whether `section`, solved by `solver` at `t` along `curve` (its filleted edge's curve), is
+/// the ball there: the two sides' offset points at its contacts (the ball's centre as each
+/// side's offset gives it) agree, the centre lies on the plane through the edge's point square
+/// to the edge, and each contact lies the ball's radius `|offsets[rail]|` from the centre, all
+/// within the solver's fit tolerance (at least the body's). A solve can stop where the faces'
+/// offsets, extended as the trace extends them, are no longer the offsets by the ball (a side
+/// round about as wide as the ball, as on #2652's twisted disc); the section it returns then
+/// misses the plane and the radius, and nothing is judged from it.
+///
+/// # Errors
+/// Those of the evaluations.
+fn is_ball_at(
+    k: &Kernel,
+    target: &Brep,
+    solver: &mut SolverObject,
+    offsets: &[f64; 2],
+    curve: &Curve,
+    t: f64,
+    section: &TsectPnt,
+) -> Result<bool> {
+    let pv = curve.evaluate(k, t, 1, true, false)?;
+    let (Some(&point), Some(&tangent)) = (pv.first(), pv.get(1)) else {
+        return Ok(false);
+    };
+    let length = tangent.length();
+    if length.is_nan() || length <= EFF_ZERO {
+        return Ok(false);
+    }
+    let normal = tangent.unitize()?;
+    let tol = solver.base().approx_tol_3d.max(target.tolerance());
+    if !tol.is_finite() {
+        return Ok(false);
+    }
+    let mut centres = [Point3::default(); 2];
+    for (rail, centre) in centres.iter_mut().enumerate() {
+        let uv = section.uv_pos(side_of(rail));
+        let Some(contact) = solver
+            .base()
+            .surface(rail)?
+            .map(|o| o.surface.base_surface().evaluate_point(k, uv))
+            .transpose()?
+        else {
+            return Ok(false);
+        };
+        *centre = crate::blend::fillet_solver::p2::eval_offset(k, solver.base_mut(), rail, uv)?;
+        let radius = offsets.get(rail).map_or(f64::NAN, |o| o.abs());
+        let miss = ((*centre - contact).length() - radius).abs();
+        if miss.is_nan() || miss > tol {
+            return Ok(false);
+        }
+    }
+    let [c0, c1] = centres;
+    Ok((c0 - c1).length() <= tol && (c0 - point).dot(normal).abs() <= tol)
 }
 
 /// How `uv` on `face`'s surface classifies against the face, within `tolerance`: in it, on its
@@ -388,7 +458,7 @@ struct Sides {
 
 /// [`rails_wholly_past`]'s first probe: each side's candidates, and whether its contact lies
 /// off its face at every section; `None` where no side with a candidate has it so (or the edge
-/// has no curve, or a section is not found).
+/// has no curve, or a section is not found or is not the ball there, [`is_ball_at`]).
 ///
 /// # Errors
 /// Those of the section solves, the classifications and the topology queries.
@@ -439,6 +509,9 @@ fn sides_wholly_off(
         else {
             return Ok(None);
         };
+        if !is_ball_at(k, target, solver, &inputs.offsets, &curve, t, &section)? {
+            return Ok(None);
+        }
         for (rail, (off_face, &face)) in wholly_off.iter_mut().zip(&inputs.faces).enumerate() {
             if *off_face {
                 *off_face = off(classify(
@@ -488,7 +561,8 @@ fn carried(
     Ok(trial?.unwrap_or(false))
 }
 
-/// [`carried`]'s trial, which leaves the solver rolled on the faces beyond.
+/// [`carried`]'s trial, which leaves the solver rolled on the faces beyond. A face beyond
+/// without a surface, or an edge without a tangent, carries nothing.
 ///
 /// # Errors
 /// Those of the rolls, the section solves, the classifications, the evaluations and
@@ -506,23 +580,22 @@ fn carried_rolled(
         let Some(rollover) = rollover else {
             continue;
         };
-        let surface = crate::topology::face::p2::surface(target, rollover.face)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
-            .clone_for_evaluation()?;
+        let Some(surface) = crate::topology::face::p2::surface(target, rollover.face)? else {
+            return Ok(false);
+        };
+        let surface = surface.clone_for_evaluation()?;
         roll_solver_surface(k, solver.base_mut(), rail, &surface, *rollover)?;
         *support = Some(surface);
     }
-    let Some(rolled) = sections(k, target, solver, &sides.curve, &sides.ts)? else {
+    let Some(rolled) = sections(k, target, solver, &inputs.offsets, &sides.curve, &sides.ts)?
+    else {
         return Ok(false);
     };
     let tolerance = target.tolerance();
     for (section, &t) in rolled.iter().zip(&sides.ts) {
-        let along = sides
-            .curve
-            .evaluate(k, t, 1, true, false)?
-            .get(1)
-            .copied()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's tangent"))?;
+        let Some(along) = sides.curve.evaluate(k, t, 1, true, false)?.get(1).copied() else {
+            return Ok(false);
+        };
         for (rail, (rollover, support)) in rollovers.iter().zip(&supports).enumerate() {
             let (Some(rollover), Some(support), Some(&offset)) =
                 (rollover, support, inputs.offsets.get(rail))
@@ -606,8 +679,8 @@ impl SessionObjects<'_> {
 /// rail that left the face would cross its boundary in the surface: there the rail is within
 /// `fit` of a point of the face's boundary, which is within `zone` of an edge's curve, which
 /// is within `zone` of the face across it. So the rail crosses no edge of the face: it lies
-/// on the face, all of it. A rail whose curve has no B-spline form this
-/// proof reads, or that comes as near another face (one it ends on, a face continued past its
+/// on the face, all of it. A rail without a curve or whose curve has no B-spline form this
+/// proof reads, a face without a surface, or a rail that comes as near another face (one it ends on, a face continued past its
 /// boundary by its surface over the face's UV box), is not proved.
 ///
 /// # Errors
@@ -620,15 +693,16 @@ fn rail_within_face(
     face: FaceId,
     fit: f64,
 ) -> Result<bool> {
-    let curve = edge::curve(fillets, rail)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?
-        .clone();
+    let Some(curve) = edge::curve(fillets, rail)?.cloned() else {
+        return Ok(false);
+    };
     let ivl = edge::interval(fillets, rail)?;
     let tolerance = target.tolerance();
     let middle = curve.evaluate_point(k, ivl.evaluate(0.5))?;
-    let surface = crate::topology::face::p2::surface(target, face)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
-        .clone_for_evaluation()?;
+    let Some(surface) = crate::topology::face::p2::surface(target, face)? else {
+        return Ok(false);
+    };
+    let surface = surface.clone_for_evaluation()?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
         k,
@@ -804,8 +878,8 @@ impl RailPiece {
             .fold(0.0_f64, f64::max);
         let err = self.err + crate::nurbs::math::gamma(2 * degree + 2) * (largest + self.err);
         let mut work = self.h.clone();
-        let mut left = Vec::with_capacity(work.len());
-        let mut right = Vec::with_capacity(work.len());
+        let mut left = Vec::new();
+        let mut right = Vec::new();
         if let Some(&first) = work.first() {
             left.push(first);
         }
