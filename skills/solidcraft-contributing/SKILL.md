@@ -141,7 +141,7 @@ at each step: what you found, what comes next, and what needs their decision.
 Explain that changes go to their own copy on GitHub. After approval, run:
 
 ```sh
-gh repo fork tangency-labs/solidcraft --clone --remote
+gh repo fork tangency-labs/solidcraft --clone
 cd solidcraft
 git remote -v
 ```
