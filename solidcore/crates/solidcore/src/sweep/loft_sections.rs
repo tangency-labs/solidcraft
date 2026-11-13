@@ -48,7 +48,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{Result, SolidError};
+use crate::error::{sweep::SweepFailure, Result, SolidError};
 use crate::math::{Point2, Vec2, Vec3};
 use crate::prism::profile::{casteljau, Seg2, H2};
 
@@ -62,7 +62,7 @@ const UNPAIRED: f64 = 0.1;
 /// segments each). Each start's search stores one byte a cell, and the search over every start
 /// visits about log2(n) times the grid. Two sections with a larger grid are paired from one start
 /// through a band of the grid ([`banded_walk`]), so no loft is refused for its size below the caller's
-/// `max_segments`.
+/// `max_segments` and [`LARGEST_BANDED`].
 pub const MAX_CELLS: usize = 4_000_000;
 /// The deepest the divide and conquer over the starts goes (log2 of the vertex count: about 22
 /// for any loop within [`MAX_CELLS`]).
@@ -1108,8 +1108,12 @@ fn between(
     between(g, (mid, &lo), high, best, depth + 1)
 }
 
-/// How many times [`banded_walk`] moves its band onto the walk it found before refusing.
+/// How many times [`banded_walk`] moves its band onto the walk it found; the last band's walk
+/// is kept.
 const BAND_PASSES: usize = 8;
+/// The most segments two sections of equal counts may have for the band of [`banded_walk`] within
+/// [`MAX_CELLS`] to be one column wide either side (`(MAX_CELLS - 3) / 5`).
+pub const LARGEST_BANDED: usize = 799_999;
 
 /// A vertex turns more than this (one less the cosine of the angle between the tangents arriving
 /// and leaving, about 26°) to be a corner the band of [`banded_walk`] is anchored at.
@@ -1129,7 +1133,9 @@ fn corners(side: &Side) -> Vec<usize> {
 /// corners joined by straight lines, in its frame): `(i, j)` vertex numbers in order from the
 /// first. Polygons whose grid is past [`MAX_CELLS`] are paired through a band of it
 /// ([`banded_walk`], at their shares of their lengths: every vertex of theirs is a corner). Empty
-/// when either loop has fewer than three corners.
+/// when either loop has fewer than three corners, or the polygons cannot be paired (past
+/// [`LARGEST_BANDED`] corners): the corner pairs only centre the band of [`banded_walk`], so
+/// without them it is centred on the shares round the whole loops, and nothing is refused for it.
 fn corner_pairs(g: &Grid) -> Vec<(usize, usize)> {
     let (ca, cb) = (corners(&g.a), corners(&g.b));
     if ca.len() < 3 || cb.len() < 3 {
@@ -1150,7 +1156,7 @@ fn corner_pairs(g: &Grid) -> Vec<(usize, usize)> {
     };
     let small = Grid { a, b };
     let walked = if (ca.len() + 1).saturating_mul(cb.len() + 1) > MAX_CELLS {
-        banded_walk(&small, false)
+        banded_walk(&small, false, MAX_CELLS)
     } else {
         best_walk(&small)
     };
@@ -1205,14 +1211,11 @@ fn share_columns(g: &Grid, (i0, i1): (usize, usize), (j0, j1): (usize, usize)) -
     out
 }
 
-/// Each row's column (0 to m) and the paired corners as (row, column) ([`band_centres`]).
-type Band = (Vec<usize>, Vec<(usize, usize)>);
-
 /// The column of every row (0 to m), from `s` for row 0 to `s + n` for row m: between two paired
 /// corners ([`corner_pairs`]), each of `a`'s vertices at its share of the length between them;
 /// with no paired corners, from `b`'s vertex that pairs most cheaply with `a`'s vertex 0, at its
-/// share of the length round. With them, the paired corners as (row, column).
-fn band_centres(g: &Grid, anchored: bool) -> Option<Band> {
+/// share of the length round.
+fn band_centres(g: &Grid, anchored: bool) -> Option<Vec<usize>> {
     let (m, n) = (g.a.count(), g.b.count());
     let anchors = if anchored {
         corner_pairs(g)
@@ -1223,7 +1226,7 @@ fn band_centres(g: &Grid, anchored: bool) -> Option<Band> {
         let s = (0..n).min_by(|x, y| g.pair(0, *x).total_cmp(&g.pair(0, *y)))?;
         let mut c = share_columns(g, (0, m), (s, s + n));
         c.push(s + n);
-        return Some((c, Vec::new()));
+        return Some(c);
     };
     // The paired corners' columns counted on round `b` so they increase, from n on.
     let mut on: Vec<(usize, usize)> = Vec::new();
@@ -1259,66 +1262,31 @@ fn band_centres(g: &Grid, anchored: bool) -> Option<Band> {
     centre.push(s + n);
     // Columns from below n, so the start is one of `b`'s vertex numbers.
     let shift = s.checked_div(n).unwrap_or(0).saturating_mul(n);
-    let centre: Vec<usize> = centre
-        .into_iter()
-        .map(|c| c.saturating_sub(shift))
-        .collect();
-    // The paired corners at their rows' columns, in order of row.
-    let mut pinned: Vec<(usize, usize)> = anchors
-        .iter()
-        .filter_map(|&(i, _)| Some((i, *centre.get(i)?)))
-        .collect();
-    pinned.sort_unstable();
-    Some((centre, pinned))
+    Some(
+        centre
+            .into_iter()
+            .map(|c| c.saturating_sub(shift))
+            .collect(),
+    )
 }
 
-/// The rows' column ranges `lo` and `hi` narrowed so a walk pairs every `(row, column)` of
-/// `pinned` (increasing in both): up to a pinned row a walk stays at or left of its column, and
-/// from the row after on, right of it, which only the pair step can do.
-fn pin(pinned: &[(usize, usize)], lo: &mut [usize], hi: &mut [usize]) {
-    let mut next = 0usize;
-    let mut last: Option<usize> = None;
-    for (i, (l, h)) in lo.iter_mut().zip(hi.iter_mut()).enumerate() {
-        while pinned.get(next).is_some_and(|p| p.0 < i) {
-            last = pinned.get(next).map(|p| p.1);
-            next += 1;
-        }
-        if let Some(c) = last {
-            *l = (*l).max(c + 1);
-        }
-        if let Some(&(_, c)) = pinned.get(next) {
-            *h = (*h).min(c);
-        }
-    }
-}
-
-/// The least-cost walk that pairs the corners the polygons through both loops' corners pair
-/// ([`corner_pairs`]), from the start [`band_centres`] gives; `None` when there are none or no
-/// such walk.
-fn pinned_walk(g: &Grid) -> Option<Walk> {
+/// The least-cost walk for two loops whose whole grid is past `cells` ([`MAX_CELLS`] for a
+/// match): from one start, through a band of columns about where each of `a`'s vertices falls
+/// ([`band_centres`]: when `anchored`, at its share of the length between the corners the
+/// polygons through both loops' corners pair, otherwise of the length round), as wide as the
+/// bound allows (its cells, at most (m + 1)(2h + 1) + 2n, stay within `cells`: h is about 400
+/// vertices for two loops of 5000). A walk that runs along an edge of the band (not the grid's)
+/// may have been held off a cheaper one outside it, so the band is moved to centre on the walk
+/// and searched again, up to [`BAND_PASSES`] times (at most that many times `cells` cells); the
+/// last band's walk is kept. So the walk is the least-cost one within its band, proven the least
+/// over the whole grid only when it does not run along the band's edge.
+///
+/// # Errors
+/// [`SweepFailure::LoftSectionsTooLarge`] when the band would be empty (h = 0: about 800 000
+/// segments a section for [`MAX_CELLS`]).
+fn banded_walk(g: &Grid, anchored: bool, cells: usize) -> Result<Walk> {
     let (m, n) = (g.a.count(), g.b.count());
-    let (centre, pinned) = band_centres(g, true)?;
-    if pinned.is_empty() {
-        return None;
-    }
-    let s = *centre.first()?;
-    let (mut lo, mut hi) = (vec![s; m + 1], vec![s + n; m + 1]);
-    pin(&pinned, &mut lo, &mut hi);
-    walk(g, s, &lo, &hi)
-}
-
-/// The least-cost walk for two loops whose whole grid is past [`MAX_CELLS`]: from one start,
-/// through a band of columns about where each of `a`'s vertices falls ([`band_centres`]: at its
-/// share of the length between the corners the polygons through both loops' corners pair), as
-/// wide as the bound allows (the band's cells, at most (m + 1)(2h + 1) + 2n, stay within it:
-/// h is about 400 vertices for two loops of 5000). The corners those polygons pair are paired
-/// ([`pin`]) when `anchored`; other vertices pair wherever they lie within the band of where their
-/// shares put them. A walk that runs along an edge of the band is searched again in the band
-/// centred on it, up to [`BAND_PASSES`] times (so at most that many times [`MAX_CELLS`] cells),
-/// and refused past that; so is a band with no walk that pairs those corners.
-fn banded_walk(g: &Grid, anchored: bool) -> Result<Walk> {
-    let (m, n) = (g.a.count(), g.b.count());
-    let h = MAX_CELLS
+    let h = cells
         .saturating_sub(n.saturating_mul(2))
         .checked_div(m + 1)
         .unwrap_or(0)
@@ -1326,41 +1294,41 @@ fn banded_walk(g: &Grid, anchored: bool) -> Result<Walk> {
         .checked_div(2)
         .unwrap_or(0);
     if h == 0 {
-        return Err(SolidError::InvalidInput {
-            operation: OP,
-            reason: "loft sections too large to pair",
-        });
+        return Err(SolidError::sweep(
+            OP,
+            SweepFailure::LoftSectionsTooLarge {
+                first: m,
+                second: n,
+                largest: LARGEST_BANDED,
+            },
+        ));
     }
-    let (mut centre, pinned) = band_centres(g, anchored).ok_or_else(unpaired)?;
+    let mut centre = band_centres(g, anchored).ok_or_else(unpaired)?;
     let s = *centre.first().ok_or_else(unpaired)?;
+    let mut last: Option<Walk> = None;
     for _ in 0..BAND_PASSES {
         // Each row's band also spans the columns of the rows either side, so a walk can step
         // from any column of one row's band into the next row and run along it.
         let column = |i: usize, c: usize| centre.get(i).copied().unwrap_or(c);
-        let band_lo: Vec<usize> = (0..=m)
+        let lo: Vec<usize> = (0..=m)
             .map(|i| {
                 let c = column(i, s);
                 let before = i.checked_sub(1).map_or(c, |b| column(b, c));
                 c.min(before).saturating_sub(h).max(s)
             })
             .collect();
-        let band_hi: Vec<usize> = (0..=m)
+        let hi: Vec<usize> = (0..=m)
             .map(|i| {
                 let c = column(i, s);
                 (c.max(column(i + 1, c)) + h).min(s + n)
             })
             .collect();
-        let (mut lo, mut hi) = (band_lo.clone(), band_hi.clone());
-        pin(&pinned, &mut lo, &mut hi);
-        // No walk that pairs the paired corners is refused, not walked without them.
         let w = walk(g, s, &lo, &hi).ok_or_else(unpaired)?;
-        // A walk that runs along an edge of the band (not the grid's) may have been held off a
-        // cheaper one outside it: the band is moved to centre on the walk and searched again.
         let (vlo, vhi) = w.bounds(m);
         let held = (0..=m).any(|i| {
             let at = |v: &[usize], b: &[usize]| v.get(i).zip(b.get(i)).is_some_and(|(x, y)| x == y);
-            (at(&vlo, &band_lo) && band_lo.get(i).is_some_and(|&b| b > s))
-                || (at(&vhi, &band_hi) && band_hi.get(i).is_some_and(|&b| b < s + n))
+            (at(&vlo, &lo) && lo.get(i).is_some_and(|&b| b > s))
+                || (at(&vhi, &hi) && hi.get(i).is_some_and(|&b| b < s + n))
         });
         if !held {
             return Ok(w);
@@ -1370,11 +1338,9 @@ fn banded_walk(g: &Grid, anchored: bool) -> Result<Walk> {
             .zip(&vhi)
             .map(|(&a, &b)| a + b.saturating_sub(a).checked_div(2).unwrap_or(0))
             .collect();
+        last = Some(w);
     }
-    Err(SolidError::InvalidInput {
-        operation: OP,
-        reason: "loft sections too large to pair: the pairing leaves every band it is searched in",
-    })
+    last.ok_or_else(unpaired)
 }
 
 /// What an event of the correspondence is on one of the loops: one of its vertices, or a point
@@ -1396,9 +1362,7 @@ fn correspond(a: &[Seg2], fa: Frame, b: &[Seg2], fb: Frame) -> Result<Correspond
     };
     let (m, n) = (g.a.count(), g.b.count());
     let w = if (m + 1).saturating_mul(n + 1) > MAX_CELLS {
-        banded_walk(&g, true)?
-    } else if let Some(w) = pinned_walk(&g) {
-        w
+        banded_walk(&g, true, MAX_CELLS)?
     } else {
         best_walk(&g)?
     };
@@ -1888,8 +1852,9 @@ fn to_world(origin: Vec3, x: Vec3, y: Vec3, p: Point2) -> Vec3 {
 /// # Errors
 /// [`SolidError::InvalidInput`] for a section with no segments, no length or a point that is not
 /// finite, plane axes that are not finite orthogonal unit vectors, a circle whose centre, radius
-/// or angles are not finite, or a match past `max_segments`; [`SolidError::PortInvariant`] when
-/// the pairing breaks down.
+/// or angles are not finite or whose radius is not positive, or a match past `max_segments`;
+/// [`SolidError::Failed`] with [`SweepFailure::LoftSectionsTooLarge`] for two sections past
+/// [`LARGEST_BANDED`] segments; [`SolidError::PortInvariant`] when the pairing breaks down.
 pub fn match_loft_sections(
     sections: &[LoftSection],
     max_segments: usize,
@@ -1926,7 +1891,13 @@ pub fn match_loft_sections(
             radius,
             start,
             sweep,
-        } => finite(center) && radius.is_finite() && start.is_finite() && sweep.is_finite(),
+        } => {
+            finite(center)
+                && radius.is_finite()
+                && radius > 0.0
+                && start.is_finite()
+                && sweep.is_finite()
+        }
         _ => true,
     };
     if sections
@@ -2749,30 +2720,101 @@ mod tests {
         poly(&pts)
     }
 
-    /// A 10 x 1 and a 1.5 x 1 rectangle, each in 5000 segments of about equal length, past
-    /// [`MAX_CELLS`]: their corners lie at different shares of their perimeters (the bottom right
-    /// at 45% of the one and 30% of the other, some 770 vertices from where the shares round the
-    /// whole loop put it), yet all four pair.
+    /// The band past [`MAX_CELLS`] finds the least-cost walk from its start over the whole grid
+    /// where that walk is far from where the shares put it: a 10 x 1 and a 1.5 x 1 rectangle in
+    /// 498 and 500 segments of about equal length (their corners at 45% and 30% of their
+    /// perimeters), paired through a band of a hundredth of their grid (h = 39) and moved onto
+    /// the walk, cost what the walk from the same start through the whole grid costs. (The search
+    /// over every start finds one 1.8% cheaper here: the band keeps its one start.)
     #[test]
-    fn corners_at_different_shares_pair_in_sections_too_large_for_the_whole_grid() {
-        let a = cut_rectangle(10.0, 1.0, [2273, 227, 2273, 227]);
-        let b = cut_rectangle(1.5, 1.0, [1500, 1000, 1500, 1000]);
-        assert_eq!((a.len(), b.len()), (5000, 5000));
-        let m = match_loft_sections(&[at(0.0, a), at(10.0, b)], 20_000).unwrap();
+    fn the_band_finds_the_whole_grids_walk_from_its_start() {
+        let a = cut_rectangle(10.0, 1.0, [227, 22, 227, 22]);
+        let b = cut_rectangle(1.5, 1.0, [150, 100, 150, 100]);
+        let frame = |segs: &[Seg2]| Frame::new(p(1.0, 0.0), p(0.0, 1.0), segs);
+        let g = Grid {
+            a: Side::new(&a, frame(&a)).unwrap(),
+            b: Side::new(&b, frame(&b)).unwrap(),
+        };
+        let banded = banded_walk(&g, true, 40_000).unwrap();
+        let (m, n) = (g.a.count(), g.b.count());
+        let whole = walk(&g, banded.start, &vec![0; m + 1], &vec![2 * n; m + 1]).unwrap();
+        assert!(
+            (banded.cost - whole.cost).abs() <= 1e-9 * whole.cost,
+            "band {} whole grid {}",
+            banded.cost,
+            whole.cost
+        );
+        let every = best_walk(&g).unwrap();
+        assert!(every.cost <= banded.cost);
+    }
+
+    /// A square lofted to a diamond (a square turned 45 degrees, its corners on the axes) with a
+    /// vertex in the middle of each side, where the square's corners point: each corner of the
+    /// square runs straight up to the vertex in its direction, as lofts did before the pairing,
+    /// not to a corner of the diamond (a turn of 45 degrees).
+    #[test]
+    fn a_square_to_a_diamond_runs_its_corners_straight_up() {
+        let r = std::f64::consts::SQRT_2;
+        let h = r / 2.0;
+        let square = poly(&[(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)]);
+        let diamond = poly(&[
+            (r, 0.0),
+            (h, h),
+            (0.0, r),
+            (-h, h),
+            (-r, 0.0),
+            (-h, -h),
+            (0.0, -r),
+            (h, -h),
+        ]);
+        let m = match_loft_sections(&[at(0.0, square), at(10.0, diamond)], 100).unwrap();
         sound(&m);
-        assert_eq!(m[0].segs.len(), m[1].segs.len());
-        let ca = [p(0.0, 0.0), p(10.0, 0.0), p(10.0, 1.0), p(0.0, 1.0)];
-        let cb = [p(0.0, 0.0), p(1.5, 0.0), p(1.5, 1.0), p(0.0, 1.0)];
-        for (x, y) in ca.iter().zip(cb) {
-            let k = starts(&m[0])
-                .iter()
-                .position(|q| dist(*q, *x) < 1e-12)
-                .unwrap();
-            assert!(
-                dist(starts(&m[1])[k], y) < 1e-9,
-                "{x:?} runs to {:?}",
-                starts(&m[1])[k]
-            );
+        for c in [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
+            let q = partner(&m, c);
+            assert!(near(q, (c.0 * h, c.1 * h)), "{c:?} runs to {q:?}");
+        }
+    }
+
+    /// A stadium (two half circles of radius 0.5 joined by straight sides `side` long) as a
+    /// polygon of `n` vertices at equal lengths along it.
+    fn stadium(side: f64, n: usize) -> Vec<Seg2> {
+        let r = 0.5;
+        let total = 2.0 * side + 2.0 * PI * r;
+        let at_length = |d: f64| -> (f64, f64) {
+            let half = side / 2.0;
+            let arc = PI * r;
+            if d < side {
+                (-half + d, -r)
+            } else if d < side + arc {
+                let a = -PI / 2.0 + (d - side) / r;
+                (half + r * a.cos(), r * a.sin())
+            } else if d < 2.0 * side + arc {
+                (half - (d - side - arc), r)
+            } else {
+                let a = PI / 2.0 + (d - 2.0 * side - arc) / r;
+                (-half + r * a.cos(), r * a.sin())
+            }
+        };
+        let pts: Vec<(f64, f64)> = (0..n)
+            .map(|k| at_length(total * k as f64 / n as f64))
+            .collect();
+        poly(&pts)
+    }
+
+    /// Stadiums of 14 000 and of 12 000 vertices each, of different proportions (straight sides
+    /// 9 against 0.5, and 30 against 0.5), past [`MAX_CELLS`]: lofts built them before the
+    /// pairing, and the pairing builds them, within the kernel's 20 000 segments.
+    #[test]
+    fn large_stadiums_of_different_proportions_pair() {
+        for (n, side) in [(14_000, 9.0), (12_000, 30.0)] {
+            let m = match_loft_sections(
+                &[at(0.0, stadium(side, n)), at(10.0, stadium(0.5, n))],
+                20_000,
+            )
+            .unwrap();
+            sound(&m);
+            assert_eq!(m[0].segs.len(), m[1].segs.len());
+            assert!(m[0].segs.len() <= 20_000, "{}", m[0].segs.len());
         }
     }
 
@@ -2883,11 +2925,10 @@ mod tests {
             sweep: PI,
         };
         assert!(is_circle(&[whole(0), whole(1)]));
-        if let Ok(m) = match_loft_sections(&[at(0.0, gon(4, 10.0)), at(10.0, back)], 100) {
-            for s in &m[1].segs {
-                for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
-                    assert!(s.point_at(t).y > -1e-9, "{:?}", s.point_at(t));
-                }
+        let m = match_loft_sections(&[at(0.0, gon(4, 10.0)), at(10.0, back)], 100).unwrap();
+        for s in &m[1].segs {
+            for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                assert!(s.point_at(t).y > -1e-9, "{:?}", s.point_at(t));
             }
         }
     }
@@ -2925,7 +2966,8 @@ mod tests {
     }
 
     /// A full circle of one arc is matched by its centre, radius and angles, which are not
-    /// checked on the way the other sections are: one that is not finite is refused.
+    /// checked on the way the other sections are: one that is not finite, or of no radius (no
+    /// length), is refused.
     #[test]
     fn a_circle_that_is_not_finite_is_refused() {
         let circle = |center: Vec2, radius: f64| Seg2::Arc {
@@ -2934,7 +2976,11 @@ mod tests {
             start: 0.0,
             sweep: 2.0 * PI,
         };
-        for c in [circle(p(f64::NAN, 0.0), 5.0), circle(p(0.0, 0.0), f64::NAN)] {
+        for c in [
+            circle(p(f64::NAN, 0.0), 5.0),
+            circle(p(0.0, 0.0), f64::NAN),
+            circle(p(0.0, 0.0), 0.0),
+        ] {
             assert!(refused(&match_loft_sections(
                 &[at(0.0, gon(4, 10.0)), at(10.0, vec![c])],
                 100

@@ -11,6 +11,7 @@
 //! | Rust                                  | Status difftest compares |
 //! |---------------------------------------|--------------------------|
 //! | [`SweepFailure::RailPastStationCap`]  | `SM_ERR`                 |
+//! | [`SweepFailure::LoftSectionsTooLarge`] | `SM_ERR`                |
 //! | [`SweepFailure::Failed`]              | `SM_ERR`                 |
 //! | [`SweepFailure::Missing`]             | `SM_ERR_NULL_POINTER`    |
 //!
@@ -35,6 +36,17 @@ pub enum SweepFailure {
         /// The wires (sections and stations) at the cap.
         wires: usize,
     },
+    /// Two loft sections too large to pair: the band their pairing is searched in
+    /// ([`crate::sweep::loft_sections`]) would have no room within its cells, with `first` and
+    /// `second` segments. Sections of equal counts up to `largest` segments pair.
+    LoftSectionsTooLarge {
+        /// The first section's segments.
+        first: usize,
+        /// The second section's segments.
+        second: usize,
+        /// The most segments two sections of equal counts may have.
+        largest: usize,
+    },
     /// A sweep routine could not continue, as the phrase says (for example "the swept edge
     /// has no trimming curves").
     Failed(&'static str),
@@ -47,7 +59,9 @@ impl SweepFailure {
     /// The status the C++ reports for it (a comparison detail): `SM_ERR`.
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::RailPastStationCap { .. } | Self::Failed(_) => SM_ERR,
+            Self::RailPastStationCap { .. }
+            | Self::LoftSectionsTooLarge { .. }
+            | Self::Failed(_) => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
         }
     }
@@ -59,6 +73,7 @@ impl SweepFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::RailPastStationCap { .. } => ErrorKind::NotWithinTolerance,
+            Self::LoftSectionsTooLarge { .. } => ErrorKind::Unsupported,
             Self::Failed(_) | Self::Missing(_) => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -70,7 +85,7 @@ impl SweepFailure {
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
         match self {
-            Self::RailPastStationCap { .. } => false,
+            Self::RailPastStationCap { .. } | Self::LoftSectionsTooLarge { .. } => false,
             Self::Failed(_) | Self::Missing(_) => true,
         }
     }
@@ -88,6 +103,14 @@ impl core::fmt::Display for SweepFailure {
             } => write!(
                 f,
                 "a railed loft's guided edges were asked within {asked:e} of their rails; at {wires} wires the bound proved is {reached:e}"
+            ),
+            Self::LoftSectionsTooLarge {
+                first,
+                second,
+                largest,
+            } => write!(
+                f,
+                "loft sections of {first} and {second} segments are too large to pair; sections of equal counts up to {largest} segments pair"
             ),
         }
     }
