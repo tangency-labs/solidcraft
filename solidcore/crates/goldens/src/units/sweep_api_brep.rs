@@ -706,14 +706,8 @@ fn put_attribute_rows(o: &mut Vec<f64>, b: &Brep) -> solidcore::Result<()> {
         r.extend(entries.into_iter().flatten());
         r
     };
-    let faces: Vec<EntityRef> = p1::faces(b, None)?
-        .into_iter()
-        .map(EntityRef::Face)
-        .collect();
-    let edges: Vec<EntityRef> = p1::edges(b, None)?
-        .into_iter()
-        .map(EntityRef::Edge)
-        .collect();
+    let faces: Vec<EntityRef> = p1::faces(b, None)?.into_iter().map(EntityRef::Face).collect();
+    let edges: Vec<EntityRef> = p1::edges(b, None)?.into_iter().map(EntityRef::Edge).collect();
     for list in [faces, edges] {
         let mut rows: Vec<Vec<f64>> = list.into_iter().map(row).collect();
         rows.sort_by(|x, y| total(x, y));
@@ -741,8 +735,8 @@ fn rust_attributed(
     sweep: &SweepIn,
     behavior: u8,
 ) -> Result<Output, HarnessError> {
-    let behavior =
-        Behavior::from_code(i32::from(behavior)).map_err(|e| harness(format!("behavior: {e}")))?;
+    let behavior = Behavior::from_code(i32::from(behavior))
+        .map_err(|e| harness(format!("behavior: {e}")))?;
     let path = curve(k, &sweep.path)?;
     let sref = curve(k, &sweep.scale_reference)?;
     let scl = curve(k, &sweep.scale_curve)?;
