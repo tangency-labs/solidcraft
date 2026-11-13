@@ -819,11 +819,16 @@ impl Line {
     /// `5u / (1 - 10u) <= γ_6` of itself. The sum rounds once more: `|a0 + r| <= |s| /
     /// (1 - u)` and `|r| <= |a0 + r| + |a0|`, so `s` is within `(u + γ_6) |s| / (1 - u) +
     /// γ_6 |a0| <= γ_8 (|s| + |a0|)` of the exact parameter; the bound's own two roundings
-    /// are covered by `1 + γ_2`. The other branches copy or negate `t`, exactly.
+    /// are covered by `1 + γ_2`. That model is relative only: a quotient or product that
+    /// lands in the subnormal range is also off by up to half the smallest subnormal,
+    /// `η = 2^-1075` (sums and differences are exact there). The quotient's `η` is then
+    /// multiplied by `A`, the product's is not, so `(1 + |A|) · 2^-1074` covers both with
+    /// room for the bound's own rounding. The other branches copy or negate `t`, exactly.
     fn step_param_enclosure(&self, t: f64) -> Option<(f64, f64)> {
         let s = self.convert_t_from_nurbs_to_step(t);
         let err = if self.is_bounded() && !is_zero(self.natural_interval().length()) {
-            gamma(8) * (s.abs() + self.anal_domain.min().abs()) * (1.0 + gamma(2))
+            let subnormal = (1.0 + self.anal_domain.length().abs()) * f64::from_bits(1);
+            gamma(8) * (s.abs() + self.anal_domain.min().abs()) * (1.0 + gamma(2)) + subnormal
         } else {
             0.0
         };
