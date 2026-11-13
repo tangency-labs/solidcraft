@@ -1072,7 +1072,11 @@ impl Dialog {
                     rail2,
                 ]
             }),
-            "solid.move" => Dialog::new(crate::dialogs_move::kind(0, &s.doc), crate::dialogs_move::inputs(0)),
+            "solid.move" => {
+                let mut d = Dialog::new(crate::dialogs_move::kind(0, &s.doc), crate::dialogs_move::inputs(0));
+                d.extra.insert("fixed".into(), json!(app.preferences.move_starts_fixed));
+                d
+            }
             "solid.hole" => Dialog::new(hole_defaults(s), single_hole_inputs()),
             "solid.box" => Dialog::new(
                 Kind::Primitive {
@@ -4235,14 +4239,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             d.reset_scroll = false;
             d.collapsed = collapsed;
             cancel |= closed;
+            // Placing a pivot, the keys answer for the pivot (below), not for the dialog.
+            let placing = crate::dialogs_move::placing_pivot(&d);
+            let (enter_key, esc_key) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
             if app.issue_report.draft.is_none() {
                 match action {
+                    crate::ui_kit::Action::Ok if placing && enter_key => {}
+                    crate::ui_kit::Action::Cancel if placing && esc_key => {}
                     crate::ui_kit::Action::Ok => {
                         ok = true;
                         apply_again = false;
                     }
                     crate::ui_kit::Action::Cancel => {
-                        if (!app.esc_handled && escape_routed_here) || !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        if (!app.esc_handled && escape_routed_here) || !esc_key {
                             cancel = true;
                         }
                     }
@@ -4322,6 +4331,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::unique("sc_canvas_value")));
     let enter_applies = enter_applies(&d);
     let report_active = app.issue_report.draft.is_some();
+    // Placing a pivot, Enter and Esc answer for the pivot: the move stays open. A right-click
+    // that asks for OK answers as Enter does.
+    let placing = crate::dialogs_move::placing_pivot(&d);
     let confirm = std::mem::take(&mut d.confirm);
     if !preset_prompt
         && !report_active
@@ -4329,11 +4341,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && app.applying.is_none()
         && (enter || canvas_enter || (enter_free && nothing_focused) || confirm)
     {
-        ok = true;
+        if placing {
+            crate::dialogs_move::accept_pivot(app, &mut d);
+        } else {
+            ok = true;
+        }
     }
     if !preset_prompt && !report_active && esc && !app.esc_handled && escape_routed_here {
         app.esc_handled = true;
-        cancel = true;
+        if placing {
+            crate::dialogs_move::end_pivot(app, &mut d);
+        } else {
+            cancel = true;
+        }
     }
     // A plane picked for a new sketch starts it right away.
     let mut then_start = None;

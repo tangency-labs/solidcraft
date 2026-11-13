@@ -1,0 +1,53 @@
+{
+  "en": {
+    "dialog.move_pivot_accept": "Accept the pivot",
+    "dialog.move_pivot_clear": "Back to the bodies' center and their own axes",
+    "dialog.move_pivot_discard": "Discard the new pivot",
+    "dialog.move_pivot_set": "Place the pivot: click a point, an edge or a face, or drag the handles"
+  },
+  "en-GB": {
+    "dialog.move_pivot_clear": "Back to the bodies' centre and their own axes"
+  },
+  "de": {
+    "dialog.move_pivot_accept": "Drehpunkt übernehmen",
+    "dialog.move_pivot_clear": "Zurück zur Mitte der Körper und ihren eigenen Achsen",
+    "dialog.move_pivot_discard": "Neuen Drehpunkt verwerfen",
+    "dialog.move_pivot_set": "Drehpunkt setzen: Punkt, Kante oder Fläche anklicken oder die Griffe ziehen"
+  },
+  "ja": {
+    "dialog.move_pivot_accept": "ピボットを確定",
+    "dialog.move_pivot_clear": "ボディの中心と固有の軸に戻す",
+    "dialog.move_pivot_discard": "新しいピボットを破棄",
+    "dialog.move_pivot_set": "ピボットを配置: 点、エッジ、面をクリックするか、ハンドルをドラッグします"
+  },
+  "ko": {
+    "dialog.move_pivot_accept": "피벗 확정",
+    "dialog.move_pivot_clear": "바디의 중심과 고유 축으로 되돌리기",
+    "dialog.move_pivot_discard": "새 피벗 취소",
+    "dialog.move_pivot_set": "피벗 배치: 점, 모서리 또는 면을 클릭하거나 핸들을 드래그합니다"
+  },
+  "zh": {
+    "dialog.move_pivot_accept": "确认枢轴",
+    "dialog.move_pivot_clear": "恢复为实体中心及其自身坐标轴",
+    "dialog.move_pivot_discard": "放弃新枢轴",
+    "dialog.move_pivot_set": "放置枢轴：单击点、边或面，或拖动手柄"
+  },
+  "ar": {
+    "dialog.move_pivot_accept": "اعتماد نقطة الارتكاز",
+    "dialog.move_pivot_clear": "العودة إلى مركز الأجسام ومحاورها الخاصة",
+    "dialog.move_pivot_discard": "تجاهل نقطة الارتكاز الجديدة",
+    "dialog.move_pivot_set": "وضع نقطة الارتكاز: انقر نقطة أو حافة أو وجهًا، أو اسحب المقابض"
+  },
+  "he": {
+    "dialog.move_pivot_accept": "אישור נקודת הציר",
+    "dialog.move_pivot_clear": "חזרה למרכז הגופים ולצירים שלהם",
+    "dialog.move_pivot_discard": "ביטול נקודת הציר החדשה",
+    "dialog.move_pivot_set": "מיקום נקודת הציר: לחצו על נקודה, קצה או פאה, או גררו את הידיות"
+  },
+  "vi": {
+    "dialog.move_pivot_accept": "Chấp nhận điểm xoay",
+    "dialog.move_pivot_clear": "Trở về tâm của các khối và các trục riêng của chúng",
+    "dialog.move_pivot_discard": "Bỏ điểm xoay mới",
+    "dialog.move_pivot_set": "Đặt điểm xoay: nhấp vào một điểm, cạnh hoặc mặt, hoặc kéo các tay nắm"
+  }
+}
