@@ -2338,15 +2338,7 @@ fn pick_body(sel: &Sel) -> Option<&str> {
 /// own or through an occurrence: the menu is then about the bodies, and the right-click leaves
 /// the selection alone (#5849).
 fn in_selection(app: &SolveApp, sel: &Sel) -> bool {
-    if context_target_selected(&app.session.selection, sel) {
-        return true;
-    }
-    let Some(body) = pick_body(sel) else { return false };
-    app.session.selection.iter().any(|x| match x {
-        Sel::Body { name } => name == body,
-        Sel::Occurrence { path } => app.session.occurrence_bodies(path, true).is_ok_and(|b| b.iter().any(|n| n == body)),
-        _ => false,
-    })
+    context_target_selected(&app.session.selection, sel) || pick_body(sel).is_some_and(|body| crate::selection::holds_body(&app.session, body))
 }
 
 /// Open the viewport menu at a screen position. A right-click on something not selected
