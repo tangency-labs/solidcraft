@@ -165,6 +165,7 @@ impl MovePreview {
             sketches: Vec::new(),
             applied: None,
             stopped: None,
+            mirror_meets: None,
             placed: None,
             tapered: Vec::new(),
             replaced: if copy { Vec::new() } else { bodies },
