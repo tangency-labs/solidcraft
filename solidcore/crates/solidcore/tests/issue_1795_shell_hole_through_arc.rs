@@ -98,10 +98,15 @@ fn options(create_offset_solid: bool) -> ShellOptions {
 /// The volume reference is pinned at relative tolerance 1e-9. The independent closed
 /// form is 9655.150444016748 (the plate less the blind hole less the cavity inset 2,
 /// open at z = 27.5, excluding the hole's offset r 7 to x = 9.5); the measured result's
-/// relative error is 3.2e-8, within the volume integrator's accuracy (1e-6). It was
-/// 9655.150697869625 (2.6e-8) before the certified offset became the default (#13827):
-/// the shell's non-analytic offsets are certified nets, not `N_SrfOffset`'s fits, and the
-/// volume moves by 5.5e-9 relative with the same faces, edges and vertices.
+/// relative error is 4.7e-8, within the volume integrator's accuracy (1e-6). It was
+/// 9655.150751213405 (3.2e-8) while the validity check ran upstream's coincident-topology
+/// search (WR-785), which edited the body it checked: the shell's result check and these
+/// checks built the faces' trim caches with tolerance adjustment, and the volume integrates
+/// from the trims. The volume moves by 1.5e-8 relative with the same faces, edges and
+/// vertices. It was 9655.150697869625 (2.6e-8) before the certified offset became the
+/// default (#13827): the shell's non-analytic offsets are certified nets, not
+/// `N_SrfOffset`'s fits, and the volume moves by 5.5e-9 relative with the same faces,
+/// edges and vertices.
 #[test]
 fn shell_open_at_the_top_is_valid_on_the_default_split_path() {
     let mut k = Kernel::default();
@@ -122,7 +127,7 @@ fn shell_open_at_the_top_is_valid_on_the_default_split_path() {
         (16, 36, 24)
     );
     let label = "1795 shell 2 open at z 27.5";
-    assert!(report(&k, label, Ok(r), Some(9655.150751213405), 1e-9));
+    assert!(report(&k, label, Ok(r), Some(9655.15089520461), 1e-9));
 }
 
 /// The default split path builds the side-open shell, rather than preserving the

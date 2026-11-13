@@ -361,10 +361,7 @@ pub fn validate_pointers(
     if level > 4 {
         return Err(invalid("invalid assert test level"));
     }
-    let mut r = Reports {
-        array: reports,
-        level,
-    };
+    let mut r = Reports { array: reports };
     let mut cache = Lists::new(b);
     if !preflight(b, &mut r, &mut cache)? {
         return Ok(ERROR);

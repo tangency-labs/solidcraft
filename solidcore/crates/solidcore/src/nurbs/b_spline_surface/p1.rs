@@ -924,30 +924,6 @@ impl BSplineSurface {
         self.nurb.as_ref()
     }
 
-    /// Certified boxes covering the whole surface, one per knot span
-    /// ([`crate::nurbs::nurbs_srf::srf_span_boxes`]); `None`, meaning no certified
-    /// cover, without a NURB, when the weights or knots cannot be read as a cover, or
-    /// while evaluation beyond the natural domain is enabled (the extension leaves the
-    /// convex hull). Not upstream.
-    #[must_use]
-    pub fn span_boxes(&self) -> Option<Vec<Extent3d>> {
-        if self.is_out_of_bounds_enabled() {
-            return None;
-        }
-        crate::nurbs::nurbs_srf::srf_span_boxes(self.gw_nurb()?)
-    }
-
-    /// The refinable certified cover ([`crate::nurbs::nurbs_srf::SurfaceCover`]), refined
-    /// `depth` times; `None` under the conditions of [`BSplineSurface::span_boxes`].
-    /// Not upstream.
-    #[must_use]
-    pub fn cover(&self, depth: usize) -> Option<crate::nurbs::nurbs_srf::SurfaceCover> {
-        if self.is_out_of_bounds_enabled() {
-            return None;
-        }
-        crate::nurbs::nurbs_srf::SurfaceCover::new(self.gw_nurb()?, depth)
-    }
-
     /// The NURB, made first if missing (`GetOrCreateGwNurbPointer`).
     ///
     /// # Errors

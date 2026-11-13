@@ -129,12 +129,6 @@ impl SpatialIndex {
         result.sort_unstable();
         result
     }
-    pub(crate) fn points_in_box(&self, bbox: &Extent3d, tol: f64) -> Vec<usize> {
-        if !finite(bbox) || !tol.is_finite() || tol < 0.0 {
-            return (0..self.len).collect();
-        }
-        self.select(|node| !node.are_disjoint(bbox, tol))
-    }
     pub(crate) fn boxes_in_box(&self, bbox: &Extent3d, tol: f64) -> Vec<usize> {
         if !finite(bbox) || !tol.is_finite() || tol < 0.0 {
             return (0..self.len).collect();

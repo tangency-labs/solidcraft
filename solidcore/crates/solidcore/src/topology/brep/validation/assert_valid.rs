@@ -382,8 +382,8 @@ pub fn check_brep_with_keys(
 
 /// `SmBrep::AssertValid(pAList, eTestLevel, eWalkTree)`: the B-rep checks (base
 /// classes, `ValidatePointers` at level 0, the validate-only tolerance pass, Brep
-/// tests 0-21, `ContainsCoincidentTopology`) and, with `walk`, `AssertValid` of every
-/// region, shell, face, loop, edge and vertex. Failed checks are appended to `reports`
+/// tests 0-21; not upstream's `ContainsCoincidentTopology`, see `brep`) and, with `walk`,
+/// `AssertValid` of every region, shell, face, loop, edge and vertex. Failed checks are appended to `reports`
 /// in native order. `level` is `SM_LEVEL_0`..`SM_LEVEL_GIVEN` (0..4). `keys` gives the
 /// geometry owners' identities (as for [`validate_pointers`]). Returns `false` when a
 /// check failed (at once when `ValidatePointers` does not succeed).
