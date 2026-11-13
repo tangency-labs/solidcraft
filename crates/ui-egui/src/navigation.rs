@@ -2880,7 +2880,7 @@ mod tests {
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
         app.run("form.prototype.create", serde_json::json!({"primitive":"box","segments":[1,1,1],"levels":0})).unwrap();
         app.preferences.nav = crate::prefs::OPENSCAD_NAV.into();
-        app.preferences.forms_exact_face_picking = true;
+        app.cam.distance *= 3.0;
         let ctx = crate::fonts::test_context();
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         let empty = egui::pos2(85.0, 70.0);

@@ -4368,6 +4368,9 @@ fn prepare_preferences(
     if !accepted::dimension_text_scale(&new) {
         return Err("`dimension_text_scale` must be 0.5…2.5".into());
     }
+    if !accepted::forms_cad_tolerance(&new) {
+        return Err("`forms_cad_tolerance` must be 0.000001…1 mm".into());
+    }
     let new = migrate(new);
     crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib: {e}"))?;
     if !UNITS.contains(&new.default_units.as_str()) {
@@ -4460,9 +4463,6 @@ fn prepare_preferences(
     if !accepted::max_sketch_points(&new) {
         use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
         return Err(format!("`max_sketch_points` must be {DEFAULT_POINTS}…{CEILING_POINTS}"));
-    }
-    if !accepted::forms_cad_tolerance(&new) {
-        return Err("`forms_cad_tolerance` must be 0.000001…1 mm".into());
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());

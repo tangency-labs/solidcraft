@@ -1791,9 +1791,9 @@ mod tests {
         let modified = model.state();
         assert!(modified.bodies[0].is_surface());
         assert_eq!(modified.bodies[0].source_transform, state.bodies[0].source_transform);
-        let (after, after_cage) = profile.recompute(&definition, &modified).unwrap();
-        assert_eq!(after.rest, changed.rest);
-        assert_eq!(after_cage, cage);
+        let (support, face) = profile.resolve(&modified).unwrap();
+        let support_center = crate::apply_point(&motion, Vec3::new(0.0, 0.0, 2.0));
+        assert_eq!(crate::appearance::face_index_at(support, support_center), Some(face));
     }
     #[test]
     fn adjacent_matching_follows_neighboring_wall_jets_and_sews_the_same_conditions() {
