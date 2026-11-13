@@ -171,6 +171,7 @@ pub struct WorkCounters {
     loop_walks: Cell<u64>,
     target_record_seedings: Cell<u64>,
     classification_snapshots: Cell<u64>,
+    orient_boxes: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -278,6 +279,14 @@ impl WorkCounters {
         self.classification_snapshots.get()
     }
 
+    /// Bounding boxes of a whole B-rep the orientation of its faces computes for its ray
+    /// votes (`orient_trimmed_surfaces`): each one walks every vertex of the B-rep, and one
+    /// pass needs one, not one per face. Not the fork's.
+    #[must_use]
+    pub fn orient_boxes(&self) -> u64 {
+        self.orient_boxes.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -292,6 +301,7 @@ impl WorkCounters {
         self.loop_walks.set(0);
         self.target_record_seedings.set(0);
         self.classification_snapshots.set(0);
+        self.orient_boxes.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -362,6 +372,12 @@ impl WorkCounters {
     pub(crate) fn add_classification_snapshot(&self) {
         self.classification_snapshots
             .set(self.classification_snapshots.get().saturating_add(1));
+    }
+
+    /// Counts one whole-B-rep box computed for orienting its faces.
+    pub(crate) fn add_orient_box(&self) {
+        self.orient_boxes
+            .set(self.orient_boxes.get().saturating_add(1));
     }
 }
 

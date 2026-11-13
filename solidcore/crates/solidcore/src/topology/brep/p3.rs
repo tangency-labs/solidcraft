@@ -4606,6 +4606,10 @@ fn orient_body(
     let mut faceuses_processed = 0usize;
     let mut swap_faces: Vec<FaceId> = Vec::new();
     let in_swap = |f: FaceId| faces_to_swap_uv.is_some_and(|l| l.contains(&f));
+    // The B-rep's bounding sphere radius, taken at the first ray vote. The loop only swaps
+    // faces' UVs, which moves no vertex or edge curve, so the box is the same for every
+    // face: one box per pass, not one per face (that was faces x faces on a large part).
+    let mut radius: Option<f64> = None;
 
     // Check orientation of each face
     for &face in &faces {
@@ -4641,7 +4645,17 @@ fn orient_body(
         let (reverse_votes, same_votes) = if just_unify_normals {
             (0u32, 10u32)
         } else {
-            match orient_ray_votes(k, b, env, marks, mark, face, normals_outward, tolerance)? {
+            match orient_ray_votes(
+                k,
+                b,
+                env,
+                marks,
+                mark,
+                face,
+                normals_outward,
+                tolerance,
+                &mut radius,
+            )? {
                 RayVotes::Skip => continue,
                 RayVotes::Votes {
                     reverse,
@@ -4775,6 +4789,7 @@ fn orient_ray_votes(
     face: FaceId,
     normals_outward: bool,
     tolerance: f64,
+    radius: &mut Option<f64>,
 ) -> Result<RayVotes> {
     // five more or less random points
     let test_param = [0.234_567, 0.567_891, 0.789_123, 0.156_789, 0.856_789];
@@ -4782,9 +4797,17 @@ fn orient_ray_votes(
     // Random vector
     let ray_vec = Vec3::new(1.23456, 2.34567, 3.45678).unitize()?;
 
-    // Brep BoundingBox and BoundingSphere
-    let bbox = brep_bounding_box(k, b, true, false, true)?;
-    let radius = bbox.sphere_bound().radius;
+    // Brep BoundingBox and BoundingSphere (once per orient pass: `radius` keeps it)
+    let radius = if let Some(r) = *radius {
+        r
+    } else {
+        k.work_counters.add_orient_box();
+        let r = brep_bounding_box(k, b, true, false, true)?
+            .sphere_bound()
+            .radius;
+        *radius = Some(r);
+        r
+    };
 
     let fu = face2::upward_faceuse(b, face)?.ok_or(null_deref("face without face use"))?;
     let other_fu = eu1::faceuse_mate(b, fu)?.ok_or(null_deref("face use without mate"))?;
@@ -6243,6 +6266,37 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Orienting a solid's faces fires its ray votes face by face, and each vote took the box
+    /// of the whole B-rep, so one pass on a large part cost faces x vertices. The faces only
+    /// have their UVs swapped in the pass, which moves no vertex or edge, so the box is taken
+    /// once per pass. A box's 6 faces each vote (each lies between the solid and the outside):
+    /// one box, and the faces keep their orientation.
+    #[test]
+    fn orienting_a_solid_takes_its_box_once_per_pass() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let faces = b.face_list().to_vec();
+        let ups = |b: &Brep| {
+            faces
+                .iter()
+                .map(|&f| face2::upward_faceuse(b, f).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let before = ups(&b);
+        b.set_editing_enabled(true);
+        let mut marks = Marks::default();
+        k.work_counters.reset();
+        let r = with_env(|env| {
+            orient_trimmed_surfaces(&mut k, &mut b, env, &mut marks, true, false, None)
+        });
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(faces.len(), 6);
+        assert_eq!(k.work_counters.orient_boxes(), 1);
+        assert_eq!(ups(&b), before);
     }
 
     /// `reseed_records` leaves the store exactly as a fresh seeding of the B-rep leaves an
