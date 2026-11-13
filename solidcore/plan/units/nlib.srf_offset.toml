@@ -1,0 +1,12 @@
+id = "nlib.srf_offset"
+upstream = ["source/SMLib/src/NL_SrfOffset.cpp"]
+rust_module = "nurbs::srf_offset"
+depends_on = ["nlib.crv_basic", "nlib.geom", "nlib.math", "nlib.srf_basic", "nlib.srf_common", "nlib.srf_fit", "nlib.srf_nurb"]
+soft_depends_on = ["nlib.crv_fit_p1", "nlib.crv_nurb", "nlib.crv_offset", "nlib.srf_adv_p1", "nlib.srf_adv_p3", "nlib.srf_tool_p1", "nlib.srf_tool_p3"]
+est_lines = 613
+layer = 16
+tests = ["prog_test:my_test_ss_nurb", "prog_test:my_test_surface_point_intersect", "prog_test:my_test_GlobalCC_intersect", "prog_test:my_test_GlobalCSI", "prog_test:my_test_surface_curve_intersect", "prog_test:my_test_cci_nurb"]
+status = "green"
+claimed_by = "swarm-nlib.srf_offset-a1"
+claimed_at = "2026-10-13T00:15:44Z"
+notes = "1 fns; largest: N_SrfOffset; unit-SCC #22 (220 units); 181 upstream test entry points reach this unit; difftest: 438 cases (38 fixtures, including the four actual #471 round inputs, + 400 generated), 0 deferred, max_rel_err 0; #471: opt-in normalized extrusion recognition and bounded adaptive sampling, with independent offset-accuracy regressions"

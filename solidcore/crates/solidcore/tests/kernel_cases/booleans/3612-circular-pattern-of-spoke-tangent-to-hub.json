@@ -1,0 +1,120 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b16": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    }
+  ],
+  "case": "3612-circular-pattern-of-spoke-tangent-to-hub",
+  "expected": {
+    "method": "rim r63..66 h3: pi(66^2-63^2)*3; hub r12 h3: pi*144*3; each spoke (x 12..64, y 0.5..2.5, z +-1.25) adds the part outside hub and rim: 2*(integral over z=-1.25..1.25 of sqrt(63^2-z^2) - 12) = 254.979 (the spoke's foot lies inside the rim; at z=+-1.25 the hub reaches x=11.93 so it never overlaps the spoke). Spokes are 72 deg apart and do not overlap: V = 5004.557 + 5*254.979 = 6279.454",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3612",
+      "tangency-labs/solidcraft#3379"
+    ],
+    "volume_mm3": 6279.4538,
+    "what": "a spoke whose inner face x=12 is exactly tangent to the hub cylinder r=12 (line contact), joined to the rim, patterned 5 times around the hub's axis"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 84,
+      "faces": 36,
+      "vertices": 56
+    }
+  },
+  "records": "3612-circular-pattern-of-spoke-tangent-to-hub.bodies.json.gz",
+  "result": [
+    {
+      "body": "Wheel (1)",
+      "made": "b17"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8288.805759133427,
+      "body_count": 2,
+      "edges": 72,
+      "faces": 32,
+      "vertices": 48,
+      "volume_mm3": 6279.453751489444
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3612",
+    "tangency-labs/solidcraft#3379"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "merge_faces",
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "union_all"
+  ],
+  "ungraded": [],
+  "what": "a spoke whose inner face x=12 is exactly tangent to the hub cylinder r=12 (line contact), joined to the rim, patterned 5 times around the hub's axis",
+  "why_not": [
+    "body \"Wheel\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

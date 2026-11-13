@@ -1,9 +1,9 @@
 //! Floating controls reserve drawing space without changing rendering or picking projection.
-use egui::{Rect, pos2, vec2};
+use egui::{Pos2, Rect, pos2, vec2};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::render::Camera;
+use solidcraft_viewport::Camera;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Layout {
@@ -29,7 +29,35 @@ const CORNER_INSET: f32 = 8.0;
 const CORNER_GAP: f32 = 4.0;
 
 /// Enumerate rectangles whose edges meet the viewport or a bounded number of overlays.
+///
+/// The answer for the same view and overlays is remembered: the search is quartic in their
+/// edges, and it ran several times at every frame (each pointer move) with the same inputs.
 pub(crate) fn free_rect(view: Rect, obstacles: &[Rect]) -> Rect {
+    let key = |r: &Rect| [r.min.x, r.min.y, r.max.x, r.max.y].map(f32::to_bits);
+    let wanted: Vec<[u32; 4]> = std::iter::once(&view).chain(obstacles).map(key).collect();
+    if let Some(found) = FREE_RECTS.with(|c| c.borrow().iter().find(|(k, _)| *k == wanted).map(|(_, r)| *r)) {
+        return found;
+    }
+    let found = free_rect_search(view, obstacles);
+    FREE_RECTS.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= FREE_RECTS_KEPT {
+            c.remove(0);
+        }
+        c.push((wanted, found));
+    });
+    found
+}
+
+/// How many [`free_rect`] answers are remembered (a frame asks for a few).
+const FREE_RECTS_KEPT: usize = 8;
+
+thread_local! {
+    /// [`free_rect`]'s recent answers, by the bits of its view and overlays.
+    static FREE_RECTS: std::cell::RefCell<Vec<(Vec<[u32; 4]>, Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn free_rect_search(view: Rect, obstacles: &[Rect]) -> Rect {
     if !view.is_finite() || !view.is_positive() {
         return Rect::NOTHING;
     }
@@ -112,7 +140,7 @@ impl Layout {
     ) -> Self {
         use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
         use solidcraft_engine::panels::{Point, Size};
-        let clearance = crate::theme::Tokens::get().space_4;
+        let clearance = solidcraft_theme::Tokens::get().space_4;
         let mut obstacles = usable.obstacles.clone();
         let navigation = if navigation.is_positive() && navigation.is_finite() && usable.contains_rect(logical_rect(navigation)) {
             navigation
@@ -185,47 +213,6 @@ impl Layout {
         corner: egui::Vec2,
         navigation: Rect,
     ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, None)
-    }
-
-    /// Render fits stay between the docked panels, including beneath a short Browser card.
-    pub fn product(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-    ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, Some(crate::frame::Side::Right))
-    }
-
-    /// Render compass at the free canvas edge beside a left-hand Inspector.
-    pub fn product_left(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-    ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, Some(crate::frame::Side::Left))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn build(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-        inspector_side: Option<crate::frame::Side>,
-    ) -> Self {
-        let fit_in_content = inspector_side.is_some();
         let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
         let mut obstacles: Vec<_> = docks.iter().copied().filter(|r| r.is_finite()).map(|r| r.expand(4.0)).collect();
         // Navigation is anchored to the viewport, never to transient dialog space.
@@ -252,29 +239,14 @@ impl Layout {
         let confirm = below_bar(confirm);
         // The axis view starts below the pair while it is shown.
         let top = if confirm.is_positive() { confirm.bottom() + CORNER_GAP } else { available.top() };
-        let cube_size = if fit_in_content { 110.0 } else { super::viewport::axis_view_size(style) };
-        let axis_left = |size| {
-            if inspector_side == Some(crate::frame::Side::Left) { available.left() } else { available.right() - size }
-        };
+        let cube_size = super::viewport::axis_view_size(style);
+        let axis_left = |size| available.right() - size;
         let top = below_bar(Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))).top();
         let mut axis_view = if available.width() >= cube_size && available.bottom() - top >= cube_size {
             Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))
         } else {
             Rect::NOTHING
         };
-        // Preserve legacy control anchors. Product controls retain their existing
-        // vertical relocation policy; the universal host uses the full contour.
-        if fit_in_content {
-            for _ in 0..obstacles.len() {
-                let bottom = obstacles.iter().filter(|dock| axis_view.intersect(**dock).is_positive()).map(Rect::bottom).max_by(f32::total_cmp);
-                let Some(bottom) = bottom else { break };
-                axis_view = if available.bottom() - bottom >= cube_size {
-                    Rect::from_min_size(pos2(axis_view.left(), bottom), vec2(cube_size, cube_size))
-                } else {
-                    Rect::NOTHING
-                };
-            }
-        }
         // On tiny viewports keep the bottom controls usable rather than overlapping them.
         // This decision depends only on viewport size, never on an overlay.
         if axis_view.intersect(navigation).is_positive() {
@@ -285,7 +257,7 @@ impl Layout {
                 Rect::NOTHING
             };
         }
-        let within = if fit_in_content { content } else { viewport };
+        let within = viewport;
         // Only the panels decide where the middle of the view is; the controls below are drawn
         // over the view and would otherwise push the model into a corner of it.
         let middle = free_rect(within, &obstacles);
@@ -364,6 +336,15 @@ pub(crate) fn fit_host_bounds(
     fov: f64,
     share: f64,
 ) -> Option<Camera> {
+    let room = host_framing_room(cam, bounds, layout, usable)?;
+    let mut target = layout.clone();
+
+    target.drawable = room;
+    target.middle = room;
+    fit_bounds_sized(cam, bounds, &target, fov, share)
+}
+
+fn host_framing_room(cam: Camera, bounds: &Aabb3, layout: &Layout, usable: &crate::panel_runtime::HostUsableRegion) -> Option<Rect> {
     use crate::panel_runtime::egui_rect;
     use solidcraft_engine::panels::Point;
     if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() || !cam.is_valid() {
@@ -381,16 +362,10 @@ pub(crate) fn fit_host_bounds(
     let room = region.fit_rect_with_clearance(
         aspect,
         Point { x: layout.viewport.center().x, y: layout.viewport.center().y },
-        crate::theme::Tokens::get().space_8,
+        solidcraft_theme::Tokens::get().space_8,
     )?;
     let room = egui_rect(room);
-    if !room.is_positive() {
-        return None;
-    }
-    let mut target = layout.clone();
-    target.drawable = room;
-    target.middle = room;
-    fit_bounds_sized(cam, bounds, &target, fov, share)
+    room.is_positive().then_some(room)
 }
 
 /// Reposition an explicitly selected focus at the current zoom. Perspective
@@ -452,14 +427,14 @@ pub(crate) fn centre_host_camera(
             if let Some(landing) = region.place_footprint(
                 Size { width: size.x, height: size.y },
                 Point { x: layout.viewport.center().x, y: layout.viewport.center().y },
-                crate::theme::Tokens::get().space_8,
+                solidcraft_theme::Tokens::get().space_8,
             ) {
                 let at = layout.viewport.center() + (egui_rect(landing).center() - footprint.center());
                 let candidate = translate(at);
                 let final_points: Option<Vec<_>> = corners.iter().map(|p| project(candidate, *p)).collect();
                 if let Some(points) = final_points {
                     let footprint = points.iter().fold(Rect::NOTHING, |rect, p| rect.union(Rect::from_min_max(*p, *p)));
-                    if region.contains_rect(logical_rect(footprint.expand(crate::theme::Tokens::get().space_4))) {
+                    if region.contains_rect(logical_rect(footprint.expand(solidcraft_theme::Tokens::get().space_4))) {
                         result = candidate;
                     }
                 }
@@ -477,6 +452,54 @@ pub(crate) fn fit_product_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout) -
 
 pub(crate) fn fit_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> Option<Camera> {
     fit_bounds_sized(cam, bounds, layout, fov, 1.0)
+}
+
+/// The screen point Home and Fit centre the model on: the middle of the view, kept `drawable`-clear for a model
+/// whose half extents on screen are `hx` by `hy` and which `hh` (its fitted half height) sizes. The one place
+/// that decides it: the orbit pivot reads it too (#14651).
+fn framing_point(layout: &Layout, hx: f64, hy: f64, hh: f64) -> Pos2 {
+    let h = f64::from(layout.viewport.height());
+    let drawable = layout.drawable;
+    let size = vec2((hx * h / hh) as f32, (hy * h / hh) as f32).min(drawable.size());
+    let toward = |want: f32, lo: f32, hi: f32| if lo <= hi { want.clamp(lo, hi) } else { (lo + hi) * 0.5 };
+    pos2(
+        toward(layout.middle.center().x, drawable.left() + size.x * 0.5, drawable.right() - size.x * 0.5),
+        toward(layout.middle.center().y, drawable.top() + size.y * 0.5, drawable.bottom() - size.y * 0.5),
+    )
+}
+
+/// Where Home and Fit put the middle of `bounds` on screen for `cam`'s direction in this layout, or `None` when
+/// they could not frame it.
+pub(crate) fn framing_centre(cam: Camera, bounds: &Aabb3, layout: &Layout) -> Option<Pos2> {
+    if let Some(usable) = &layout.usable {
+        return host_framing_room(cam, bounds, layout, usable).map(|room| room.center());
+    }
+    if bounds.is_empty()
+        || !bounds.min.is_finite()
+        || !bounds.max.is_finite()
+        || !cam.is_valid()
+        || !layout.viewport.is_positive()
+        || !layout.drawable.is_positive()
+        || !layout.drawable.is_finite()
+    {
+        return None;
+    }
+    let (r, u, _) = cam.basis();
+    let centre = bounds.center();
+    let (mut hx, mut hy): (f64, f64) = (0.0, 0.0);
+    for x in [bounds.min.x, bounds.max.x] {
+        for y in [bounds.min.y, bounds.max.y] {
+            for z in [bounds.min.z, bounds.max.z] {
+                let d = Vec3::new(x, y, z) - centre;
+                hx = hx.max(d.dot(r).abs());
+                hy = hy.max(d.dot(u).abs());
+            }
+        }
+    }
+    let h = f64::from(layout.viewport.height());
+    let hh = (hx * h / f64::from(layout.drawable.width())).max(hy * h / f64::from(layout.drawable.height())).max(0.5);
+    let at = framing_point(layout, hx, hy, hh);
+    at.is_finite().then_some(at)
 }
 
 /// [`fit_bounds`] with the model filling `share` (0.1 to 1) of the room between the panels, the
@@ -524,12 +547,7 @@ pub(crate) fn fit_bounds_sized(mut cam: Camera, bounds: &Aabb3, layout: &Layout,
     // it clear of every control; the room it leaves over in either direction moves the model
     // towards `middle`, the middle of the view, instead of the middle of the gap between the
     // compass and the navigation bar, which left it low and to one side of an otherwise empty view.
-    let size = vec2((hx * h / hh) as f32, (hy * h / hh) as f32).min(drawable.size());
-    let toward = |want: f32, lo: f32, hi: f32| if lo <= hi { want.clamp(lo, hi) } else { (lo + hi) * 0.5 };
-    let at = pos2(
-        toward(layout.middle.center().x, drawable.left() + size.x * 0.5, drawable.right() - size.x * 0.5),
-        toward(layout.middle.center().y, drawable.top() + size.y * 0.5, drawable.bottom() - size.y * 0.5),
-    );
+    let at = framing_point(layout, hx, hy, hh);
     let half = vec2((at.x - drawable.left()).min(drawable.right() - at.x), (at.y - drawable.top()).min(drawable.bottom() - at.y));
     let room = Rect::from_center_size(at, half * 2.0);
     if !room.is_positive() || !room.is_finite() {

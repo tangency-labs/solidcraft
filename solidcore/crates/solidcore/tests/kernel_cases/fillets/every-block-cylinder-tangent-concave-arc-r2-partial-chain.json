@@ -1,0 +1,137 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "SMLib failed (status 1001)",
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  -10.0,
+                  15.0
+                ],
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  15.0
+                ]
+              ],
+              "index": 10
+            }
+          ],
+          "points": [
+            [
+              8.867375777689988,
+              -4.60471376596052,
+              15.0
+            ]
+          ],
+          "tolerance": 3.0832070014844883
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "every-block-cylinder-tangent-concave-arc-r2-partial-chain",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "block 40x20x15 (x 0..40, y -10..10) joined to the cylinder R10 x 30 on the z axis: the block's sides y = +-10 run tangent into the cylinder wall at x = 0; V0 = 12000 + 3000 pi - 15 * 50 pi = 19068.5835. The arc (z = 15, rho = 10, x > 0) ends at (0, +-10, 15), where the block's top-side edges go on tangentially. Rounded r2 alone, the round adds the spandrel (rho in [10,12], z in [15,17]) over the block only, between its side planes |y| = 10: at radius rho it spans 2 asin(10/rho), running out to nothing at the ends. Added = int over the spandrel of 2 rho asin(10/rho) (Gauss-Legendre) = 23.3785. V = 19091.9620. Or a refusal saying the edge continues tangentially (as fillets/1207-fillet-bar-top-edge-after-boss-arc-round-partial-chain).",
+    "outcome": "solid_or_refused",
+    "refusal": "continues tangentially",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 19091.962003483477,
+    "what": "the concave half circle where a block as wide as the cylinder's diameter meets the cylinder's wall above its top, rounded r2 alone (Tangent chain off)"
+  },
+  "expressible": false,
+  "gallery_note": "the operand the refusal leaves: the arc where the block's top meets the cylinder ends at (0, +-10, 15), where the block's sides run tangent into the cylinder and its top-side edges go on tangentially; rounded alone, the arc's round runs out to nothing at those two ends.",
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) (a picked edge continues tangentially into the edge at (4.734, 8.808, 15.000), which is not blended with it, and the blend cannot end there: with tangent propagation on, tangent_chain: true, its tangent chain is blended as one)",
+    "kernel_error": "SMLib failed (status 1001)",
+    "ran": false
+  },
+  "records": "every-block-cylinder-tangent-concave-arc-r2-partial-chain.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 3 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) (a picked edge continues tangentially into the edge at (4.734, 8.808, 15.000), which is not blended with it, and the blend cannot end there: with tangent propagation on, tangent_chain: true, its tangent chain is blended as one)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it",
+    "refusal \"continues tangentially\": SolidCraft's wording of the kernel's error"
+  ],
+  "what": "the concave half circle where a block as wide as the cylinder's diameter meets the cylinder's wall above its top, rounded r2 alone (Tangent chain off)",
+  "why_not": []
+}

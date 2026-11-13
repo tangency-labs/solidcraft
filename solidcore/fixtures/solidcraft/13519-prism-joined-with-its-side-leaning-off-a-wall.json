@@ -1,0 +1,376 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/13519",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/11360",
+ "test": "none: open on SolidCraft main (solidcore); geometry is leon-vv's reduction in the issue's comments (box, sketch on XY, extrude join), with the gaps of their table",
+ "summary": "Joining a prism whose side starts on a wall's face and leans a hair off it fails on SolidCraft main (#13519, 0.40, solidcore). The report's design: a curved wall extruded from a sketch whose short end line, meant to lie against a vertical wall, was left 0.00007 mm off it (the sketch kept one degree of freedom), and the join failed at that extrude. leon-vv reduced it in the issue's comments: a box 8 x 20 x 20 at the origin and a rectangle sketched on XY against its face x = 0 with one corner 0.00007 mm short of it, (-20, 5), (0, 5), (-0.00007, 10), (-20, 10), extruded 10 and joined. On SolidCraft main (2026-11-08) that join fails with 'SmApiBoolean: boolean::merge::p2::make_faceuse: upstream status 1001'; at a gap of 3e-5 SMLib's check refuses the result, at 0 and 1e-5 it builds (4200), at 1e-4 it builds with the sliver kept (4199.9975). Replayed with solidcraft-cli built from SolidCraft main 0d490ffb and kernel 8f13e948 (2026-11-09): the same on both, and at 1e-4 and 1e-3 the result comes out as two bodies (3200 and the prism). The prism's side crosses the wall's plane at atan(g / 5) along the prism's own edge (x = 0, y = 5), so the two planes stay within the 1e-5 tolerance over a strip 5e-5 / g wide beside that edge and part beyond it: the near-coincident strip of solidcore's docs/booleans.md section 5, here with the crossing on an edge of one face, where the coincident-strip rule (WR-614, now the default) does not help. No fix yet; the `pr` link is SolidCraft's move to solidcore as its only kernel (tangency-labs/solidcraft#11360). The cases are box, extrude and union steps at gaps 0, 1e-5, 3e-5, 7e-5 (the report's), 1e-4 and 1e-3. Volume: the box 3200 plus the prism 10*(20*5 - g*5/2) by the shoelace formula, 4200 - 25 g, exact; checked with exact rationals, and the sliver 25 g at g = 7e-5 by a randomised QMC in its own box (scrambled Sobol, 16 replicates of 2^20 points) within 0.97 of its standard error. The tolerance 0.0005 mm^3 is below 25 g for every gap from 3e-5 up, so a join that closes the sliver (moving a face by more than the bodies' tolerance) fails; it is above the volume integral's 1e-8 relative accuracy plus what snapping the strip beside the edge could change (under 1e-4 mm^3 from 3e-5 up). Lumps: at g = 0 the bodies share a 5 x 10 face, one lump and a manifold solid; for g > 0 they meet only along the edge in exact geometry (two lumps, as 168-bodies-touching-only-along-a-line.json counts them) but within tolerance over the strip beside it, so the count depends on a tolerance decision solidcore has not made (docs/booleans.md section 5) and is not checked. Expected values are analytic; nothing comes from a commercial CAD product.",
+ "cases": [
+  {
+   "name": "side_on_the_wall",
+   "note": "The control: the prism's side lies on the wall's face x = 0, so the join shares a 5 x 10 face. On SolidCraft main and kernel (solidcraft-cli, 2026-11-09): the join builds, one body of 4200.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "wall",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.0,
+      20.0,
+      20.0
+     ]
+    },
+    {
+     "op": "extrude",
+     "id": "prism",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -20.0,
+         5.0
+        ],
+        [
+         0.0,
+         5.0
+        ],
+        [
+         0.0,
+         10.0
+        ],
+        [
+         -20.0,
+         10.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "wall",
+     "b": "prism"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 4200.0,
+     "tol": 0.0005,
+     "formula": "3200 (the box) + 10*20*5 (the prism); tol 0.0005 mm^3"
+    }
+   }
+  },
+  {
+   "name": "gap_10_nm",
+   "note": "The side leans 1e-5 mm (the bodies' tolerance) off the wall at its far end. On SolidCraft main and kernel (solidcraft-cli, 2026-11-09): the join builds, one body of 4200 (the sliver closed).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "wall",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.0,
+      20.0,
+      20.0
+     ]
+    },
+    {
+     "op": "extrude",
+     "id": "prism",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -20.0,
+         5.0
+        ],
+        [
+         0.0,
+         5.0
+        ],
+        [
+         -1e-05,
+         10.0
+        ],
+        [
+         -20.0,
+         10.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "wall",
+     "b": "prism"
+    }
+   ],
+   "expect": {
+    "volume": {
+     "value": 4199.99975,
+     "tol": 0.0005,
+     "formula": "3200 (the box) + 10*(20*5 - 1e-05*5/2) (the prism, shoelace) = 4200 - 25*1e-05; tol 0.0005 mm^3, below 25*g for every gap from 3e-5 up, so a join that closes the sliver fails"
+    }
+   }
+  },
+  {
+   "name": "gap_30_nm",
+   "note": "The side leans 3e-5 mm off the wall at its far end. On SolidCraft main and kernel (solidcraft-cli, 2026-11-09): the join is refused: 'SMLib's check refuses the result: ... Vertex-Face Gap exceeds XSectTol3d ... (offset= 3e-05, tolerance= 2e-05)'.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "wall",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.0,
+      20.0,
+      20.0
+     ]
+    },
+    {
+     "op": "extrude",
+     "id": "prism",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -20.0,
+         5.0
+        ],
+        [
+         0.0,
+         5.0
+        ],
+        [
+         -3e-05,
+         10.0
+        ],
+        [
+         -20.0,
+         10.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "wall",
+     "b": "prism"
+    }
+   ],
+   "expect": {
+    "volume": {
+     "value": 4199.99925,
+     "tol": 0.0005,
+     "formula": "3200 (the box) + 10*(20*5 - 3e-05*5/2) (the prism, shoelace) = 4200 - 25*3e-05; tol 0.0005 mm^3, below 25*g for every gap from 3e-5 up, so a join that closes the sliver fails"
+    }
+   }
+  },
+  {
+   "name": "gap_70_nm",
+   "note": "The report's gap: the side leans 7e-5 mm off the wall at its far end, the width the reporter's sketch left between the curved wall's end line and the vertical wall. On SolidCraft main and kernel (solidcraft-cli, 2026-11-09): the join fails: 'SmApiBoolean: boolean::merge::p2::make_faceuse: upstream status 1001'.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "wall",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.0,
+      20.0,
+      20.0
+     ]
+    },
+    {
+     "op": "extrude",
+     "id": "prism",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -20.0,
+         5.0
+        ],
+        [
+         0.0,
+         5.0
+        ],
+        [
+         -7e-05,
+         10.0
+        ],
+        [
+         -20.0,
+         10.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "wall",
+     "b": "prism"
+    }
+   ],
+   "expect": {
+    "volume": {
+     "value": 4199.99825,
+     "tol": 0.0005,
+     "formula": "3200 (the box) + 10*(20*5 - 7e-05*5/2) (the prism, shoelace) = 4200 - 25*7e-05; tol 0.0005 mm^3, below 25*g for every gap from 3e-5 up, so a join that closes the sliver fails"
+    }
+   }
+  },
+  {
+   "name": "gap_100_nm",
+   "note": "The side leans 1e-4 mm off the wall at its far end. On SolidCraft main and kernel (solidcraft-cli, 2026-11-09): the join builds as two bodies, 3200 and 999.9975 (the sliver kept).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "wall",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.0,
+      20.0,
+      20.0
+     ]
+    },
+    {
+     "op": "extrude",
+     "id": "prism",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -20.0,
+         5.0
+        ],
+        [
+         0.0,
+         5.0
+        ],
+        [
+         -0.0001,
+         10.0
+        ],
+        [
+         -20.0,
+         10.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "wall",
+     "b": "prism"
+    }
+   ],
+   "expect": {
+    "volume": {
+     "value": 4199.9975,
+     "tol": 0.0005,
+     "formula": "3200 (the box) + 10*(20*5 - 0.0001*5/2) (the prism, shoelace) = 4200 - 25*0.0001; tol 0.0005 mm^3, below 25*g for every gap from 3e-5 up, so a join that closes the sliver fails"
+    }
+   }
+  },
+  {
+   "name": "gap_1_um",
+   "note": "The side leans 1e-3 mm off the wall at its far end. On SolidCraft main and kernel (solidcraft-cli, 2026-11-09): the join builds as two bodies, 3200 and 999.975 (the sliver kept).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "wall",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      8.0,
+      20.0,
+      20.0
+     ]
+    },
+    {
+     "op": "extrude",
+     "id": "prism",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -20.0,
+         5.0
+        ],
+        [
+         0.0,
+         5.0
+        ],
+        [
+         -0.001,
+         10.0
+        ],
+        [
+         -20.0,
+         10.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "wall",
+     "b": "prism"
+    }
+   ],
+   "expect": {
+    "volume": {
+     "value": 4199.975,
+     "tol": 0.0005,
+     "formula": "3200 (the box) + 10*(20*5 - 0.001*5/2) (the prism, shoelace) = 4200 - 25*0.001; tol 0.0005 mm^3, below 25*g for every gap from 3e-5 up, so a join that closes the sliver fails"
+    }
+   }
+  }
+ ]
+}

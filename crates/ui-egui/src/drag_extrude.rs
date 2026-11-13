@@ -149,11 +149,17 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     let travelled = v - g.grab;
     let travelled = if free { travelled } else { (travelled / g.step).round() * g.step };
     app.viewport.drag_extrude.last_step = Some(g.step);
+    let step = g.step;
     app.viewport.drag_extrude.gesture = Some(g);
     let Some(Kind::Extrude { distance, direction, .. }) = app.dialog.as_mut().map(|d| &mut d.kind) else { return };
     // A reversed extrude measures its distance against the normal.
     let sign = if matches!(*direction, 1 | crate::dialogs::TWO_SIDES_REVERSED) { -1.0 } else { 1.0 };
-    *distance = crate::canvas::format_len(&app.session.doc, travelled * sign);
+    let mm = travelled * sign;
+    *distance = if free {
+        crate::canvas::format_len(&app.session.doc, mm)
+    } else {
+        crate::canvas::format_len_drag(&app.session.doc, mm, step, app.preferences.length_decimals)
+    };
 }
 
 /// The button is up: the window stays open for the user to adjust and confirm.
@@ -178,7 +184,7 @@ pub fn step_note(app: &SolveApp) -> Option<String> {
 /// It sits below the pointer, clear of the distance box at the arrow tip.
 pub fn show(app: &SolveApp, painter: &egui::Painter) {
     let Some(g) = app.viewport.drag_extrude.gesture.as_ref().filter(|g| g.started) else { return };
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let now = nearest_step(g.step);
     let galley = |i: usize, current: bool| {
         let size = if current { t.font_body * 1.25 } else { t.font_body };

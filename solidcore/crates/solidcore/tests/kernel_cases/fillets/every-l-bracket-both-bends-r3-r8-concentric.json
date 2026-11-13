@@ -1,0 +1,167 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  20.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "index": 13
+            }
+          ],
+          "points": [
+            [
+              0.0,
+              10.0,
+              0.0
+            ]
+          ],
+          "tolerance": 3.001
+        },
+        "kind": "round",
+        "sizes": [
+          8.0
+        ]
+      }
+    }
+  ],
+  "case": "every-l-bracket-both-bends-r3-r8-concentric",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        20,
+        40
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "faces": 10,
+    "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. Both rounds' centre lines are (8, y, 8): V = 7500 + 20 (1-pi/4) 9 - 20 (1-pi/4) 64 = 7263.9380. Check: in the square [0,8]^2 the bend is the quarter annulus pi (64 - 9)/4 against the L's 64 - 9 = 55 there: 20 (pi 55/4 - 55) = -236.0620. Faces 10.",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 7263.937979737193,
+    "what": "an L-bracket's inside bend rounded r3, then its outside bend r8 = 3 + its thickness: concentric rounds, a bend of even thickness"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16
+    }
+  },
+  "records": "every-l-bracket-both-bends-r3-r8-concentric.bodies.json.gz",
+  "result": [
+    {
+      "body": "Bracket",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3831.9689898738143,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 7263.937979821392
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an L-bracket's inside bend rounded r3, then its outside bend r8 = 3 + its thickness: concentric rounds, a bend of even thickness",
+  "why_not": []
+}

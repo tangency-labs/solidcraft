@@ -4,8 +4,8 @@ use solidcraft_engine::panels::*;
 
 use super::*;
 
-fn surface_test_palette(dark: bool) -> crate::theme::Tokens {
-    let mut tokens = if dark { crate::theme::Tokens::dark() } else { crate::theme::Tokens::light() };
+fn surface_test_palette(dark: bool) -> solidcraft_theme::Tokens {
+    let mut tokens = if dark { solidcraft_theme::Tokens::dark() } else { solidcraft_theme::Tokens::light() };
     tokens.panel = if dark { egui::Color32::BLACK } else { egui::Color32::WHITE };
     let ink = if dark { egui::Color32::WHITE } else { egui::Color32::BLACK };
     tokens.text = ink;
@@ -19,15 +19,16 @@ fn surface_test_palette(dark: bool) -> crate::theme::Tokens {
 #[test]
 fn panel_surface_policy_keeps_disabled_host_storage_small() {
     assert!(
-        std::mem::size_of::<HostSurfaceStyle>() < std::mem::size_of::<crate::theme::Tokens>(),
+        std::mem::size_of::<HostSurfaceStyle>() < std::mem::size_of::<solidcraft_theme::Tokens>(),
         "disabled host policy must not embed whole palettes in SolveApp"
     );
 }
 
 #[test]
 fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
+    crate::test_support::host_data();
     use egui::Color32;
-    use solidcraft_engine::geom::srgb::{decode8, encode8};
+    use solidcraft_color::srgb::{decode8, encode8};
     let high_contrast = crate::theme_files::resolve(crate::theme_files::find("high-contrast", &[]).unwrap());
     // Independent stored-premultiplied source-over for both real renderer target
     // formats. This does not call the production contrast/bounds predicate.
@@ -42,15 +43,17 @@ fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
         };
         Color32::from_rgb(channel(source.r(), ground.r()), channel(source.g(), ground.g()), channel(source.b(), ground.b()))
     };
-    let inks = |tokens: &crate::theme::Tokens| [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label];
-    for (name, authored) in [("light", crate::theme::Tokens::light()), ("dark", crate::theme::Tokens::dark()), ("high-contrast", high_contrast)] {
+    let inks = |tokens: &solidcraft_theme::Tokens| [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label];
+    for (name, authored) in
+        [("light", solidcraft_theme::Tokens::light()), ("dark", solidcraft_theme::Tokens::dark()), ("high-contrast", high_contrast)]
+    {
         let ctx = egui::Context::default();
-        let _scope = crate::theme::scoped_panel_tokens(authored);
+        let _scope = solidcraft_theme::scoped_panel_tokens(authored);
         assert!(inks(&authored).iter().all(|ink| ink.a() == 255), "these shipped canonical ink pairs are opaque: {name}");
         for floating in [false, true] {
             let raw = crate::ui_kit::panel_host_frame(&ctx, floating).fill.to_srgba_unmultiplied();
             let opaque = Color32::from_rgb(raw[0], raw[1], raw[2]);
-            let impossible = inks(&authored).iter().any(|ink| crate::theme::contrast_ratio(*ink, opaque) < 4.5);
+            let impossible = inks(&authored).iter().any(|ink| solidcraft_theme::contrast_ratio(*ink, opaque) < 4.5);
             for translucency_percent in [0.0_f32, 50.0, 100.0] {
                 let requested = 1.0 - translucency_percent / 100.0;
                 let style = HostSurfaceStyle::capture(&ctx, false, Some(requested), None);
@@ -74,7 +77,7 @@ fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
                         for ink in inks(palette) {
                             let physical_ink = blend(ink, background, linear);
                             assert!(
-                                crate::theme::contrast_ratio(physical_ink, background) >= 4.5,
+                                solidcraft_theme::contrast_ratio(physical_ink, background) >= 4.5,
                                 "{name}: primary/muted text at translucency {translucency_percent}, viewport {viewport}, linear={linear}"
                             );
                         }
@@ -90,7 +93,7 @@ fn captured_panel_surfaces_protect_all_inks_at_requested_translucencies() {
     let ctx = egui::Context::default();
     for dark in [false, true] {
         let tokens = surface_test_palette(dark);
-        let _scope = crate::theme::scoped_panel_tokens(tokens);
+        let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
         for translucency_percent in [0.0_f32, 50.0, 100.0] {
             let opacity = 1.0 - translucency_percent / 100.0;
             let style = HostSurfaceStyle::capture(&ctx, false, Some(opacity), None);
@@ -102,11 +105,11 @@ fn captured_panel_surfaces_protect_all_inks_at_requested_translucencies() {
                 assert!(effective_background_alpha >= opacity);
                 assert_eq!(effective_background_alpha, f32::from(appearance.fill.a()) / 255.0);
                 assert_eq!(style.palette(appearance), &tokens);
-                assert!(crate::theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
+                assert!(solidcraft_theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
                 if appearance.fill.a() > (opacity * 255.0).ceil() as u8 {
                     let [r, g, b, alpha] = appearance.fill.to_srgba_unmultiplied();
                     let previous = egui::Color32::from_rgba_unmultiplied(r, g, b, alpha - 1);
-                    assert!(!crate::theme::panel_surface_readable(previous, &tokens), "chosen byte is the first readable candidate");
+                    assert!(!solidcraft_theme::panel_surface_readable(previous, &tokens), "chosen byte is the first readable candidate");
                 }
             }
             assert_eq!(style.appearance(PanelSurface::Opaque, false).fill.a(), 255);
@@ -121,19 +124,19 @@ fn panel_contrast_checks_interior_luminance_and_translucent_muted_inks() {
     // viewport background can match it exactly. Endpoint checks alone are false.
     let middle = egui::Color32::from_gray(117);
     tokens.form_dim = middle;
-    assert!(crate::theme::contrast_ratio(middle, egui::Color32::BLACK) >= 4.5);
-    assert!(crate::theme::contrast_ratio(middle, egui::Color32::WHITE) >= 4.5);
-    assert!(!crate::theme::panel_surface_readable(egui::Color32::TRANSPARENT, &tokens));
+    assert!(solidcraft_theme::contrast_ratio(middle, egui::Color32::BLACK) >= 4.5);
+    assert!(solidcraft_theme::contrast_ratio(middle, egui::Color32::WHITE) >= 4.5);
+    assert!(!solidcraft_theme::panel_surface_readable(egui::Color32::TRANSPARENT, &tokens));
     tokens.form_dim = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 240);
-    assert!(crate::theme::panel_surface_readable(egui::Color32::WHITE, &tokens), "RGBA ink is composited rather than rejected");
+    assert!(solidcraft_theme::panel_surface_readable(egui::Color32::WHITE, &tokens), "RGBA ink is composited rather than rejected");
     tokens.form_dim = egui::Color32::TRANSPARENT;
-    assert!(!crate::theme::panel_surface_readable(egui::Color32::WHITE, &tokens), "invisible muted ink cannot satisfy contrast");
+    assert!(!solidcraft_theme::panel_surface_readable(egui::Color32::WHITE, &tokens), "invisible muted ink cannot satisfy contrast");
 }
 
 #[test]
 fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
     use egui::Color32;
-    use solidcraft_engine::geom::srgb::{decode8, encode8};
+    use solidcraft_color::srgb::{decode8, encode8};
     // Independent physical source-over oracle: read stored premultiplied bytes,
     // never the production readability predicate or unpremultiplication helper.
     let physical = |source: Color32, background: Color32, linear: bool, dither: f64| {
@@ -153,10 +156,10 @@ fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
     let premultiplied = Color32::from_rgba_premultiplied(32, 32, 32, 128);
     let ground = Color32::from_gray(1);
     assert_eq!(physical(premultiplied, ground, false, 0.0), Color32::from_gray(32));
-    assert_eq!(crate::theme::composite(premultiplied, ground), Color32::from_gray(33), "round-trip reconstruction is a different blend");
+    assert_eq!(solidcraft_theme::composite(premultiplied, ground), Color32::from_gray(33), "round-trip reconstruction is a different blend");
     for background in [0, 1, 64, 117, 192, 254, 255] {
         let ground = Color32::from_gray(background);
-        let (low, high) = crate::theme::panel_composite_bounds(premultiplied, ground);
+        let (low, high) = solidcraft_theme::panel_composite_bounds(premultiplied, ground);
         for (linear, dither) in [(false, -0.475), (false, 0.0), (false, 0.475), (true, 0.0)] {
             let actual = physical(premultiplied, ground, linear, dither);
             assert!(low.r() <= actual.r() && actual.r() <= high.r(), "actual stored-byte blend lies inside conservative bounds");
@@ -166,7 +169,7 @@ fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
     for dark in [false, true] {
         let mut tokens = surface_test_palette(dark);
         tokens.form_dim = if dark { Color32::from_rgba_unmultiplied(255, 255, 255, 240) } else { Color32::from_rgba_unmultiplied(0, 0, 0, 240) };
-        let _scope = crate::theme::scoped_panel_tokens(tokens);
+        let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
         let style = HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
         let appearance = style.appearance(PanelSurface::Translucent, false);
         assert!(matches!(appearance.contrast, ContrastOutcome::Readable { .. }));
@@ -176,7 +179,7 @@ fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
                 for ink in [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label] {
                     let text = physical(ink, background, linear, 0.0);
                     assert!(
-                        crate::theme::contrast_ratio(text, background) >= 4.5,
+                        solidcraft_theme::contrast_ratio(text, background) >= 4.5,
                         "independent framebuffer blend preserves both primary and muted text"
                     );
                 }
@@ -190,17 +193,17 @@ fn panel_surface_cache_tracks_dark_mode_even_with_identical_authored_tokens() {
     struct RestoreDark(bool);
     impl Drop for RestoreDark {
         fn drop(&mut self) {
-            crate::theme::set_dark(self.0);
+            solidcraft_theme::set_dark(self.0);
         }
     }
-    let _restore = RestoreDark(crate::theme::is_dark());
+    let _restore = RestoreDark(solidcraft_theme::is_dark());
     let ctx = egui::Context::default();
     let mut tokens = surface_test_palette(false);
     tokens.form_dim = tokens.panel;
-    let _scope = crate::theme::scoped_panel_tokens(tokens);
-    crate::theme::set_dark(false);
+    let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
+    solidcraft_theme::set_dark(false);
     let light = HostSurfaceStyle::capture(&ctx, false, Some(0.5), None);
-    crate::theme::set_dark(true);
+    solidcraft_theme::set_dark(true);
     let dark = HostSurfaceStyle::capture(&ctx, false, Some(0.5), Some(&light));
     let light_appearance = light.appearance(PanelSurface::Translucent, false);
     let dark_appearance = dark.appearance(PanelSurface::Translucent, false);
@@ -214,7 +217,7 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
     let mut tokens = surface_test_palette(false);
     tokens.form_dim = tokens.panel;
     tokens.space_4 = 7.0;
-    let _scope = crate::theme::scoped_panel_tokens(tokens);
+    let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     for override_alpha in [Some(0.5), Some(f32::NAN), Some(f32::INFINITY), Some(-0.1), Some(1.1)] {
         let style = HostSurfaceStyle::capture(&ctx, false, override_alpha, None);
         let appearance = style.appearance(PanelSurface::Translucent, false);
@@ -225,7 +228,7 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
         };
         assert_eq!(appearance.contrast, ContrastOutcome::RetainReadableFallback { reason: expected });
         assert_eq!(appearance.fill.a(), 255);
-        assert!(crate::theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
+        assert!(solidcraft_theme::panel_surface_readable(appearance.fill, style.palette(appearance)));
         assert_eq!(style.palette(appearance).space_4, tokens.space_4, "fallback does not change layout metrics");
         let cached = HostSurfaceStyle::capture(&ctx, false, override_alpha, Some(&style));
         assert_eq!(cached, style, "even an invalid raw NaN override has a stable bitwise cache key");
@@ -236,7 +239,7 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
 fn panel_surface_capture_matches_shared_frames_and_respects_accessibility() {
     let ctx = egui::Context::default();
     let tokens = surface_test_palette(false);
-    let _scope = crate::theme::scoped_panel_tokens(tokens);
+    let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     let style = HostSurfaceStyle::capture(&ctx, false, None, None);
     for floating in [false, true] {
         let requested = crate::ui_kit::panel_host_frame(&ctx, floating).fill;
@@ -248,36 +251,36 @@ fn panel_surface_capture_matches_shared_frames_and_respects_accessibility() {
     for floating in [false, true] {
         let appearance = forced.appearance(PanelSurface::Translucent, floating);
         assert_eq!(appearance.fill.a(), 255);
-        assert!(crate::theme::panel_surface_readable(appearance.fill, forced.palette(appearance)));
+        assert!(solidcraft_theme::panel_surface_readable(appearance.fill, forced.palette(appearance)));
     }
     let second_context = egui::Context::default();
     assert_eq!(HostSurfaceStyle::capture(&second_context, false, None, Some(&style)), style);
     let mut changed = tokens;
     changed.text_dim = egui::Color32::from_gray(20);
-    let _changed = crate::theme::scoped_panel_tokens(changed);
+    let _changed = solidcraft_theme::scoped_panel_tokens(changed);
     assert_ne!(HostSurfaceStyle::capture(&ctx, false, None, Some(&style)), style);
 }
 
 #[test]
 fn panel_paint_palette_scope_restores_nested_tokens_without_changing_base_theme() {
-    let before = crate::theme::Tokens::get();
-    let base = crate::theme::Tokens::base();
+    let before = solidcraft_theme::Tokens::get();
+    let base = solidcraft_theme::Tokens::base();
     let mut outer = before;
     outer.text = outer.file_primary_ink;
     {
-        let _outer = crate::theme::scoped_panel_tokens(outer);
-        assert_eq!(crate::theme::Tokens::get(), outer);
-        assert_eq!(crate::theme::Tokens::get_in(crate::theme::ColorVision::Off), outer);
-        assert_eq!(crate::theme::Tokens::base(), base);
+        let _outer = solidcraft_theme::scoped_panel_tokens(outer);
+        assert_eq!(solidcraft_theme::Tokens::get(), outer);
+        assert_eq!(solidcraft_theme::Tokens::get_in(solidcraft_theme::ColorVision::Off), outer);
+        assert_eq!(solidcraft_theme::Tokens::base(), base);
         {
             let inner = surface_test_palette(false);
-            let _inner = crate::theme::scoped_panel_tokens(inner);
-            assert_eq!(crate::theme::Tokens::get(), inner);
+            let _inner = solidcraft_theme::scoped_panel_tokens(inner);
+            assert_eq!(solidcraft_theme::Tokens::get(), inner);
         }
-        assert_eq!(crate::theme::Tokens::get(), outer);
+        assert_eq!(solidcraft_theme::Tokens::get(), outer);
     }
-    assert_eq!(crate::theme::Tokens::get(), before);
-    assert_eq!(crate::theme::Tokens::base(), base);
+    assert_eq!(solidcraft_theme::Tokens::get(), before);
+    assert_eq!(solidcraft_theme::Tokens::base(), base);
 }
 
 fn prepare_preference_fixture(app: &mut crate::SolveApp) {
@@ -1180,6 +1183,64 @@ fn allocation_repeated_column_previews_do_not_drift_proposed_section_or_column_i
 }
 
 #[test]
+fn live_drag_keeps_the_receiving_tab_active_and_stacks_in_the_lower_third() {
+    for direction in [Direction::Ltr, Direction::Rtl] {
+        let mut service = fixture_service(false).unwrap();
+        apply_fixture(
+            &mut service,
+            vec![
+                fixture_open("fixture.log", "target", "target", Zone::Left, 0).unwrap(),
+                fixture_open("fixture.log", "moving", "moving", Zone::Floating, 1).unwrap(),
+            ],
+        );
+        let host = allocate_fixture(&service, Size { width: 1400.0, height: 900.0 }, direction, &fixture_metric_policy(&service));
+        let mut interaction = HostInteraction::default();
+        interaction.set_live_drag(true);
+        fixture_press(&service, &host, &mut interaction, HostPointerTarget::Header { instance: id("moving") });
+        let receiver = host.sections.iter().find(|card| card.instance == id("target")).unwrap();
+        let below = Point {
+            x: receiver.outer.origin.x + if direction == Direction::Ltr { receiver.outer.size.width - 4.0 } else { 4.0 },
+            y: receiver.outer.origin.y + receiver.outer.size.height * 0.7,
+        };
+        let preview = fixture_move(&service, &host, &mut interaction, below);
+        assert!(matches!(preview.destination, Some(Destination::Relative { placement: RelativePlacement::Below, .. })), "{preview:?}");
+        let at = middle(receiver.outer);
+        let preview = fixture_move(&service, &host, &mut interaction, at);
+        assert!(matches!(preview.destination, Some(Destination::JoinTab { .. })), "{preview:?}");
+        assert!(preview.tab_marker.is_some());
+        assert_eq!(preview.projected.unwrap().sections[0].instance, id("target"));
+        let release = interaction.update(&service, &fixture_scope(&service), &host, HostPointerEvent::Release { at });
+        let candidate = release.candidate.unwrap();
+        assert_eq!(candidate.prepared().layout().section(&section("target")).unwrap().active, id("target"));
+        fixture_commit(&mut service, &host, candidate);
+        assert_eq!(service.layout().section(&section("target")).unwrap().tabs, [id("target"), id("moving")]);
+    }
+}
+
+#[test]
+fn detached_drag_preview_reflows_panels_without_committing_a_close() {
+    let content = host_logs(2, Zone::Left);
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.frame(Vec::new(), false);
+    let frame = raw.host.frame().unwrap();
+    let service = raw.content.runtime.layout();
+    let before = service.inspect();
+    let instance = id("log-0");
+    let scope = fixture_scope(service);
+    let detached = super::interaction::detached_drag_layout(service, &scope, &frame.layout, &instance).unwrap();
+    let closed = prepare_host_layout(
+        service,
+        &scope,
+        &frame.layout,
+        LayoutAction::Apply { expected_revision: Some(before.revision), mutations: vec![Mutation::Close { instance }] },
+    )
+    .unwrap();
+    assert_eq!(detached.sections, closed.layout().sections);
+    assert_eq!(detached.sections.len(), 1);
+    assert_eq!(service.inspect(), before);
+}
+
+#[test]
 fn allocation_invisible_physical_edges_and_measured_tab_halves_preserve_rtl_and_detached_indices() {
     for zone in [Zone::Left, Zone::Right] {
         for direction in [Direction::Ltr, Direction::Rtl] {
@@ -1239,15 +1300,26 @@ fn allocation_invisible_physical_edges_and_measured_tab_halves_preserve_rtl_and_
                     if left { card.outer.origin.x - outward } else { card.outer.origin.x + card.outer.size.width - inward }
                 );
             }
-            let before_last =
-                targets.iter().find(|target| target.id == HostDropTargetId::Tab { section: section("group"), before: Some(id("last")) }).unwrap();
-            assert_eq!(before_last.destination, Destination::JoinTab { section: section("group"), index: 1 }, "moved tab removed before indexing");
+            let before_moving = HostDropTargetId::Tab { section: section("group"), before: Some(id("moving")) };
+            let first = card.tabs.iter().find(|tab| tab.instance == id("first")).unwrap();
+            let moving = card.tabs.iter().find(|tab| tab.instance == id("moving")).unwrap();
+            let first_trailing = Point {
+                x: first.bounds.origin.x + first.bounds.size.width * if direction == Direction::Ltr { 0.75 } else { 0.25 },
+                y: middle(first.bounds).y,
+            };
+            let moving_leading = Point {
+                x: moving.bounds.origin.x + moving.bounds.size.width * if direction == Direction::Ltr { 0.25 } else { 0.75 },
+                y: middle(moving.bounds).y,
+            };
             let mut interaction = HostInteraction::default();
-            fixture_press(&service, &host, &mut interaction, HostPointerTarget::Tab { instance: id("moving") });
-            let preview = fixture_move(&service, &host, &mut interaction, middle(before_last.bounds));
-            assert_eq!(preview.target, Some(before_last.id.clone()), "measured tabs arbitrate ahead of top/side edges");
+            fixture_press(&service, &host, &mut interaction, HostPointerTarget::Tab { instance: id("last") });
+            let preview = fixture_move(&service, &host, &mut interaction, first_trailing);
+            assert_eq!(preview.target, Some(before_moving.clone()), "the trailing half inserts after the first tab");
+            assert_eq!(preview.destination, Some(Destination::JoinTab { section: section("group"), index: 1 }));
             assert_eq!(preview.targets.len(), 1);
-            interaction.cancel();
+            let release = interaction.update(&service, &fixture_scope(&service), &host, HostPointerEvent::Release { at: moving_leading });
+            assert_eq!(release.preview.unwrap().target, Some(before_moving));
+            assert_eq!(release.candidate.unwrap().layout(), preview.projected.as_ref().unwrap());
             fixture_press(&service, &host, &mut interaction, HostPointerTarget::Tab { instance: id("moving") });
             let corner = Point {
                 x: if physical_left { card.outer.origin.x + 45.0 } else { card.outer.origin.x + card.outer.size.width - 45.0 },
@@ -1273,7 +1345,7 @@ fn allocation_invisible_physical_edges_and_measured_tab_halves_preserve_rtl_and_
 
 #[test]
 fn allocation_shared_shell_gap_controls_allocation_and_keeps_compact_sashes_and_free_origins() {
-    for mode in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for mode in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         for direction in [Direction::Ltr, Direction::Rtl] {
             for zone in [Zone::Left, Zone::Right] {
                 let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
@@ -2127,7 +2199,7 @@ fn allocation_full_domain_and_short_wide_inline_roles_keep_real_usable_contours_
         let card = &host.sections[0];
         assert!(card.inline && card.body.is_none() && card.footer.is_none());
         assert_eq!(card.header, card.outer, "one total row is shared by controls and inline content");
-        let controls = [card.actions[0].1, card.menu, card.collapse, card.close.unwrap()];
+        let controls = [card.actions[0].1, card.menu, card.collapse.unwrap(), card.close.unwrap()];
         for pair in controls.windows(2) {
             assert!(if direction == Direction::Ltr { pair[0].origin.x < pair[1].origin.x } else { pair[0].origin.x > pair[1].origin.x });
         }
@@ -2291,7 +2363,7 @@ fn assert_host_geometry(h: &PanelMountHarness, host: &HostLayout) {
             .chain(card.tabs.iter().map(|tab| tab.bounds))
             .chain(card.tab_overflow)
             .chain(card.actions.iter().map(|(_, bounds)| *bounds))
-            .chain([card.menu, card.collapse])
+            .chain([card.menu, card.collapse.unwrap()])
             .chain(card.close)
             .chain(card.inline_content)
             .collect();
@@ -2505,9 +2577,10 @@ impl RawPanelHost {
         let ctx = crate::fonts::test_context();
         ctx.enable_accesskit();
         ctx.set_pixels_per_point(scale);
+        let host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
         Self {
             content,
-            host: WorkspacePanelHost::new(HostOptions::default()).unwrap(),
+            host,
             ctx,
             time: 0.0,
             capacity: capacity(),
@@ -2615,7 +2688,7 @@ impl RawPanelHost {
             // foreground container. Warmed frames establish real egui ownership.
             if let Some(bounds) = self.foreign_cover {
                 let container = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Window);
-                let frame = container.frame(ui.ctx(), crate::theme::Tokens::get().dialog_body, crate::frame::Side::Left).inner_margin(0);
+                let frame = container.frame(ui.ctx(), solidcraft_theme::Tokens::get().dialog_body, crate::frame::Side::Left).inner_margin(0);
                 container
                     .area(egui::Id::unique("unrelated_test_window"))
                     .order(self.foreign_order)
@@ -2673,7 +2746,7 @@ impl RawPanelHost {
             }
             let modal = self.late_modal.then(|| {
                 let container = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Window);
-                let frame = container.frame(ui.ctx(), crate::theme::Tokens::get().dialog_body, crate::frame::Side::Left);
+                let frame = container.frame(ui.ctx(), solidcraft_theme::Tokens::get().dialog_body, crate::frame::Side::Left);
                 container.modal(egui::Id::unique("unrelated_test_modal")).frame(frame).show(ui.ctx(), |ui| {
                     ui.set_min_size(egui::vec2(200.0, 80.0));
                     ui.label("Independent modal content");
@@ -2991,9 +3064,12 @@ fn raw_host_native_prepare_failure_and_capability_false_menu_preserve_atomicity(
             .unwrap()
             .controls
             .iter()
-            .find(|control| control.target == HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Popout })
-            .unwrap();
-        assert_eq!(control.enabled, native, "native capability must be truthful");
+            .find(|control| control.target == HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Popout });
+        assert_eq!(control.is_some_and(|control| control.enabled), native, "only supported pop-outs appear");
+        if !native {
+            assert!(control.is_none());
+            continue;
+        }
         let before = raw.content.runtime.layout().inspect();
         let commits = raw.content.native.commits;
         raw.content.native.fail_prepare = true;
@@ -3190,13 +3266,13 @@ fn raw_host_wider_perimeters_win_over_cards_tabs_and_clear_below_without_fallbac
                     // Exercise both actual shell gaps without multiplying all
                     // selection cases by an unrelated rendering-mode matrix.
                     let mode = if matches!(case, "side-edge" | "bottom-clear" | "empty") {
-                        crate::shell::LayoutMode::Docked
+                        crate::ui_kit::LayoutMode::Docked
                     } else {
-                        crate::shell::LayoutMode::Floating
+                        crate::ui_kit::LayoutMode::Floating
                     };
                     mode.publish(&raw.ctx);
                     let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
-                    assert_eq!(gap, if mode == crate::shell::LayoutMode::Docked { 0.0 } else { 7.0 });
+                    assert_eq!(gap, if mode == crate::ui_kit::LayoutMode::Docked { 0.0 } else { 7.0 });
                     let mut options = priority_host_options();
                     options.metrics.gap = gap;
                     options.metrics.inline_max_height = 0.0;
@@ -3307,7 +3383,7 @@ fn raw_host_wider_perimeters_win_over_cards_tabs_and_clear_below_without_fallbac
                         assert!(output_paints_rect(
                             &output,
                             preview.bounds,
-                            Some(crate::theme::Tokens::get().form_primary.gamma_multiply(0.12)),
+                            Some(solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.12)),
                             None
                         ));
                         let shown = preview.projected.unwrap();
@@ -3408,7 +3484,12 @@ fn raw_host_perimeter_anchors_survive_source_detach_and_commit_the_exact_preview
                     );
                     assert!(preview.rejection.is_none(), "{preview:?}");
                     assert_eq!(preview.targets.len(), 1);
-                    assert!(output_paints_rect(&output, preview.bounds, Some(crate::theme::Tokens::get().form_primary.gamma_multiply(0.12)), None));
+                    assert!(output_paints_rect(
+                        &output,
+                        preview.bounds,
+                        Some(solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.12)),
+                        None
+                    ));
                     let shown = preview.projected.unwrap();
                     assert_eq!(raw.content.runtime.layout().inspect(), before);
                     assert_eq!(raw.content.native.commits, commits);
@@ -3434,7 +3515,7 @@ fn raw_host_perimeter_anchors_survive_source_detach_and_commit_the_exact_preview
 #[test]
 fn raw_host_drag_and_pair_resize_dispatch_once_even_when_egui_repeats_the_release_pass() {
     for (mode, resize) in
-        [(crate::shell::LayoutMode::Floating, false), (crate::shell::LayoutMode::Floating, true), (crate::shell::LayoutMode::Docked, true)]
+        [(crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true), (crate::ui_kit::LayoutMode::Docked, true)]
     {
         let h = host_logs(2, Zone::Left);
         let mut raw = RawPanelHost::new(h, 2.0);
@@ -4466,7 +4547,7 @@ fn raw_below_short_card_previews_and_commits_halfway_through_clear_space_before_
 #[test]
 fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_footprints() {
     fn feedback(output: &egui::FullOutput, title: &str, source: egui::Rect, ink: egui::Color32, faded: bool, badge: bool) {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         let (mut originals, mut badges, mut others) = (0, 0, 0);
         for clipped in &output.shapes {
             crate::test_support::each_shape(&clipped.shape, &mut |shape| {
@@ -4526,7 +4607,7 @@ fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_foo
             let source = egui_rect(raw.host.frame().unwrap().controls.iter().find(|control| control.target == target).unwrap().bounds);
             let controls = raw.host.frame().unwrap().controls.iter().map(|control| (control.id, control.bounds)).collect::<Vec<_>>();
             let title = raw.content.runtime.instance_presentation(&id("editor")).unwrap().title;
-            let ink = crate::theme::Tokens::get().form_primary; // Editor declares attention.
+            let ink = solidcraft_theme::Tokens::get().form_primary; // Editor declares attention.
             let start = raw.at(target);
             raw.pointer(start, true, false);
             let below = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(5.99, 0.0))], false);
@@ -4719,7 +4800,7 @@ fn raw_host_inactive_tab_widget_drag_obeys_threshold_and_moves_only_its_retained
                 .unwrap()
                 .nodes
                 .iter()
-                .any(|(_, node)| { node.role() == egui::accesskit::Role::Button && node.label() == Some(widget.accessible_name.as_str()) }),
+                .any(|(_, node)| { node.role() == egui::accesskit::Role::Tab && node.label() == Some(widget.accessible_name.as_str()) }),
             "published Tab metadata must correspond to an actual egui widget"
         );
         let start = raw.at(target);
@@ -4754,9 +4835,9 @@ fn raw_host_inactive_tab_widget_drag_obeys_threshold_and_moves_only_its_retained
         assert!(preview.rejection.is_none());
         assert_eq!(preview.destination, Some(Destination::JoinTab { section: section("destination"), index: 2 }));
         let projected = preview.projected.clone().unwrap();
-        assert!(output_paints_rect(&output, preview.bounds, Some(crate::theme::Tokens::get().form_primary.gamma_multiply(0.12)), None));
+        assert!(output_paints_rect(&output, preview.bounds, Some(solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.12)), None));
         assert!(
-            output_paints_rect(&output, preview.tab_marker.unwrap(), Some(crate::theme::Tokens::get().form_primary), None),
+            output_paints_rect(&output, preview.tab_marker.unwrap(), Some(solidcraft_theme::Tokens::get().form_primary), None),
             "paint the actual inserted-tab edge, not a nominal body highlight"
         );
         assert_eq!(raw.content.runtime.layout().inspect(), before, "preview cannot activate the tab or change layout");
@@ -7060,6 +7141,7 @@ fn boundary_app() -> (crate::scenario::Harness, FixtureProbe, BoundaryProbe) {
             )
             .unwrap();
     }
+    h.app.disable_panel_runtime().unwrap();
     h.app.enable_panel_runtime(runtime, Box::new(BoundaryServices::new(trace.clone()))).unwrap();
     prepare_app_commands(&mut h.app);
     h.app.dispatch_panel_layout(transaction(vec![fixture_open("fixture.editor", "editor", "editor-section", Zone::Left, 0).unwrap()])).unwrap();
@@ -7839,7 +7921,7 @@ fn raw_split_preview_paints_the_exact_landing_and_changed_neighbours_before_one_
             let preview = moving.preview.unwrap();
             assert!(preview.rejection.is_none());
             let projected = preview.projected.unwrap();
-            assert!(output_paints_rect(&output, preview.bounds, Some(crate::theme::Tokens::get().form_primary.gamma_multiply(0.12)), None));
+            assert!(output_paints_rect(&output, preview.bounds, Some(solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.12)), None));
             let changed = projected
                 .sections
                 .iter()
@@ -7849,7 +7931,7 @@ fn raw_split_preview_paints_the_exact_landing_and_changed_neighbours_before_one_
                 .collect::<Vec<_>>();
             assert!(!changed.is_empty());
             for card in changed {
-                assert!(output_paints_rect(&output, card.outer, None, Some(crate::theme::Tokens::get().form_primary.gamma_multiply(0.7))));
+                assert!(output_paints_rect(&output, card.outer, None, Some(solidcraft_theme::Tokens::get().form_primary.gamma_multiply(0.7))));
             }
             assert_eq!(raw.content.runtime.layout().inspect(), before);
             assert_eq!(raw.host.frame().unwrap().layout.usable, initial.usable, "landing paint never commits the candidate usable region");
@@ -9299,7 +9381,11 @@ fn native_reply_capabilities_match_live_sink_across_prepare_show_finish_stale_an
             raw.frame(Vec::new(), false);
             raw.menu(id("editor"));
             let popout = HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Popout };
-            assert_eq!(raw_control(&raw, &popout).enabled, expected.native_windows);
+            if !expected.native_windows {
+                assert!(raw.host.frame().unwrap().controls.iter().all(|control| control.target != popout));
+                continue;
+            }
+            assert!(raw_control(&raw, &popout).enabled);
             raw.content.native.fail_prepare = true;
             let before = raw.content.runtime.layout().inspect();
             raw.click(popout, true);
@@ -9347,6 +9433,7 @@ struct ReviewCohortTrace {
     editors: Vec<(egui::Id, ContentSlot, egui::Rect, String)>,
     wrap_rows: Vec<usize>,
     consume_wheel: bool,
+    omit_editor: bool,
     child_scroll: std::collections::BTreeMap<InstanceId, (egui::Rect, f32)>,
 }
 type ReviewTrace = std::rc::Rc<std::cell::RefCell<ReviewCohortTrace>>;
@@ -9404,6 +9491,7 @@ impl PanelController for ReviewController {
     fn presentation(&self) -> PanelPresentation {
         let mut presentation = self.inner.presentation();
         presentation.actions.push(RuntimeAction {
+            pressed: Some(!self.trace.borrow().disabled),
             id: ControlId::new("pulse").unwrap(),
             label: "review pulse".into(),
             enabled: !self.trace.borrow().disabled,
@@ -9422,6 +9510,9 @@ impl PanelController for ReviewController {
         self.inner.render(slot, ui, context, services)?;
         let consume_wheel = self.trace.borrow().consume_wheel;
         if slot == ContentSlot::Body {
+            if self.trace.borrow().omit_editor {
+                return Ok(());
+            }
             if self.key.instance.0 == "inline-editor" || self.key.instance.0 == "wrapping-editor" {
                 let editor_id = egui::Id::unique(("review-inline-editor", &self.key));
                 let response = if self.key.instance.0 == "wrapping-editor" {
@@ -9430,12 +9521,17 @@ impl PanelController for ReviewController {
                     crate::ui_kit::bounded_cell_editor(ui, editor_id, &mut self.draft, "Review editable value", false, 4096)
                 };
                 if self.key.instance.0 == "wrapping-editor" {
-                    let tokens = crate::theme::Tokens::get();
+                    let tokens = solidcraft_theme::Tokens::get();
                     let width = (response.rect.width() - 2.0 * tokens.form_inset).max(1.0);
                     let galley =
                         ui.fonts_mut(|fonts| fonts.layout(self.draft.clone(), egui::FontId::monospace(tokens.font_label), tokens.form_ink, width));
                     self.trace.borrow_mut().wrap_rows.push(galley.rows.len());
                 }
+                services.local.register_focus_response(
+                    &LocalScope { workspace: context.workspace.clone(), document: context.document.clone(), viewport: context.viewport.clone() },
+                    &context.instance,
+                    &response,
+                )?;
                 self.trace.borrow_mut().editors.push((response.id, slot, response.rect, self.draft.clone()));
             } else if consume_wheel {
                 let child = egui::ScrollArea::vertical()
@@ -10137,7 +10233,7 @@ fn raw_inline_title_actions_editor_and_system_slots_mirror_and_keep_editor_ident
             assert!(card.inline && card.body.is_none() && card.footer.is_none());
             assert_eq!(card.outer.size.height, 64.0);
             let shared_title = card.title.expect("inline composition retains the actual shared title/grip");
-            let slots = [shared_title, card.actions[0].1, card.inline_content.unwrap(), card.menu, card.collapse, card.close.unwrap()];
+            let slots = [shared_title, card.actions[0].1, card.inline_content.unwrap(), card.menu, card.collapse.unwrap(), card.close.unwrap()];
             for pair in slots.windows(2) {
                 if direction == Direction::Ltr {
                     assert!(pair[0].origin.x + pair[0].size.width <= pair[1].origin.x);
@@ -12384,7 +12480,7 @@ fn app_atomic_workspace_replacements_accept_distinct_incoming_contexts_and_match
 
 #[test]
 fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates_owned_geometry() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let (mut h, _, _) = boundary_app();
         h.app.ui.layout = mode;
         h.frames(2);
@@ -12402,7 +12498,7 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
             assert_eq!(card.paint_alpha, Some(255), "Classic's default opaque policy is preserved");
         }
         let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
-        assert_eq!(gap, if mode == crate::shell::LayoutMode::Floating { 7.0 } else { 0.0 });
+        assert_eq!(gap, if mode == crate::ui_kit::LayoutMode::Floating { 7.0 } else { 0.0 });
         assert_eq!(painted.metrics.gap, gap);
         assert_eq!(painted.allocation_environment.gap, gap);
         let domain = egui_rect(painted.render_domain);
@@ -12505,4 +12601,1320 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         assert_eq!(h.app.session.undo.len(), undo);
         assert_eq!(h.app.session.is_dirty(), dirty);
     }
+}
+
+#[test]
+fn shared_host_accessibility_exposes_tabs_disclosure_and_oriented_splits() {
+    for scale in [1.0, 2.0] {
+        let mut content = host_logs(2, Zone::Left);
+        content
+            .dispatch(vec![Mutation::Open {
+                kind: PanelKind::new("fixture.log").unwrap(),
+                instance: id("extra-tab"),
+                destination: Some(Destination::JoinTab { section: section("section-0"), index: 1 }),
+            }])
+            .unwrap();
+        let mut raw = RawPanelHost::new(content, scale);
+        raw.frame(Vec::new(), false);
+        let (frame, output) = raw.frame(Vec::new(), false);
+        let nodes = &output.platform_output.accesskit_update.as_ref().unwrap().nodes;
+        let active = frame.layout.sections.iter().find(|card| card.section == section("section-0")).unwrap().instance.clone();
+        let tabs: Vec<_> =
+            frame.controls.iter().filter(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Tab { .. }))).collect();
+        assert_eq!(tabs.len(), 2);
+        for tab in tabs {
+            let node = &nodes.iter().find(|(id, _)| *id == tab.id.accesskit_id()).unwrap().1;
+            assert_eq!(node.role(), egui::accesskit::Role::Tab);
+            assert_eq!(
+                node.is_selected(),
+                Some(matches!(&tab.target, HostControlTarget::Pointer(HostPointerTarget::Tab { instance }) if *instance == active))
+            );
+        }
+        let tablist = nodes.iter().find(|(_, node)| node.role() == egui::accesskit::Role::TabList).unwrap();
+        let mut descendants = vec![tablist.0];
+        let mut next = 0;
+        while next < descendants.len() && next < nodes.len() {
+            if let Some((_, node)) = nodes.iter().find(|(id, _)| *id == descendants[next]) {
+                for child in node.children() {
+                    if !descendants.contains(child) {
+                        descendants.push(*child);
+                    }
+                }
+            }
+            next += 1;
+        }
+        for tab in frame.controls.iter().filter(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Tab { .. }))) {
+            assert!(descendants.contains(&tab.id.accesskit_id()), "the actual Tab must descend from the actual TabList");
+        }
+        let collapse = raw_control(&raw, &HostControlTarget::Pointer(HostPointerTarget::Collapse { instance: active }));
+        assert_eq!(nodes.iter().find(|(id, _)| *id == collapse.id.accesskit_id()).unwrap().1.is_expanded(), Some(true));
+        assert!(
+            nodes
+                .iter()
+                .any(|(_, node)| node.role() == egui::accesskit::Role::Splitter && node.orientation().is_some() && node.numeric_value().is_some())
+        );
+    }
+}
+
+fn sash_numeric_value(frame: &HostFrame, output: &egui::FullOutput, target: &HostControlTarget) -> f64 {
+    let control = frame.controls.iter().find(|control| control.target == *target).unwrap();
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == control.id.accesskit_id())
+        .unwrap()
+        .1
+        .numeric_value()
+        .unwrap()
+}
+
+#[test]
+fn contextual_keyboard_resize_reuses_candidates_and_rejects_foreign_focus() {
+    for scale in [1.0, 2.0] {
+        for direction in [Direction::Ltr, Direction::Rtl] {
+            let mut content = host_logs(2, Zone::Left);
+            let mut environment = content.runtime.environment().clone();
+            environment.direction = direction;
+            content.runtime.set_environment(environment, &mut content.local).unwrap();
+            let mut raw = RawPanelHost::new(content, scale);
+            raw.frame(Vec::new(), false);
+            let (frame, output) = raw.frame(Vec::new(), false);
+            let sash =
+                frame.controls.iter().find(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Sash { .. }))).unwrap();
+            let target = sash.target.clone();
+            let before_value = sash_numeric_value(&frame, &output, &target);
+            raw.ctx.memory_mut(|memory| memory.request_focus(sash.id));
+            raw.frame(Vec::new(), false);
+            let candidate = raw.host.contextual_action(&raw.content.runtime, ContextualPanelAction::ResizeDown).unwrap();
+            let before = raw.content.runtime.layout().inspect();
+            raw.frame(vec![host_key(egui::Key::ArrowDown, true)], false);
+            let (after_frame, output) = raw.frame(vec![host_key(egui::Key::ArrowDown, false)], false);
+            assert_ne!(raw.content.runtime.layout().inspect().revision, before.revision);
+            assert!(matches!(candidate, LayoutAction::Apply { .. }));
+            let value = sash_numeric_value(&after_frame, &output, &target);
+            assert_eq!(value, f64::from(after_frame.layout.sections[0].outer.size.height));
+            assert!(value > before_value, "the default standalone arrow changes the controlled height and accessible value");
+            raw.host.set_keyboard_shortcuts(Vec::new());
+            let unbound = raw.content.runtime.layout().inspect();
+            raw.frame(vec![host_key(egui::Key::ArrowDown, true)], false);
+            raw.frame(vec![host_key(egui::Key::ArrowDown, false)], false);
+            assert_eq!(raw.content.runtime.layout().inspect(), unbound, "application bindings replace rather than extend standalone defaults");
+            raw.foreign_cover = Some(egui_rect(raw.capacity));
+            raw.foreign_takes_focus = true;
+            raw.frame(Vec::new(), false);
+            raw.frame(Vec::new(), false);
+            assert!(raw.host.contextual_action(&raw.content.runtime, ContextualPanelAction::ResizeDown).is_err());
+        }
+    }
+}
+
+#[test]
+fn splitter_accessible_extent_keeps_its_axis_and_value_when_the_host_scrolls() {
+    for scale in [1.0, 2.0] {
+        for direction in [Direction::Ltr, Direction::Rtl] {
+            for zone in [Zone::Left, Zone::Bottom] {
+                let mut content = host_logs(2, zone);
+                let mut environment = content.runtime.environment().clone();
+                environment.direction = direction;
+                content.runtime.set_environment(environment, &mut content.local).unwrap();
+                let mut raw = RawPanelHost::new(content, scale);
+                raw.capacity.size = if zone == Zone::Bottom { Size { width: 250.0, height: 400.0 } } else { Size { width: 800.0, height: 200.0 } };
+                raw.frame(Vec::new(), false);
+                let (before_frame, output) = raw.frame(Vec::new(), false);
+                let target = HostControlTarget::Pointer(HostPointerTarget::Sash { first: section("section-0"), second: section("section-1") });
+                let value = sash_numeric_value(&before_frame, &output, &target);
+                let before_control = raw_control(&raw, &target);
+                let horizontal_scroll = zone == Zone::Bottom;
+                let track = raw_control(&raw, &HostControlTarget::Scroll { horizontal: horizontal_scroll });
+                let bounds = egui_rect(track.bounds);
+                let at = if horizontal_scroll { bounds.right_center() - egui::vec2(1.0, 0.0) } else { bounds.center_bottom() - egui::vec2(0.0, 1.0) };
+                let before = raw.content.runtime.layout().inspect();
+                raw.frame(vec![egui::Event::PointerMoved(at)], false);
+                raw.pointer(at, true, false);
+                raw.pointer(at, false, false);
+                let (after_frame, output) = raw.frame(Vec::new(), false);
+                let after_control = raw_control(&raw, &target);
+                assert_ne!(after_control.bounds.origin, before_control.bounds.origin, "the actual sash moved with presentation scrolling");
+                assert_eq!(sash_numeric_value(&after_frame, &output, &target), value, "scrolling cannot announce a panel resize");
+                let node = &output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .unwrap()
+                    .nodes
+                    .iter()
+                    .find(|(id, _)| *id == after_control.id.accesskit_id())
+                    .unwrap()
+                    .1;
+                assert_eq!(
+                    node.orientation(),
+                    Some(if horizontal_scroll { egui::accesskit::Orientation::Vertical } else { egui::accesskit::Orientation::Horizontal })
+                );
+                assert_eq!(raw.content.runtime.layout().inspect(), before);
+            }
+        }
+    }
+}
+
+#[test]
+fn contextual_panel_focus_reveals_last_tiny_header_without_a_canvas_shield() {
+    for scale in [1.0, 2.0] {
+        let mut content = host_logs(24, Zone::Left);
+        content
+            .dispatch((0..24).map(|index| Mutation::Collapse { section: section(&format!("section-{index}")), collapsed: true }).collect())
+            .unwrap();
+        let mut raw = RawPanelHost::new(content, scale);
+        raw.capacity.size = Size { width: 480.0, height: 320.0 };
+        raw.frame(Vec::new(), false);
+        raw.frame(Vec::new(), false);
+        let first = raw_control(&raw, &HostControlTarget::Pointer(HostPointerTarget::Header { instance: id("log-0") }));
+        raw.ctx.memory_mut(|memory| memory.request_focus(first.id));
+        raw.frame(Vec::new(), false);
+        let action = raw.host.contextual_action(&raw.content.runtime, ContextualPanelAction::FocusPrevious).unwrap();
+        let reply = raw
+            .content
+            .dispatch(match action {
+                LayoutAction::Apply { mutations, .. } => mutations,
+                _ => panic!("focus must be a typed mutation"),
+            })
+            .unwrap();
+        raw.host.note_reply(&reply);
+        raw.frame(Vec::new(), false);
+        let frame = raw.frame(Vec::new(), false).0;
+        let last = raw_control(&raw, &HostControlTarget::Pointer(HostPointerTarget::Header { instance: id("log-23") }));
+        assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(last.id));
+        assert!(raw.capacity.contains_rect(last.bounds));
+        assert!(frame.layout.input.iter().all(|bounds| frame.layout.painted.contains(bounds)));
+        assert!(frame.layout.sections.iter().filter(|card| card.instance != id("log-23")).all(|card| card.collapsed && card.body.is_none()));
+        let target = frame.layout.sections.iter().find(|card| card.instance == id("log-23")).unwrap();
+        assert!(!target.collapsed && target.body.is_some(), "Focus deliberately expands only its target");
+    }
+}
+
+#[test]
+fn shared_menu_keyboard_entry_end_and_escape_restore_actual_opener() {
+    for scale in [1.0, 2.0] {
+        let mut raw = RawPanelHost::new(host_logs(1, Zone::Left), scale);
+        raw.ctx.global_style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
+        // The compact menu still needs enough overflow to scroll a whole row out of view.
+        raw.capacity.size = Size { width: 480.0, height: 64.0 };
+        raw.frame(Vec::new(), false);
+        raw.frame(Vec::new(), false);
+        let opener = raw_control(&raw, &HostControlTarget::Pointer(HostPointerTarget::Menu { instance: id("log-0") }));
+        raw.ctx.memory_mut(|memory| memory.request_focus(opener.id));
+        raw.frame(vec![host_key(egui::Key::Enter, true)], false);
+        raw.frame(vec![host_key(egui::Key::Enter, false)], false);
+        raw.frame(Vec::new(), false);
+        assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(opener.id));
+        // Settle the entry reveal, then prove a retained first-row focus does
+        // not undo manual wheel scrolling on subsequent ordinary paints.
+        raw.frame(Vec::new(), false);
+        let first = raw.focused_response.as_ref().unwrap().clone();
+        scroll_real_host_popup_to_end(&mut raw);
+        assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(first.id));
+        let scrolled = raw.focused_response.as_ref().unwrap().clone();
+        let inner = egui_rect(raw.host.frame().unwrap().menu_bounds.unwrap()).shrink(solidcraft_theme::Tokens::get().space_6);
+        assert!(scrolled.rect.bottom() < inner.top(), "manual scrolling can leave the focused first item outside the visible menu");
+        raw.frame(Vec::new(), false);
+        assert_eq!(raw.focused_response.as_ref().unwrap().rect, scrolled.rect, "idle repaint must not pull manual scroll back to the focused row");
+        let (_, output) = raw.frame(vec![host_key(egui::Key::End, true)], false);
+        assert!(output.platform_output.accesskit_update.as_ref().unwrap().nodes.iter().any(|(_, node)| node.role() == egui::accesskit::Role::Menu));
+        raw.frame(vec![host_key(egui::Key::End, false)], false);
+        raw.frame(Vec::new(), false);
+        raw.frame(Vec::new(), false);
+        let focused = raw.ctx.memory(|memory| memory.focused()).unwrap();
+        // read_response after run_ui can return the preceding pass: egui swaps
+        // its current/previous widget stores at end_pass. Use the actual
+        // response already captured inside this frame after menu painting.
+        let response = raw.focused_response.as_ref().unwrap();
+        assert_eq!(response.id, focused);
+        let menu = egui_rect(raw.host.frame().unwrap().menu_bounds.unwrap());
+        let inner = menu.shrink(solidcraft_theme::Tokens::get().space_6);
+        assert!(inner.contains_rect(response.rect), "final action {:?} should fit in the menu {inner:?}", response.rect);
+        assert!(response.interact_rect.is_positive());
+        assert_eq!(response.interact_rect, response.rect, "the focused row must be fully interactable too");
+        raw.frame(vec![host_key(egui::Key::Escape, true)], false);
+        raw.frame(vec![host_key(egui::Key::Escape, false)], false);
+        assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(opener.id));
+        assert!(raw.host.frame().unwrap().menu_bounds.is_none());
+    }
+}
+
+#[test]
+fn nested_menu_keyboard_entry_and_escape_keep_the_live_root_opener() {
+    for scale in [1.0, 2.0] {
+        for fixture in [PopupFixture::Tabs, PopupFixture::CompactTabs] {
+            let (mut raw, source, button) = raw_popup_fixture(scale, fixture);
+            let root = raw_control(&raw, &source);
+            open_root_popup(&mut raw, &source, button, false);
+            raw.frame(Vec::new(), false);
+            let nested = raw_control(&raw, &HostControlTarget::PanelMenu { instance: id("log-0") });
+            raw.ctx.memory_mut(|memory| memory.request_focus(nested.id));
+            raw.frame(Vec::new(), false);
+            raw.frame(vec![host_key(egui::Key::Enter, true)], false);
+            raw.frame(vec![host_key(egui::Key::Enter, false)], false);
+            raw.frame(Vec::new(), false);
+            let first = raw_control(&raw, &HostControlTarget::Shared { instance: id("log-0"), action: HostSharedAction::Focus });
+            assert_eq!(
+                raw.ctx.memory(|memory| memory.focused()),
+                Some(first.id),
+                "the replacement panel menu takes keyboard focus from its immediate submenu source"
+            );
+            assert!(
+                !raw.host.frame().unwrap().controls.iter().any(|control| control.target == HostControlTarget::PanelMenu { instance: id("log-0") })
+            );
+            raw.frame(vec![host_key(egui::Key::ArrowDown, true)], false);
+            raw.frame(vec![host_key(egui::Key::ArrowDown, false)], false);
+            let second = raw_control(&raw, &HostControlTarget::Shared { instance: id("log-0"), action: HostSharedAction::Collapse });
+            assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(second.id), "the entered submenu is immediately keyboard navigable");
+            raw.frame(vec![host_key(egui::Key::Escape, true)], false);
+            raw.frame(vec![host_key(egui::Key::Escape, false)], false);
+            assert_no_popup(raw.host.frame().unwrap());
+            assert_eq!(
+                raw.ctx.memory(|memory| memory.focused()),
+                Some(root.id),
+                "Escape restores the live overflow launcher, not the vanished submenu row"
+            );
+            // A separate fresh menu must establish a new root launcher.
+            let fresh = raw_control(&raw, &HostControlTarget::Pointer(HostPointerTarget::Menu { instance: id("log-0") }));
+            raw.ctx.memory_mut(|memory| memory.request_focus(fresh.id));
+            raw.frame(Vec::new(), false);
+            raw.frame(vec![host_key(egui::Key::Enter, true)], false);
+            raw.frame(vec![host_key(egui::Key::Enter, false)], false);
+            raw.frame(Vec::new(), false);
+            raw.frame(vec![host_key(egui::Key::Escape, true)], false);
+            raw.frame(vec![host_key(egui::Key::Escape, false)], false);
+            assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(fresh.id));
+        }
+    }
+}
+
+#[test]
+fn focused_editor_keeps_automatic_keys_and_explicit_panel_intents_are_observational() {
+    for scale in [1.0, 2.0] {
+        let (mut content, trace) = review_cohort_host(|_| {});
+        content.dispatch(vec![fixture_open("fixture.editor", "wrapping-editor", "wrapping", Zone::Left, 0).unwrap()]).unwrap();
+        let mut raw = RawPanelHost::new(content, scale);
+        raw.frame(Vec::new(), false);
+        raw.frame(Vec::new(), false);
+        let editor = trace.borrow().editors.last().unwrap().clone();
+        raw.ctx.memory_mut(|memory| memory.request_focus(editor.0));
+        raw.frame(Vec::new(), false);
+        raw.host.set_keyboard_shortcuts(vec![
+            (ContextualPanelAction::Toggle, egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::T)),
+            (ContextualPanelAction::FocusNext, egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowLeft)),
+        ]);
+        let before = raw.content.runtime.layout().inspect();
+        let (invalidated, _) = raw.frame_late(vec![host_key(egui::Key::T, true), egui::Event::Text("typed text".into())], false, |_, _| {});
+        assert!(invalidated.is_none(), "changed editor text invalidates its captured metrics");
+        raw.frame(Vec::new(), false);
+        raw.frame(vec![host_key(egui::Key::T, false), host_key(egui::Key::ArrowLeft, true)], false);
+        raw.frame(vec![host_key(egui::Key::ArrowLeft, false)], false);
+        assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(editor.0));
+        assert!(trace.borrow().editors.last().unwrap().3.contains("typed text"));
+        assert_eq!(raw.content.runtime.layout().inspect(), before);
+        let caret = egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range();
+        let explicit = raw.host.contextual_action(&raw.content.runtime, ContextualPanelAction::Toggle).unwrap();
+        assert!(matches!(explicit, LayoutAction::Apply { .. }));
+        assert_eq!(raw.content.runtime.layout().inspect(), before, "resolving a command must not dispatch it");
+        assert!(raw.host.contextual_action(&raw.content.runtime, ContextualPanelAction::ResizeLeft).is_err());
+        assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range(), caret);
+        assert_eq!(raw.content.commands.calls, 0);
+    }
+}
+
+#[test]
+fn content_focus_bookmark_restores_caret_after_explicit_collapse_and_focus() {
+    for scale in [1.0, 2.0] {
+        let (mut content, trace) = review_cohort_host(|_| {});
+        content.dispatch(vec![fixture_open("fixture.editor", "wrapping-editor", "wrapping", Zone::Left, 0).unwrap()]).unwrap();
+        let mut raw = RawPanelHost::new(content, scale);
+        raw.frame(Vec::new(), false);
+        raw.frame(Vec::new(), false);
+        let editor = trace.borrow().editors.last().unwrap().clone();
+        raw.ctx.memory_mut(|memory| memory.request_focus(editor.0));
+        raw.frame(Vec::new(), false);
+        let (invalidated, _) = raw.frame_late(vec![egui::Event::Text(" retained selection".into())], false, |_, _| {});
+        assert!(invalidated.is_none(), "changed editor text invalidates its captured metrics");
+        raw.frame(Vec::new(), false);
+        let before = trace.borrow().editors.last().unwrap().3.clone();
+        let expected: String = before.chars().take(1).chain(std::iter::once('!')).chain(before.chars().skip(4)).collect();
+        let mut state = egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap();
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(1), egui::text::CCursor::new(4))));
+        state.store(&raw.ctx, editor.0);
+        raw.frame(Vec::new(), false);
+        let caret = egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range();
+        assert!(!caret.unwrap().is_empty(), "exercise an actual nonempty selection before hiding");
+        raw.content.dispatch(vec![Mutation::Collapse { section: section("wrapping"), collapsed: true }]).unwrap();
+        raw.frame(Vec::new(), false);
+        raw.frame(Vec::new(), false);
+        let reply = raw
+            .content
+            .dispatch(vec![
+                Mutation::Collapse { section: section("wrapping"), collapsed: false },
+                Mutation::Focus { instance: id("wrapping-editor") },
+            ])
+            .unwrap();
+        raw.host.note_reply(&reply);
+        raw.frame(Vec::new(), false);
+        raw.frame(Vec::new(), false);
+        assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(editor.0));
+        assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range(), caret);
+        assert!(trace.borrow().editors.last().unwrap().3.contains("retained selection"));
+        let (invalidated, _) = raw.frame_late(vec![egui::Event::Text("!".into())], false, |_, _| {});
+        assert!(invalidated.is_none(), "changed editor text invalidates its captured metrics");
+        raw.frame(Vec::new(), false);
+        assert_eq!(trace.borrow().editors.last().unwrap().3, expected, "typing must replace the restored selection, not insert beside it");
+    }
+}
+
+#[test]
+fn editor_focus_survives_floating_sizing_unless_a_live_foreign_control_takes_it() {
+    for scale in [1.0, 2.0] {
+        for foreign_focus in [false, true] {
+            let (mut content, trace) = review_cohort_host(|_| {});
+            content.dispatch(vec![fixture_open("fixture.editor", "wrapping-editor", "wrapping", Zone::Left, 0).unwrap()]).unwrap();
+            let mut raw = RawPanelHost::new(content, scale);
+            raw.frame(Vec::new(), false);
+            raw.frame(Vec::new(), false);
+            if foreign_focus {
+                raw.prime_foreign_window();
+            }
+            let editor = trace.borrow().editors.last().unwrap().0;
+            raw.ctx.memory_mut(|memory| memory.request_focus(editor));
+            raw.frame(Vec::new(), false);
+            raw.frame_late(vec![egui::Event::Text(" retained reparent selection".into())], false, |_, _| {});
+            raw.frame(Vec::new(), false);
+            let mut state = egui::TextEdit::load_state(&raw.ctx, editor).unwrap();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(1), egui::text::CCursor::new(4))));
+            state.store(&raw.ctx, editor);
+            raw.frame(Vec::new(), false);
+            assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(editor));
+            let caret = egui::TextEdit::load_state(&raw.ctx, editor).unwrap().cursor.char_range();
+            assert!(!caret.unwrap().is_empty());
+            let draft = trace.borrow().editors.last().unwrap().3.clone();
+            let key = ControllerKey { instance: id("wrapping-editor"), owner: raw.content.runtime.instance_owner(&id("wrapping-editor")).unwrap() };
+            let renders = raw.content.probe.state(&key).unwrap().renders;
+            if foreign_focus {
+                raw.foreign_cover = Some(egui::Rect::from_min_size(egui::pos2(1000.0, 600.0), egui::vec2(180.0, 80.0)));
+                raw.foreign_takes_focus = true;
+            }
+            raw.content
+                .dispatch(vec![Mutation::Move {
+                    instance: id("wrapping-editor"),
+                    destination: Destination::NewSection {
+                        section: section("reparented-editor"),
+                        index: 0,
+                        location: SectionLocation::Floating { origin: Point { x: 400.0, y: 180.0 } },
+                        size: Size { width: 400.0, height: 320.0 },
+                    },
+                }])
+                .unwrap();
+            raw.frame(Vec::new(), false);
+            assert_eq!(raw.content.probe.state(&key).unwrap().renders, renders, "the new Area sizing pass must not run a hidden body");
+            let foreign = foreign_focus.then(|| raw.foreign_responses.last().unwrap().id);
+            assert_eq!(
+                raw.ctx.memory(|memory| memory.focused()),
+                foreign,
+                "sizing removes the editor; only the real late foreign widget may take focus"
+            );
+            // Stop requesting focus: subsequent passes must retain the person's
+            // choice without repeatedly forcing it after host restoration.
+            raw.foreign_takes_focus = false;
+            for _ in 0..2 {
+                raw.frame(Vec::new(), false);
+                assert_eq!(raw.ctx.memory(|memory| memory.focused()), foreign.or(Some(editor)));
+            }
+            assert!(raw.content.probe.state(&key).unwrap().renders > renders);
+            assert_eq!(trace.borrow().editors.last().unwrap().3, draft);
+            if foreign_focus {
+                // A later deliberate focus command may return to the retained
+                // selection. It is separate from the Move tested above.
+                let reply = raw.content.dispatch(vec![Mutation::Focus { instance: id("wrapping-editor") }]).unwrap();
+                raw.host.note_reply(&reply);
+                raw.frame(Vec::new(), false);
+                raw.frame(Vec::new(), false);
+            }
+            assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(editor));
+            assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor).unwrap().cursor.char_range(), caret);
+            assert_eq!(trace.borrow().editors.last().unwrap().3, draft);
+            assert_eq!(raw.content.commands.calls, 0);
+
+            // A retained bookmark must not keep its editor focused after the
+            // owning content becomes unavailable, even before another paint.
+            trace.borrow_mut().unavailable.insert(key.clone());
+            raw.content.tick().unwrap();
+            assert_ne!(raw.content.runtime.layout().availability(&key.instance), Availability::Available);
+            assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(editor));
+            raw.host.reconcile_scope(&raw.content.runtime);
+            assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(editor));
+            assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor).unwrap().cursor.char_range(), caret);
+            assert_eq!(trace.borrow().editors.last().unwrap().3, draft);
+        }
+    }
+}
+
+#[test]
+fn custom_header_action_reports_enabled_and_pressed_state_from_retained_presentation() {
+    let (mut content, trace) = review_cohort_host(|_| {});
+    content.dispatch(vec![fixture_open("fixture.log", "log", "log-section", Zone::Left, 0).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.frame(Vec::new(), false);
+    let (frame, output) = raw.frame(Vec::new(), false);
+    let target = HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance: id("log"), action: ControlId::new("pulse").unwrap() });
+    let action = frame.controls.iter().find(|control| control.target == target).unwrap();
+    let node = &output.platform_output.accesskit_update.as_ref().unwrap().nodes.iter().find(|(id, _)| *id == action.id.accesskit_id()).unwrap().1;
+    assert_eq!(node.role(), egui::accesskit::Role::Button);
+    assert_eq!(node.toggled(), Some(egui::accesskit::Toggled::True));
+    assert!(!node.is_disabled());
+    trace.borrow_mut().disabled = true;
+    let (frame, output) = raw.frame(Vec::new(), false);
+    let action = frame.controls.iter().find(|control| control.target == target).unwrap();
+    assert!(!action.enabled);
+    let node = &output.platform_output.accesskit_update.as_ref().unwrap().nodes.iter().find(|(id, _)| *id == action.id.accesskit_id()).unwrap().1;
+    assert!(node.is_disabled());
+    assert_eq!(node.toggled(), Some(egui::accesskit::Toggled::False));
+}
+
+#[test]
+fn absent_content_response_cannot_restore_old_focus_but_live_response_keeps_its_caret() {
+    for scale in [1.0, 2.0] {
+        let (mut content, trace) = review_cohort_host(|_| {});
+        content.dispatch(vec![fixture_open("fixture.editor", "wrapping-editor", "wrapping", Zone::Left, 0).unwrap()]).unwrap();
+        let mut raw = RawPanelHost::new(content, scale);
+        raw.frame(Vec::new(), false);
+        raw.frame(Vec::new(), false);
+        let editor = trace.borrow().editors.last().unwrap().clone();
+        raw.ctx.memory_mut(|memory| memory.request_focus(editor.0));
+        raw.frame(Vec::new(), false);
+        let (invalidated, _) = raw.frame_late(vec![egui::Event::Text(" keep caret".into())], false, |_, _| {});
+        assert!(invalidated.is_none(), "changed editor text invalidates its captured metrics");
+        raw.frame(Vec::new(), false);
+        let mut state = egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap();
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(1), egui::text::CCursor::new(4))));
+        state.store(&raw.ctx, editor.0);
+        raw.frame(Vec::new(), false);
+        let caret = egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range();
+        trace.borrow_mut().omit_editor = true;
+        let reply = raw.content.dispatch(vec![Mutation::Focus { instance: id("wrapping-editor") }]).unwrap();
+        raw.host.note_reply(&reply);
+        raw.frame_late(Vec::new(), false, |_, ctx| {
+            assert!(ctx.read_response(editor.0).is_some(), "egui still exposes the omitted previous-pass widget");
+        });
+        let header = raw_control(&raw, &HostControlTarget::Pointer(HostPointerTarget::Header { instance: id("wrapping-editor") }));
+        assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(header.id));
+        assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range(), caret);
+        trace.borrow_mut().omit_editor = false;
+        let reply = raw.content.dispatch(vec![Mutation::Focus { instance: id("wrapping-editor") }]).unwrap();
+        raw.host.note_reply(&reply);
+        raw.frame(Vec::new(), false);
+        assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(editor.0));
+        assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range(), caret);
+    }
+}
+
+#[test]
+fn modal_dismissal_keys_preserve_passive_content_restore_but_foreign_focus_wins() {
+    for scale in [1.0, 2.0] {
+        for foreign in [false, true] {
+            let (mut content, trace) = review_cohort_host(|_| {});
+            content.dispatch(vec![fixture_open("fixture.editor", "wrapping-editor", "wrapping", Zone::Left, 0).unwrap()]).unwrap();
+            let mut raw = RawPanelHost::new(content, scale);
+            raw.frame(Vec::new(), false);
+            raw.frame(Vec::new(), false);
+            raw.prime_modal();
+            let editor = trace.borrow().editors.last().unwrap().clone();
+            raw.ctx.memory_mut(|memory| memory.request_focus(editor.0));
+            raw.frame(Vec::new(), false);
+            let (invalidated, _) = raw.frame_late(vec![egui::Event::Text(" before modal".into())], false, |_, _| {});
+            assert!(invalidated.is_none(), "changed editor text invalidates its captured metrics");
+            raw.frame(Vec::new(), false);
+            let before = trace.borrow().editors.last().unwrap().3.clone();
+            let expected: String = before.chars().take(1).chain(std::iter::once('!')).chain(before.chars().skip(4)).collect();
+            let mut state = egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(1), egui::text::CCursor::new(4))));
+            state.store(&raw.ctx, editor.0);
+            raw.frame(Vec::new(), false);
+            let caret = egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range();
+            raw.late_modal = true;
+            raw.frame(Vec::new(), false);
+            raw.frame(Vec::new(), false);
+            raw.frame(vec![host_key(egui::Key::Escape, true)], false);
+            raw.late_modal = false;
+            if foreign {
+                raw.foreign_cover = Some(egui::Rect::from_min_size(egui::pos2(900.0, 600.0), egui::vec2(200.0, 100.0)));
+                raw.foreign_takes_focus = true;
+            }
+            raw.frame(vec![host_key(egui::Key::Escape, false), host_key(egui::Key::Enter, true)], false);
+            raw.frame(vec![host_key(egui::Key::Enter, false)], false);
+            raw.frame(Vec::new(), false);
+            if foreign {
+                assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(editor.0));
+                raw.foreign_takes_focus = false;
+                let reply = raw.content.dispatch(vec![Mutation::Focus { instance: id("wrapping-editor") }]).unwrap();
+                raw.host.note_reply(&reply);
+                raw.frame(Vec::new(), false);
+            }
+            assert_eq!(
+                raw.ctx.memory(|memory| memory.focused()),
+                Some(editor.0),
+                "an explicit panel focus request can intentionally leave foreign focus"
+            );
+            assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range(), caret);
+            assert!(!caret.unwrap().is_empty());
+            let (invalidated, _) = raw.frame_late(vec![egui::Event::Text("!".into())], false, |_, _| {});
+            assert!(invalidated.is_none(), "changed editor text invalidates its captured metrics");
+            raw.frame(Vec::new(), false);
+            assert_eq!(trace.borrow().editors.last().unwrap().3, expected, "modal return must retain replacement selection");
+        }
+    }
+}
+
+#[test]
+fn late_modal_reentry_surrenders_content_focused_after_mount() {
+    for scale in [1.0, 2.0] {
+        let (mut content, trace) = review_cohort_host(|_| {});
+        content.dispatch(vec![fixture_open("fixture.editor", "wrapping-editor", "wrapping", Zone::Left, 0).unwrap()]).unwrap();
+        let mut raw = RawPanelHost::new(content, scale);
+        raw.frame(Vec::new(), false);
+        raw.frame(Vec::new(), false);
+        raw.prime_modal();
+        let editor = trace.borrow().editors.last().unwrap().clone();
+        raw.ctx.memory_mut(|memory| memory.request_focus(editor.0));
+        raw.frame(Vec::new(), false);
+        let caret = egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range();
+        raw.late_modal = true;
+        raw.frame(Vec::new(), false);
+        assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(editor.0));
+        raw.late_modal = false;
+        raw.frame(Vec::new(), false);
+        let reply = raw.content.dispatch(vec![Mutation::Focus { instance: id("wrapping-editor") }]).unwrap();
+        raw.host.note_reply(&reply);
+        raw.late_modal = true;
+        raw.frame_late(Vec::new(), false, |_, ctx| {
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                Some(editor.0),
+                "the actual content target receives focus after mount before the late modal is finalized"
+            );
+        });
+        assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(editor.0), "the late modal must surrender newly restored content focus too");
+        assert_eq!(egui::TextEdit::load_state(&raw.ctx, editor.0).unwrap().cursor.char_range(), caret);
+        assert_eq!(raw.content.commands.calls, 0);
+    }
+}
+
+fn production_content_harness(combined_history: bool, assistant: bool) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.ui.show_timeline = true;
+    h.app.preferences.timeline_left = false;
+    h.app.preferences.history_in_browser = combined_history;
+    h.app.preferences.ai_features = assistant;
+    h.app.agent_chat.open = assistant;
+    for name in ["First", "Second"] {
+        h.app.run("sketch.create", serde_json::json!({"plane":"XY","name":name})).unwrap();
+        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+    }
+    h.app.disable_panel_runtime().unwrap();
+    // These fixtures seed first-run settings, without restoring the harness's earlier layout.
+    h.app.panel_layout_preferences = Default::default();
+    super::production::enable_production(&mut h.app).unwrap();
+    h.frames(3);
+    h
+}
+
+fn production_controller_keys(app: &crate::SolveApp) -> Vec<ControllerKey> {
+    let runtime = app.panel_runtime().unwrap();
+    ["browser", "history", "assistant", "render-browser"]
+        .into_iter()
+        .filter_map(|name| {
+            let instance = id(name);
+            let owner = runtime.instance_owner(&instance).unwrap();
+            let key = ControllerKey { instance, owner };
+            runtime.state(&key).map(|_| key)
+        })
+        .collect()
+}
+
+#[test]
+fn production_browser_and_history_mount_existing_content_once_and_preserve_combined_history() {
+    for combined in [false, true] {
+        let h = production_content_harness(combined, false);
+        let frame = h.app.universal_panel_frame().expect("real content uses the shared host");
+        assert!(frame.layout.sections.iter().any(|card| card.instance == id("browser")));
+        assert_eq!(frame.layout.sections.iter().any(|card| card.instance == id("history")), !combined);
+        let rows = crate::browser::drawn_rows();
+        for name in ["First", "Second"] {
+            assert_eq!(rows.iter().filter(|row| row.0 == name).count(), 1, "{name} has one canonical Browser presentation");
+            assert_eq!(crate::scenario::handle_at(&format!("timeline:{name}")).is_some(), !combined);
+        }
+        if combined {
+            assert!(rows.iter().any(|row| row.0 == solidcraft_ui_text::tr("ui.history_title")), "combined History keeps its real Browser folder");
+        } else {
+            let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+            assert!(history.inline, "Bottom History uses the generic one-row composition");
+            let body = egui_rect(history.inline_content.unwrap());
+            let first = crate::scenario::handle_at("timeline:First").unwrap();
+            assert!(body.contains(first), "the real feature chips are inside the shared inline slot");
+        }
+        assert!(h.app.panel_runtime().unwrap().update_errors().is_empty());
+    }
+}
+
+#[test]
+fn production_tab_collapse_and_move_keep_real_selection_document_camera_and_retained_owners() {
+    let mut h = production_content_harness(false, false);
+    let feature = h.app.session.doc.features[0].id;
+    h.app.run("select.set", serde_json::json!({"items":[solidcraft_engine::Sel::Feature { id: feature }]})).unwrap();
+    h.frames(2);
+    let session = h.app.session.uid;
+    let document = h.app.session.doc.clone();
+    let model = h.app.session.model.state();
+    let camera = h.app.cam;
+    let selection = h.app.session.selection.clone();
+    let revision = h.app.session.revision;
+    let undo = h.app.session.undo.len();
+    let dirty = h.app.session.is_dirty();
+    let keys = production_controller_keys(&h.app);
+    let controllers = h.app.panel_runtime().unwrap().controller_count();
+    let browser_section = h.app.panel_runtime().unwrap().layout().layout().containing(&id("browser")).unwrap().id.clone();
+    h.app
+        .dispatch_panel_layout(transaction(vec![
+            Mutation::Move { instance: id("history"), destination: Destination::JoinTab { section: browser_section.clone(), index: 1 } },
+            Mutation::Activate { instance: id("history") },
+        ]))
+        .unwrap();
+    h.frames(3);
+    assert!(crate::browser::drawn_rows().is_empty(), "an inactive Browser does not render a hidden body");
+    assert!(crate::scenario::handle_at("timeline:First").is_some(), "History switches to its existing side rows");
+    h.app.dispatch_panel_layout(transaction(vec![Mutation::Activate { instance: id("browser") }])).unwrap();
+    h.frames(2);
+    assert!(crate::browser::drawn_rows().iter().any(|row| row.0 == "First"));
+    for collapsed in [true, false] {
+        h.app.dispatch_panel_layout(transaction(vec![Mutation::Collapse { section: browser_section.clone(), collapsed }])).unwrap();
+        h.frames(2);
+        assert_eq!(crate::browser::drawn_rows().is_empty(), collapsed, "collapse controls real body work");
+    }
+    h.app
+        .dispatch_panel_layout(transaction(vec![Mutation::Move {
+            instance: id("browser"),
+            destination: Destination::NewSection {
+                section: section("moved-browser"),
+                index: 0,
+                location: SectionLocation::Dock { zone: Zone::Right },
+                size: Size { width: 300.0, height: 320.0 },
+            },
+        }]))
+        .unwrap();
+    h.frames(3);
+    let card = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.instance == id("browser")).unwrap();
+    assert_eq!(card.zone, Zone::Right);
+    assert!(crate::browser::drawn_rows().iter().any(|row| row.0 == "First"));
+    assert_eq!(production_controller_keys(&h.app), keys);
+    assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
+    assert_eq!(h.app.session.uid, session);
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.model.state(), &model));
+    assert_eq!(h.app.cam, camera);
+    assert_eq!(h.app.session.selection, selection);
+    assert_eq!(h.app.session.revision, revision);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.is_dirty(), dirty);
+}
+
+#[test]
+fn production_browser_and_assistant_refuse_bottom_without_changing_live_content() {
+    let mut h = production_content_harness(false, true);
+    h.app.agent_chat.input = "keep this unsent draft".into();
+    let document = h.app.session.doc.clone();
+    let camera = h.app.cam;
+    let controllers = h.app.panel_runtime().unwrap().controller_count();
+    for instance in ["browser", "assistant"] {
+        let before = h.app.panel_runtime().unwrap().layout().inspect();
+        let result = h.app.dispatch_panel_layout(transaction(vec![Mutation::Move {
+            instance: id(instance),
+            destination: Destination::NewSection {
+                section: section("forbidden-bottom"),
+                index: 0,
+                location: SectionLocation::Dock { zone: Zone::Bottom },
+                size: Size { width: 400.0, height: 120.0 },
+            },
+        }]));
+        assert_eq!(result.unwrap_err().rule, Rule::Placement, "only product History permits Bottom");
+        assert_eq!(h.app.panel_runtime().unwrap().layout().inspect(), before);
+        h.frames(2);
+        assert_eq!(h.app.agent_chat.input, "keep this unsent draft");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
+    }
+}
+
+#[test]
+fn production_host_ignores_the_retired_classic_switch() {
+    let mut h = crate::scenario::Harness::new();
+    let mut saved: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+    saved["preferences"]["shared_panel_layout"] = serde_json::json!(false);
+    h.app.disable_panel_runtime().unwrap();
+    h.app.load_prefs(&saved.to_string());
+    h.app.home.open = false;
+    h.frames(3);
+    assert!(h.app.universal_panel_frame().is_some());
+    assert!(!h.app.prefs().contains("shared_panel_layout"));
+}
+
+#[test]
+fn production_preferences_without_a_panel_record_preserve_the_live_catalogue() {
+    let mut h = production_content_harness(false, false);
+    let mut saved: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+    saved.as_object_mut().unwrap().remove(super::preferences::PREFERENCES_KEY);
+    let current = super::preferences::preferences_value(&h.app).unwrap();
+    h.app.load_prefs(&saved.to_string());
+    h.frames(2);
+    assert_eq!(super::preferences::preferences_value(&h.app).unwrap(), current);
+    assert!(super::preferences::preferences_enabled(&h.app));
+}
+
+#[test]
+fn production_assistant_actions_use_the_existing_confirmation_and_close_retains_its_draft_and_queue() {
+    let mut h = production_content_harness(false, true);
+    h.app.agent_chat.input = "unsent composer draft".into();
+    h.app.agent_chat.items.push(crate::agent_chat::Item::Agent { thought: false, text: "retained transcript".into() });
+    h.app.agent_chat.pending.push(crate::agent_chat::Pending {
+        text: "queued instruction".into(),
+        image: false,
+        context: Default::default(),
+        files: Vec::new(),
+    });
+    let pending = h.app.agent_chat.pending.clone();
+    let state = h.app.agent_chat.state();
+    let keys = production_controller_keys(&h.app);
+    let controllers = h.app.panel_runtime().unwrap().controller_count();
+    h.app.panel_content_action(&id("assistant"), &ControlId::new("new-chat").unwrap()).unwrap();
+    super::production::drain_production_actions(&mut h.app).unwrap();
+    assert!(h.app.agent_chat.confirm_new, "the real New Chat confirmation protects queued instructions");
+    assert_eq!(h.app.agent_chat.items.len(), 1);
+    assert_eq!(h.app.agent_chat.pending, pending);
+    h.app.agent_chat.confirm_new = false;
+    h.frames(2);
+    h.app.dispatch_panel_layout(transaction(vec![Mutation::Close { instance: id("assistant") }])).unwrap();
+    h.frames(2);
+    assert!(!h.app.universal_panel_frame().unwrap().layout.sections.iter().any(|card| card.instance == id("assistant")));
+    assert_eq!(h.app.agent_chat.input, "unsent composer draft");
+    assert_eq!(h.app.agent_chat.pending, pending);
+    assert_eq!(h.app.agent_chat.items.len(), 1);
+    assert_eq!(h.app.agent_chat.state(), state, "closing presentation does not restart or cancel the retained chat service");
+    h.app.start("ui.assistant");
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_some(), "the existing Assistant button reopens the shared body after quick close");
+    let section = h.app.panel_runtime().unwrap().layout().layout().containing(&id("assistant")).unwrap().id.clone();
+    h.app.dispatch_panel_layout(transaction(vec![Mutation::Collapse { section: section.clone(), collapsed: true }])).unwrap();
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_none());
+    crate::agent_chat::toggle(&mut h.app);
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_some(), "the keyboard toggle expands a shared collapsed Assistant");
+    h.app.dispatch_panel_layout(transaction(vec![Mutation::Collapse { section, collapsed: true }])).unwrap();
+    h.app.dispatch_panel_layout(transaction(vec![Mutation::Close { instance: id("assistant") }])).unwrap();
+    h.frames(2);
+    h.app.start("ui.assistant");
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_some(), "opening a panel remembered as collapsed expands it atomically");
+    h.app.start("ui.assistant");
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_none(), "the existing Assistant button closes an expanded shared Assistant");
+    crate::agent_chat::toggle(&mut h.app);
+    h.frames(2);
+    assert!(h.app.agent_chat.panel_rect.is_some());
+    assert_eq!(h.app.agent_chat.input, "unsent composer draft");
+    assert_eq!(h.app.agent_chat.pending, pending);
+    assert_eq!(production_controller_keys(&h.app), keys);
+    assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
+    h.app.agent_chat.pending.clear();
+    h.app.panel_content_action(&id("assistant"), &ControlId::new("new-chat").unwrap()).unwrap();
+    super::production::drain_production_actions(&mut h.app).unwrap();
+    assert!(!h.app.agent_chat.confirm_new);
+    assert!(h.app.agent_chat.items.is_empty(), "the same New Chat action clears the real transcript when no confirmation is needed");
+    assert_eq!(h.app.agent_chat.input, "unsent composer draft");
+}
+
+#[test]
+fn production_render_browser_reuses_real_lens_search_and_retains_explicit_layout_workspace() {
+    let mut h = production_content_harness(false, false);
+    let workspace = h.app.panel_runtime().unwrap().layout().layout().workspace.clone();
+    let document = h.app.session.doc.clone();
+    let camera = h.app.cam;
+    h.app.ui.tab = "RENDER".into();
+    h.frames(3);
+    let frame = h.app.universal_panel_frame().unwrap();
+    assert!(frame.layout.sections.iter().any(|card| card.instance == id("render-browser")));
+    assert!(!frame.layout.sections.iter().any(|card| card.instance == id("browser")));
+    h.app.panel_content_action(&id("render-browser"), &ControlId::new("by-look").unwrap()).unwrap();
+    super::production::drain_production_actions(&mut h.app).unwrap();
+    h.frames(2);
+    assert!(h.app.render_workspace.view.by_look);
+    h.app.panel_content_action(&id("render-browser"), &ControlId::new("search").unwrap()).unwrap();
+    super::production::drain_production_actions(&mut h.app).unwrap();
+    h.frames(2);
+    assert!(h.app.render_workspace.view.search_objects);
+    let search = h.app.panel_runtime().unwrap().instance_presentation(&id("render-browser")).unwrap();
+    assert_eq!(search.actions.iter().find(|action| action.id.0 == "search").unwrap().pressed, Some(true));
+    assert_eq!(h.app.panel_runtime().unwrap().layout().layout().workspace, workspace, "changing ribbon tabs never selects a layout workspace");
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+    assert_eq!(h.app.cam, camera);
+    h.app.ui.tab = "SOLID".into();
+    h.frames(2);
+    assert!(h.app.universal_panel_frame().unwrap().layout.sections.iter().any(|card| card.instance == id("browser")));
+    h.app.ui.tab = "RENDER".into();
+    h.frames(2);
+    assert!(h.app.render_workspace.view.by_look && h.app.render_workspace.view.search_objects);
+}
+
+#[test]
+fn production_render_panels_reopen_independently_with_existing_controls() {
+    let mut h = production_content_harness(false, false);
+    // Restore a layout saved before the three Render panels were registered.
+    let names = ["render-library", "render-inspector", "render-shots"];
+    let mut old = h.app.panel_runtime().unwrap().layout().layout().clone();
+    old.instances.retain(|instance| !names.contains(&instance.id.0.as_str()));
+    old.sections.retain(|section| !names.contains(&section.active.0.as_str()));
+    old.columns.retain(|column| old.sections.iter().any(|section| section.column.as_ref() == Some(&column.id)));
+    h.app.dispatch_panel_layout(LayoutAction::Replace { expected_revision: None, layout: old }).unwrap();
+
+    let document = h.app.session.doc.clone();
+    h.app.ui.tab = "RENDER".into();
+    h.frames(12);
+    let presented = |app: &crate::SolveApp, name| {
+        app.universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .any(|card| card.instance == id(name) && (card.body.is_some() || card.inline_content.is_some()))
+    };
+    for name in ["render-browser", "render-library", "render-inspector", "render-shots"] {
+        assert!(presented(&h.app, name), "old layout should present {name}");
+    }
+    let frame = h.app.universal_panel_frame().unwrap();
+    let shots = frame.layout.sections.iter().find(|card| card.instance == id("render-shots")).unwrap();
+    assert_eq!(shots.zone, Zone::Bottom, "older layouts gain Shots in the Bottom dock");
+    assert!(shots.inline && shots.body.is_none(), "Bottom Shots fits in one shared row");
+    assert!(crate::scenario::rect_of("render:editor:scene").is_some());
+    assert!(crate::scenario::rect_of("render:shots:status").is_some());
+    assert!(!h.app.shell.workspace_panels.contains_key("render:appearances"));
+    assert!(!h.app.shell.workspace_panels.contains_key("render:inspector"));
+    assert!(!h.app.shell.workspace_panels.contains_key("render:shots_strip"));
+
+    h.app
+        .dispatch_panel_layout(transaction(vec![
+            Mutation::Close { instance: id("render-library") },
+            Mutation::Close { instance: id("render-browser") },
+        ]))
+        .unwrap();
+    h.frames(3);
+    assert!(!presented(&h.app, "render-library"));
+    assert!(presented(&h.app, "render-inspector"));
+    assert!(presented(&h.app, "render-shots"));
+    h.app.render_workspace.view.library_focus_pending = true;
+    h.frames(3);
+    assert!(presented(&h.app, "render-library"));
+    assert!(!presented(&h.app, "render-browser"));
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &document));
+}
+
+#[test]
+fn production_short_render_assistant_keeps_conversation_above_the_pinned_composer() {
+    let mut h = production_content_harness(false, true);
+    h.call("ui.resize", serde_json::json!({"width":1600,"height":480}));
+    h.app.ui.tab = "RENDER".into();
+    for draft in [String::new(), "Retained panel draft\n".repeat(40)] {
+        h.app.agent_chat.input = draft.clone();
+        h.frames(8);
+        let conversation = crate::scenario::rect_of("agent_chat:conversation").unwrap();
+        let composer = crate::scenario::rect_of("agent_chat:composer_footer").unwrap();
+        assert!(conversation.height() < 64.0, "exercise the short viewport that formerly expanded over the composer: {conversation:?}");
+        assert!(
+            !conversation.is_positive() || conversation.bottom() <= composer.top() + 1.0,
+            "a short transcript viewport must not paint or scroll over the composer: draft bytes={}, conversation={conversation:?}, composer={composer:?}",
+            draft.len()
+        );
+        let body = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.instance == id("assistant")).unwrap().body.unwrap();
+        assert!(composer.bottom() <= body.origin.y + body.size.height + 1.0, "the full footer remains inside the shared content slot");
+        assert!(crate::scenario::rect_of("agent_chat:input").is_some());
+        assert_eq!(h.app.agent_chat.input, draft);
+    }
+}
+
+#[test]
+fn production_sole_content_tracks_real_tree_folds_and_stops_at_column_capacity() {
+    let mut h = production_content_harness(false, true);
+    h.frames(6);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let browser = frame.layout.sections.iter().find(|card| card.instance == id("browser")).unwrap();
+    let original_height = browser.outer.size.height;
+    assert!(original_height < frame.layout.capacity.size.height - 20.0);
+    let assistant = frame.layout.sections.iter().find(|card| card.instance == id("assistant")).unwrap();
+    let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+    let available = history.outer.origin.y - frame.layout.metrics.gap - assistant.outer.origin.y;
+    assert!((assistant.outer.size.height - available).abs() < 1.0, "Assistant fills its available column height even with an empty conversation");
+    let root = crate::browser::drawn_rows().first().unwrap().0.clone();
+    let point = h.call("ui.at", serde_json::json!({"chevron":root}));
+    h.call("ui.click", serde_json::json!({"x":point["result"][0],"y":point["result"][1]}));
+    h.frames(6);
+    let folded = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.instance == id("browser")).unwrap().outer.size.height;
+    assert!(folded < original_height - 20.0, "folding real content releases the unused space");
+    let point = h.call("ui.at", serde_json::json!({"chevron":root}));
+    h.call("ui.click", serde_json::json!({"x":point["result"][0],"y":point["result"][1]}));
+    h.call("ui.resize", serde_json::json!({"width":1600,"height":350}));
+    h.frames(6);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let browser = frame.layout.sections.iter().find(|card| card.instance == id("browser")).unwrap();
+    let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+    let available = history.outer.origin.y - frame.layout.metrics.gap - browser.outer.origin.y;
+    assert!((browser.outer.size.height - available).abs() < 1.0, "long content is capped above Bottom History and its gap");
+}
+
+#[test]
+fn production_bottom_history_has_fixed_height_without_collapse_or_height_changes() {
+    let mut h = production_content_harness(false, false);
+    h.frames(6);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
+    let spec = h.app.panel_runtime().unwrap().layout().registry().get(&PanelKind::new("solidcraft.history").unwrap()).unwrap();
+    assert_eq!(history.outer.size.height, spec.fixed_bottom_height.unwrap());
+    assert!(history.collapse.is_none());
+    let before = h.app.panel_runtime().unwrap().layout().inspect();
+    assert!(h.app.run_panel_command("panel.collapse", &serde_json::json!({"target":{"type":"instance","id":"history"},"collapsed":true})).is_err());
+    assert!(
+        h.app
+            .run_panel_command(
+                "panel.resize",
+                &serde_json::json!({"target":{"type":"instance","id":"history"},"size":{"width":760,"height":100},"thickness_only":true})
+            )
+            .is_err()
+    );
+    assert_eq!(h.app.panel_runtime().unwrap().layout().inspect(), before);
+}
+
+#[test]
+fn production_history_play_preference_updates_the_visible_shared_controls() {
+    let mut h = production_content_harness(false, false);
+    let play_is_visible = |app: &crate::SolveApp| {
+        app.universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .any(|section| section.instance == id("history") && section.actions.iter().any(|(action, _)| action.0 == "play"))
+    };
+    assert!(play_is_visible(&h.app));
+    h.app.preferences.history_play_button = false;
+    h.frames(2);
+    assert!(!play_is_visible(&h.app));
+    h.app.preferences.history_play_button = true;
+    h.frames(2);
+    assert!(play_is_visible(&h.app));
+}
+
+#[test]
+fn production_history_compatibility_command_updates_the_shared_layout() {
+    let mut h = production_content_harness(false, false);
+    h.app.run("view.history_layout", serde_json::json!({"dock":"left","width":340.0,"collapsed":true})).unwrap();
+    let layout = h.app.panel_runtime().unwrap().layout().layout();
+    let history = layout.containing(&id("history")).unwrap();
+    assert_eq!(history.location.zone(), Zone::Left);
+    assert!(history.collapsed);
+    assert_eq!(layout.column(history.column.as_ref().unwrap()).unwrap().width, 340.0);
+    let browser = layout.containing(&id("browser")).unwrap();
+    assert_ne!(history.column, browser.column);
+    assert_eq!(layout.column(browser.column.as_ref().unwrap()).unwrap().width, crate::prefs::DEFAULT_BROWSER_WIDTH);
+
+    h.app.run("view.history_layout", serde_json::json!({"dock":"bottom"})).unwrap();
+    let history = h.app.panel_runtime().unwrap().layout().layout().containing(&id("history")).unwrap();
+    assert_eq!(history.location.zone(), Zone::Bottom);
+    assert!(!history.collapsed);
+}
+
+#[test]
+fn production_fixed_bottom_history_ignores_a_legacy_collapsed_preference() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_timeline = true;
+    h.app.preferences.timeline_left = false;
+    h.app.preferences.timeline_collapsed = true;
+    h.app.disable_panel_runtime().unwrap();
+    // These fixtures seed first-run settings, without restoring the harness's earlier layout.
+    h.app.panel_layout_preferences = Default::default();
+    super::production::enable_production(&mut h.app).unwrap();
+    h.frames(6);
+    let section = h.app.panel_runtime().unwrap().layout().layout().containing(&id("history")).unwrap();
+    assert_eq!(section.location.zone(), Zone::Bottom);
+    assert!(!section.collapsed);
+}
+
+#[test]
+fn universal_chrome_controls_have_real_accessible_widgets_and_stable_ids_at_both_scales() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen};
+    for scale in [1.0, 2.0] {
+        for preset in ["docks", "tabs", "collapsed", "overflow", "floating", "inline"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.ctx.set_pixels_per_point(scale);
+            h.call("ui.resize", serde_json::json!({"width":800,"height":600}));
+            enable_host_specimen(&mut h.app, preset).unwrap();
+            h.frames(3);
+            let before = h.app.universal_panel_frame().unwrap().controls.clone();
+            assert!(!before.is_empty(), "actual chrome at scale {scale}: {preset}");
+            let tree = h.output.accesskit_update.as_ref().expect("real egui accessibility update");
+            let mut ids = std::collections::HashSet::new();
+            for control in &before {
+                assert!(ids.insert(control.id), "semantic IDs cannot collide: {control:?}");
+                assert!(!control.accessible_name.is_empty());
+                control.bounds.validate().unwrap();
+                let interactive = !matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Surface { .. }));
+                if interactive && control.enabled {
+                    let node = tree
+                        .nodes
+                        .iter()
+                        .find(|(id, _)| *id == control.id.accesskit_id())
+                        .map(|(_, node)| node)
+                        .unwrap_or_else(|| panic!("exported control needs its own actual widget: {control:?}"));
+                    assert_eq!(node.label(), Some(control.accessible_name.as_str()), "actual widget/metadata name parity: {control:?}");
+                    let expected_role = match &control.target {
+                        HostControlTarget::Pointer(HostPointerTarget::Tab { .. }) => egui::accesskit::Role::Tab,
+                        HostControlTarget::Pointer(HostPointerTarget::Sash { .. } | HostPointerTarget::Resize { .. }) => {
+                            egui::accesskit::Role::Splitter
+                        }
+                        HostControlTarget::Scroll { .. } => egui::accesskit::Role::ScrollBar,
+                        HostControlTarget::PanelMenu { .. } | HostControlTarget::Shared { .. } => egui::accesskit::Role::MenuItem,
+                        HostControlTarget::Pointer(_) | HostControlTarget::Content { .. } => egui::accesskit::Role::Button,
+                    };
+                    assert_eq!(node.role(), expected_role, "the actual widget role follows its typed target: {control:?}");
+                    if matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. })) {
+                        assert_eq!(control.accessible_name, solidcraft_ui_text::tr("ui.panel_host.menu"));
+                    }
+                }
+            }
+            h.frames(2);
+            let after = &h.app.universal_panel_frame().unwrap().controls;
+            for control in before {
+                let retained = after.iter().find(|other| other.target == control.target).expect("same semantic target on the next frame");
+                assert_eq!(retained.id, control.id, "status/service update cannot change widget identity");
+                assert_eq!(retained.bounds, control.bounds);
+            }
+        }
+    }
+}
+
+#[test]
+fn universal_host_slots_and_menu_button_stay_bounded_at_minimum_and_small_window_sizes() {
+    use crate::panel_runtime::enable_host_specimen;
+    for scale in [1.0, 2.0] {
+        for (width, height) in [(1280, 800), (800, 600), (480, 320)] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.ctx.set_pixels_per_point(scale);
+            h.call("ui.resize", serde_json::json!({"width":width,"height":height}));
+            enable_host_specimen(&mut h.app, "tabs").unwrap();
+            h.frames(3);
+            let host = &h.app.universal_panel_frame().unwrap().layout;
+            host.resolved.validate().unwrap();
+            for section in &host.sections {
+                assert!(section.outer.contains_rect(section.header));
+                assert!(section.header.contains_rect(section.menu));
+                if let Some(body) = section.body {
+                    assert!(section.outer.contains_rect(body));
+                    assert!(body.origin.y >= section.header.origin.y + section.header.size.height);
+                }
+                assert_eq!(section.header.size.height, host.metrics.header_height);
+                if let Some(strip) = section.tab_strip {
+                    assert_eq!(strip.origin.y, section.header.origin.y);
+                    assert_eq!(strip.size.height, section.header.size.height);
+                    assert!(section.header.contains_rect(strip));
+                    assert!(section.outer.contains_rect(strip));
+                    if let Some(body) = section.body {
+                        assert!(body.origin.y >= strip.origin.y + strip.size.height);
+                    }
+                }
+                if let Some(footer) = section.footer {
+                    assert!(section.outer.contains_rect(footer));
+                    if let Some(body) = section.body {
+                        assert_eq!(footer.origin.y, body.origin.y + body.size.height);
+                    }
+                    assert_eq!(footer.size.height, host.metrics.footer_height);
+                }
+                assert!(section.menu.size.width > 0.0 && section.menu.size.height > 0.0, "shared actions remain reachable when content fits");
+            }
+            for overflow in &host.overflow {
+                assert!(!overflow.sections.is_empty());
+                if let Some(bounds) = overflow.bounds {
+                    assert!(host.capacity.contains_rect(bounds));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn universal_collapsed_header_keeps_actions_and_one_click_restores_the_same_controller() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen, inspect_host_specimen};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "collapsed").unwrap();
+    h.frames(3);
+    let before = inspect_host_specimen(&mut h.app).unwrap();
+    let frame = h.app.universal_panel_frame().unwrap();
+    assert!(frame.layout.sections.iter().all(|section| section.collapsed && section.body.is_none() && section.footer.is_none()));
+    assert!(frame.controls.iter().any(|control| matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance, action }) if instance.0 == "specimen-0" && action.0 == "apply")
+        && control.enabled));
+    assert!(frame.controls.iter().any(|control| matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::Close { instance }) if instance.0 == "specimen-0")));
+    assert!(!frame.controls.iter().any(|control| matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::Close { instance }) if instance.0 == "specimen-1")));
+    let expand = frame
+        .controls
+        .iter()
+        .find(|control| {
+            matches!(&control.target,
+        HostControlTarget::Pointer(HostPointerTarget::Collapse { instance }) if instance.0 == "specimen-0")
+        })
+        .unwrap();
+    let at = crate::panel_runtime::egui_rect(expand.bounds).center();
+    h.call("ui.click", serde_json::json!({"x":at.x,"y":at.y}));
+    h.frames(2);
+    let restored = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|section| section.instance.0 == "specimen-0").unwrap();
+    assert!(!restored.collapsed);
+    assert!(restored.body.is_some());
+    let after = inspect_host_specimen(&mut h.app).unwrap();
+    let controller = |value: &serde_json::Value| {
+        value["runtime"]["probe"]["controllers"].as_array().unwrap().iter().find(|state| state["instance"] == "specimen-0").unwrap().clone()
+    };
+    let old = controller(&before);
+    let new = controller(&after);
+    assert_eq!(old["renders"], 0);
+    assert!(new["renders"].as_u64().unwrap() > 0);
+    assert_eq!(old["controller_identity"], new["controller_identity"]);
+    assert_eq!(old["cancels"], new["cancels"]);
+    assert_eq!(old["draft"], new["draft"]);
+    assert_eq!(before["session"]["camera"], after["session"]["camera"]);
+}
+
+#[test]
+fn universal_sole_content_gap_is_navigable_while_declared_fill_uses_the_column() {
+    use crate::panel_runtime::{enable_host_specimen, logical_rect};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "content_fill").unwrap();
+    h.frames(3);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let content = frame.layout.sections.iter().find(|section| section.instance.0 == "specimen-0").unwrap();
+    let fill = frame.layout.sections.iter().find(|section| section.instance.0 == "specimen-1").unwrap();
+    assert!(fill.outer.size.height > content.outer.size.height);
+    let outer = crate::panel_runtime::egui_rect(content.outer);
+    let gap = egui::Rect::from_center_size(egui::pos2(outer.center().x, outer.bottom() + 20.0), egui::vec2(4.0, 4.0));
+    assert!(frame.layout.usable.contains_rect(logical_rect(gap)));
+    assert!(!frame.layout.consumes_pointer(solidcraft_engine::panels::Point { x: gap.center().x, y: gap.center().y }));
+    assert!(frame.layout.resolved.rails.is_empty() && frame.layout.overflow.is_empty());
+}
+
+#[test]
+fn universal_inline_specimen_uses_one_total_row_with_real_content_and_shared_controls() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "inline").unwrap();
+    h.frames(3);
+    let frame = h.app.universal_panel_frame().unwrap();
+    let section = frame.layout.sections.first().unwrap();
+    assert!(section.inline && !section.collapsed);
+    assert_eq!(section.header, section.outer);
+    assert!(section.outer.size.height <= solidcraft_theme::PANEL_INLINE_MAX_HEIGHT);
+    assert!(section.body.is_none() && section.footer.is_none());
+    assert!(!frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::HeaderAction { .. }))));
+    let runtime = h.app.panel_runtime().unwrap();
+    let instance = runtime.layout().layout().instance(&section.instance).unwrap();
+    assert!(runtime.layout().registry().get(&instance.kind).unwrap().header_actions.is_empty(), "the inline log declares no custom or debug actions");
+    assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. }))));
+    assert!(frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Collapse { .. }))));
+    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.inline")).is_some());
+    assert!(h.widget(solidcraft_ui_text::tr("ui.panel_fixture.caption")).is_none());
+}
+
+#[test]
+fn universal_registered_header_command_invokes_only_the_declared_synthetic_binding() {
+    use crate::panel_runtime::{enable_host_specimen, inspect_host_specimen};
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", serde_json::json!({"width":1400,"height":900}));
+    enable_host_specimen(&mut h.app, "collapsed").unwrap();
+    h.frames(3);
+    let before = inspect_host_specimen(&mut h.app).unwrap();
+    h.app.run_panel_command("panel.action", &serde_json::json!({"target":{"type":"instance","id":"specimen-0"},"action":"apply"})).unwrap();
+    let after = inspect_host_specimen(&mut h.app).unwrap();
+    let applies = |value: &serde_json::Value| {
+        value["runtime"]["probe"]["controllers"].as_array().unwrap().iter().find(|state| state["instance"] == "specimen-0").unwrap()["applies"]
+            .as_u64()
+            .unwrap()
+    };
+    assert_eq!(applies(&after), applies(&before) + 1);
+    assert_eq!(after["runtime"]["probe"]["content_command_calls"], before["runtime"]["probe"]["content_command_calls"].as_u64().unwrap() + 1);
+    assert_eq!(before["session"], after["session"]);
+    let rejected = h.app.run_panel_command("panel.action", &serde_json::json!({"target":{"type":"instance","id":"specimen-1"},"action":"apply"}));
+    assert_eq!(rejected.unwrap_err().rule, solidcraft_engine::panels::Rule::Capability);
+    let undeclared = h.app.run_panel_command("panel.action", &serde_json::json!({"target":{"type":"instance","id":"specimen-0"},"action":"cancel"}));
+    assert_eq!(undeclared.unwrap_err().rule, solidcraft_engine::panels::Rule::Capability, "a content action is not automatically a header action");
+    let refused = inspect_host_specimen(&mut h.app).unwrap();
+    assert_eq!(applies(&after), applies(&refused));
+    assert_eq!(after["runtime"]["probe"]["content_command_calls"], refused["runtime"]["probe"]["content_command_calls"]);
+    let editor = |value: &serde_json::Value| {
+        value["runtime"]["probe"]["controllers"].as_array().unwrap().iter().find(|state| state["instance"] == "specimen-0").unwrap().clone()
+    };
+    assert_eq!(editor(&after)["cancels"], editor(&refused)["cancels"]);
+    assert_eq!(editor(&after)["transaction_live"], editor(&refused)["transaction_live"]);
+    assert_eq!(before["session"], refused["session"]);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn desktop_panel_windows_reserve_ids_only_after_commit_and_fit_the_current_monitor() {
+    use super::native::{DesktopNativeAdapter, NativeMonitor};
+
+    let mut adapter = DesktopNativeAdapter::default();
+    let host = HostId::new("desktop-test").unwrap();
+    let section = SectionId::new("desktop-section").unwrap();
+    let instance = InstanceId::new("desktop-panel").unwrap();
+    let create = [HostEffect::CreateNative { host: host.clone(), section: section.clone() }];
+    adapter.prepare(&create).unwrap();
+    assert!(adapter.viewport_id(&host).is_none());
+    adapter.commit(&create);
+    let previous = adapter.viewport_id(&host).unwrap();
+    assert!(adapter.owns(&host, &section));
+    assert_eq!(adapter.prepare(&create).unwrap_err().rule, Rule::DuplicateId);
+
+    let monitor = egui::Rect::from_min_size(egui::pos2(-1000.0, 0.0), egui::vec2(1000.0, 800.0));
+    adapter.update_monitors(|| vec![NativeMonitor { name: Some("Primary".into()), bounds: monitor, scale: 2.0, primary: true }]);
+    let ctx = egui::Context::default();
+    let min = Size { width: 200.0, height: 100.0 };
+    let max = Size { width: 900.0, height: 900.0 };
+    let builder = adapter.builder(&ctx, &host, &instance, "Panel".into(), max, (min, max)).unwrap();
+    let size = builder.inner_size.unwrap();
+    let origin = builder.position.unwrap();
+    assert!(monitor.contains_rect(egui::Rect::from_min_size((origin.to_vec2() * 2.0).to_pos2(), size * 2.0)));
+    assert_eq!(builder.min_inner_size, Some(egui::vec2(min.width, min.height)));
+
+    adapter.commit(&[HostEffect::ReleaseNative { host: host.clone() }]);
+    assert!(adapter.viewport_id(&host).is_none());
+    adapter.prepare(&create).unwrap();
+    adapter.commit(&create);
+    assert_ne!(adapter.viewport_id(&host), Some(previous));
 }

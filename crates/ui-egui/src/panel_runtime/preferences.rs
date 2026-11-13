@@ -152,20 +152,29 @@ impl LegacyPanelPlacements {
         let prefs = &app.preferences;
         let vertical = app.ui.show_timeline && prefs.timeline_left;
         let stacked = vertical && prefs.timeline_under_browser;
+        // Repair only the import snapshot; Classic keeps its saved preferences.
+        let defaults = crate::prefs::Prefs::default();
+        let width = |value: f32, fallback: f32| {
+            if value.is_finite() && value > 0.0 && value <= MAX_LOGICAL { value } else { fallback }
+        };
         Self {
-            browser_width: prefs.browser_width,
+            browser_width: width(prefs.browser_width, defaults.browser_width),
             browser_collapsed: if vertical { prefs.timeline_left_browser_collapsed } else { prefs.browser_collapsed },
             history_left: prefs.timeline_left,
             history_under_browser: stacked,
-            history_width: prefs.timeline_left_width,
+            history_width: width(prefs.timeline_left_width, defaults.timeline_left_width),
             history_collapsed: prefs.timeline_collapsed,
-            browser_share: prefs.browser_share,
+            browser_share: if prefs.browser_share.is_finite() && (0.0..=1.0).contains(&prefs.browser_share) {
+                prefs.browser_share
+            } else {
+                defaults.browser_share
+            },
             assistant_side: if prefs.agent_chat_side == "left" { "left" } else { "right" }.into(),
-            assistant_width: prefs.agent_chat_width,
+            assistant_width: width(prefs.agent_chat_width, defaults.agent_chat_width),
             assistant_collapsed: prefs.agent_chat_minimized,
             assistant_popped: prefs.agent_chat_popped,
             render_side: if prefs.render_browser_side == "right" { "right" } else { "left" }.into(),
-            render_width: prefs.render_browser_width,
+            render_width: width(prefs.render_browser_width, defaults.render_browser_width),
             imported: BTreeSet::new(),
         }
     }
@@ -330,7 +339,8 @@ pub fn load_preferences(app: &mut crate::SolveApp, saved: &Value) {
     }
     let record = saved.get(PREFERENCES_KEY).cloned();
     if preferences_enabled(app) {
-        if restore_preferences(app, record).is_err() {
+        let production = app.panel_runtime.as_ref().is_some_and(|runtime| runtime.production.is_some());
+        if (record.is_some() || !production) && restore_preferences(app, record).is_err() {
             report_notice(app);
         }
         return;
@@ -440,7 +450,7 @@ pub fn restore_preferences(app: &mut crate::SolveApp, value: Option<Value>) -> P
             None => integration.preferences.as_ref().ok_or_else(|| error(Rule::Lifecycle, "panel preferences disappeared"))?.initial.clone(),
         };
         integration.restore_preference_record(&app.session, record)?;
-        if value.is_none() {
+        if value.is_none() && integration.production.is_none() {
             integration.preferences = None;
         }
     }

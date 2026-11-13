@@ -107,7 +107,7 @@ impl Presentation {
             tone_map: self.tone_map,
             finishing: self.finishing,
             backdrop: self.backdrop,
-            background: self.background.map(crate::surface::srgb8_to_linear),
+            background: self.background.map(solidcraft_viewport::surface::srgb8_to_linear),
             transparent: self.transparent_background,
         })
     }
@@ -191,7 +191,7 @@ impl Display {
                     let strength = self.finishing.bloom.map_or(0.0, |b| b.strength);
                     value += strength * self.tone_map.map(f64::from(glow[channel]) * self.exposure * self.finishing.rgb_gain[channel]);
                 }
-                *out = solidcraft_geom::srgb::encode8(value);
+                *out = solidcraft_color::srgb::encode8(value);
             }
             rgba[3] = if self.transparent { (alpha * 255.0).round() as u8 } else { 255 };
         }

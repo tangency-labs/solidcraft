@@ -1,0 +1,42 @@
+{
+  "area": "ladder/06-threads",
+  "bodies": {},
+  "calls": [],
+  "case": "030-square-thread-refused",
+  "expected": {
+    "method": "ISO, ASME and DIN define no square thread (Machinery's Handbook gives only historical proportions), so no dimension of it can be taken from a standard: the right answer is a refusal pointing to trapezoidal (ISO 2904) or acme (ASME B1.5)",
+    "outcome": "refused",
+    "refusal": "no current standard defines a square thread",
+    "source": "invariants",
+    "sources": [],
+    "what": "a square thread on a d10 x 30 cylinder: refused, no current standard defines one"
+  },
+  "expressible": false,
+  "golden": {
+    "measured": null,
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (solid.thread): invalid parameters for `solid.thread`: no current standard defines a square thread (ISO, ASME and DIN have none; Machinery's Handbook gives only historical proportions): use trapezoidal (ISO 2904) or acme (ASME B1.5)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (solid.thread): invalid parameters for `solid.thread`: no current standard defines a square thread (ISO, ASME and DIN have none; Machinery's Handbook gives only historical proportions): use trapezoidal (ISO 2904) or acme (ASME B1.5)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a square thread on a d10 x 30 cylinder: refused, no current standard defines one",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.thread): invalid parameters for `solid.thread`: no current standard defines a square thread (ISO, ASME and DIN have none; Machinery's Handbook gives only historical proportions): use trapezoidal (ISO 2904) or acme (ASME B1.5)"
+  ]
+}

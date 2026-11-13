@@ -87,10 +87,10 @@ fn a_round_edge_shows_its_diameter_radius_and_circumference() {
 }
 
 #[test]
-fn a_face_shows_its_area() {
+fn a_face_shows_its_area_and_perimeter() {
     let mut h = block();
     h.app.session.selection = vec![face_at_height(&h, 30.0)];
-    assert_eq!(readout(&mut h), vec![row("Area", crate::prefs::show_mm(&h.app, 200.0, 2))]);
+    assert_eq!(readout(&mut h), vec![row("Area", crate::prefs::show_mm(&h.app, 200.0, 2)), row("Perimeter", crate::prefs::show_mm(&h.app, 60.0, 1))]);
 }
 
 #[test]
@@ -141,12 +141,12 @@ fn a_circle_and_a_line_show_the_distance_from_the_line_to_the_centre() {
     h.app.session.selection = ["c1", "l1"].into_iter().map(|id| Sel::SketchCurve { id: id.into(), sketch: None }).collect();
     let rows = readout(&mut h);
     assert!(rows.contains(&row("Line to center", crate::prefs::show_mm(&h.app, 20.0, 1))), "{rows:?}");
-    assert!(!rows.iter().any(|(l, _)| l == crate::i18n::tr("Centre to centre")), "{rows:?}");
+    assert!(!rows.iter().any(|(l, _)| l == solidcraft_ui_text::tr("Centre to centre")), "{rows:?}");
 
     h.app.run("sketch.circle.center", json!({"center": [50, 0], "radius": 5})).unwrap();
     h.app.session.selection = ["c1", "c2"].into_iter().map(|id| Sel::SketchCurve { id: id.into(), sketch: None }).collect();
     let rows = readout(&mut h);
-    assert!(rows.iter().any(|(l, _)| l == crate::i18n::tr("Centre to centre")), "two circles still measure centre to centre: {rows:?}");
+    assert!(rows.iter().any(|(l, _)| l == solidcraft_ui_text::tr("Centre to centre")), "two circles still measure centre to centre: {rows:?}");
 }
 
 #[test]

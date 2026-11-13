@@ -5,11 +5,11 @@ use crate::{
         self,
         aging::{AgingKind, AgingLayer, AgingStack, SurfaceClass},
     },
-    surface::{OpaqueSurface, srgb8_to_linear},
     surface_patterns::ShadingSurface,
 };
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_viewport::surface::{OpaqueSurface, srgb8_to_linear};
 
 fn invalid(message: &'static str) -> job::JobError {
     job::JobError::new(job::ErrorCode::InvalidRequest, message)
@@ -111,7 +111,7 @@ fn apply(
         )
         .map_err(|_| invalid("invalid CPU aged surface"))?;
     if let Some(clear) = surface.clear_coat() {
-        let clear = crate::clear_coat::ClearCoat::new(clear.weight() * (1.0 - weight), clear.roughness(), clear.ior())
+        let clear = solidcraft_viewport::clear_coat::ClearCoat::new(clear.weight() * (1.0 - weight), clear.roughness(), clear.ior())
             .map_err(|_| invalid("invalid CPU aged clear coat"))?;
         result = result.with_clear_coat(clear);
     }

@@ -1,0 +1,2568 @@
+{
+ "cases": [
+  {
+   "name": "review_wire_vertex_make",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_analytics",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_noforce",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_stamp",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 12345
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_closure",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_wire_vertex_remove_noedit",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_wire_vertex_borrowed",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_shelltype0",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_eutype0",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 4,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_prim_wire_neg",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 4,
+       "value": -6
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_prim_other",
+   "inputs": {
+    "file": "fixture:wire_vertex.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 5
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_make",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_analytics",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_noforce",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_stamp",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 12345
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_closure",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_remove_noedit",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "remove_all": {
+      "editing": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_borrowed",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_shelltype0",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 9,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_eutype0",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 12,
+       "index": 4,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_prim_wire_neg",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 4,
+       "value": -6
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_vertex_nm_prim_other",
+   "inputs": {
+    "file": "fixture:wire_vertex_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 5
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_m0_closure_False",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_spine_fan_m0_closure_True",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "review_spine_fan_m1_closure_False",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 1
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_spine_fan_m1_closure_True",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 1
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "review_spine_fan_prim_m2",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_prim_3",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_prim_m4_nm",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     },
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -4
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_sharecurve_plain",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_sharecurve3_plain",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 1
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 3,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_sharesurf_plain",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_sharecurve_an",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_sharecurve3_an",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 1
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 3,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_sharesurf_an",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_scale_0.0",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_scale_1e-300",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e-300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_scale_1e+300",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e+300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_scale_-1.0",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": -1.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_scale_1e-06",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_scale_1000000.0",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1000000.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_zt_1e-300",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_zt_force_1e-300",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_zt_1e-12",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-12
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_zt_force_1e-12",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-12
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_zt_0.5",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_zt_force_0.5",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_zt_1e+300",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e+300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_zt_force_1e+300",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e+300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_zt_-0.001",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": -0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_zt_force_-0.001",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": -0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_fan_iges",
+   "inputs": {
+    "file": "fixture:spine_fan.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_spine_doubled_m0_closure_False",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_spine_doubled_m0_closure_True",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "review_spine_doubled_m1_closure_False",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 1
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_spine_doubled_m1_closure_True",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 1
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "review_spine_doubled_prim_m2",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -2
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_prim_3",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": 3
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_prim_m4_nm",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     },
+     {
+      "set": {
+       "field": 8,
+       "index": 0,
+       "value": -4
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_sharecurve_plain",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_sharecurve3_plain",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 1
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 3,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_sharesurf_plain",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_sharecurve_an",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_sharecurve3_an",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 7,
+       "index": 2,
+       "value": 1
+      }
+     },
+     {
+      "set": {
+       "field": 7,
+       "index": 3,
+       "value": 1
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_sharesurf_an",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "set": {
+       "field": 0,
+       "index": 1,
+       "value": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_scale_0.0",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_scale_1e-300",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e-300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_scale_1e+300",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e+300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_scale_-1.0",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": -1.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_scale_1e-06",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1e-06
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_scale_1000000.0",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "scale": 1000000.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_zt_1e-300",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_zt_force_1e-300",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_zt_1e-12",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-12
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_zt_force_1e-12",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e-12
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_zt_0.5",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_zt_force_0.5",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 0.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_zt_1e+300",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e+300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_zt_force_1e+300",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": 1e+300
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_zt_-0.001",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": -0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_zt_force_-0.001",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "zone_tol": -0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_spine_doubled_iges",
+   "inputs": {
+    "file": "fixture:spine_doubled.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_iges_sphere.smb",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "review_iges_closure_sphere.smb",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_nm_closure_sphere.smb",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_analytics_sphere.smb",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_stamp_scale_sphere.smb",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 99
+     },
+     {
+      "scale": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_iges_Boolean_extrudeHoles1.smb",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "review_iges_closure_Boolean_extrudeHoles1.smb",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_nm_closure_Boolean_extrudeHoles1.smb",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_analytics_Boolean_extrudeHoles1.smb",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_stamp_scale_Boolean_extrudeHoles1.smb",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 99
+     },
+     {
+      "scale": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_iges_Solids_fillet_ts.smb",
+   "inputs": {
+    "file": "Solids/fillet_ts.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "review_iges_closure_Solids_fillet_ts.smb",
+   "inputs": {
+    "file": "Solids/fillet_ts.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_nm_closure_Solids_fillet_ts.smb",
+   "inputs": {
+    "file": "Solids/fillet_ts.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_analytics_Solids_fillet_ts.smb",
+   "inputs": {
+    "file": "Solids/fillet_ts.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_stamp_scale_Solids_fillet_ts.smb",
+   "inputs": {
+    "file": "Solids/fillet_ts.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 99
+     },
+     {
+      "scale": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_iges_Mouse.smb",
+   "inputs": {
+    "file": "Mouse.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "review_iges_closure_Mouse.smb",
+   "inputs": {
+    "file": "Mouse.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_nm_closure_Mouse.smb",
+   "inputs": {
+    "file": "Mouse.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_analytics_Mouse.smb",
+   "inputs": {
+    "file": "Mouse.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_stamp_scale_Mouse.smb",
+   "inputs": {
+    "file": "Mouse.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 99
+     },
+     {
+      "scale": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_iges_plane_square.smb",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ]
+   }
+  },
+  {
+   "name": "review_iges_closure_plane_square.smb",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     "iges"
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_nm_closure_plane_square.smb",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "manifold": 0
+     }
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": false
+     }
+    }
+   }
+  },
+  {
+   "name": "review_analytics_plane_square.smb",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_stamp_scale_plane_square.smb",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "stamp": 99
+     },
+     {
+      "scale": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_full_an",
+   "inputs": {
+    "file": "fixture:wire_quad_full.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_full_an_borrowed",
+   "inputs": {
+    "file": "fixture:wire_quad_full.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_full_plain",
+   "inputs": {
+    "file": "fixture:wire_quad_full.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_full_plain_borrowed",
+   "inputs": {
+    "file": "fixture:wire_quad_full.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_full_an_closure",
+   "inputs": {
+    "file": "fixture:wire_quad_full.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "review_wire_quad_sub_an",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_sub_an_borrowed",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_sub_plain",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_sub_plain_borrowed",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_sub_an_closure",
+   "inputs": {
+    "file": "fixture:wire_quad_sub.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "review_wire_quad_rev_nm_an",
+   "inputs": {
+    "file": "fixture:wire_quad_rev_nm.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_rev_nm_an_borrowed",
+   "inputs": {
+    "file": "fixture:wire_quad_rev_nm.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_rev_nm_plain",
+   "inputs": {
+    "file": "fixture:wire_quad_rev_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_rev_nm_plain_borrowed",
+   "inputs": {
+    "file": "fixture:wire_quad_rev_nm.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ],
+    "patches": [
+     {
+      "borrowed": true
+     },
+     {
+      "stamp": 7
+     }
+    ]
+   }
+  },
+  {
+   "name": "review_wire_quad_rev_nm_an_closure",
+   "inputs": {
+    "file": "fixture:wire_quad_rev_nm.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "closure": {
+      "do_infinite": true
+     }
+    }
+   }
+  },
+  {
+   "name": "review_uv_bspline_an",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_uv_bspline_plain",
+   "inputs": {
+    "file": "fixture:uv_bspline.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_uv_line_v38_an",
+   "inputs": {
+    "file": "Defeature/inset_cube_3x1fillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_uv_line_v38_plain",
+   "inputs": {
+    "file": "Defeature/inset_cube_3x1fillet.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_uv_composite_v38_an",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "review_uv_composite_v38_plain",
+   "inputs": {
+    "file": "fixture:uv_composite_v38.smb",
+    "options": [
+     false,
+     false,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  }
+ ]
+}

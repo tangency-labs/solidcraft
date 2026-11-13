@@ -75,6 +75,19 @@ staple() {
   return 1
 }
 
+# validate <path>: stapler validate looks the ticket up at Apple and can lose the connection
+# ("The network connection was lost", error 68), so try it a few times as staple does.
+validate() {
+  local i
+  for i in 1 2 3 4 5 6; do
+    if xcrun stapler validate "$1"; then return 0; fi
+    echo "stapler validate failed (attempt $i), retrying" >&2
+    sleep "${STAPLE_RETRY_SLEEP:-20}"
+  done
+  echo "could not validate the staple of $1" >&2
+  return 1
+}
+
 ARCH=universal
 SKIP_BUILD=0
 BUILD_ONLY=
@@ -189,7 +202,7 @@ if [ "$NOTARIZE" = 1 ]; then
   ditto -c -k --keepParent "$APP" "$WORK/SolidCraft-app.zip"
   notarize "$WORK/SolidCraft-app.zip"
   staple "$APP"
-  xcrun stapler validate "$APP"
+  validate "$APP"
 fi
 
 # ---- DMG ---------------------------------------------------------------------------------------
@@ -242,7 +255,7 @@ if [ "$NOTARIZE" = 1 ]; then
   echo "==> notarizing $DMG"
   notarize "$DMG"
   staple "$DMG"
-  xcrun stapler validate "$DMG"
+  validate "$DMG"
   # Gatekeeper's verdict on the DMG and on the app as a user gets it.
   spctl -a -t open --context context:primary-signature -vv "$DMG"
   MNT="$(mktemp -d)"

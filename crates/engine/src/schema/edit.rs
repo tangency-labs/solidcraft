@@ -19,6 +19,24 @@ pub struct AssistantParams {}
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AssistantResult {}
 
+/// Command search is UI-owned and takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PaletteParams {}
+
+/// Headless sessions refuse to open command search and produce no result.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PaletteResult {}
+
+/// `ui.toggle_visibility` takes nothing: it acts on the app's selection.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ToggleVisibilityParams {}
+
+/// Never produced: headless calls are refused, and the app acts on its own selection.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToggleVisibilityResult {}
+
 /// `edit.repeat` takes no parameters: it starts the last tool with its defaults.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -124,13 +142,14 @@ impl JsonSchema for CheckpointId {
 }
 
 /// Go back to a checkpoint, undo history included; or, with `forget`, drop it without going
-/// back. Either uses it up and every later checkpoint with it: take a new one to go back again.
+/// back. Going back uses it up and every later checkpoint with it: take a new one to go back
+/// again. Forgetting drops only this one.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct RestoreCheckpointParams {
     /// The checkpoint, by the id `edit.checkpoint` returned.
     pub checkpoint: CheckpointId,
-    /// True to drop the checkpoint (and every later one) without going back. Default: false.
+    /// True to drop the checkpoint without going back; later checkpoints stay. Default: false.
     #[serde(default)]
     pub forget: Option<bool>,
 }
@@ -857,16 +876,677 @@ pub struct FeatureInput {
     pub unit: String,
 }
 
+// The feature folder commands, Reorder, Move Timeline Items and Edit Feature (#13131):
+// `timeline.group`, `ungroup`, `move_to_group`, `rename_group`, `reorder`, `reorder_many`,
+// `move_many` and `redefine`.
+//
+// As above, each key reads as its handler reads it and fails with the handler's message; whether
+// a feature, joint or folder exists, and whether a move would break the timeline, stays the
+// handler's to check. A key a handler reads as text, a number or a flag, and otherwise takes as
+// absent, is a plain optional field: the contract is the stricter of the two.
+
+fn feature_and_position_required(schema: &mut Schema) {
+    require(schema, "feature");
+    require(schema, "position");
+}
+
+fn features_and_position_required(schema: &mut Schema) {
+    require(schema, "features");
+    require(schema, "position");
+}
+
+fn group_and_name_required(schema: &mut Schema) {
+    require(schema, "group");
+    require(schema, "name");
+}
+
+fn feature_and_command_required(schema: &mut Schema) {
+    require(schema, "feature");
+    require(schema, "command");
+}
+
+fn move_needs_an_item(schema: &mut Schema) {
+    require_any(schema, &["features", "joints", "groups"]);
+}
+
+fn move_many_needs_an_item(schema: &mut Schema) {
+    require_any(schema, &["features", "groups"]);
+    require(schema, "position");
+}
+
+fn ungroup_needs_a_folder(schema: &mut Schema) {
+    require_any(schema, &["group", "groups"]);
+}
+
+/// A list of features as `group_features` reads `features`: a list of up to 10000 ids and names.
+/// `null` is refused. `MIN_ONE` is for the command that needs at least one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FeatureList<const MIN_ONE: bool = false>(pub Vec<FeatureRef>);
+
+impl<'de, const MIN_ONE: bool> Deserialize<'de> for FeatureList<MIN_ONE> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let Value::Array(list) = Value::deserialize(d)? else {
+            return Err(D::Error::custom(whole("`features` must be a list of feature ids or names")));
+        };
+        if list.is_empty() && MIN_ONE {
+            return Err(D::Error::custom(whole("`features` must list at least one feature")));
+        }
+        if list.len() > MAX_LIST {
+            return Err(D::Error::custom(whole("too many features")));
+        }
+        list.into_iter().map(FeatureRef::deserialize).collect::<Result<_, _>>().map(FeatureList).map_err(|e| D::Error::custom(e.to_string()))
+    }
+}
+
+impl<const MIN_ONE: bool> JsonSchema for FeatureList<MIN_ONE> {
+    fn schema_name() -> Cow<'static, str> {
+        if MIN_ONE { "FeatureListNonEmpty" } else { "FeatureList" }.into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let one = generator.subschema_for::<FeatureRef>();
+        json_schema!({
+            "description": "Features, each by id or name.",
+            "type": "array",
+            "items": one,
+            "minItems": usize::from(MIN_ONE),
+            "maxItems": MAX_LIST
+        })
+    }
+}
+
+/// `joints`, as `group_joints` reads it: a list of up to 10000 joint ids and names. `null` is
+/// refused.
+#[derive(Clone, Debug, PartialEq)]
+pub struct JointList(pub Vec<Value>);
+
+impl<'de> Deserialize<'de> for JointList {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::Array(list) if list.len() <= MAX_LIST => {
+                if list.iter().all(|v| v.is_number() || v.is_string()) {
+                    Ok(JointList(list))
+                } else {
+                    Err(D::Error::custom(whole("`joint` must be an id or a name")))
+                }
+            }
+            _ => Err(D::Error::custom(whole("`joints` must list at most 10000 joint ids or names"))),
+        }
+    }
+}
+
+impl JsonSchema for JointList {
+    fn schema_name() -> Cow<'static, str> {
+        "JointList".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Joints, each by id or name.",
+            "type": "array",
+            "items": {"type": ["integer", "string"], "minimum": 0},
+            "maxItems": MAX_LIST
+        })
+    }
+}
+
+/// A new folder's name as `timeline.group` reads `name`: text, which once the whitespace around
+/// it is trimmed is at most 128 bytes long. Nothing left means the default name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FolderName(pub String);
+
+impl<'de> Deserialize<'de> for FolderName {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) if s.trim().len() > 128 => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
+            Value::String(s) => Ok(FolderName(s)),
+            // The handler reads a name that isn't text as absent, so the folder gets the default
+            // name: a call that works today, left alone here.
+            _ => Ok(FolderName(String::new())),
+        }
+    }
+}
+
+impl JsonSchema for FolderName {
+    fn schema_name() -> Cow<'static, str> {
+        "FolderName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Text at most 128 bytes long once the whitespace around it is trimmed (the bytes of its UTF-8, so fewer characters when some are not ASCII). Blank text means the default name. Anything but text is read as no name.",
+            "type": "string"
+        })
+    }
+}
+
+/// `timeline.group`'s `parent`: one timeline folder id.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParentFolder(pub u64);
+
+impl<'de> Deserialize<'de> for ParentFolder {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?.as_u64().map(ParentFolder).ok_or_else(|| D::Error::custom(whole("`parent` must be a timeline folder id")))
+    }
+}
+
+impl JsonSchema for ParentFolder {
+    fn schema_name() -> Cow<'static, str> {
+        "ParentFolder".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A timeline folder, by id.", "type": "integer", "minimum": 0})
+    }
+}
+
+/// `timeline.ungroup`'s `groups`: a list of 1 to 10000 timeline folder ids.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FoldersToRemove(pub Vec<u64>);
+
+impl<'de> Deserialize<'de> for FoldersToRemove {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::Array(a) if !a.is_empty() && a.len() <= MAX_LIST => a
+                .iter()
+                .map(|v| v.as_u64().ok_or_else(|| D::Error::custom(whole("`groups` must contain timeline folder ids"))))
+                .collect::<Result<_, _>>()
+                .map(FoldersToRemove),
+            Value::Array(_) => Err(D::Error::custom(whole("`groups` must list 1…10000 timeline folder ids"))),
+            _ => Err(D::Error::custom(whole("`groups` must be a list of timeline folder ids"))),
+        }
+    }
+}
+
+impl JsonSchema for FoldersToRemove {
+    fn schema_name() -> Cow<'static, str> {
+        "FoldersToRemove".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Timeline folders, by id.",
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0},
+            "minItems": 1,
+            "maxItems": MAX_LIST
+        })
+    }
+}
+
+/// A `position` as `params::num` reads it: a number of absolute value below 1e9. A number below
+/// 0 is read as 0, and a fraction is cut to a whole number.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SlotNumber(pub f64);
+
+impl<'de> Deserialize<'de> for SlotNumber {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_f64()
+            .and_then(crate::params::finite)
+            .map(SlotNumber)
+            .ok_or_else(|| D::Error::custom(whole("`position` must be a number")))
+    }
+}
+
+impl JsonSchema for SlotNumber {
+    fn schema_name() -> Cow<'static, str> {
+        "SlotNumber".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9})
+    }
+}
+
+/// A flag the move commands read: `null` is read as absent, and anything but true or false is
+/// refused with `message`.
+fn move_flag<'de, D: Deserializer<'de>>(d: D, message: &str) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole(message))),
+    }
+}
+
+fn active_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    move_flag(d, "`active` must be true or false")
+}
+
+fn allow_errors_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    move_flag(d, "`allow_errors` must be true or false")
+}
+
+/// A feature command's id, as `timeline.redefine` reads `command`: text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommandId(pub String);
+
+impl<'de> Deserialize<'de> for CommandId {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => Ok(CommandId(s)),
+            _ => Err(D::Error::custom(whole("`command` must name the feature's command"))),
+        }
+    }
+}
+
+impl JsonSchema for CommandId {
+    fn schema_name() -> Cow<'static, str> {
+        "CommandId".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The id of the command that makes the feature (`solid.extrude`, `solid.fillet`, …). Only the commands that make features are taken.",
+            "type": "string"
+        })
+    }
+}
+
+/// `timeline.redefine`'s `params`: the feature command's own parameters. The handler passes
+/// whatever it is given on to that command, which checks it, so any value is read here.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommandParams(pub Value);
+
+impl<'de> Deserialize<'de> for CommandParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d).map(CommandParams)
+    }
+}
+
+impl JsonSchema for CommandParams {
+    fn schema_name() -> Cow<'static, str> {
+        "CommandParams".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The parameters of the feature's command, as `describe_command` shows them for it: the feature is rebuilt from them. Keys it takes that this leaves out take their defaults, except that some are kept from the feature being edited: an extrude's or revolve's `convention` and an extrude's run-to body, a feature's `participants`, a frame member's `names` (when `body_name` is unchanged), a thread's old size, a perforation's outline and an emboss's face. Any value is read here and passed on, and the command refuses what is not its parameters. `name` is ignored: the feature keeps its name.",
+            "type": "object"
+        })
+    }
+}
+
+/// Make a new timeline folder holding features, joints and other folders, inside another folder
+/// or at the top level. The features and joints leave any other folder they were in. Each folder
+/// must hold one unbroken run of features, so the features given must be next to each other in
+/// the history. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TimelineGroupParams {
+    /// Features to put in the folder, by id or name. Default: none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FeatureList")]
+    pub features: Option<FeatureList>,
+    /// Joints to put in the folder, by id or name. Default: none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointList")]
+    pub joints: Option<JointList>,
+    /// Folders to move into the new one, by id. Default: none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FolderIds")]
+    pub groups: Option<FolderIds>,
+    /// The folder's name. Default: `Folder` and the number of folders there will be.
+    #[serde(default)]
+    pub name: Option<FolderName>,
+    /// The folder to put the new one in, by id. Default: the top level. `null` is read as absent.
+    #[serde(default)]
+    pub parent: Option<ParentFolder>,
+}
+
+/// What `timeline.group` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TimelineGroupMade {
+    /// The new folder, by id.
+    pub group: u64,
+    /// Its name, without the whitespace around it.
+    pub name: String,
+    /// The folder it is in, by id; `null` at the top level.
+    pub parent: Option<u64>,
+    /// The folders moved into it, by id.
+    pub groups: Vec<u64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// The keys `timeline.ungroup` reads. `groups` is read first: when it is given, `group` is not
+/// read at all.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = ungroup_needs_a_folder)]
+pub struct UngroupKeys {
+    /// One folder to remove, by id. Ignored when `groups` is given; `null` is refused.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FolderId")]
+    pub group: Option<FolderId>,
+    /// Folders to remove, by id: 1 to 10000. `null` is refused.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FoldersToRemove")]
+    pub groups: Option<FoldersToRemove>,
+}
+
+/// `timeline.ungroup`'s parameters: [`UngroupKeys`], read as the handler reads them, with
+/// `group` not looked at when `groups` is given.
+#[derive(Debug)]
+pub struct TimelineUngroupParams(pub UngroupKeys);
+
+impl<'de> Deserialize<'de> for TimelineUngroupParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut value = Value::deserialize(d)?;
+        if let Value::Object(o) = &mut value
+            && o.contains_key("groups")
+        {
+            o.remove("group");
+        }
+        serde_path_to_error::deserialize(&value).map(TimelineUngroupParams).map_err(|e| D::Error::custom(located(&e)))
+    }
+}
+
+impl JsonSchema for TimelineUngroupParams {
+    fn schema_name() -> Cow<'static, str> {
+        "TimelineUngroupParams".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut schema = UngroupKeys::json_schema(generator);
+        schema.insert(
+            "description".into(),
+            "Remove timeline folders. The features, joints and folders in them stay in the timeline, and go up to the folder that held the removed one, or to the top level. Give `groups`, or `group` for one. One undo step.".into(),
+        );
+        schema
+    }
+}
+
+/// What `timeline.ungroup` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TimelineUngrouped {
+    /// The folders removed, by id, each once.
+    pub groups: Vec<u64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Rename a timeline folder (the one that holds features and joints).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = group_and_name_required)]
+pub struct TimelineRenameGroupParams {
+    // Optional in the type and required in the schema (`group_and_name_required`).
+    /// The folder, by id.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FolderId")]
+    pub group: Option<FolderId>,
+    /// The new name.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "NewName")]
+    pub name: Option<NewName>,
+}
+
+/// What `timeline.rename_group` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TimelineGroupRenamed {
+    /// The folder, by id.
+    pub group: u64,
+    /// Its name now, without the whitespace around it.
+    pub name: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Move features, joints and folders into a timeline folder, or to the top level. They leave the
+/// folders they were in, and each folder must still hold one unbroken run of features. Give at
+/// least one of `features`, `joints` and `groups`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = move_needs_an_item)]
+pub struct TimelineMoveToGroupParams {
+    /// Features to move, by id or name. Default: none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FeatureList")]
+    pub features: Option<FeatureList>,
+    /// Joints to move, by id or name. Default: none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointList")]
+    pub joints: Option<JointList>,
+    /// Folders to move, by id. A folder can't go into itself or one of its own folders. Default:
+    /// none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FolderIds")]
+    pub groups: Option<FolderIds>,
+    /// The folder to move them into, by id. Default: the top level, also when `null`.
+    #[serde(default)]
+    pub group: Option<FolderId>,
+}
+
+/// What `timeline.move_to_group` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TimelineMovedToGroup {
+    /// The features moved, by id.
+    pub features: Vec<u64>,
+    /// The joints moved, by id.
+    pub joints: Vec<u64>,
+    /// The folders moved, by id.
+    pub groups: Vec<u64>,
+    /// The folder they are in now, by id; `null` at the top level.
+    pub group: Option<u64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Move features and folders (with everything in them) to a place in the timeline and into a
+/// folder, together, as one block and one undo step. The block keeps the order its features had.
+/// Give at least one of `features` and `groups`. Refused when a feature that worked would fail.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = move_many_needs_an_item)]
+pub struct TimelineMoveManyParams {
+    /// Features to move, by id or name. Default: none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FeatureList")]
+    pub features: Option<FeatureList>,
+    /// Folders to move, by id, with their features and nested folders. A folder can't go into
+    /// itself or one of its own folders. Default: none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FolderIds")]
+    pub groups: Option<FolderIds>,
+    /// The folder to move them into, by id. Default: the top level, also when `null`.
+    #[serde(default)]
+    pub group: Option<FolderId>,
+    // Optional in the type and required in the schema (`move_many_needs_an_item`).
+    /// Where the block goes: the insertion slot among the timeline's features, counted before
+    /// the block is taken out. A number below 0 is 0, a fraction is cut to a whole number, and a
+    /// number past the end is the end.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SlotNumber")]
+    pub position: Option<SlotNumber>,
+    /// True: the moved features end up before the history marker. False: behind it. Other
+    /// features keep their state. Default: the marker stays where it is. `null` is read as
+    /// absent.
+    #[serde(default, deserialize_with = "active_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub active: Option<bool>,
+}
+
+/// What `timeline.move_many` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TimelineMoved {
+    /// The features moved, by id, in the order they now have: those given and those of the
+    /// folders, each once.
+    pub features: Vec<u64>,
+    /// The folders moved, by id.
+    pub groups: Vec<u64>,
+    /// The folder they are in now, by id; `null` at the top level.
+    pub group: Option<u64>,
+    /// The slot asked for, as a whole number of at least 0.
+    pub position: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A feature a move broke, which worked before.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BrokenFeature {
+    /// The feature's name.
+    pub feature: String,
+    /// Why it fails now.
+    pub error: String,
+}
+
+// `timeline.reorder` reads `allow_errors` only once it knows the feature moves, which depends
+// on the design, so the contract takes any value there and leaves a wrong one to the handler,
+// which refuses it with its own message; reading it here would refuse a call that works.
+
+/// Move one feature to another place in the timeline. Refused when a feature that worked would
+/// fail, unless `allow_errors` is true. A feature in a timeline folder must stay next to the
+/// others of its folder.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = feature_and_position_required)]
+pub struct TimelineReorderParams {
+    // Optional in the type and required in the schema (`feature_and_position_required`).
+    /// The feature to move, by id or name.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FeatureRef")]
+    pub feature: Option<FeatureRef>,
+    /// Its new index in the timeline, from 0. A number below 0 is 0, a fraction is cut to a whole
+    /// number, and a number past the end is the last slot (the reply's `note` says so).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SlotNumber")]
+    pub position: Option<SlotNumber>,
+    /// True: the feature ends up before the history marker. False: behind it. Other features keep
+    /// their state. Default: the marker stays where it is. `null` is read as absent.
+    #[serde(default, deserialize_with = "active_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub active: Option<bool>,
+    /// True: make the move even when it breaks features that worked; they are listed in `broken`.
+    /// Default: false, the move is refused. `null` is read as absent. Anything but true, false
+    /// or `null` is refused, except when `allow_errors` is not read: when the feature is already
+    /// at `position` (and `active` is not given) nothing is moved, and a move that would break a
+    /// timeline folder is refused first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub allow_errors: Option<Value>,
+}
+
+/// What `timeline.reorder` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TimelineReordered {
+    /// The feature, by id.
+    pub feature: u64,
+    /// Its index now.
+    pub position: usize,
+    /// Its index before.
+    pub from: usize,
+    /// Whether it changed place.
+    pub moved: bool,
+    /// Why nothing moved, or that a position past the end meant the last slot. Absent when there
+    /// is nothing to say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// With `allow_errors`: the features the move broke; empty when it broke none. Absent
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broken: Option<Vec<BrokenFeature>>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Move several features together to one place in the timeline, as one block that keeps the
+/// order the features have there. Refused when a feature that worked would fail, unless
+/// `allow_errors` is true.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = features_and_position_required)]
+pub struct TimelineReorderManyParams {
+    // Optional in the type and required in the schema (`features_and_position_required`).
+    /// The features to move, by id or name: at least one.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FeatureList<true>")]
+    pub features: Option<FeatureList<true>>,
+    /// Where the block goes: the insertion slot among the timeline's features, counted before the
+    /// block is taken out. A number below 0 is 0, a fraction is cut to a whole number, and a
+    /// number past the end is the end.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SlotNumber")]
+    pub position: Option<SlotNumber>,
+    /// True: the moved features end up before the history marker. False: behind it. Other
+    /// features keep their state. Default: the marker stays where it is. `null` is read as
+    /// absent.
+    #[serde(default, deserialize_with = "active_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub active: Option<bool>,
+    /// True: make the move even when it breaks features that worked; they are listed in `broken`.
+    /// Default: false, the move is refused. `null` is read as absent.
+    #[serde(default, deserialize_with = "allow_errors_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub allow_errors: Option<bool>,
+}
+
+/// What `timeline.reorder_many` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TimelineReorderedMany {
+    /// The features moved, by id, in the order they now have.
+    pub features: Vec<u64>,
+    /// The slot asked for, at most the number of features the timeline holds.
+    pub position: usize,
+    /// With `allow_errors`: the features the move broke; empty when it broke none. Absent
+    /// otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub broken: Option<Vec<BrokenFeature>>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Rebuild a feature in place from its command and parameters, keeping its place in the
+/// timeline, its name and its folder. The feature's type can't change. Only the commands that
+/// make features are taken. When the edited feature fails to build, the call returns that error
+/// and the design is left as it was.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = feature_and_command_required)]
+pub struct TimelineRedefineParams {
+    // Optional in the type and required in the schema (`feature_and_command_required`).
+    /// The feature, by id or name.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FeatureRef")]
+    pub feature: Option<FeatureRef>,
+    /// The command that makes the feature, as `timeline.inspect` and the timeline name it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "CommandId")]
+    pub command: Option<CommandId>,
+    /// That command's parameters. Default: none.
+    #[serde(default)]
+    pub params: Option<CommandParams>,
+}
+
+/// What `timeline.redefine` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TimelineRedefined {
+    /// The feature, by id.
+    pub feature: u64,
+    /// How many features were rebuilt.
+    pub recomputed: usize,
+    /// How many features took an earlier result for the same inputs instead of being rebuilt.
+    pub restored: usize,
+    /// Whether the feature is after the history marker, so the edit is not built yet.
+    pub rolled_back: bool,
+    /// What the feature's command noticed building it. Absent when there is nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+    /// With `rolled_back`: that the feature is not built, and what to do about it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
 
     use super::{
         AssistantParams, CheckpointParams, CheckpointResult, FeatureKeys, FeatureRef, FeatureSelection, FolderId, FolderIds, MarkerPosition, NewName,
-        RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SetFields, TimelineComputeAllParams, TimelineComputeAllResult,
+        PaletteParams, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SetFields, TimelineComputeAllParams, TimelineComputeAllResult,
         TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams, TimelineEditResult,
         TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineRenameParams, TimelineRenameResult, TimelineRollToParams,
-        TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult, UndoParams, UndoResult,
+        TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult, ToggleVisibilityParams, UndoParams, UndoResult,
+    };
+    use super::{
+        TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
+        TimelineMovedToGroup, TimelineRedefineParams, TimelineRedefined, TimelineRenameGroupParams, TimelineReorderManyParams, TimelineReorderParams,
+        TimelineReordered, TimelineReorderedMany, TimelineUngroupParams, TimelineUngrouped,
     };
     use crate::Session;
     use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -876,6 +1556,8 @@ mod tests {
     fn schemas_and_the_key_check_agree() {
         assert_keys(input_schema_for::<RepeatParams>(), &[]);
         assert_keys(input_schema_for::<AssistantParams>(), &[]);
+        assert_keys(input_schema_for::<PaletteParams>(), &[]);
+        assert_keys(input_schema_for::<ToggleVisibilityParams>(), &[]);
         assert_keys(input_schema_for::<UndoParams>(), &[]);
         assert_keys(input_schema_for::<RedoParams>(), &[]);
         assert_keys(input_schema_for::<CheckpointParams>(), &[]);
@@ -889,6 +1571,14 @@ mod tests {
         assert_keys(input_schema_for::<TimelineSuppressParams>(), &["feature", "features", "groups", "suppressed"]);
         assert_keys(input_schema_for::<TimelineEditParams>(), &["feature", "set"]);
         assert_keys(input_schema_for::<TimelineInspectParams>(), &["feature", "group"]);
+        assert_keys(input_schema_for::<TimelineGroupParams>(), &["features", "groups", "joints", "name", "parent"]);
+        assert_keys(input_schema_for::<TimelineUngroupParams>(), &["group", "groups"]);
+        assert_keys(input_schema_for::<TimelineRenameGroupParams>(), &["group", "name"]);
+        assert_keys(input_schema_for::<TimelineMoveToGroupParams>(), &["features", "group", "groups", "joints"]);
+        assert_keys(input_schema_for::<TimelineMoveManyParams>(), &["active", "features", "group", "groups", "position"]);
+        assert_keys(input_schema_for::<TimelineReorderParams>(), &["active", "allow_errors", "feature", "position"]);
+        assert_keys(input_schema_for::<TimelineReorderManyParams>(), &["active", "allow_errors", "features", "position"]);
+        assert_keys(input_schema_for::<TimelineRedefineParams>(), &["command", "feature", "params"]);
     }
 
     #[test]
@@ -965,6 +1655,72 @@ mod tests {
             ("timeline.inspect", json!({"group": -1})),
             ("timeline.inspect", json!({"group": 1.5})),
             ("timeline.inspect", json!({"group": 99})),
+            ("timeline.group", json!({"features": "A"})),
+            ("timeline.group", json!({"features": null})),
+            ("timeline.group", json!({"features": [null]})),
+            ("timeline.group", json!({"features": [99]})),
+            ("timeline.group", json!({"features": ["Nope"]})),
+            ("timeline.group", json!({"features": vec![1; 10_001]})),
+            ("timeline.group", json!({"joints": null})),
+            ("timeline.group", json!({"joints": [true]})),
+            ("timeline.group", json!({"joints": ["Nope"]})),
+            ("timeline.group", json!({"groups": 3})),
+            ("timeline.group", json!({"groups": null})),
+            ("timeline.group", json!({"groups": ["a"]})),
+            ("timeline.group", json!({"groups": [77]})),
+            ("timeline.group", json!({"name": "x".repeat(129)})),
+            ("timeline.group", json!({"parent": "a"})),
+            ("timeline.group", json!({"parent": 77})),
+            ("timeline.ungroup", json!({})),
+            ("timeline.ungroup", json!({"group": null})),
+            ("timeline.ungroup", json!({"group": "a"})),
+            ("timeline.ungroup", json!({"group": 77})),
+            ("timeline.ungroup", json!({"groups": []})),
+            ("timeline.ungroup", json!({"groups": null})),
+            ("timeline.ungroup", json!({"groups": 3})),
+            ("timeline.ungroup", json!({"groups": ["a"]})),
+            ("timeline.ungroup", json!({"groups": [77]})),
+            ("timeline.ungroup", json!({"groups": vec![1; 10_001]})),
+            ("timeline.rename_group", json!({})),
+            ("timeline.rename_group", json!({"name": "x"})),
+            ("timeline.rename_group", json!({"group": null, "name": "x"})),
+            ("timeline.rename_group", json!({"group": 77, "name": "x"})),
+            ("timeline.move_to_group", json!({})),
+            ("timeline.move_to_group", json!({"features": []})),
+            ("timeline.move_to_group", json!({"features": "A"})),
+            ("timeline.move_to_group", json!({"features": [true]})),
+            ("timeline.move_to_group", json!({"joints": [1.5]})),
+            ("timeline.move_to_group", json!({"groups": ["a"]})),
+            ("timeline.move_to_group", json!({"features": [1], "group": "a"})),
+            ("timeline.move_to_group", json!({"features": [1], "group": 77})),
+            ("timeline.move_many", json!({})),
+            ("timeline.move_many", json!({"features": [1]})),
+            ("timeline.move_many", json!({"features": [1], "position": "1"})),
+            ("timeline.move_many", json!({"features": [1], "position": null})),
+            ("timeline.move_many", json!({"features": [1], "position": 1e9})),
+            ("timeline.move_many", json!({"features": [1], "position": 0, "active": "yes"})),
+            ("timeline.move_many", json!({"features": [1], "position": 0, "group": "a"})),
+            ("timeline.reorder", json!({})),
+            ("timeline.reorder", json!({"feature": 1})),
+            ("timeline.reorder", json!({"feature": null, "position": 0})),
+            ("timeline.reorder", json!({"feature": 99, "position": 0})),
+            ("timeline.reorder", json!({"feature": 1, "position": "0"})),
+            ("timeline.reorder", json!({"feature": 1, "position": 0, "active": 1})),
+            ("timeline.reorder_many", json!({})),
+            ("timeline.reorder_many", json!({"features": null, "position": 0})),
+            ("timeline.reorder_many", json!({"features": [], "position": 0})),
+            ("timeline.reorder_many", json!({"features": 1, "position": 0})),
+            ("timeline.reorder_many", json!({"features": [true], "position": 0})),
+            ("timeline.reorder_many", json!({"features": [1]})),
+            ("timeline.reorder_many", json!({"features": [1], "position": 0, "allow_errors": 0})),
+            ("timeline.redefine", json!({})),
+            ("timeline.redefine", json!({"feature": 1})),
+            ("timeline.redefine", json!({"feature": 1, "command": 5})),
+            ("timeline.redefine", json!({"feature": 1, "command": null})),
+            ("timeline.redefine", json!({"command": "solid.box"})),
+            ("timeline.redefine", json!({"feature": true, "command": "solid.box"})),
+            ("timeline.redefine", json!({"feature": 1, "command": "solid.nope"})),
+            ("timeline.redefine", json!({"feature": 1, "command": "file.save"})),
         ]);
     }
 
@@ -1345,5 +2101,382 @@ mod tests {
             assert!(e.contains("unknown key"), "{e}");
             assert_eq!(s.doc.to_json(), before);
         }
+    }
+
+    /// A part with boxes A, B, C and D (ids 1 to 4, each apart from the others), a component and a
+    /// joint of it, Hinge.
+    fn folder_session(param_check: ParamCheck) -> Session {
+        let mut s = Session::default();
+        let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        for (i, name) in ["A", "B", "C", "D"].into_iter().enumerate() {
+            run("solid.box", json!({"name": name, "length": 5, "width": 5, "height": 5, "corner": [i as f64 * 20.0, 0, 0]}));
+        }
+        run("component.create", json!({"name": "Part"}));
+        run("joint.as_built", json!({"type": "revolute", "a": 0, "b": "Part", "name": "Hinge"}));
+        s.param_check = param_check;
+        s
+    }
+
+    fn feature_ids(s: &Session) -> Vec<u64> {
+        s.doc.features.iter().map(|f| f.id).collect()
+    }
+
+    /// Every form of the folder commands, Reorder, Move Timeline Items and Edit Feature, run for
+    /// real in Warn: each reply matches its output schema and carries no warning, so the
+    /// contract takes the call the handler takes.
+    #[test]
+    fn folder_and_reorder_replies_match_the_output_schema() {
+        let mut s = folder_session(ParamCheck::Warn);
+        let ids = feature_ids(&s);
+        let (a, b, c, d) = (ids[0], ids[1], ids[2], ids[3]);
+        let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+
+        // New folders: nothing in them, features, joints, a name with spaces, a blank name,
+        // `null` for the keys that read it as absent, and a folder in a folder.
+        let r = run("timeline.group", json!({}));
+        assert_eq!((r["name"].as_str(), r["parent"].is_null(), &r["groups"]), (Some("Folder1"), true, &json!([])), "{r}");
+        matches(output_schema_for::<TimelineGroupMade>(), "timeline.group", &r);
+        let empty = r["group"].as_u64().unwrap_or_default();
+        let r = run("timeline.group", json!({"name": "  Pair ", "features": ["A", b], "joints": ["Hinge"], "groups": [empty], "parent": null}));
+        assert_eq!((r["name"].as_str(), &r["groups"]), (Some("Pair"), &json!([empty])), "{r}");
+        matches(output_schema_for::<TimelineGroupMade>(), "timeline.group", &r);
+        let pair = r["group"].as_u64().unwrap_or_default();
+        let r = run("timeline.group", json!({"name": "   ", "features": [], "joints": [], "groups": [], "parent": pair}));
+        assert_eq!((r["name"].as_str(), &r["parent"]), (Some("Folder3"), &json!(pair)), "{r}");
+        matches(output_schema_for::<TimelineGroupMade>(), "timeline.group", &r);
+        let inner = r["group"].as_u64().unwrap_or_default();
+        let r = run("timeline.group", json!({"name": null, "features": [c]}));
+        matches(output_schema_for::<TimelineGroupMade>(), "timeline.group", &r);
+        let third = r["group"].as_u64().unwrap_or_default();
+        let r = run("timeline.group", json!({"name": "é".repeat(64), "features": ["D"]}));
+        matches(output_schema_for::<TimelineGroupMade>(), "timeline.group", &r);
+        let fourth = r["group"].as_u64().unwrap_or_default();
+
+        // Rename: with spaces around the name.
+        let r = run("timeline.rename_group", json!({"group": third, "name": "  Third "}));
+        assert_eq!((r["group"].as_u64(), r["name"].as_str()), (Some(third), Some("Third")), "{r}");
+        matches(output_schema_for::<TimelineGroupRenamed>(), "timeline.rename_group", &r);
+
+        // Move to a folder: features, joints, folders, to the top level with `null` or without `group`.
+        let r = run("timeline.move_to_group", json!({"features": [c], "group": pair}));
+        assert_eq!((&r["features"], &r["joints"], &r["group"]), (&json!([c]), &json!([]), &json!(pair)), "{r}");
+        matches(output_schema_for::<TimelineMovedToGroup>(), "timeline.move_to_group", &r);
+        let r = run("timeline.move_to_group", json!({"joints": ["Hinge"], "group": third}));
+        assert_eq!(r["joints"].as_array().map(Vec::len), Some(1), "{r}");
+        matches(output_schema_for::<TimelineMovedToGroup>(), "timeline.move_to_group", &r);
+        let r = run("timeline.move_to_group", json!({"groups": [third], "features": [], "group": null}));
+        assert!(r["group"].is_null() && r["groups"] == json!([third]), "{r}");
+        matches(output_schema_for::<TimelineMovedToGroup>(), "timeline.move_to_group", &r);
+        let r = run("timeline.move_to_group", json!({"features": ["C", c], "groups": [], "joints": []}));
+        assert!(r["group"].is_null() && r["features"] == json!([c]), "{r}");
+        matches(output_schema_for::<TimelineMovedToGroup>(), "timeline.move_to_group", &r);
+
+        // Move many: features, folders, a folder, a place, the marker; a slot as a negative or
+        // fractional number, and `null` for what reads it as absent.
+        let r = run("timeline.move_many", json!({"features": [d], "position": 0}));
+        assert_eq!((&r["features"], &r["group"], &r["position"]), (&json!([d]), &Value::Null, &json!(0)), "{r}");
+        matches(output_schema_for::<TimelineMoved>(), "timeline.move_many", &r);
+        let r = run("timeline.move_many", json!({"features": ["A"], "position": 2.7, "group": null, "active": null}));
+        assert_eq!(r["position"], 2, "{r}");
+        matches(output_schema_for::<TimelineMoved>(), "timeline.move_many", &r);
+        let r = run("timeline.move_many", json!({"features": ["B"], "position": -3, "group": fourth, "active": true}));
+        assert_eq!(r["position"], 0, "{r}");
+        matches(output_schema_for::<TimelineMoved>(), "timeline.move_many", &r);
+        let r = run("timeline.move_many", json!({"groups": [fourth], "features": [], "position": 100, "active": true}));
+        matches(output_schema_for::<TimelineMoved>(), "timeline.move_many", &r);
+        let r = run("timeline.move_many", json!({"groups": [fourth], "group": inner, "position": 1, "active": true}));
+        matches(output_schema_for::<TimelineMoved>(), "timeline.move_many", &r);
+        run("timeline.rollback", json!({"position": "end"}));
+
+        // Remove folders: one, a list (also with a `group` that is not read), a list with a
+        // folder twice.
+        let r = run("timeline.ungroup", json!({"group": inner}));
+        assert_eq!(r["groups"], json!([inner]), "{r}");
+        matches(output_schema_for::<TimelineUngrouped>(), "timeline.ungroup", &r);
+        let r = run("timeline.ungroup", json!({"groups": [fourth, fourth], "group": {"anything": [null]}}));
+        assert_eq!(r["groups"], json!([fourth]), "{r}");
+        matches(output_schema_for::<TimelineUngrouped>(), "timeline.ungroup", &r);
+        let r = run("timeline.ungroup", json!({"groups": [pair, empty, third]}));
+        matches(output_schema_for::<TimelineUngrouped>(), "timeline.ungroup", &r);
+
+        // Reorder: a move, one place with a note (nothing moved; past the end), the marker, and
+        // `allow_errors` with and without something broken.
+        let r = run("timeline.reorder", json!({"feature": "A", "position": 3}));
+        assert_eq!((&r["position"], &r["moved"]), (&json!(3), &json!(true)), "{r}");
+        assert!(r.get("note").is_none() && r.get("broken").is_none(), "{r}");
+        matches(output_schema_for::<TimelineReordered>(), "timeline.reorder", &r);
+        let r = run("timeline.reorder", json!({"feature": a, "position": 3.9, "allow_errors": "not read here"}));
+        assert_eq!(r["moved"], false, "{r}");
+        assert!(r["note"].as_str().is_some_and(|n| n.starts_with("nothing moved")), "{r}");
+        matches(output_schema_for::<TimelineReordered>(), "timeline.reorder", &r);
+        let r = run("timeline.reorder", json!({"feature": "B", "position": 99, "active": null, "allow_errors": null}));
+        assert!(r["note"].as_str().is_some_and(|n| n.contains("past the end")) && r["moved"] == true, "{r}");
+        matches(output_schema_for::<TimelineReordered>(), "timeline.reorder", &r);
+        let r = run("timeline.reorder", json!({"feature": "B", "position": -5, "active": true, "allow_errors": true}));
+        assert_eq!(r["broken"], json!([]), "{r}");
+        matches(output_schema_for::<TimelineReordered>(), "timeline.reorder", &r);
+        run("timeline.rollback", json!({"position": 2}));
+        let r = run("timeline.reorder", json!({"feature": "B", "position": 3, "active": false, "allow_errors": false}));
+        assert!(r.get("broken").is_none(), "{r}");
+        matches(output_schema_for::<TimelineReordered>(), "timeline.reorder", &r);
+        run("timeline.rollback", json!({"position": "end"}));
+
+        // Reorder many: a block, with the marker, with `allow_errors`.
+        let r = run("timeline.reorder_many", json!({"features": ["A", c], "position": 4}));
+        assert_eq!(r["position"], 4, "{r}");
+        assert!(r.get("broken").is_none(), "{r}");
+        matches(output_schema_for::<TimelineReorderedMany>(), "timeline.reorder_many", &r);
+        let r = run("timeline.reorder_many", json!({"features": [d], "position": 0, "active": true, "allow_errors": true}));
+        assert_eq!(r["broken"], json!([]), "{r}");
+        matches(output_schema_for::<TimelineReorderedMany>(), "timeline.reorder_many", &r);
+        let r = run("timeline.reorder_many", json!({"features": [b, "A"], "position": 100.5, "active": null, "allow_errors": false}));
+        assert_eq!(r["position"], 4, "{r}");
+        matches(output_schema_for::<TimelineReorderedMany>(), "timeline.reorder_many", &r);
+
+        // Edit Feature: params of the command, none that change anything, a name that is
+        // ignored, and a feature after the history marker.
+        let r = run("timeline.redefine", json!({"feature": "A", "command": "solid.box", "params": {"length": 7, "width": 5, "height": 5}}));
+        assert_eq!((&r["feature"], &r["rolled_back"]), (&json!(a), &json!(false)), "{r}");
+        assert!(r.get("note").is_none() && r.get("warning").is_none(), "{r}");
+        matches(output_schema_for::<TimelineRedefined>(), "timeline.redefine", &r);
+        let r = run(
+            "timeline.redefine",
+            json!({"feature": b, "command": "solid.box", "params": {"name": "Other", "length": 7, "width": 5, "height": 5, "corner": [20, 0, 0]}}),
+        );
+        matches(output_schema_for::<TimelineRedefined>(), "timeline.redefine", &r);
+        run("timeline.rollback", json!({"position": 0}));
+        let r = run("timeline.redefine", json!({"feature": "D", "command": "solid.box", "params": {"length": 9, "width": 5, "height": 5}}));
+        assert_eq!(r["rolled_back"], true, "{r}");
+        assert!(r["note"].as_str().is_some_and(|n| n.contains("after the history marker")), "{r}");
+        matches(output_schema_for::<TimelineRedefined>(), "timeline.redefine", &r);
+    }
+
+    /// Reorder, Reorder Many and Edit Feature with something in the way: a move that is made
+    /// anyway lists what it broke, and an edit that gives a warning says so.
+    #[test]
+    fn replies_with_broken_features_and_warnings_match_the_output_schema() {
+        let (mut s, _) = timeline_session(ParamCheck::Warn);
+        let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        // The extrude can't come before its sketch.
+        let r = run("timeline.reorder", json!({"feature": "Pad", "position": 1, "allow_errors": true}));
+        assert!(r["broken"].as_array().is_some_and(|b| b.len() == 1 && b[0]["feature"] == "Pad" && b[0]["error"].is_string()), "{r}");
+        matches(output_schema_for::<TimelineReordered>(), "timeline.reorder", &r);
+        run("edit.undo", json!({}));
+        let r = run("timeline.reorder_many", json!({"features": ["Pad"], "position": 1, "allow_errors": true}));
+        assert!(r["broken"].as_array().is_some_and(|b| !b.is_empty()), "{r}");
+        matches(output_schema_for::<TimelineReorderedMany>(), "timeline.reorder_many", &r);
+    }
+
+    /// A call that works today gets no warning and none that would be refused in strict: what the
+    /// types accept is what the handlers read (the other forms are in
+    /// `folder_and_reorder_replies_match_the_output_schema`).
+    #[test]
+    fn the_folder_types_read_each_key_as_the_handlers_do() {
+        // Keys a handler doesn't read in this case may hold anything; `null` is read as absent
+        // where the handler does so.
+        for (id, p) in [
+            ("timeline.ungroup", json!({"groups": [1], "group": null})),
+            ("timeline.ungroup", json!({"groups": [1], "group": "x"})),
+            ("timeline.group", json!({"name": "", "parent": null, "features": [1, "A", 1], "joints": [3, "H"], "groups": []})),
+            ("timeline.group", json!({"name": 5, "features": [1]})),
+            ("timeline.group", json!({"name": "x".repeat(128), "parent": 4})),
+            ("timeline.group", json!({"name": format!("  {}  ", "x".repeat(128))})),
+            ("timeline.move_to_group", json!({"features": [1], "group": null})),
+            ("timeline.move_many", json!({"features": [1], "position": -1e8, "active": null, "group": null})),
+            ("timeline.reorder", json!({"feature": 1.0, "position": 1e8, "allow_errors": null, "active": null})),
+            ("timeline.reorder", json!({"feature": "A", "position": 0.5})),
+            ("timeline.reorder", json!({"feature": 1, "position": 0, "allow_errors": "no"})),
+            ("timeline.reorder_many", json!({"features": ["A", 2], "position": 0})),
+            ("timeline.redefine", json!({"feature": 1, "command": "solid.box"})),
+            ("timeline.redefine", json!({"feature": 1, "command": "solid.box", "params": null})),
+            ("timeline.redefine", json!({"feature": 1, "command": "solid.box", "params": [1]})),
+        ] {
+            assert_eq!(issues(id, p.clone()), Vec::<String>::new(), "{id} {p}");
+        }
+        // What the handlers refuse, with their messages, as the check words it.
+        for (id, p, message) in [
+            ("timeline.group", json!({"features": "A"}), "`features` must be a list of feature ids or names"),
+            ("timeline.group", json!({"features": null}), "`features` must be a list of feature ids or names"),
+            ("timeline.group", json!({"features": [null]}), "`feature` must be an id or name"),
+            ("timeline.group", json!({"features": vec![1; 10_001]}), "too many features"),
+            ("timeline.group", json!({"joints": null}), "`joints` must list at most 10000 joint ids or names"),
+            ("timeline.group", json!({"joints": [true]}), "`joint` must be an id or a name"),
+            ("timeline.group", json!({"groups": 3}), "`groups` must be a list of timeline folder ids"),
+            ("timeline.group", json!({"groups": [-1]}), "`groups` must contain folder ids"),
+            ("timeline.group", json!({"name": "x".repeat(129)}), "`name` must be 1…128 characters"),
+            ("timeline.group", json!({"parent": "a"}), "`parent` must be a timeline folder id"),
+            ("timeline.ungroup", json!({"groups": []}), "`groups` must list 1…10000 timeline folder ids"),
+            ("timeline.ungroup", json!({"groups": null}), "`groups` must be a list of timeline folder ids"),
+            ("timeline.ungroup", json!({"groups": ["a"]}), "`groups` must contain timeline folder ids"),
+            ("timeline.ungroup", json!({"group": null}), "`group` must be a timeline folder id"),
+            ("timeline.rename_group", json!({"group": 1, "name": " "}), "`name` must be 1…128 characters"),
+            ("timeline.rename_group", json!({"group": "a", "name": "x"}), "`group` must be a timeline folder id"),
+            ("timeline.move_to_group", json!({"group": "a"}), "`group` must be a timeline folder id"),
+            ("timeline.move_many", json!({"features": [1], "position": "1"}), "`position` must be a number"),
+            ("timeline.move_many", json!({"features": [1], "position": 1, "active": "yes"}), "`active` must be true or false"),
+            ("timeline.reorder", json!({"feature": 1, "position": 1e9}), "`position` must be a number"),
+            ("timeline.reorder", json!({"feature": null, "position": 1}), "`feature` must be an id or name"),
+            ("timeline.reorder_many", json!({"features": [], "position": 1}), "`features` must list at least one feature"),
+            ("timeline.reorder_many", json!({"features": 1, "position": 1}), "`features` must be a list of feature ids or names"),
+            ("timeline.redefine", json!({"feature": 1, "command": 5}), "`command` must name the feature's command"),
+            ("timeline.redefine", json!({"feature": true, "command": "solid.box"}), "`feature` must be an id or name"),
+        ] {
+            assert_eq!(issues(id, p.clone()), [message], "{id} {p}");
+        }
+        // Absent keys are left to the handlers' messages.
+        for (id, p) in [
+            ("timeline.ungroup", json!({})),
+            ("timeline.rename_group", json!({})),
+            ("timeline.move_to_group", json!({})),
+            ("timeline.move_many", json!({})),
+            ("timeline.reorder", json!({})),
+            ("timeline.reorder_many", json!({})),
+            ("timeline.redefine", json!({})),
+        ] {
+            assert_eq!(issues(id, p.clone()), Vec::<String>::new(), "{id} {p}");
+        }
+    }
+
+    /// The schemas say what the handlers need: the keys they refuse a call without are required,
+    /// and a call that works matches.
+    #[test]
+    fn the_folder_schemas_take_what_the_handlers_read() {
+        let takes = |schema: schemars::Schema, cases: &[(Value, bool)]| {
+            let schema = schema.as_value();
+            for (p, takes) in cases {
+                assert_eq!(conforms(schema, schema, p), *takes, "{p}");
+            }
+        };
+        takes(
+            input_schema_for::<TimelineGroupParams>(),
+            &[
+                (json!({}), true),
+                (json!({"name": "Box", "features": ["A", 2], "joints": ["H", 1], "groups": [3], "parent": 4}), true),
+                (json!({"features": "A"}), false),
+                (json!({"joints": null}), false),
+                (json!({"parent": "x"}), false),
+            ],
+        );
+        takes(
+            input_schema_for::<TimelineUngroupParams>(),
+            &[
+                (json!({"group": 1}), true),
+                (json!({"groups": [1, 2]}), true),
+                (json!({}), false),
+                (json!({"groups": []}), false),
+                (json!({"group": null}), false),
+            ],
+        );
+        takes(
+            input_schema_for::<TimelineRenameGroupParams>(),
+            &[
+                (json!({"group": 1, "name": "x"}), true),
+                (json!({"group": 1}), false),
+                (json!({"name": "x"}), false),
+                (json!({"group": 1, "name": ""}), true),
+            ],
+        );
+        takes(
+            input_schema_for::<TimelineMoveToGroupParams>(),
+            &[
+                (json!({"features": [1]}), true),
+                (json!({"joints": ["H"], "group": null}), true),
+                (json!({"groups": [2], "group": 3}), true),
+                (json!({}), false),
+                (json!({"group": 3}), false),
+            ],
+        );
+        takes(
+            input_schema_for::<TimelineMoveManyParams>(),
+            &[
+                (json!({"features": [1], "position": 2}), true),
+                (json!({"groups": [1], "position": -2.5, "group": 3, "active": false}), true),
+                (json!({"features": [1]}), false),
+                (json!({"position": 1}), false),
+                (json!({"features": [1], "position": 1e9}), false),
+                (json!({"features": [1], "position": 1, "active": 1}), false),
+            ],
+        );
+        takes(
+            input_schema_for::<TimelineReorderParams>(),
+            &[
+                (json!({"feature": "A", "position": 2}), true),
+                (json!({"feature": 1, "position": 2, "active": true, "allow_errors": false}), true),
+                (json!({"feature": "A"}), false),
+                (json!({"position": 2}), false),
+                (json!({"feature": "A", "position": "2"}), false),
+            ],
+        );
+        takes(
+            input_schema_for::<TimelineReorderManyParams>(),
+            &[
+                (json!({"features": ["A", 2], "position": 0}), true),
+                (json!({"features": [], "position": 0}), false),
+                (json!({"features": ["A"]}), false),
+                (json!({"position": 0}), false),
+            ],
+        );
+        takes(
+            input_schema_for::<TimelineRedefineParams>(),
+            &[
+                (json!({"feature": "A", "command": "solid.box", "params": {"length": 1}}), true),
+                (json!({"feature": "A", "command": "solid.box"}), true),
+                (json!({"feature": "A"}), false),
+                (json!({"command": "solid.box"}), false),
+                (json!({"feature": "A", "command": "solid.box", "params": 1}), false),
+            ],
+        );
+    }
+
+    /// A misspelt key still runs in Warn, and says so, with a reply that matches its schema.
+    #[test]
+    fn a_misspelt_folder_key_is_reported_in_warn() {
+        let mut s = folder_session(ParamCheck::Warn);
+        let mut run = |id: &str, p: Value, schema: schemars::Schema| {
+            let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+            let warnings = r["param_warnings"].as_array().map(|w| w.iter().filter_map(Value::as_str).collect::<Vec<_>>()).unwrap_or_default();
+            assert_eq!(warnings.len(), 1, "{id}: {r}");
+            assert!(warnings[0].starts_with("unknown key `"), "{id}: {warnings:?}");
+            assert!(conforms(schema.as_value(), schema.as_value(), &r), "{id}: {r}");
+            r
+        };
+        let made = run("timeline.group", json!({"name": "F", "feautres": ["A"], "features": ["A"]}), output_schema_for::<TimelineGroupMade>());
+        let group = made["group"].as_u64().unwrap_or_default();
+        run("timeline.rename_group", json!({"group": group, "nme": "x", "name": "G"}), output_schema_for::<TimelineGroupRenamed>());
+        run("timeline.move_to_group", json!({"features": ["B"], "gruop": 1, "group": group}), output_schema_for::<TimelineMovedToGroup>());
+        // `joints` is not read by `timeline.move_many`, so naming it is a mistake too.
+        run("timeline.move_many", json!({"features": ["B"], "joints": ["Hinge"], "position": 1}), output_schema_for::<TimelineMoved>());
+        run("timeline.reorder", json!({"feature": "B", "postion": 1, "position": 2}), output_schema_for::<TimelineReordered>());
+        run("timeline.reorder_many", json!({"features": ["B"], "position": 0, "alow_errors": true}), output_schema_for::<TimelineReorderedMany>());
+        run(
+            "timeline.redefine",
+            json!({"feature": "A", "command": "solid.box", "parmas": {}, "params": {"length": 6, "width": 5, "height": 5}}),
+            output_schema_for::<TimelineRedefined>(),
+        );
+        run("timeline.ungroup", json!({"groups": [group], "grops": 1}), output_schema_for::<TimelineUngrouped>());
+    }
+
+    /// Strict refuses a misspelt key before anything runs, and a call with only the keys the
+    /// handler reads goes through.
+    #[test]
+    fn strict_refuses_a_misspelt_folder_key_and_changes_nothing() {
+        let mut s = folder_session(ParamCheck::Strict);
+        let before = s.doc.to_json();
+        for (id, p) in [
+            ("timeline.group", json!({"features": ["A"], "feautres": 1})),
+            ("timeline.ungroup", json!({"group": 1, "grop": 1})),
+            ("timeline.rename_group", json!({"group": 1, "name": "x", "nme": 1})),
+            ("timeline.move_to_group", json!({"features": ["A"], "gruop": 1})),
+            ("timeline.move_many", json!({"features": ["A"], "position": 0, "joints": []})),
+            ("timeline.reorder", json!({"feature": "A", "position": 2, "postion": 1})),
+            ("timeline.reorder_many", json!({"features": ["A"], "position": 2, "alow_errors": true})),
+            ("timeline.redefine", json!({"feature": "A", "command": "solid.box", "parmas": {}})),
+        ] {
+            let e = s.execute(id, &p).unwrap_err().to_string();
+            assert!(e.contains("unknown key"), "{id}: {e}");
+            assert_eq!(s.doc.to_json(), before, "{id}");
+        }
+        let r = s.execute("timeline.group", &json!({"name": "F", "features": ["A", "B"]})).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(r["name"], "F", "{r}");
     }
 }
