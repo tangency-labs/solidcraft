@@ -165,6 +165,26 @@ diagnostics without preparing or evaluating geometry. `details_findings` and
 preferences, manager cards, prompts, context menus and the sketch palette. Import through
 `crate::ui_kit::{...}`. Most controls are crate-visible; the container API is public so platform apps use the same hosts.
 
+## Grid
+
+`Grid` is the one editable table: a cell cursor, ranges, editing, TSV copy and paste, fill down
+and clear, over `table_custom` (so column layout, resizing, `Sort` headings, the empty state,
+reveal and the `dialog:table:…` handles are the table's own). The caller implements `GridSource`
+(rows, columns, each cell's text and `CellKind`, a per-cell message, `set_cell` to refuse a value,
+and the optional add row and add column). The grid keeps only view state in egui memory; every
+gesture returns one `Vec<Edit>` in `GridOutput`, which the caller applies as one command and one
+undo step, calling `Grid::refuse` when that command says no.
+
+Keys with no cell being edited: arrows (Shift extends the range), Tab and Shift+Tab across with
+wrap, Enter and Shift+Enter down and up, Home/End, Ctrl+Home/End, Ctrl+A. Typing starts an edit
+that replaces the cell; F2 or a double-click opens it with its text selected. While editing,
+Escape cancels and Enter, Tab or leaving the cell commit; Ctrl+Enter writes the value to every
+selected cell. Ctrl+C copies the range as Excel and Google Sheets write it (tabs, CRLF, quotes
+only where needed); Ctrl+V pastes (one value fills the range; a block below the last row adds
+rows when the source offers an add row); Ctrl+D fills down; Delete clears. Clipboard access goes
+through egui, so it works in wasm. Rows have one height and only the visible ones are built.
+Each cell is named "{column}, {row key}" for accessibility and publishes `grid:{id}:{row}:{column}`.
+
 ## Stage bars
 
 `StageBar` composes two clipped, horizontally scrollable rows inside the shell's
