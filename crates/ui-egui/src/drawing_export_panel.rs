@@ -21,8 +21,8 @@ use solidcraft_engine::geom::drawing_sheet::SheetSize;
 use solidcraft_engine::geom::drawing_view::NamedView;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit::{self, StatusTone};
+use solidcraft_theme::Tokens;
 
 /// The command the window builds: its ribbon button opens the window, and the window runs it.
 pub const ID: &str = "drawing.export";
@@ -256,10 +256,10 @@ pub fn view_name(d: &Drawing, view: u64) -> String {
             NamedView::IsoFrontRight | NamedView::IsoFrontLeft | NamedView::IsoBackRight | NamedView::IsoBackLeft => "ui.drawing_export.view_iso",
         })
     };
-    let numbered = crate::i18n::format("ui.drawing_export.view_number", &[("number", &number.to_string())]);
+    let numbered = solidcraft_ui_text::format("ui.drawing_export.view_number", &[("number", &number.to_string())]);
     match plain(view) {
-        Some(key) if on_sheet.iter().filter(|id| plain(**id) == Some(key)).count() > 1 => format!("{} ({number})", crate::i18n::tr(key)),
-        Some(key) => crate::i18n::tr(key).to_owned(),
+        Some(key) if on_sheet.iter().filter(|id| plain(**id) == Some(key)).count() > 1 => format!("{} ({number})", solidcraft_ui_text::tr(key)),
+        Some(key) => solidcraft_ui_text::tr(key).to_owned(),
         None => numbered,
     }
 }
@@ -397,11 +397,11 @@ fn outcome_lines(d: Option<&Drawing>, views: &[(u64, u64, String, String)], shee
         // The file's name: the folder is the one the window shows or the one just chosen.
         let path = result.get("path").and_then(Value::as_str).unwrap_or_default();
         let file = Path::new(path).file_name().map_or_else(|| path.to_owned(), |f| f.to_string_lossy().into_owned());
-        let mut lines = vec![(StatusTone::Dim, crate::i18n::format("ui.drawing_export.saved", &[("sheet", &sheet_name), ("path", &file)]))];
+        let mut lines = vec![(StatusTone::Dim, solidcraft_ui_text::format("ui.drawing_export.saved", &[("sheet", &sheet_name), ("path", &file)]))];
         let stale = result.get("out_of_date").and_then(Value::as_array).map_or(0, Vec::len);
         if stale > 0 {
             let key = if stale == 1 { "ui.drawing_export.as_last_were_one" } else { "ui.drawing_export.as_last_were_other" };
-            lines.push((StatusTone::Warning, crate::i18n::format(key, &[("sheet", &sheet_name), ("count", &stale.to_string())])));
+            lines.push((StatusTone::Warning, solidcraft_ui_text::format(key, &[("sheet", &sheet_name), ("count", &stale.to_string())])));
         }
         let missing: Vec<&Value> = result
             .get("dimensions")
@@ -412,15 +412,15 @@ fn outcome_lines(d: Option<&Drawing>, views: &[(u64, u64, String, String)], shee
             let key = if missing.len() == 1 { "ui.drawing_export.dimensions_one" } else { "ui.drawing_export.dimensions_other" };
             lines.push((
                 StatusTone::Warning,
-                crate::i18n::format(key, &[("sheet", &sheet_name), ("count", &missing.len().to_string()), ("why", why)]),
+                solidcraft_ui_text::format(key, &[("sheet", &sheet_name), ("count", &missing.len().to_string()), ("why", why)]),
             ));
         }
         return lines;
     }
     let error = reply.get("error").and_then(Value::as_str).unwrap_or_default();
     if error == CANCELLED {
-        let stopped = crate::i18n::tr("ui.drawing_export.stopped");
-        return vec![(StatusTone::Warning, crate::i18n::format("ui.drawing_export.failed", &[("sheet", &sheet_name), ("error", stopped)]))];
+        let stopped = solidcraft_ui_text::tr("ui.drawing_export.stopped");
+        return vec![(StatusTone::Warning, solidcraft_ui_text::format("ui.drawing_export.failed", &[("sheet", &sheet_name), ("error", stopped)]))];
     }
     // The status lists each view of the sheet that can't be drawn, with its reason: name it as people know it.
     let named: Vec<(StatusTone, String)> = d.map_or_else(Vec::new, |d| {
@@ -428,14 +428,16 @@ fn outcome_lines(d: Option<&Drawing>, views: &[(u64, u64, String, String)], shee
             .iter()
             .filter(|(_, s, status, _)| *s == sheet && status == "failed")
             .map(|(view, _, _, reason)| {
-                let text =
-                    crate::i18n::format("ui.drawing_export.refused", &[("sheet", &sheet_name), ("view", &view_name(d, *view)), ("reason", reason)]);
+                let text = solidcraft_ui_text::format(
+                    "ui.drawing_export.refused",
+                    &[("sheet", &sheet_name), ("view", &view_name(d, *view)), ("reason", reason)],
+                );
                 (StatusTone::Error, text)
             })
             .collect()
     });
     if named.is_empty() {
-        let text = crate::i18n::format("ui.drawing_export.failed", &[("sheet", &sheet_name), ("error", &crate::friendly_error(ID, error))]);
+        let text = solidcraft_ui_text::format("ui.drawing_export.failed", &[("sheet", &sheet_name), ("error", &crate::friendly_error(ID, error))]);
         vec![(StatusTone::Error, text)]
     } else {
         named
@@ -463,7 +465,7 @@ fn collect(app: &mut SolveApp) {
                 d.as_deref(),
                 &views,
                 job.sheet,
-                &json!({"ok": false, "error": crate::i18n::tr("ui.drawing_export.stopped")}),
+                &json!({"ok": false, "error": solidcraft_ui_text::tr("ui.drawing_export.stopped")}),
             ));
             finished = true;
             false
@@ -521,7 +523,7 @@ fn listed(export: &Export) -> Vec<(u64, u64, String, String)> {
 fn close_button(ui: &mut egui::Ui) -> bool {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_24, t.space_24), egui::Sense::hover());
-    let r = ui_kit::icon_button_at(ui, rect, "close", crate::i18n::tr("ui.drawing_export.close"));
+    let r = ui_kit::icon_button_at(ui, rect, "close", solidcraft_ui_text::tr("ui.drawing_export.close"));
     crate::scenario::publish_target("drawing:export:close", rect);
     r.clicked()
 }
@@ -545,13 +547,13 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let mut close = false;
     ui.horizontal(|ui| {
-        ui.heading(crate::i18n::tr("ui.drawing_export.title"));
+        ui.heading(solidcraft_ui_text::tr("ui.drawing_export.title"));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| close = close_button(ui));
     });
     ui.add_space(t.space_8);
 
-    ui_kit::section_heading(ui, crate::i18n::tr("ui.drawing_export.format"));
-    let planned = crate::i18n::tr("ui.drawing_export.planned");
+    ui_kit::section_heading(ui, solidcraft_ui_text::tr("ui.drawing_export.format"));
+    let planned = solidcraft_ui_text::tr("ui.drawing_export.planned");
     let mut format = match export.format {
         Format::Svg => 1,
         Format::Png => 2,
@@ -570,7 +572,7 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     ui.add_space(t.space_8);
 
-    ui_kit::section_heading(ui, crate::i18n::tr("ui.drawing_export.sheets"));
+    ui_kit::section_heading(ui, solidcraft_ui_text::tr("ui.drawing_export.sheets"));
     let views = listed(export);
     for sheet in &d.sheets {
         let mut on = export.sheets.contains(&sheet.id);
@@ -585,21 +587,23 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         for (view, _, _, reason) in views.iter().filter(|(_, s, status, _)| *s == sheet.id && status == "failed") {
-            let text =
-                crate::i18n::format("ui.drawing_export.view_failed", &[("view", &view_name(&d, *view)), ("sheet", &sheet.name), ("reason", reason)]);
+            let text = solidcraft_ui_text::format(
+                "ui.drawing_export.view_failed",
+                &[("view", &view_name(&d, *view)), ("sheet", &sheet.name), ("reason", reason)],
+            );
             ui_kit::status_line(ui, &text, StatusTone::Warning);
         }
     }
     if export.sheets.is_empty() {
-        ui_kit::status_line(ui, crate::i18n::tr("ui.drawing_export.no_sheet"), StatusTone::Warning);
+        ui_kit::status_line(ui, solidcraft_ui_text::tr("ui.drawing_export.no_sheet"), StatusTone::Warning);
     }
     ui.add_space(t.space_8);
 
-    ui_kit::section_heading(ui, crate::i18n::tr("ui.drawing_export.paper"));
+    ui_kit::section_heading(ui, solidcraft_ui_text::tr("ui.drawing_export.paper"));
     let papers = [
-        crate::i18n::tr("ui.drawing_export.paper_white"),
-        crate::i18n::tr("ui.drawing_export.paper_blueprint"),
-        crate::i18n::tr("ui.drawing_export.paper_prussian_blue"),
+        solidcraft_ui_text::tr("ui.drawing_export.paper_white"),
+        solidcraft_ui_text::tr("ui.drawing_export.paper_blueprint"),
+        solidcraft_ui_text::tr("ui.drawing_export.paper_prussian_blue"),
     ];
     let mut paper = Paper::ALL.iter().position(|p| *p == export.paper).unwrap_or(0);
     let paper_targets = ["drawing:export:paper:white", "drawing:export:paper:blueprint", "drawing:export:paper:prussian_blue"];
@@ -611,13 +615,13 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if picked {
         export.paper = Paper::ALL.get(paper).copied().unwrap_or(Paper::White);
     }
-    ui_kit::text(ui, crate::i18n::tr("ui.drawing_export.paper_note"), ui_kit::Text::Note("drawing_export_paper"));
+    ui_kit::text(ui, solidcraft_ui_text::tr("ui.drawing_export.paper_note"), ui_kit::Text::Note("drawing_export_paper"));
     ui.add_space(t.space_8);
 
-    ui_kit::section_heading(ui, crate::i18n::tr("ui.drawing_export.output"));
+    ui_kit::section_heading(ui, solidcraft_ui_text::tr("ui.drawing_export.output"));
     if export.format == Format::Png {
         let own = d.sheets.iter().find(|s| export.sheets.contains(&s.id)).map_or(solidcraft_engine::doc::drawing::DEFAULT_DPI, |s| s.dpi);
-        let resolution = crate::i18n::tr("ui.drawing_export.resolution");
+        let resolution = solidcraft_ui_text::tr("ui.drawing_export.resolution");
         let mut dpi = export.dpi.unwrap_or(own);
         ui_kit::row(ui, resolution, |ui| {
             let r = ui_kit::number_field(ui, &mut dpi, 25.0..=2400.0, 1.0, " dpi");
@@ -627,22 +631,22 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         if export.dpi.is_some() {
-            ui_kit::text(ui, crate::i18n::tr("ui.drawing_export.dpi_set"), ui_kit::Text::Note("drawing_export_dpi"));
-            if ui_kit::button(ui, crate::i18n::tr("ui.drawing_export.dpi_reset"), ui_kit::Button::Normal).clicked() {
+            ui_kit::text(ui, solidcraft_ui_text::tr("ui.drawing_export.dpi_set"), ui_kit::Text::Note("drawing_export_dpi"));
+            if ui_kit::button(ui, solidcraft_ui_text::tr("ui.drawing_export.dpi_reset"), ui_kit::Button::Normal).clicked() {
                 export.dpi = None;
             }
         } else {
-            ui_kit::text(ui, crate::i18n::tr("ui.drawing_export.dpi_note"), ui_kit::Text::Note("drawing_export_dpi"));
+            ui_kit::text(ui, solidcraft_ui_text::tr("ui.drawing_export.dpi_note"), ui_kit::Text::Note("drawing_export_dpi"));
         }
-        let colour_label = crate::i18n::tr("ui.drawing_export.colour");
+        let colour_label = solidcraft_ui_text::tr("ui.drawing_export.colour");
         let colours = [
-            crate::i18n::tr("ui.drawing_export.colour_grey"),
-            crate::i18n::tr("ui.drawing_export.colour_black_white"),
-            crate::i18n::tr("ui.drawing_export.colour_rgb"),
-            crate::i18n::tr("ui.drawing_export.colour_transparent"),
+            solidcraft_ui_text::tr("ui.drawing_export.colour_grey"),
+            solidcraft_ui_text::tr("ui.drawing_export.colour_black_white"),
+            solidcraft_ui_text::tr("ui.drawing_export.colour_rgb"),
+            solidcraft_ui_text::tr("ui.drawing_export.colour_transparent"),
         ];
         let blue = export.paper != Paper::White;
-        let only_rgb = crate::i18n::tr("ui.drawing_export.colour_blue");
+        let only_rgb = solidcraft_ui_text::tr("ui.drawing_export.colour_blue");
         let shown_colour = if blue { Colour::Rgb } else { export.colour };
         let current = Colour::ALL.iter().position(|c| *c == shown_colour).and_then(|at| colours.get(at)).copied().unwrap_or_default();
         ui_kit::row(ui, colour_label, |ui| {
@@ -667,11 +671,11 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::text(ui, only_rgb, ui_kit::Text::Note("drawing_export_colour"));
         }
     }
-    let folder_label = crate::i18n::tr("ui.drawing_export.folder");
+    let folder_label = solidcraft_ui_text::tr("ui.drawing_export.folder");
     if !saved {
         export.folder = Folder::Choose;
     }
-    let shown = crate::i18n::tr(match export.folder {
+    let shown = solidcraft_ui_text::tr(match export.folder {
         Folder::Design => "ui.drawing_export.folder_design",
         Folder::Choose => "ui.drawing_export.folder_choose",
     });
@@ -680,7 +684,7 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
             for (folder, key, enabled) in
                 [(Folder::Design, "ui.drawing_export.folder_design", saved), (Folder::Choose, "ui.drawing_export.folder_choose", true)]
             {
-                let r = ui.add_enabled_ui(enabled, |ui| ui.selectable_label(export.folder == folder, crate::i18n::tr(key))).inner;
+                let r = ui.add_enabled_ui(enabled, |ui| ui.selectable_label(export.folder == folder, solidcraft_ui_text::tr(key))).inner;
                 crate::scenario::publish_target(
                     &format!("drawing:export:folder:{}", if folder == Folder::Design { "design" } else { "choose" }),
                     r.rect,
@@ -693,18 +697,18 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::scenario::publish_target("drawing:export:folder", r.rect);
     });
     if !saved {
-        ui_kit::text(ui, crate::i18n::tr("ui.drawing_export.folder_unsaved"), ui_kit::Text::Note("drawing_export_unsaved"));
+        ui_kit::text(ui, solidcraft_ui_text::tr("ui.drawing_export.folder_unsaved"), ui_kit::Text::Note("drawing_export_unsaved"));
     }
     let sheets = chosen(&d, export);
     if export.folder == Folder::Design && !sheets.is_empty() {
         let names: Vec<String> = sheets.iter().map(|(_, name)| format!("{}.{}", file_stem(&design, name), export.format.name())).collect();
-        let files = crate::i18n::format("ui.drawing_export.files", &[("files", &names.join(", "))]);
+        let files = solidcraft_ui_text::format("ui.drawing_export.files", &[("files", &names.join(", "))]);
         ui_kit::text(ui, files.as_str(), ui_kit::Text::Note("drawing_export_files"));
     } else if sheets.len() > 1 {
-        ui_kit::text(ui, crate::i18n::tr("ui.drawing_export.several"), ui_kit::Text::Note("drawing_export_files"));
+        ui_kit::text(ui, solidcraft_ui_text::tr("ui.drawing_export.several"), ui_kit::Text::Note("drawing_export_files"));
     }
     ui.add_space(t.space_8);
-    ui_kit::text(ui, crate::i18n::tr("ui.drawing_export.paper_info"), ui_kit::Text::Hint("drawing_export_paper_info"));
+    ui_kit::text(ui, solidcraft_ui_text::tr("ui.drawing_export.paper_info"), ui_kit::Text::Hint("drawing_export_paper_info"));
     for (tone, line) in &export.outcome {
         ui_kit::status_line(ui, line, *tone);
     }
@@ -714,10 +718,10 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let held = export.status.as_ref().and_then(|s| s.get("held")).and_then(Value::as_bool) == Some(true);
     let stale = views.iter().filter(|(_, sheet, status, _)| export.sheets.contains(sheet) && status == "out_of_date").count();
     let footer_status = if export.busy() {
-        Some(crate::i18n::tr(if export.stopping { "ui.drawing_export.stopping" } else { "ui.drawing_export.exporting" }).to_owned())
+        Some(solidcraft_ui_text::tr(if export.stopping { "ui.drawing_export.stopping" } else { "ui.drawing_export.exporting" }).to_owned())
     } else if held && stale > 0 {
         let key = if stale == 1 { "ui.drawing_export.out_of_date_one" } else { "ui.drawing_export.out_of_date_other" };
-        Some(crate::i18n::format(key, &[("count", &stale.to_string())]))
+        Some(solidcraft_ui_text::format(key, &[("count", &stale.to_string())]))
     } else {
         None
     };
