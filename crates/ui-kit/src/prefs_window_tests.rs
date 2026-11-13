@@ -302,3 +302,42 @@ fn invalid_draft_fields_keep_ok_and_apply_editable_until_corrected() {
         assert_eq!(fake.window.open, button == Button::Apply);
     }
 }
+
+/// #15908: the footer's Restore Defaults is drawn like Cancel, Apply and OK: the same rounded corners
+/// on a frame of its own, not the hairline square outline a frameless button shows.
+#[test]
+fn restore_defaults_is_drawn_like_the_footer_buttons() {
+    let (ctx, mut fake) = opened();
+    registry::clear_handles();
+    let output = crate::test_support::raw_frame(
+        &ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
+            focused: true,
+            ..Default::default()
+        },
+        |ui| {
+            show(ui.ctx(), &mut fake, PAGES, &options("test"), |_| {});
+        },
+    );
+    /// The corner radius of the rectangle drawn over `rect`: on its centre, about its size.
+    fn corners(shape: &egui::Shape, rect: egui::Rect) -> Option<egui::CornerRadius> {
+        match shape {
+            egui::Shape::Rect(r)
+                if (r.rect.center() - rect.center()).length() < 2.0
+                    && r.rect.width() <= rect.width() + 16.0
+                    && r.rect.height() <= rect.height() + 16.0
+                    && (r.fill != egui::Color32::TRANSPARENT || r.stroke.width > 0.0) =>
+            {
+                Some(r.corner_radius)
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| corners(s, rect)),
+            _ => None,
+        }
+    }
+    let of = |name: &str| {
+        let rect = registry::rect_of(name).unwrap_or_else(|| panic!("{name} is published"));
+        output.shapes.iter().find_map(|clipped| corners(&clipped.shape, rect)).unwrap_or_else(|| panic!("{name} is drawn on a frame"))
+    };
+    assert_eq!(of("test:defaults"), of("test:cancel"), "Restore Defaults has Cancel's corners");
+}
