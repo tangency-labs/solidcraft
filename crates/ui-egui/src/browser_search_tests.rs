@@ -216,6 +216,22 @@ fn select_all_selects_what_was_found() {
     assert_eq!(h.app.tree.picked_joints, [h.app.session.doc.assembly.joints[0].id]);
 }
 
+/// Construction geometry is planes, axes and points: the kind list offers Construction for an axis
+/// and a point alone, and the search lists and selects each as its row does.
+#[test]
+fn construction_axes_and_points_are_found_and_selected() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"})).unwrap();
+    h.app.run("construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"})).unwrap();
+    h.frames(3);
+    open(&mut h);
+    pick_kind(&mut h, "construction");
+    assert_eq!((total(&h), count("Spine"), count("Pin")), (2, 1, 1));
+    click(&mut h, "browser:search:select-all");
+    assert_eq!(h.app.session.selection, [Sel::Axis { name: "Spine".into() }, Sel::ConstructionPoint { name: "Pin".into() }]);
+}
+
 #[test]
 fn hide_others_leaves_only_what_was_found_shown() {
     let mut h = assembly();
@@ -781,9 +797,8 @@ fn find_in_browser_on_a_face_ends_the_search_and_a_search_leaves_out_the_feature
     assert!(count("Features") > 0);
     search(&mut h, "m20");
     assert_eq!(count("Features"), 0);
-    let made_by = |f: &&solidcraft_engine::doc::Feature| {
-        f.component == 0 && !matches!(f.kind, FeatureKind::Sketch { .. } | FeatureKind::ConstructionPlane { .. })
-    };
+    let made_by =
+        |f: &&solidcraft_engine::doc::Feature| f.component == 0 && !matches!(f.kind, FeatureKind::Sketch { .. }) && !f.kind.is_construction();
     let feature = h.app.session.doc.features.iter().find(made_by).map(|f| f.id).unwrap();
     crate::browser::reveal_feature(&mut h.app, feature, "Base plate");
     h.frames(3);

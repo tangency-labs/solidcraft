@@ -1690,7 +1690,7 @@ impl JsonSchema for FindKinds {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         let ids: Vec<&str> = Kind::ALL.iter().map(|k| k.id()).collect();
         json_schema!({
-            "description": "A list of kinds: a placement of a component, a body, a sketch, a construction plane, a joint. An empty list means every kind.",
+            "description": "A list of kinds: a placement of a component, a body, a sketch, a construction plane, axis or point, a joint. An empty list means every kind.",
             "type": "array",
             "items": {"enum": ids},
             "maxItems": Kind::ALL.len()

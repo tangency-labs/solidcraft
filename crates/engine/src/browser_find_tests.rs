@@ -327,6 +327,31 @@ fn a_body_removed_later_is_not_found_while_a_sketch_is_edited() {
     assert_eq!(found.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Kept block"]);
 }
 
+/// Construction geometry is planes, axes and points, as in the browser's Construction folder: the
+/// search finds each, and each selects as its row does.
+#[test]
+fn construction_axes_and_points_are_found_and_select_as_their_rows() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Shelf"}));
+    run(&mut s, "construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"}));
+    run(&mut s, "construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Peg"}));
+    let found = find(&s, None, &[Kind::Construction]);
+    let items: Vec<(&str, Option<Sel>)> = found.found.iter().map(|f| (f.name.as_str(), f.item.clone())).collect();
+    assert_eq!(
+        items,
+        [
+            ("Shelf", Some(Sel::Plane { name: "Shelf".into() })),
+            ("Spine", Some(Sel::Axis { name: "Spine".into() })),
+            ("Peg", Some(Sel::ConstructionPoint { name: "Peg".into() })),
+        ]
+    );
+    assert_eq!(names(&s, "peg", &[]), [(Kind::Construction, "Peg".to_string(), vec![])]);
+    // `select.set` takes what `browser.find` lists.
+    let listed = run(&mut s, "browser.find", json!({"kinds": ["construction"]}));
+    run(&mut s, "select.set", json!({"items": listed["found"].as_array().unwrap().iter().map(|f| f["item"].clone()).collect::<Vec<_>>()}));
+    assert_eq!(s.selection.len(), 3);
+}
+
 /// With the timeline rolled back, the features after the marker are not in the browser's folders,
 /// so the search doesn't find them either.
 #[test]

@@ -2813,7 +2813,7 @@ impl Entry {
     }
 
     fn plane(app: &SolveApp, f: &solidcraft_engine::doc::Feature) -> Self {
-        let sel = construction_sel(f);
+        let sel = solidcraft_engine::browser_find::construction_sel(f);
         let thing = match &sel {
             Sel::Axis { name } => Thing::Axis(name.clone()),
             Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
@@ -2895,15 +2895,6 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
             .collect(),
         "sketches" => model_feature_indices(app, comp, true).into_iter().filter_map(|i| doc.features.get(i)).map(|f| Entry::sketch(app, f)).collect(),
         _ => model_feature_indices(app, comp, false).into_iter().filter_map(|i| doc.features.get(i)).map(|f| Entry::plane(app, f)).collect(),
-    }
-}
-
-fn construction_sel(f: &solidcraft_engine::doc::Feature) -> Sel {
-    let name = f.name.clone();
-    match f.kind {
-        FeatureKind::ConstructionPoint { .. } => Sel::ConstructionPoint { name },
-        FeatureKind::ConstructionAxis { .. } => Sel::Axis { name },
-        _ => Sel::Plane { name },
     }
 }
 

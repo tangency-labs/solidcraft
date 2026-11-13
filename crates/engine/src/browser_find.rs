@@ -1,12 +1,12 @@
 //! Finding things in the browser by name (#1413): every placement of a component, and the
-//! bodies, sketches, construction planes and joints, as the browser lists them. The browser's
+//! bodies, sketches, construction planes, axes and points, and joints, as the browser lists them. The browser's
 //! search field and the `browser.find` command both use it, so they always agree.
 
 use std::collections::HashMap;
 
 use schemars::JsonSchema;
 use serde::Serialize;
-use solidcraft_doc::FeatureKind;
+use solidcraft_doc::{Feature, FeatureKind};
 
 use crate::occurrences::OccurrencePlacement;
 use crate::{Sel, Session};
@@ -129,7 +129,7 @@ pub struct Found {
     /// The name it is listed under.
     pub name: String,
     /// The browser's key for it: a body's name in its component, a sketch's or construction
-    /// plane's feature id, a placement's occurrence id, a joint's id.
+    /// feature's id, a placement's occurrence id, a joint's id.
     pub key: String,
     /// The placement it is listed in, or a component's own placement (empty: the design itself).
     pub path: Vec<u64>,
@@ -173,6 +173,17 @@ pub(crate) fn find_within(s: &Session, pattern: Option<&Pattern>, kinds: &[Kind]
     }
     walk.placements(&[], 0);
     walk.out
+}
+
+/// What a construction feature (a plane, axis or point: `FeatureKind::is_construction`) selects.
+/// The browser's Construction rows and the search both use it, so a found item selects as its row does.
+pub fn construction_sel(f: &Feature) -> Sel {
+    let name = f.name.clone();
+    match f.kind {
+        FeatureKind::ConstructionPoint { .. } => Sel::ConstructionPoint { name },
+        FeatureKind::ConstructionAxis { .. } => Sel::Axis { name },
+        _ => Sel::Plane { name },
+    }
 }
 
 struct Walk<'a> {
@@ -221,12 +232,10 @@ impl Walk<'_> {
         // Features after the history marker are not in the browser's folders, so not found either.
         let before_marker = s.doc.marker.unwrap_or(s.doc.features.len());
         for f in s.doc.features.iter().take(before_marker).filter(|f| f.component == component) {
-            match f.kind {
-                FeatureKind::Sketch { .. } => self.hit(Kind::Sketch, &f.name, || (f.id.to_string(), Some(Sel::Feature { id: f.id })), path),
-                FeatureKind::ConstructionPlane { .. } => {
-                    self.hit(Kind::Construction, &f.name, || (f.id.to_string(), Some(Sel::Plane { name: f.name.clone() })), path)
-                }
-                _ => {}
+            if matches!(f.kind, FeatureKind::Sketch { .. }) {
+                self.hit(Kind::Sketch, &f.name, || (f.id.to_string(), Some(Sel::Feature { id: f.id })), path);
+            } else if f.kind.is_construction() {
+                self.hit(Kind::Construction, &f.name, || (f.id.to_string(), Some(construction_sel(f))), path);
             }
         }
     }
