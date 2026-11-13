@@ -18,13 +18,14 @@
 //! and the unused outputs are not returned. With
 //! `Kernel::fixes.validate_tolerances_fixes_reported_gaps` (WR-679) the update grows a
 //! vertex past half its tolerance, not the whole. Edge-use marks are a local set. `CollectRegions`'
-//! linear stack and result searches use companion sets (same order). `AssertValid` does not
-//! run `ContainsCoincidentTopology`, which is not ported: upstream folds in a result that is
-//! always true and leaves its report (test 15) commented out, so the search never changed a
-//! check's result (it did edit the body: its queries built the faces' trim caches). It cannot
-//! be a validity test: the bodies solidcore builds keep coincident topology on purpose (a
-//! pinch where a hole is tangent to a face, solids touching along an edge, a sweep's glued
-//! lamina edges). A face's own coincident vertices and edges are its tests 32, 33 and 34.
+//! linear stack and result searches use companion sets (same order).
+//! `AssertValid` does not run `ContainsCoincidentTopology`, which is not ported: upstream
+//! folds in a result that is always true and leaves its report (test 15) commented out, so
+//! the search never changed a check's result (it did edit the body: its queries created the
+//! faces' UV trim curves). It cannot be a validity test: the bodies solidcore builds keep
+//! coincident topology on purpose (a pinch where a hole is tangent to a face, solids
+//! touching along an edge, a sweep's glued lamina edges). A face's own coincident vertices
+//! and edges are its tests 32, 33 and 34.
 
 use std::collections::BTreeSet;
 
