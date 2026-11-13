@@ -755,7 +755,8 @@ fn a_countersink_meets_its_bore_on_one_circle_edge() {
         let expected = l * w * h - removed(diameter / 2.0, cs_diameter / 2.0, length);
         let v = volume(&mut s);
         assert!((v - expected).abs() < 1e-3 * expected, "{position:?}: {v} vs {expected}");
-        let body = &s.model.state().body("A").unwrap().body;
+        let state = s.model.state();
+        let body = &state.body("A").unwrap().body;
         assert_eq!((body.face_count(), body.edge_count(), body.vertex_count()), (8, 17, 11), "{position:?} {direction:?}");
         assert!(body.validity().is_empty(), "{position:?}: {:?}", body.validity());
     }
@@ -770,7 +771,8 @@ fn a_countersink_meets_its_bore_on_one_circle_edge() {
             p[k] = v.clone();
         }
         run(&mut s, "solid.hole", p);
-        let body = &s.model.state().body("A").unwrap().body;
+        let state = s.model.state();
+        let body = &state.body("A").unwrap().body;
         assert_eq!((body.face_count(), body.edge_count(), body.vertex_count()), fev, "{kind}");
     }
 }
