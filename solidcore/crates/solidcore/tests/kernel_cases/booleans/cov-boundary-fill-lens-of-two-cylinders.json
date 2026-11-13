@@ -1,0 +1,162 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "intersect"
+      }
+    }
+  ],
+  "case": "cov-boundary-fill-lens-of-two-cylinders",
+  "expected": {
+    "bbox": {
+      "max": [
+        10,
+        8.660254037844387,
+        10
+      ],
+      "min": [
+        0,
+        -8.660254037844387,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 4,
+    "method": "two circles r with centres d = r apart overlap in 2r^2 acos(d/2r) - (d/2) sqrt(4r^2-d^2) = 200 pi/3 - 5 sqrt 300 = 122.837; h 10. Faces: bottom, top, two cylinder arcs = 4",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 1228.3696986087568,
+    "what": "Boundary Fill of the cell inside both of two overlapping cylinders (r10, axes 10 apart): the lens"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6
+    }
+  },
+  "records": "cov-boundary-fill-lens-of-two-cylinders.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 664.5529602084746,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4,
+      "volume_mm3": 1228.3696986488694
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [
+    "faces: graded merged across analytic surfaces (4), the records have 5"
+  ],
+  "what": "Boundary Fill of the cell inside both of two overlapping cylinders (r10, axes 10 apart): the lens",
+  "why_not": []
+}

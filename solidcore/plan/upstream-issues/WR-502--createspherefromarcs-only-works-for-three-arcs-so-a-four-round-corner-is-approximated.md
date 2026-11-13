@@ -1,0 +1,10 @@
+#### WR-502. `CreateSphereFromArcs` only takes three arcs, so a corner of four equal rounds gets an approximating blend 0.2 mm low
+- **Severity:** Wrong result (a shape error, no failure)
+- **Area:** Blends
+- **Location:** `source/SMLib/src/SmBSplineSurface.cpp`, `SmBSplineSurface::CreateSphereFromArcs` (`// Only works for 3 now`), reached from `SmFilletCorner::MakeAnalyticCornerSurface`.
+- **What happens:** `MakeAnalyticCornerSurface` fills a three- or four-edge corner with a sphere through its edge curves when they are arcs of one centre and radius. `CreateSphereFromArcs` returns `SM_ERR` unless it is given exactly three curves, so a four-edge corner never gets the sphere and falls back to the constant-radius fillet and then the default corner blend (`CreateCornerBlend`), a B-spline patch that only approximates the sphere.
+- **Trigger:** a square pyramid (40 across the base, 30 high) with all eight edges rounded R 2. The four rounds at the apex lie on one ball, centre z = (600 - 2 sqrt(1300)) / 20, top z = 28.389; SMLib's patch tops out at z = 28.184 (0.2 mm low, 0.19 mm from the sphere at the apex). FreeCAD's build of the same recipe gives 28.374 (SolidCraft oracle case 37, `37-pyramid-apex-blend`).
+- **How found:** SolidCraft's oracle, run on the Rust port.
+- **Confirmed:** the Rust port matches the C++ by default (difftest on `nurbs.b_spline_surface_p2` and the corner units is unchanged); the C++ build was not run on the pyramid itself.
+- **Fix:** none in the C++ at the pin.
+- **Rust port:** behaves as upstream by default. With `Kernel::fixes.fillet_corner_sphere_from_four_arcs` (`BSplineSurface::create_sphere_from_arcs`) four arcs of one centre and radius that meet end to end and close a loop give the whole sphere (a half meridian turned a full turn about an axis square to the way the arcs face, its seam on the far side), so the apex ends at the ball's top. Regression tests: `crates/solidcore/tests/fillet_four_round_corner_sphere.rs` (the pyramid, field off and on) and `nurbs::b_spline_surface::p2::tests::sphere_from_four_arcs_only_with_the_fix`.

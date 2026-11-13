@@ -1,146 +1,65 @@
-# Plugins (design)
+# Plugins
 
-Design companion to [#1221](https://github.com/bherbruck/solidcraft/issues/1221): sandboxed
-WebAssembly plugins with a WIT interface, the same `run(command, args)` JSON as
-[MCP](mcp.md) and the [control protocol](control-protocol.md). Browser hosting is in
-[web-runtime.md](web-runtime.md).
+[RFC 0002: Plugins](rfcs/0002-plugins.md) defines the plugin API and phases.
+Phase 1 splits the host into two app-agnostic crates:
 
-This document adds **parametric timeline features**: a generic host-owned feature shell that
-plugins fill with parameters, display metadata, and rebuild logic, without a second timeline
-model or a private geometry API.
+- `crates/craft-plugin` owns the generic WIT contract, manifest, permissions,
+  entry input schemas and typed host errors. It has no wasmtime dependency.
+- `crates/craft-plugin-wasm` runs WebAssembly components against that contract
+  with fuel, memory and stack limits. Its linker exposes no network imports.
 
-## Goals (unchanged from #1221)
+An app implements `PluginHost`: it supplies command schemas, each command's
+`read` or `edit` effect, command execution, transaction begin/commit/rollback,
+and the folders that file grants may resolve to. One successful plugin call is
+one undo step; a failed guest call rolls back the transaction. Granted file writes
+are staged and published only after the guest succeeds and the app commits. A rollback
+deletes staged files without replacing their targets. A filesystem failure during publication
+after app commit is reported and may leave some files changed. App commands remain
+JSON data rather than app-specific WIT types. Both crates are Shared crates;
+`cargo xtask layers` forbids direct and indirect SolidCraft dependencies.
 
-- Sandboxed by default: manifest permissions, fuel/memory limits on desktop, broker enforcement on web.
-- Any language that compiles to Wasm components; Rust first.
-- **One command surface:** plugins change the model only through engine commands (undoable, journaled).
-- Versioned WIT world (`solidcraft:plugin@1.0.0`).
+SolidCraft's adapter lives in `crates/engine` and uses the same command surface
+as MCP. Entries appear as `plugin_id.function`; `plugin.list` and
+`engine.describe` expose their declared inputs. Selection and target inputs
+are lists. Entries may declare named menu or ribbon slots; each app decides
+which slots exist and draws forms from the input schemas. Plugins ship no UI
+code. SolidCraft retains approval, cancellation and plugin preferences.
 
-## Two plugin shapes
+## Versions
 
-| Shape | Timeline | Rebuild | Milestone |
-|-------|----------|---------|-----------|
-| **One-shot** | Optional; often no persistent feature | N/A | 1 (first ship) |
-| **Parametric** | One **`Plugin` feature row** per plugin instance | Host calls plugin on param/timeline rebuild | 2 |
+The WIT package is `craft:plugin@0.1.0`. Today's surface is one capability, `commands@0.1`:
+running app commands, logging, progress and cancellation, named files, a clock, and the exported
+entry. A plugin's `plugin.json` lists what it needs, for example
+`"capabilities": ["commands@0.1"]`; the host refuses an unknown or newer capability when it reads
+the manifest, with a plain message such as "needs commands 0.2; update SolidCraft or the plugin".
+`ui`, `viewport`, `formats` and `storage` arrive later as their own versioned interfaces. While a
+version is 0.x, a minor version may break the one before it.
 
-One-shot plugins call `execute(params)` once; they may emit ordinary native features (sketch,
-extrude, …) inside that transaction. Parametric plugins still use `run()` inside rebuild; the
-difference is that the document **records** a single feature whose params the user edits later.
+## Commands and permissions
 
-## Generic feature shell (host-owned)
+A plugin can call every command in the MCP catalog that its manifest lists. Commands that reach
+past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused unless the
+manifest asks for the group in `permissions.command_groups` and the user grants it.
+File access requires approved folder grants. The reserved `net` permission is
+refused with a typed error. Traps, missing permissions, failed commands, limits
+and invalid manifest fields return structured errors. Later phases add
+import/export, author tooling and browser execution after the
+phase 1 design review.
 
-Add one variant to the parametric document (name illustrative):
+## Installing
 
-```text
-FeatureKind::Plugin {
-  plugin_id: String,           // "gear_generator"
-  api_version: u32,            // matches WIT world
-  params: Value,               // JSON owned by the plugin schema
-  display: PluginDisplay,      // timeline + browser presentation
-  provenance: PluginProvenance, // optional: manifest hash, build id
-}
-```
+Install plugin… on Preferences › Plugins (desktop only) picks a plugin `.zip`, shows its name, version, summary and
+what it asks for, and installs it on Install. `plugin.install` does the same for programs:
+`{"path": "gears.zip"}` installs, `"dry_run": true` only checks and describes it, and replacing an
+installed plugin of the same id needs `"replace": true`. The `.zip` holds one plugin, `plugin.json`
+and its component, at its top or in one top-level folder. Before anything is written the host parses
+the manifest (refusing unknown or newer capabilities), and refuses absolute paths, `..`, symlinks
+and device entries, entries over 16 MiB and more than 64 MiB unpacked. It unpacks into a hidden
+folder beside the installed plugins and renames that to `plugins/<id>/`; the plugin's entries
+resolve at once, with no restart. Installing runs no plugin code.
 
-**`PluginDisplay`** (stored in the file, not recomputed from plugin code at open):
+## Plugin data in a design
 
-| Field | Role |
-|-------|------|
-| `label` | Primary timeline / browser text |
-| `icon_id` | Host icon registry name (same system as [`feature_icon`](https://github.com/bherbruck/solidcraft/blob/main/crates/ui-egui/src/workspace.rs)) |
-| `tooltip` | Hover text, `inspect` type string |
-| `type_name` | short feature type name for power users |
-
-The timeline renders **any** `Plugin` feature through one code path: read `display`, draw icon +
-label, wire suppress/rename/delete/reorder like built-in features. No per-plugin egui in milestone 2.
-
-Optional later: **`parameter_schema()`** in WIT returns `{ id, label, kind, min, max, … }` so the
-host renders sliders and dimension rows without custom UI per plugin.
-
-## WIT entry points (phase 2 additions)
-
-Milestone 1 (#1221): `manifest()`, `execute(params) -> result<string, string>`.
-
-Milestone 2 parametric:
-
-| Export | Purpose |
-|--------|---------|
-| `evaluate(params, ctx) -> result<string, string>` | Rebuild: plugin runs `run()` commands; result is success JSON or error |
-| `parameter_schema() -> string` | Optional JSON schema for generic parameter UI |
-| `fallback_policy() -> string` | Declares missing-plugin behaviour (see below) |
-
-`ctx` is host-provided read-only hints (configuration name, units, feature id); plugins must not
- rely on it for correctness.
-
-Inside **`evaluate`**, the plugin uses the same **`run(command, args)`** import as one-shot mode.
-The host applies commands to the current eval context (or a scratch session merged by the host).
-No second registry of geometry ops.
-
-## Rebuild flow
-
-```text
-Timeline rebuild reaches FeatureKind::Plugin
-  -> load plugin (wasmtime desktop / broker web) if permitted + present
-  -> evaluate(stored params)
-       -> plugin calls run("sketch.line", …), run("solid.extrude", …), …
-  -> host merges geometry like any native feature
-  -> errors surface on the feature row like native eval errors
-```
-
-Param changes (parameter panel, `parameters.change`, config switch) re-run **`evaluate`** for
-affected plugin features only when dependencies say so (same invalidation rules as native features).
-
-## Missing plugin and API drift
-
-Manifest declares **`fallback_policy`**:
-
-| Policy | Behaviour |
-|--------|-----------|
-| `recorded_mesh` | Optional B-rep or mesh blob stored beside params; open works, edit disabled without plugin |
-| `recorded_script` | Stored list of native commands; rebuild without plugin if every command is built-in |
-| `suppress_with_warning` | Feature suppressed; user sees clear message |
-| `error_on_rebuild` | Hard fail on eval (strict teams) |
-
-Design files shared in CollabCraft should prefer a policy that **opens safely** (`recorded_mesh` or
-`recorded_script`). CI for plugins (#1221) should include: uninstall plugin, reopen file, assert
-document still opens and policy matches manifest.
-
-## Icons and metadata
-
-Plugins declare allowed **`icon_id`** values in `manifest()`; the host rejects unknown ids. Icons
-stay in the app registry so untrusted plugins cannot inject arbitrary raster assets into the tree
-without a reviewed icon pack.
-
-**Rename** by the user updates the feature user label; **`display.label`** remains the default from
-creation unless the plugin updates it via a host callback (optional future).
-
-Command naming: prefer **`plugin_id.function`** in `run()` or registered command aliases to avoid
-collisions ([#1221 discussion](https://github.com/bherbruck/solidcraft/issues/1221)).
-
-## Group header variant (lighter-weight v2a)
-
-Before full **`evaluate`**, a stepping stone: one-shot plugin creates a **feature folder** whose
-header carries `PluginDisplay` metadata while children are ordinary native features. Rebuild does
-not need the plugin until the user edits plugin-owned params on the header. Migrates cleanly to
-full `FeatureKind::Plugin` when `evaluate` lands.
-
-## Relationship to craft-libs
-
-Plugin **document model and eval** stay in SolidCraft (`crates/doc`, `crates/engine`). craft-libs
-provides worker/broker hosting only ([web-runtime.md](web-runtime.md)). Neutral serde types
-(`VersionedParams`, `PluginDisplay`) may move to a shared crate later if multiple apps need them;
-CAD plugins remain SolidCraft-specific.
-
-## Phasing
-
-1. WIT + wasmtime host + one-shot `execute` + permissions tests (#1221 milestone 1).
-2. `FeatureKind::Plugin` + `PluginDisplay` + timeline generic row + `evaluate` + fallback policy.
-3. Web broker runs same WIT; parametric features offline only if plugin module cached and policy
-   allows.
-4. Parameter schema UI, cloud-signed plugin index, inspector extensions.
-
-## Tests (parametric)
-
-- Create plugin feature, change param, rebuild, measure geometry (oracle or bbox).
-- Undo/redo across plugin eval.
-- Remove plugin binary, reopen design, assert fallback policy.
-- Icon id from manifest appears on timeline (scenario or screenshot harness).
+A design container reserves `plugins/<plugin-id>/` for a plugin's own files. They are kept and
+saved back untouched when the plugin is missing, and opening a design never fails because a plugin
+is missing. The `storage` capability will let plugins read and write them.

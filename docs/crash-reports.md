@@ -63,11 +63,20 @@ Without the CLI, run `solidcraft-cli run <report>/replay.json --in <report>/desi
 A fixed crash turns into a regression test with the same two files.
 
 **Check that reporting works:** with `SOLIDCRAFT_CRASH_TEST=1` set for the app, the command
-`diagnostics.crash_test` has three modes:
+`diagnostics.crash_test` has these modes:
 - `panic`: an internal error in a command
 - `kernel`: an internal error inside the geometry kernel
+- `worker`: an internal error on a Rayon worker inside the geometry kernel (caught; reported with the command, recovered)
+- `worker_raw`: an internal error on a Rayon worker outside the kernel guard (caught as a command panic)
 - `abort`: the app ends at once, and the report appears at the next start. On macOS the
   signal handler catches it, so the report names SIGABRT and the frames that called `abort()`.
+
+A panic on a Rayon worker during a command is held and reported with that command when it
+ends. Two limits: only Rayon pool threads are held, so a panic on a plain thread
+(`solidcraft-each`, `solidcraft-interference`, `plan-mesh`) is written at once from the
+journal, not with the design the command started from; and the count of open commands is
+process-wide, so a worker panic from unrelated background work while a command is open is
+reported with the next command that ends.
 
 ## What a report holds
 
@@ -76,8 +85,8 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
 - `report.json` (`"format": "solidcraft-crash/1"`):
   - `kind`: one of
     - `command_panic`: a command hit an internal error; it was caught and the design was left unchanged
-    - `kernel_panic_recovered`: the third-party geometry kernel panicked and was caught. This is harmless on the desktop, but it would crash the web build.
-    - `panic`: an internal error outside any command
+    - `kernel_panic_recovered`: the third-party geometry kernel panicked and was caught. This is harmless on the desktop, but it would crash the web build. A panic on a Rayon worker during a command is recorded this way, with that command and design, when the worker was inside the kernel guard or the command fails with a kernel error.
+    - `panic`: an internal error outside any command. A Rayon worker panic while no command is running is still this kind, written at once.
     - `unclean_exit`: a previous session ended without recording a clean exit. It is detected at the next start, which may be days later. Possible causes include an abort, a stack overflow, a segfault, a crash inside a graphics driver, a system shutdown, or the process being forcibly stopped. This kind alone does not identify the cause. When the app died while starting up, the message and `location` name the startup step (see below). On Windows and macOS, a captured native crash also says the exception or signal, the module it happened in and the offset into it.
   - `message`, `location` (file:line), `thread`
   - `backtrace`: frames `symbol (file:line)`, without the panic machinery, std internals or the user's home folder
@@ -88,11 +97,12 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
   - `count`: how many matching reports have been recorded; repeats update the existing report.
   - `first_seen`, `last_seen`: UTC timestamps when the report was first and most recently recorded. For `unclean_exit`, these are detection times at a later launch, not the exact times the sessions ended. The session start in `message` may be much earlier; the report does not imply a failure in the currently open design.
   - `notes`: what is missing and why, for example a design too large to copy
-  - `startup_phase`: `{step, ms}` when the app died before it drew its first frame: the step it
-    was in (`window`, `graphics instance`, `window surface`, `adapter request`, `adapter chosen`,
+  - `startup_phase`: `{step, ms}` when the app died before it was up: the step it was in
+    (`window`, `graphics instance`, `window surface`, `adapter request`, `adapter chosen`,
     `device creation`, `egui renderer (shader compile)`, `surface configure`, `app setup`,
-    `viewport pipelines (shader compile)`, `first frame`, `first frame (present)`) and how many
-    milliseconds after launch it began. `system.environment` names the renderer (backend, GPU,
+    `first frame (present)`, which shows the window with its starting page, then the setup run
+    behind that page: `viewport pipelines (shader compile)`, `design`, `recovery`, `first frame`)
+    and how many milliseconds after launch it began. `system.environment` names the renderer (backend, GPU,
     driver) as soon as the adapter is picked, so it is there even when the device never started.
   - `native` (Windows and macOS): what the native crash handler caught: `code`, `name`,
     `address` (of the faulting instruction), `module`, `offset` (into the module), `detail` (for

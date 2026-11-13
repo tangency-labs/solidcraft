@@ -552,7 +552,7 @@ fn runner_output(
     let on = |c: &Option<Curve2>, s: &Surface| -> (Vec<[f64; 2]>, Vec<V3>) {
         let Some(c) = c else { return (Vec::new(), Vec::new()) };
         let Some(ivl) = c.interval() else { return (Vec::new(), Vec::new()) };
-        params(ivl).filter_map(|t| solidcraft_geom::brep::pcurve::eval(c, t)).filter_map(|q| s.evaluate(q[0], q[1]).ok().map(|p| (q, p))).unzip()
+        params(ivl).filter_map(|t| solidcore_ops::pcurve::eval(c, t)).filter_map(|q| s.evaluate(q[0], q[1]).ok().map(|p| (q, p))).unzip()
     };
     let mut curves = Vec::new();
     for c in r.curves {

@@ -1,0 +1,10 @@
+# Paths into solidcore crates that are not public (xtask/solidcore-public.txt), counted per
+# SolidCraft crate, one a line: `<crate path> <count>`. `cargo xtask layers`
+# (xtask/src/solidcore_paths.rs) counts each `solidcore::a::b` in code and each leaf of a
+# `use solidcore::a::{b, c}` tree, and fails when a crate's count goes up (#15031). The counts
+# only fall: a pull request that removes paths lowers its crate's line to the new count in the
+# same pull request, and a crate down to none drops its line. Never raise a count: call
+# solidcore-ops or solidcore-tess (solidcore docs/layers.md). `cargo xtask layers --paths [crate]`
+# lists the paths counted.
+crates/geom 20
+crates/smlib 726

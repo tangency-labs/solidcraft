@@ -1,7 +1,8 @@
 //! Guide rails on path sweeps (issue #771), checked against analytic solids: a rail that closes
 //! in on the path scales a circle into a cone frustum, a stretching rail widens a square one way
-//! only, a helical rail twists a square, two rails carry a line between them; and rails the
-//! sweep cannot follow are refused.
+//! only, a helical rail twists a square, a rail parallel to a curved path (an arc or a polyline)
+//! keeps the section, two rails carry a line between them; and rails the sweep cannot follow are
+//! refused.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -10,7 +11,7 @@ use std::f64::consts::PI;
 
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
-use crate::{RailFit, SweepControl, measure, sweep_path_with};
+use crate::{PathSeg, RailFit, SweepControl, measure, sweep_path_with, sweep_with};
 
 fn circle(r: f64) -> Region2 {
     Region2 { outer: Loop2::circle(Vec2::ZERO, r), holes: Vec::new() }
@@ -101,23 +102,73 @@ fn a_helical_rail_twists_a_square() {
     assert!(!joins(Vec3::new(5.0, 5.0, 0.0), Vec3::new(5.0, 5.0, 40.0)));
 }
 
-/// Along a quarter circle of radius 30, a rail keeping 5 mm out from the path (the circle's
-/// outer point, on a quarter circle of radius 35) leaves the circle as it is: a quarter torus,
-/// volume πr² · R · π/2 (Pappus).
+/// Along a quarter circle of radius 30 (one arc segment), a rail keeping 5 mm out from the path
+/// (the circle's outer point, on a quarter circle of radius 35) leaves the circle as it is: a
+/// quarter torus, volume πr² · R · π/2 (Pappus).
 #[test]
 fn a_parallel_rail_along_a_curved_path_keeps_the_section() {
+    let path = [PathSeg::Arc { a: Vec3::ZERO, center: Vec3::new(30.0, 0.0, 0.0), axis: Vec3::new(0.0, 1.0, 0.0), angle: PI / 2.0 }];
+    let rail: Vec<Vec3> = (0..=180)
+        .map(|i| {
+            let a = PI / 2.0 * i as f64 / 180.0;
+            Vec3::new(30.0 - 35.0 * a.cos(), 0.0, 35.0 * a.sin())
+        })
+        .collect();
+    let b = sweep_with(&Plane::XY, &circle(5.0), &path, &railed(vec![rail], RailFit::Scale)).unwrap();
+    let m = measure(&b).unwrap();
+    let volume = PI * 25.0 * 30.0 * PI / 2.0;
+    assert!(close(m.volume, volume, 1e-6), "volume {} vs {volume}", m.volume);
+}
+
+/// The same quarter circles as 9-point polylines: the path mitres its 7 corners and the rail
+/// turns with it. The profile drawn square to the start meets the first chord tilted by half a
+/// step d/2, and each run carries that section as it is, so the runs are oblique cylinders whose
+/// sections parallel to the profile are the r5 circle (the rail stays 5 mm out in those planes):
+/// volume πr² · L · cos(d/2) over the polyline's length L.
+#[test]
+fn a_parallel_rail_along_a_polyline_turns_with_its_corners() {
+    let n = 8;
     let arc = |radius: f64| -> Vec<Vec3> {
-        (0..=180)
+        (0..=n)
             .map(|i| {
-                let a = PI / 2.0 * i as f64 / 180.0;
+                let a = PI / 2.0 * f64::from(i) / f64::from(n);
                 Vec3::new(30.0 - radius * a.cos(), 0.0, radius * a.sin())
             })
             .collect()
     };
     let b = sweep_path_with(&Plane::XY, &circle(5.0), &arc(30.0), &railed(vec![arc(35.0)], RailFit::Scale)).unwrap();
     let m = measure(&b).unwrap();
-    let volume = PI * 25.0 * 30.0 * PI / 2.0;
-    assert!(close(m.volume, volume, 2e-3), "volume {} vs {volume}", m.volume);
+    let d = PI / 2.0 / f64::from(n);
+    let length = f64::from(n) * 60.0 * (d / 2.0).sin();
+    let volume = PI * 25.0 * length * (d / 2.0).cos();
+    assert!(close(m.volume, volume, 1e-6), "volume {} vs {volume}", m.volume);
+}
+
+/// A densely sampled polyline (#14451): 33 points, 32 runs, 31 mitres. The runs' pieces are
+/// unioned in a balanced tree, so each takes part in at most ⌈log2 32⌉ = 5 unions (160 pieces'
+/// worth of union operands in all, where unioning each onto the body so far takes in
+/// 2 + 3 + … + 32 = 527 and grows with the square of the points), and the solid is the same
+/// oblique cylinders: volume πr² · L · cos(d/2).
+#[test]
+fn a_rail_along_a_dense_polyline_joins_its_runs_in_a_balanced_union() {
+    let n = 32;
+    let arc = |radius: f64| -> Vec<Vec3> {
+        (0..=n)
+            .map(|i| {
+                let a = PI / 2.0 * f64::from(i) / f64::from(n);
+                Vec3::new(30.0 - radius * a.cos(), 0.0, radius * a.sin())
+            })
+            .collect()
+    };
+    crate::smlib_sweeps::UNION_LOAD.with(|l| l.set(0));
+    let b = sweep_path_with(&Plane::XY, &circle(5.0), &arc(30.0), &railed(vec![arc(35.0)], RailFit::Scale)).unwrap();
+    let load = crate::smlib_sweeps::UNION_LOAD.with(std::cell::Cell::get);
+    assert_eq!(load, 32 * 5, "union operands, in runs' pieces");
+    let m = measure(&b).unwrap();
+    let d = PI / 2.0 / f64::from(n);
+    let length = f64::from(n) * 60.0 * (d / 2.0).sin();
+    let volume = PI * 25.0 * length * (d / 2.0).cos();
+    assert!(close(m.volume, volume, 1e-6), "volume {} vs {volume}", m.volume);
 }
 
 /// Two rails bulging apart along arcs (radius 25 about (∓5, 0, 20), through x = ±10 at z = 0
