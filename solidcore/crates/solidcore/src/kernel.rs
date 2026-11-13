@@ -172,6 +172,7 @@ pub struct WorkCounters {
     target_record_seedings: Cell<u64>,
     classification_snapshots: Cell<u64>,
     orient_boxes: Cell<u64>,
+    ball_certified_roots: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -287,6 +288,15 @@ impl WorkCounters {
         self.orient_boxes.get()
     }
 
+    /// Ball corners whose centre a certified root proves
+    /// (`blend::blend_corner::ball`'s `ball_certified_root`, `sm_BallCertifiedRoot`): a corner
+    /// of three equal rounds with fewer than two planes among its faces, whose centre has no
+    /// closed form. Not the fork's (a test's witness that a body reaches the solve, #15140).
+    #[must_use]
+    pub fn ball_certified_roots(&self) -> u64 {
+        self.ball_certified_roots.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -302,6 +312,7 @@ impl WorkCounters {
         self.target_record_seedings.set(0);
         self.classification_snapshots.set(0);
         self.orient_boxes.set(0);
+        self.ball_certified_roots.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -378,6 +389,12 @@ impl WorkCounters {
     pub(crate) fn add_orient_box(&self) {
         self.orient_boxes
             .set(self.orient_boxes.get().saturating_add(1));
+    }
+
+    /// Counts one ball corner's certified root.
+    pub(crate) fn add_ball_certified_root(&self) {
+        self.ball_certified_roots
+            .set(self.ball_certified_roots.get().saturating_add(1));
     }
 }
 
@@ -1654,9 +1671,10 @@ mod tests {
                 w.wall_body_copies(),
                 w.proto_edge_intersections(),
                 w.loop_walks(),
+                w.ball_certified_roots(),
             )
         };
-        assert_eq!(counts(w), (0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
@@ -1665,11 +1683,12 @@ mod tests {
         w.add_loop_walk();
         w.add_loop_walk();
         w.add_loop_walk();
-        assert_eq!(counts(w), (2, 1, 1, 1, 3));
+        w.add_ball_certified_root();
+        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0));
     }
 
     #[test]
