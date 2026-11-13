@@ -224,7 +224,9 @@ mod welded_tests {
     use super::*;
 
     /// The vertex past `u32::MAX` is an error naming the count, not a second vertex numbered
-    /// `u32::MAX` (as the index was capped before).
+    /// `u32::MAX` (as the index was capped before). Only where `usize` holds a count past
+    /// `u32::MAX` (64-bit targets): on 32-bit ones no such count exists.
+    #[cfg(target_pointer_width = "64")]
     #[test]
     fn a_vertex_past_u32_max_is_an_error_not_a_capped_index() {
         assert_eq!(vertex_index(0), Ok(0));
