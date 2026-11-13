@@ -1,8 +1,10 @@
 //! A sheet's control net: read, its control points moved, and the surface rebuilt to new degrees
 //! and spans with the kernel's certified bound of how far it moved. The sheet is a record of one
-//! untrimmed face on a non-rational B-spline surface (its face the whole of the surface's
-//! natural box, as `surface::boundary` and `surface::ruled` make it); the geometry is the
-//! kernel's. Ops checks the record and converts.
+//! untrimmed face on a B-spline surface (its face the whole of the surface's natural box, as
+//! `surface::boundary` and `surface::ruled` make it), or one the kernel makes such a sheet
+//! ([`editable`]: a plane, a cylinder, a cone, a sphere, a torus); the geometry is the kernel's,
+//! and so is which control points are one point and move together (a closed surface's seam, a
+//! pole). Ops checks the record and converts.
 
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::crv_basic::Boundary;
@@ -24,7 +26,7 @@ use solidcore_record::brep::{
 
 use std::borrow::Cow;
 
-use solidcore::topology::brep::sheet::face_spline_sheet;
+use solidcore::topology::brep::sheet::editable_sheet;
 
 use crate::body::Body;
 use crate::error::status;
@@ -44,24 +46,36 @@ pub struct Net {
     pub rows: usize,
     /// Control points along v.
     pub cols: usize,
-    /// The points, row by row (u index major).
+    /// The points, row by row (u index major), Euclidean.
     pub points: Vec<[f64; 3]>,
+    /// Each point's weight, in the order of `points`; empty for a non-rational surface. Edits
+    /// keep them.
+    pub weights: Vec<f64>,
+    /// The points that are one point and move together, `(u index, v index)` (the kernel's
+    /// `net_ties`): a closed surface's seam twins, a pole's row. An edit of any member moves
+    /// all of its group.
+    pub ties: Vec<Vec<(usize, usize)>>,
 }
 
-/// `sheet` ready for a control-net edit: a one-face sheet on a plane (a flat skin, which has no
-/// net) rebuilt as the Coons spline of its edges, its whole box the face (the kernel's
-/// `face_spline_sheet`); any other sheet as it is, borrowed (so a spline sheet's edits are
-/// exactly what they were).
+/// `sheet` ready for a control-net edit: a one-face sheet on a spline surface as it is,
+/// borrowed (so a spline sheet's edits are exactly what they were); any other one-face sheet as
+/// the kernel makes it a sheet with a net (`editable_sheet`, which decides by the surface's
+/// kind: a plane as the Coons spline of its edges, an analytic face as its exact NURBS form, its
+/// whole box the face). A record of other than one face is borrowed, for the edits to refuse.
 ///
 /// # Errors
 /// [`Error::Record`] for a record the kernel refuses; the kernel's refusal of the rebuild
-/// ([`Error::Unsupported`]: holes, other than three or four edges, a folding outline) by its
-/// status.
+/// ([`Error::Unsupported`]: holes, other than three or four edges, a folding outline, a face that
+/// is not its surface's whole box, a kind with no exact NURBS form) by its status.
 pub(crate) fn editable(sheet: &Brep) -> Result<Cow<'_, Brep>> {
     let [face] = sheet.faces.as_slice() else {
         return Ok(Cow::Borrowed(sheet));
     };
-    if !matches!(face.surface, Surface::Plane { .. }) {
+    let spline = matches!(
+        face.surface,
+        Surface::Spline { .. } | Surface::RationalSpline { .. }
+    );
+    if spline && face.nurbs.is_none() {
         return Ok(Cow::Borrowed(sheet));
     }
     let (body, _) = Body::from_record(sheet, true)?;
@@ -69,7 +83,7 @@ pub(crate) fn editable(sheet: &Brep) -> Result<Cow<'_, Brep>> {
         let Some(&f) = b.face_list().first() else {
             return Ok(Err(Error::Argument));
         };
-        Ok(face_spline_sheet(k, b, f).map_err(status))
+        Ok(editable_sheet(k, b, f).map_err(status))
     })??;
     match rebuilt {
         Some(b) => Ok(Cow::Owned(Body::new(b).to_record()?.0)),
@@ -77,46 +91,67 @@ pub(crate) fn editable(sheet: &Brep) -> Result<Cow<'_, Brep>> {
     }
 }
 
-/// The control net of `sheet`'s surface (a planar sheet's after [`editable`]).
+/// The control net of `sheet`'s surface (a planar or analytic sheet's after [`editable`]): its
+/// Euclidean points, their weights and the points tied together.
 ///
 /// # Errors
-/// [`Error::Argument`] for a record that is not one face on a non-rational B-spline surface, or
-/// whose net is not rectangular; [`Error::Unsupported`] for a trimmed face (see [`untrimmed`]).
+/// [`Error::Argument`] for a record that is not one face on a B-spline surface, or whose net
+/// is not rectangular; [`Error::Unsupported`] for a trimmed face (see [`untrimmed`]); the
+/// kernel's status for a record tolerance it refuses.
 pub fn control_net(sheet: &Brep) -> Result<Net> {
     let sheet = editable(sheet)?;
-    let (_, points) = untrimmed(&sheet)?;
-    let rows = points.len();
-    let cols = points.first().map_or(0, Vec::len);
-    if cols == 0 || points.iter().any(|r| r.len() != cols) {
+    let ((u, v), net) = untrimmed(&sheet)?;
+    net_of(&kernel_surface(u, v, net)?, sheet.tolerance)
+}
+
+/// The [`Net`] of the kernel's surface `surface`, its ties within `tol` (the record's).
+fn net_of(surface: &NurbSurface, tol: f64) -> Result<Net> {
+    let s = BSplineSurface::from_gw_nurb(surface);
+    let net = s.control_point_net().map_err(status)?;
+    let ties = s.net_ties(tol).map_err(status)?;
+    if net.u_count == 0 || net.v_count == 0 {
         return Err(Error::Argument);
     }
     Ok(Net {
-        rows,
-        cols,
-        points: points.iter().flatten().copied().collect(),
+        rows: net.u_count,
+        cols: net.v_count,
+        points: net.points.iter().map(|p| [p.x, p.y, p.z]).collect(),
+        weights: net.weights,
+        ties,
     })
 }
 
+/// The points tied to `p` in `ties` (its group), or `p` alone.
+fn tied(ties: &[Vec<(usize, usize)>], p: (usize, usize)) -> Vec<(usize, usize)> {
+    ties.iter()
+        .find(|g| g.contains(&p))
+        .cloned()
+        .unwrap_or_else(|| vec![p])
+}
+
 /// `sheet` with the control points `moves` names moved: `((i, j), to)` puts the point of the
-/// i-th u index and j-th v index at `to` (a later move of one point wins). The knots and
-/// degrees are kept; the result is a new one-face sheet on the moved surface, its whole box.
+/// i-th u index and j-th v index at `to`, its weight kept, and every point tied to it
+/// ([`Net::ties`]) there too, so a closed surface stays closed and a pole a point (a later move
+/// of one point wins). The knots, degrees and weights are kept; the result is a new one-face
+/// sheet on the moved surface, its whole box.
 ///
 /// # Errors
 /// As [`control_net`]; [`Error::Argument`] for an index past the net or a point not finite or
 /// past the coordinate bound; the kernel's status otherwise.
 pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Brep> {
     let sheet = editable(sheet)?;
-    let ((u, v), points) = untrimmed(&sheet)?;
-    let mut net = points.to_vec();
+    let ((u, v), net) = untrimmed(&sheet)?;
+    let mut surface = kernel_surface(u, v, net)?;
+    let ties = net_of(&surface, sheet.tolerance)?.ties;
     for &((i, j), to) in moves {
         if !coord_ok(&to) {
             return Err(Error::Argument);
         }
-        *net.get_mut(i)
-            .and_then(|row| row.get_mut(j))
-            .ok_or(Error::Argument)? = to;
+        for (a, b) in tied(&ties, (i, j)) {
+            let c = surface.cpt_mut(a, b).map_err(|_| Error::Argument)?;
+            *c = CPoint::weighted(Vec3::new(to[0], to[1], to[2]), c.w);
+        }
     }
-    let surface = kernel_surface(u, v, &net)?;
     record(run("surface_cvs::move_cvs", |k| {
         sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
     }))
@@ -222,8 +257,10 @@ pub fn net_weights(
 
 /// `sheet` with the picked control points moved by `delta`, and with a `falloff` the points
 /// around them by their weight of it ([`net_weights`]): the kernel moves each point of weight
-/// `t` by `t delta` (`Surface::displace_cpts`). The knots and degrees are kept; the result is a
-/// new one-face sheet on the moved surface, its whole box.
+/// `t` by `t delta` (`Surface::displace_cpts`), the points tied together ([`Net::ties`]) each by
+/// the largest weight among them, so a closed surface stays closed and a pole a point. The
+/// knots, degrees and point weights are kept; the result is a new one-face sheet on the moved
+/// surface, its whole box.
 ///
 /// # Errors
 /// As [`control_net`] and [`net_weights`]; [`Error::Argument`] for a `delta` not finite or
@@ -238,15 +275,28 @@ pub fn move_net(
         return Err(Error::Argument);
     }
     let sheet = editable(sheet)?;
-    let ((u, v), points) = untrimmed(&sheet)?;
-    let net = control_net(&sheet)?;
-    let weights = net_weights(net.rows, net.cols, picks, falloff)?;
+    let ((u, v), record_net) = untrimmed(&sheet)?;
+    let mut surface = kernel_surface(u, v, record_net)?;
+    let net = net_of(&surface, sheet.tolerance)?;
+    let mut weights = net_weights(net.rows, net.cols, picks, falloff)?;
+    let place = |(i, j): (usize, usize)| i.checked_mul(net.cols).and_then(|r| r.checked_add(j));
+    for group in &net.ties {
+        let most = group
+            .iter()
+            .filter_map(|&p| place(p).and_then(|n| weights.get(n)))
+            .copied()
+            .fold(0.0, f64::max);
+        for &p in group {
+            if let Some(t) = place(p).and_then(|n| weights.get_mut(n)) {
+                *t = most;
+            }
+        }
+    }
     let moves: Vec<((usize, usize), f64)> = (0..net.rows)
         .flat_map(|i| (0..net.cols).map(move |j| (i, j)))
         .zip(weights)
         .filter(|&(_, t)| t > 0.0)
         .collect();
-    let mut surface = kernel_surface(u, v, points)?;
     let moved = record(run("surface_cvs::move_net", |k| {
         surface.displace_cpts(&moves, Vec3::new(delta[0], delta[1], delta[2]))?;
         sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
@@ -269,9 +319,12 @@ pub fn move_net(
 /// squares through its boundary rows: each column of samples along u at those parameters,
 /// then each row of the result along v ([`approx_knots`], The NURBS Book §9.4.3).
 ///
+/// A rational surface (an analytic face's exact form) is not rebuilt: the kernel's certified
+/// bound takes polynomial surfaces only, so a refit could not say how far it moved.
+///
 /// # Errors
-/// As [`control_net`]; [`Error::Argument`] for a surface on knots not clamped (a periodic
-/// one), a degree of 0 or past the record's most, no
+/// As [`control_net`]; [`Error::Unsupported`] for a rational surface; [`Error::Argument`] for
+/// a surface on knots not clamped (a periodic one), a degree of 0 or past the record's most, no
 /// spans, fewer than three or more than a record's control points either way, more samples
 /// than [`REBUILD_MAX_SAMPLES`], or a `tol` not finite or negative; [`Error::PastTolerance`]
 /// with the bound when it is past `tol`; the kernel's status otherwise.
@@ -285,6 +338,11 @@ pub fn rebuild(
 ) -> Result<(Brep, f64)> {
     let sheet = editable(sheet)?;
     let ((u, v), points) = untrimmed(&sheet)?;
+    if points.is_rational() {
+        return Err(Error::Unsupported(
+            "a rational surface: no certified bound for its refit",
+        ));
+    }
     let degrees_ok = |d: usize| (1..=MAX_SPLINE_DEGREE).contains(&d);
     if !(degrees_ok(deg_u) && degrees_ok(deg_v) && tol.is_finite() && tol >= 0.0) {
         return Err(Error::Argument);
@@ -403,8 +461,12 @@ pub fn match_edge(
     let side = side_of(sheet, edge)?;
     let target_side = side_of(other, target)?;
     let ((u, v), points) = untrimmed(sheet)?;
-    let surface = kernel_surface(u, v, points)?;
     let ((tu, tv), tpoints) = untrimmed(other)?;
+    // spline sheets on polynomial surfaces only, as before rational nets were read
+    if points.is_rational() || tpoints.is_rational() {
+        return Err(Error::Argument);
+    }
+    let surface = kernel_surface(u, v, points)?;
     let target_surface = kernel_surface(tu, tv, tpoints)?;
     let matched = run("surface_cvs::match_edge", |_| {
         Ok(
@@ -478,33 +540,72 @@ fn clamped(knots: &[f64], degree: usize) -> bool {
     flat(knots.get(..=degree)) && flat(last.and_then(|s| knots.get(s..)))
 }
 
+/// A record's control net as the record holds it: Euclidean points of a polynomial surface, or
+/// the homogeneous `[x w, y w, z w, w]` of a rational one (the kernel's own form).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RecordNet<'a> {
+    /// `Surface::Spline`'s points.
+    Plain(&'a [Vec<[f64; 3]>]),
+    /// `Surface::RationalSpline`'s homogeneous points.
+    Rational(&'a [Vec<[f64; 4]>]),
+}
+
+impl RecordNet<'_> {
+    fn rows(self) -> usize {
+        match self {
+            Self::Plain(n) => n.len(),
+            Self::Rational(n) => n.len(),
+        }
+    }
+
+    fn cols(self) -> usize {
+        match self {
+            Self::Plain(n) => n.first().map_or(0, Vec::len),
+            Self::Rational(n) => n.first().map_or(0, Vec::len),
+        }
+    }
+
+    fn is_rational(self) -> bool {
+        matches!(self, Self::Rational(_))
+    }
+}
+
 /// The kernel's surface of a record net and its knots (degrees from the knot counts).
 ///
 /// # Errors
 /// [`Error::Argument`] for knots that do not fit the net.
-fn kernel_surface(u: &[f64], v: &[f64], net: &[Vec<[f64; 3]>]) -> Result<NurbSurface> {
-    let rows = net.len();
-    let cols = net.first().map_or(0, Vec::len);
-    let p = u.len().checked_sub(rows + 1).ok_or(Error::Argument)?;
-    let q = v.len().checked_sub(cols + 1).ok_or(Error::Argument)?;
-    let pw = net
-        .iter()
-        .map(|row| {
-            row.iter()
-                .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
-                .collect()
-        })
-        .collect();
+fn kernel_surface(u: &[f64], v: &[f64], net: RecordNet<'_>) -> Result<NurbSurface> {
+    let p = u.len().checked_sub(net.rows() + 1).ok_or(Error::Argument)?;
+    let q = v.len().checked_sub(net.cols() + 1).ok_or(Error::Argument)?;
+    let pw = match net {
+        RecordNet::Plain(n) => n
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect(),
+        RecordNet::Rational(n) => n
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+                    .collect()
+            })
+            .collect(),
+    };
     NurbSurface::new(pw, p, q, u.to_vec(), v.to_vec()).map_err(|_| Error::Argument)
 }
 
 /// The knots `(u, v)` and net of the one face of `sheet`, when it is untrimmed: one face on a
-/// non-rational B-spline surface (no separate NURBS form), its domain the surface's natural
-/// box, one loop, and every use's pcurve on a side of that box (a spline pcurve whose control
-/// points all share the side's u or v: by their convex hull, the whole pcurve lies on it).
+/// B-spline surface, polynomial or rational (no separate NURBS form), its domain the surface's
+/// natural box, one loop, and every use's pcurve on a side of that box (a spline pcurve whose
+/// control points all share the side's u or v: by their convex hull, the whole pcurve lies on
+/// it).
 ///
 /// # Errors
-/// [`Error::Argument`] for a record of more or fewer faces, another surface or a rational one;
+/// [`Error::Argument`] for a record of more or fewer faces or another surface;
 /// [`Error::Unsupported`] for a face that is trimmed (or not proved untrimmed: a rational
 /// pcurve, a pcurve off the box's sides, holes).
 ///
@@ -512,25 +613,32 @@ fn kernel_surface(u: &[f64], v: &[f64], net: &[Vec<[f64; 3]>]) -> Result<NurbSur
 /// `move_cvs`, `move_net`, `rebuild`); `match_edge`, which names its edges by record index,
 /// takes spline sheets only (a planar one's rebuilt edges would need the edge map).
 #[allow(clippy::type_complexity)]
-pub(crate) fn untrimmed(sheet: &Brep) -> Result<((&[f64], &[f64]), &[Vec<[f64; 3]>])> {
+pub(crate) fn untrimmed(sheet: &Brep) -> Result<((&[f64], &[f64]), RecordNet<'_>)> {
     let [face] = sheet.faces.as_slice() else {
         return Err(Error::Argument);
     };
-    let (
-        Surface::Spline {
-            u_knots,
-            v_knots,
-            points,
-        },
-        None,
-    ) = (&face.surface, &face.nurbs)
-    else {
-        return Err(Error::Argument);
+    let (u_knots, v_knots, net) = match (&face.surface, &face.nurbs) {
+        (
+            Surface::Spline {
+                u_knots,
+                v_knots,
+                points,
+            },
+            None,
+        ) => (u_knots, v_knots, RecordNet::Plain(points)),
+        (
+            Surface::RationalSpline {
+                u_knots,
+                v_knots,
+                homogeneous,
+            },
+            None,
+        ) => (u_knots, v_knots, RecordNet::Rational(homogeneous)),
+        _ => return Err(Error::Argument),
     };
-    let cols = points.first().map_or(0, Vec::len);
     let (Natural::Range(u0, u1), Natural::Range(v0, v1)) = (
-        knot_domain(u_knots, points.len()),
-        knot_domain(v_knots, cols),
+        knot_domain(u_knots, net.rows()),
+        knot_domain(v_knots, net.cols()),
     ) else {
         return Err(Error::Argument);
     };
@@ -550,7 +658,7 @@ pub(crate) fn untrimmed(sheet: &Brep) -> Result<((&[f64], &[f64]), &[Vec<[f64; 3
             return trimmed;
         }
     }
-    Ok(((u_knots, v_knots), points))
+    Ok(((u_knots, v_knots), net))
 }
 
 #[cfg(test)]
