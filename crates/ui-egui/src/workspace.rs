@@ -1483,7 +1483,7 @@ mod tests {
             h.app.dialog.as_ref().map(|d| &d.kind),
             Some(crate::dialogs::Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. }))
         ));
-        assert!(h.widget("Add Column").is_some());
+        assert!(h.widget("Add column").is_some());
         assert!(h.widget("Add configuration").is_some());
     }
 
