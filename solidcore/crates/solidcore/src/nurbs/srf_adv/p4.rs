@@ -1446,4 +1446,76 @@ mod tests {
             assert!(r.is_err());
         }
     }
+
+    /// The upright frame `[x | y | z]` of `traj` at `u` with the unit up direction `up`: `x` the
+    /// unit tangent, `z` the up direction made square to it and unit, `y = z x x`.
+    fn upright_frame(traj: &Curve, u: f64, up: Vec3) -> [Vec3; 3] {
+        let (_, x) = traj.eval_tangent(u, Side::Left).unwrap();
+        let w = up - x * up.dot(x);
+        let z = w * (1.0 / w.length());
+        [x, z.cross(x), z]
+    }
+
+    /// The closed-form rate of the upright frame ([`ZSource::Up`]) against central differences
+    /// of the frame itself, at five parameters round a closed saddle loop (sixteen points of
+    /// `(10 cos t, 10 sin t, 3 cos 2t)` interpolated closed, chord-length parameters on
+    /// `[a, b]`).
+    ///
+    /// Step and tolerance: the step is `h = 1e-5 (b - a)`. A central difference is off by
+    /// `h^2 |M3| / 6` (`M3` the frame's third derivative) plus its rounding, about
+    /// `eps |M| / h`. The loop's radius of curvature stays above about 5 mm and its
+    /// parameter runs over about 70 mm of arc, so per unit of the parameter `|M'| <~ 14` and
+    /// `|M3| <~ 14^3 ~ 3e3`: truncation below `(1e-5)^2 3e3 / 6 ~ 5e-8` and rounding below
+    /// `2.2e-16 / 1e-5 ~ 2e-11`. The tolerance, `1e-5` of the rate's largest entry (at least
+    /// 1), stands above both, and far below what a dropped or flipped term costs: the loop's
+    /// slope `up . x` reaches about 0.5 and its turn `|x'|` about 14, so either term of
+    /// `w' = -(up . x') x - (up . x) x'`, or the `w (w . w')` term of the unit's derivative,
+    /// is of the rate's own order, and a sign flip changes the rate by twice the term.
+    #[test]
+    fn the_upright_rate_is_the_frames_derivative() {
+        let points: Vec<Vec3> = (0..16)
+            .map(|i| {
+                let t = std::f64::consts::TAU * f64::from(i) / 16.0;
+                Vec3::new(10.0 * t.cos(), 10.0 * t.sin(), 3.0 * (2.0 * t).cos())
+            })
+            .collect();
+        let traj = crate::nurbs::b_spline_curve::BSplineCurve::interpolate_points(
+            &points,
+            None,
+            3,
+            None,
+            None,
+            true,
+            crate::nurbs::crv_fit::p1::ParamMethod::ChordLength,
+        )
+        .unwrap()
+        .nurb
+        .clone()
+        .unwrap();
+        let up = Vec3::Z;
+        let (a, b) = traj.param_bounds();
+        let h = 1e-5 * (b - a);
+        for f in [0.1, 0.27, 0.45, 0.62, 0.81] {
+            let u = a + f * (b - a);
+            let rate = rotation_rate_of_change(&traj, u, ZSource::Up(up)).unwrap();
+            let (lo, hi) = (
+                upright_frame(&traj, u - h, up),
+                upright_frame(&traj, u + h, up),
+            );
+            let mut size = 1.0_f64;
+            for row in &rate {
+                for v in row {
+                    size = size.max(v.abs());
+                }
+            }
+            for (j, (p, q)) in lo.iter().zip(&hi).enumerate() {
+                let fd = (*q - *p) * (1.0 / (2.0 * h));
+                let closed = Vec3::new(rate[0][j], rate[1][j], rate[2][j]);
+                assert!(
+                    (closed - fd).length() <= 1e-5 * size,
+                    "at {f} of the loop, column {j}: closed form {closed:?}, differences {fd:?}"
+                );
+            }
+        }
+    }
 }
