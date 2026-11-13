@@ -353,3 +353,130 @@ fn a_held_input_is_reported_not_waited_for() {
         "{seen:?}"
     );
 }
+
+/// A status error is no answer, unless a solidcore-side failure or a cancellation is in its cause
+/// chain: then the call fails. (Each assertion on a chain fails when `answer` reads only the
+/// error on top.)
+#[test]
+fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() {
+    use solidcore::error::{Failure, Reason};
+
+    let wrap = |cause: SolidError| {
+        Failure::new("test::stage", Reason::Failed("a stage failed"))
+            .caused_by(cause)
+            .into_error()
+    };
+    let status = wrap(SolidError::sm_err("test::inner"));
+    assert!(status.sm_status().is_some());
+    assert!(matches!(answer::<()>(Err(status)), Ok(None)));
+
+    let unported = wrap(SolidError::unported("test::callee", "test.unit"));
+    assert!(unported.sm_status().is_some());
+    assert!(matches!(answer::<()>(Err(unported)), Err(e) if e.is_port_failure()));
+    let deep = wrap(wrap(SolidError::unported("test::callee", "test.unit")));
+    assert!(answer::<()>(Err(deep)).is_err());
+
+    let cancelled = wrap(SolidError::cancelled("test::cancelled"));
+    assert!(cancelled.sm_status().is_some() && !cancelled.is_port_failure());
+    assert!(answer::<()>(Err(cancelled)).is_err());
+
+    assert!(answer::<()>(Err(SolidError::invalid_input("test::input", "bad"))).is_err());
+}
+
+/// The body's vertex points, in its order.
+fn points(b: &Body) -> Vec<solidcore::Vec3> {
+    let brep = b.lock();
+    brep.vertex_list()
+        .iter()
+        .map(|&v| brep.vertex(v).unwrap().point)
+        .collect()
+}
+
+/// A call whose token is cancelled already is refused before it reaches the kernel.
+#[test]
+fn a_cancelled_token_refuses_the_call_before_it_runs() {
+    all_fixes();
+    let token = CancelToken::new();
+    token.cancel();
+    let ran = Cell::new(false);
+    let r: Result<()> = crate::cancel::within(&token, || {
+        run("never runs", |_| {
+            ran.set(true);
+            Ok(())
+        })
+    });
+    assert_eq!(r, Err(Error::Cancelled));
+    assert!(!ran.get());
+    assert!(
+        make_box([0.0; 3], [1.0; 3]).is_ok(),
+        "outside the scope calls run"
+    );
+}
+
+/// The kernel polls the scope's token during the call: a cancel from another thread part way
+/// is `Cancelled`, the body the call was editing is as it came in, nothing reaches the failure
+/// callback, and the kernel the call ran on is replaced (the mark it left is gone).
+#[test]
+fn a_call_cancelled_part_way_leaves_its_body_and_no_kernel_state() {
+    in_own_process(
+        "session::tests::a_call_cancelled_part_way_leaves_its_body_and_no_kernel_state",
+        || {
+            all_fixes();
+            let reported: Arc<Mutex<Vec<String>>> = Arc::default();
+            let seen = Arc::clone(&reported);
+            set_failure_hook(Some(Arc::new(move |f: &Failure<'_>| {
+                seen.lock().unwrap().push(f.call.to_owned());
+            })));
+            let b = make_box([0.0; 3], [1.0; 3]).unwrap();
+            let before = points(&b);
+            let token = CancelToken::new();
+            let r: Result<()> = crate::cancel::within(&token, || {
+                with_body("cancelled part way", &b, |k, br| {
+                    let v = br.vertex_list()[0];
+                    br.vertex_mut(v)?.point = solidcore::Vec3::new(9.0, 9.0, 9.0);
+                    k.upstream_ub_passed.push("marker");
+                    // the application cancels from its own thread; the kernel's next check sees it
+                    let other = token.clone();
+                    std::thread::spawn(move || other.cancel()).join().unwrap();
+                    k.check_cancelled("session::tests")
+                })
+            });
+            set_failure_hook(None);
+            assert_eq!(r, Err(Error::Cancelled));
+            assert_eq!(before, points(&b), "the edit was put back");
+            assert!(
+                reported.lock().unwrap().is_empty(),
+                "a cancellation is no failure"
+            );
+            let fresh = run("after", |k| {
+                Ok(k.upstream_ub_passed.is_empty() && k.cancel.is_none())
+            })
+            .unwrap();
+            assert!(fresh, "the kernel was replaced and carries no token");
+        },
+    );
+}
+
+/// A token cancelled while the call runs takes its result away even when the kernel finished
+/// first: the edit goes, and the answer is `Cancelled`, never a result that came in late.
+#[test]
+fn a_result_finished_after_the_cancel_is_not_returned() {
+    all_fixes();
+    let b = make_box([0.0; 3], [1.0; 3]).unwrap();
+    let token = CancelToken::new();
+    let r: Result<()> = crate::cancel::within(&token, || {
+        with_body("finished after the cancel", &b, |_, br| {
+            let v = br.vertex_list()[0];
+            br.vertex_mut(v)?.point = solidcore::Vec3::new(9.0, 9.0, 9.0);
+            token.cancel();
+            Ok(())
+        })
+    });
+    assert_eq!(r, Err(Error::Cancelled));
+    assert!(
+        !points(&b).contains(&solidcore::Vec3::new(9.0, 9.0, 9.0)),
+        "the edit was put back"
+    );
+    let r: Result<bool> = run("reads", |k| Ok(k.cancel.is_none()));
+    assert_eq!(r, Ok(true), "the token is off the kernel after the call");
+}

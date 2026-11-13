@@ -13,9 +13,9 @@ See [PR #11087](https://github.com/tangency-labs/solidcraft/pull/11087) for this
 follow-up's exact source and qualification; the historical CI7 and opaque native
 results above remain separate.
 
-CPU **Indirect lighting** (`options.path`) can consume up to eight stable saved or
+CPU **Indirect lighting** (`options.path`) can consume up to 128 stable saved or
 exact captured optical assignments. It requires explicit progressive camera
-sampling, one primary attempt and traced shadows. Path depth remains 1–16 and counts
+sampling, one primary attempt and traced shadows. Path depth is 1–64 and counts
 shaded opaque surfaces, optical boundaries and active scattering events. An endpoint beyond this finite
 limit contributes no further radiance; the limit is not a convergence guarantee.
 There is no default, size, camera, profile or method change. Fixed saved choices
@@ -70,7 +70,7 @@ use one reusable prepaid state and a cooperative BVH scan. An actual boundary at
 the origin or in the eye/pupil-to-near-clip segment refuses explicitly; endpoints
 outside a small object do not bypass the segment check. No camera, ray or boundary
 is moved to manufacture an outside origin.
-The single path carries an eight-entry medium stack. Every segment uses the
+The single path carries a 16-entry medium stack, independently of the 128 target and 64 event limits. The absent-Path legacy producer retains its eight-target and bounded deterministic branch contract. Every segment uses the
 previous physical surface point for Beer absorption, before any numeric launch
 adjustment. Geometric winding chooses entry/exit and verifies the certified parent.
 Smooth captured optical normals are used only if both reflected and refracted

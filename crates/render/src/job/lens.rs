@@ -13,7 +13,7 @@ pub struct ThinLens {
 impl ThinLens {
     /// The shared physical camera domain used by both native ray-traced methods.
     /// A zero-radius lens preserves pinhole/orthographic behavior exactly.
-    pub fn validate_camera(self, camera: &crate::Camera) -> Result<()> {
+    pub fn validate_camera(self, camera: &solidcraft_viewport::Camera) -> Result<()> {
         self.validate()?;
         if self.aperture_radius_mm > 0.0
             && (!camera.is_valid()
@@ -64,16 +64,16 @@ mod tests {
     fn active_lens_camera_domain_is_explicit_and_zero_aperture_stays_compatible() {
         let active = ThinLens { aperture_radius_mm: 0.5, focus_distance_mm: 10.0 };
         let zero = ThinLens { aperture_radius_mm: 0.0, ..active };
-        let mut camera = crate::Camera::default();
+        let mut camera = solidcraft_viewport::Camera::default();
         assert!(active.validate_camera(&camera).is_err());
         zero.validate_camera(&camera).unwrap();
         camera.fov = 0.7;
         active.validate_camera(&camera).unwrap();
         for fov in [f64::NAN, f64::INFINITY, -0.7, std::f64::consts::PI, 1e-12] {
-            assert!(active.validate_camera(&crate::Camera { fov, ..camera }).is_err());
+            assert!(active.validate_camera(&solidcraft_viewport::Camera { fov, ..camera }).is_err());
         }
         for distance in [1e-7, 1e9 + 1.0] {
-            assert!(active.validate_camera(&crate::Camera { distance, ..camera }).is_err());
+            assert!(active.validate_camera(&solidcraft_viewport::Camera { distance, ..camera }).is_err());
         }
         let fixed = super::super::RaytraceOptions { lens: Some(active), ..Default::default() };
         assert!(fixed.validate().is_err());

@@ -25,23 +25,10 @@ const STRAIGHT_TOL: f64 = 1e-3;
 /// Evaluate a `FrameMember` feature: one new body per line, each named
 /// ([`member_names`], or by position for a copy whose `body_names` were set).
 pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, angle, mirror, body_name, names } = &f.kind else {
+    let FeatureKind::FrameMember { body_name, names, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
-    // The frame sketch in this feature's component frame: its plane, and its 3D lines.
-    let mapped =
-        if ps.sketch.wires.is_empty() { Cow::Owned(sketch_in_feature_frame(doc, ps, f.component)?) } else { path_in_frame(doc, ps, f.component)? };
-    let segments = member_lines(mapped.as_ref(), lines)?;
-    let (mut regions, description) = profile_regions(vals, st, profile)?;
-    if *mirror {
-        regions = regions.iter().map(frame::mirrored).collect();
-    }
-    let at = frame::anchor_point(&regions, *anchor);
-    let turn = match angle {
-        Some(e) => val(vals, e, Kind::Angle)?,
-        None => 0.0,
-    };
+    let Layout { segments, regions, description, at, turn } = layout(doc, vals, f, st)?;
     let mut made = Vec::with_capacity(segments.len());
     for (id, a, b) in &segments {
         let (x, y) = frame::member_axes(*b - *a, turn).ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
@@ -68,6 +55,68 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
         st.bodies.push(ModelBody::traced_new(name, t, f.id));
     }
     Ok(())
+}
+
+/// A member feature's lines (in its component frame), profile regions, default name, the
+/// profile point that sits on the lines and the profile's turn about them.
+struct Layout {
+    segments: Vec<(String, Vec3, Vec3)>,
+    regions: Vec<Region2>,
+    description: String,
+    at: Vec2,
+    turn: f64,
+}
+
+fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
+    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a frame member feature".into()));
+    };
+    let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
+    // The frame sketch in this feature's component frame: its plane, and its 3D lines.
+    let mapped =
+        if ps.sketch.wires.is_empty() { Cow::Owned(sketch_in_feature_frame(doc, ps, f.component)?) } else { path_in_frame(doc, ps, f.component)? };
+    let segments = member_lines(mapped.as_ref(), lines)?;
+    let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
+    if *mirror {
+        regions = regions.iter().map(frame::mirrored).collect();
+    }
+    let at = match locate {
+        Some([x, y]) => {
+            // A design file is hostile input: the command checks the point, a file may not.
+            if !(x.is_finite() && y.is_finite() && x.abs() <= frame::MAX_PROFILE_SIZE && y.abs() <= frame::MAX_PROFILE_SIZE) {
+                return Err(DocError::Invalid(format!("frame member `locate` must be two finite lengths within {} mm", frame::MAX_PROFILE_SIZE)));
+            }
+            // `locate` is the profile point that sits on the line, measured from the profile's
+            // own origin (`Profile::origin`). The built-in region is centred on its bounding
+            // box, so that origin moves when the section's size changes, and the located point
+            // moves with it: the member stays attached at the same point of its section.
+            let p = origin + Vec2::new(*x, *y);
+            if *mirror { Vec2::new(-p.x, p.y) } else { p }
+        }
+        None => frame::anchor_point(&regions, *anchor),
+    };
+    let turn = match angle {
+        Some(e) => val(vals, e, Kind::Angle)?,
+        None => 0.0,
+    };
+    Ok(Layout { segments, regions, description, at, turn })
+}
+
+/// The member of feature `f` on line `line`, as its body was made: the plane square to the line
+/// at its start (x × y along the line), its length, and its profile in that plane.
+pub(crate) fn member_section(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    line: &str,
+) -> Result<(Plane, f64, Region2)> {
+    let Layout { segments, regions, at, turn, .. } = layout(doc, vals, f, st)?;
+    let (_, a, b) = segments.iter().find(|(id, _, _)| id == line).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
+    let (x, y) = frame::member_axes(*b - *a, turn).ok_or_else(|| DocError::Invalid(format!("line `{line}` has no length")))?;
+    let plane = Plane::new(*a - x * at.x - y * at.y, x, y).ok_or_else(|| DocError::Invalid(format!("line `{line}`: no plane square to it")))?;
+    let region = regions.into_iter().next().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
+    Ok((plane, a.dist(*b), region))
 }
 
 /// The body name of the member on each of `lines`: its own name from `pinned` (by line id) when no
@@ -194,11 +243,12 @@ fn straight(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
 
 /// The regions of a member's profile, in the profile's own coordinates: one piece of material,
 /// holes and all; and what its members are named after when they have no name of their own.
-fn profile_regions(vals: &BTreeMap<String, Value>, st: &ModelState, profile: &MemberProfile) -> Result<(Vec<Region2>, String)> {
-    let (regions, description) = match profile {
+fn profile_regions(vals: &BTreeMap<String, Value>, st: &ModelState, profile: &MemberProfile) -> Result<(Vec<Region2>, String, Vec2)> {
+    let (regions, description, origin) = match profile {
         MemberProfile::Library { profile } => {
-            let p = profile.resolve(|name, e| val(vals, e, Kind::Length).map_err(|err| DocError::Invalid(format!("profile `{name}`: {err}"))))?;
-            (vec![p.region()?], p.description())
+            let p = profile.resolve(|name, e, kind| val(vals, e, kind).map_err(|err| DocError::Invalid(format!("profile `{name}`: {err}"))))?;
+            let origin = p.origin();
+            (vec![p.region()?], profile.size.clone().unwrap_or_else(|| p.description()), origin)
         }
         MemberProfile::Sketch { sketch, profiles } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
@@ -206,11 +256,11 @@ fn profile_regions(vals: &BTreeMap<String, Value>, st: &ModelState, profile: &Me
                 ProfileSel::All => material(ss)?,
                 sel => select_profiles(ss, sel)?,
             };
-            (solidcraft_sketch::merge_regions(&picked), ss.name.clone())
+            (solidcraft_sketch::merge_regions(&picked), ss.name.clone(), Vec2::ZERO)
         }
     };
     match regions.len() {
-        1 => Ok((regions, description)),
+        1 => Ok((regions, description, origin)),
         0 => Err(DocError::Invalid("the member profile has no area".into())),
         n => Err(DocError::Invalid(format!("the member profile is {n} separate pieces (pick one with `profiles`)"))),
     }

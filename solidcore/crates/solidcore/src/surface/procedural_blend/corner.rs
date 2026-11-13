@@ -271,7 +271,7 @@ fn same_form(a: &BSplineSurface, b: &BSplineSurface) -> bool {
 /// weights positive), so no point of one is farther from the other's at the same
 /// parameters. `None` where no orientation matches but for the control points and weights
 /// (another parametrization, a piece).
-fn net_distance(a: &BSplineSurface, b: &BSplineSurface) -> Option<f64> {
+pub(crate) fn net_distance(a: &BSplineSurface, b: &BSplineSurface) -> Option<f64> {
     let (a, b) = (a.gw_nurb()?, b.gw_nurb()?);
     let grid = |s: &crate::nurbs::srf_basic::Surface| -> Vec<Vec<crate::nurbs::math::CPoint>> {
         s.rows().map(<[_]>::to_vec).collect()
@@ -698,7 +698,7 @@ impl MixedDefinition {
                 seg.iter_mut().for_each(map);
             }
         };
-        for s in self.sides.iter_mut() {
+        for s in &mut *self.sides {
             crv(&mut s.c);
             crv(&mut s.dir);
             crv(&mut s.t);

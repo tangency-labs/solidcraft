@@ -10,7 +10,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec3};
 use solidcraft_kernel::{self as kernel, FaceSurface};
 
 use crate::eval::{ModelBody, ModelState};
@@ -23,6 +23,9 @@ use crate::{DocError, Document, PlaneRef, Result};
 pub enum GeoRef {
     /// A fixed point.
     Point { p: Vec3 },
+    /// An origin datum of an exact placement (its O point, an axis or a plane), found again on
+    /// each evaluation, so it follows the component the way a named reference does.
+    Datum { datum: DatumRef },
     /// The design origin.
     Origin,
     /// A body vertex: where the edges named `edges` meet (the end they share), else the one
@@ -52,10 +55,31 @@ pub enum GeoRef {
     Axis { name: crate::FeatureName },
     /// A construction point feature, by name.
     ConstructPoint { name: crate::FeatureName },
-    /// A sketch point (by sketch feature id and point id).
+    /// A sketch point (by sketch feature id and point id), or a drawn wire node as `wire:index`.
     SketchPoint { sketch: u64, point: String },
     /// A sketch curve (by sketch feature id and curve id).
     SketchCurve { sketch: u64, curve: String },
+    /// A snap point of an edge, face or sketch curve (#11228): its centre, its middle or a flat
+    /// face's centre, found again on `of` as it is now. Where `of` has more than one (a
+    /// cylinder's two end centres), `end` says which along the axis (0 the low end, 1 the
+    /// high one, set when the reference is made), else the one nearest `at`, where it was picked.
+    Snap {
+        of: Box<GeoRef>,
+        kind: SnapAt,
+        at: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<usize>,
+    },
+}
+
+/// Which snap point of an edge, face or sketch curve a [`GeoRef::Snap`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapAt {
+    /// The centre of a circle or arc, a sphere or torus, or one end of a cylinder or cone.
+    Centre,
+    /// The middle of an edge or sketch curve, along its length.
+    Middle,
 }
 
 /// How a construction axis is defined.
@@ -112,6 +136,129 @@ impl ConstructGeom {
     }
 }
 
+/// One of the seven named items of a placement's Origin folder: the O point, the X, Y and Z
+/// axes, and the XY, XZ and YZ planes. Case-insensitive to parse; the `Plane::named` aliases
+/// (TOP/FRONT/RIGHT) stay root-only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DatumItem {
+    O,
+    X,
+    Y,
+    Z,
+    XY,
+    XZ,
+    YZ,
+}
+
+impl DatumItem {
+    /// The item's name as a key spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            DatumItem::O => "O",
+            DatumItem::X => "X",
+            DatumItem::Y => "Y",
+            DatumItem::Z => "Z",
+            DatumItem::XY => "XY",
+            DatumItem::XZ => "XZ",
+            DatumItem::YZ => "YZ",
+        }
+    }
+
+    /// Case-insensitive; the Plane::named aliases (TOP/FRONT/RIGHT) stay root-only.
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name.to_ascii_uppercase().as_str() {
+            "O" => DatumItem::O,
+            "X" => DatumItem::X,
+            "Y" => DatumItem::Y,
+            "Z" => DatumItem::Z,
+            "XY" => DatumItem::XY,
+            "XZ" => DatumItem::XZ,
+            "YZ" => DatumItem::YZ,
+            _ => return None,
+        })
+    }
+
+    /// The item in its component's own frame: O the point, X/Y/Z the axes, XY/XZ/YZ the planes.
+    pub fn geom(self) -> ConstructGeom {
+        match self {
+            DatumItem::O => ConstructGeom::Point(Vec3::ZERO),
+            DatumItem::X => ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::X },
+            DatumItem::Y => ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::Y },
+            DatumItem::Z => ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::Z },
+            DatumItem::XY => ConstructGeom::Plane(Plane::XY),
+            DatumItem::XZ => ConstructGeom::Plane(Plane::XZ),
+            DatumItem::YZ => ConstructGeom::Plane(Plane::YZ),
+        }
+    }
+}
+
+/// An origin datum of an exact placement. The empty path is never a `DatumRef`: the root keeps
+/// `PlaneRef::Origin` and `GeoRef::Origin` as they are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DatumRef {
+    /// The occurrence ids of the placement, root first.
+    pub path: Vec<u64>,
+    pub item: DatumItem,
+}
+
+impl DatumRef {
+    /// The datum's Browser key: `o:2/3/origin/XY`.
+    pub fn key(&self) -> String {
+        format!("o:{}/origin/{}", self.path.iter().map(|id| id.to_string()).collect::<Vec<_>>().join("/"), self.item.name())
+    }
+
+    /// Strict: canonical non-zero decimal ids, depth at most 64, length at most 2048. Rejects
+    /// `c0/origin`, `o:01/origin/X` and `o:0/origin/X`.
+    pub fn parse_key(key: &str) -> Option<Self> {
+        if key.len() > 2048 {
+            return None;
+        }
+        let rest = key.strip_prefix("o:")?;
+        let (ids, item) = rest.rsplit_once("/origin/")?;
+        if ids.is_empty() || ids.split('/').count() > 64 {
+            return None;
+        }
+        let path = ids.split('/').map(|id| id.parse::<u64>().ok().filter(|n| *n != 0 && n.to_string() == id)).collect::<Option<Vec<_>>>()?;
+        Some(DatumRef { path, item: DatumItem::parse(item)? })
+    }
+}
+
+impl Serialize for DatumRef {
+    /// Saved as its Browser key: `o:2/3/origin/XY`.
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(&self.key())
+    }
+}
+
+impl<'de> Deserialize<'de> for DatumRef {
+    /// Reads a saved reference back from its Browser key: anything that is not a bounded
+    /// datum key is a deserialize error, so an older release never mis-reads a newer design.
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let key = String::deserialize(d)?;
+        DatumRef::parse_key(&key).ok_or_else(|| serde::de::Error::custom(format!("not a datum key: `{key}`")))
+    }
+}
+
+/// An origin datum of an exact placement, resolved at evaluation time: the item in its own
+/// component's frame, placed by the placement's world frame. It follows the component on every
+/// evaluation, the way `PlaneRef::Face` re-finds its face.
+pub fn resolve_datum(doc: &Document, d: &DatumRef) -> Result<ConstructGeom> {
+    Ok(d.item.geom().placed(&doc.placement_frame(&d.path)?))
+}
+
+/// [`resolve_datum`] as the component `component` sees it: placed by the placements, then
+/// mapped back through that component's frame, since a feature evaluated in its own frame
+/// places what it reads into the world again through that frame (the world pass). The root
+/// (0) reads the world as it is.
+pub fn resolve_datum_in(doc: &Document, d: &DatumRef, component: u64) -> Result<ConstructGeom> {
+    if component == 0 {
+        return resolve_datum(doc, d);
+    }
+    let inverse =
+        crate::mat_inverse(&doc.component_transform(component)).ok_or_else(|| DocError::Invalid("the component's placement is singular".into()))?;
+    Ok(resolve_datum(doc, d)?.placed(&inverse))
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Construct {
     pub feature: u64,
@@ -133,6 +280,10 @@ pub(crate) struct Ctx<'a> {
     /// geometry resolves its sides through the document again, so the count has to continue
     /// across that hop; restarting it lets a plane that refers to itself recurse forever.
     pub depth: usize,
+    /// The component the reading feature lives in: a datum it reads is found through the
+    /// placements and mapped back into this frame ([`resolve_datum_in`]). The root (0) is
+    /// the world.
+    pub component: u64,
 }
 
 fn bad(m: impl Into<String>) -> DocError {
@@ -163,7 +314,25 @@ fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&
             return Ok((b, fi, at));
         }
     }
+    // A mesh body has no faces to pick: say so, rather than let the pick read as a miss (#11469).
+    if let Some(m) = st.bodies.iter().find(|b| lies_on_mesh(b, at)) {
+        return Err(bad(format!("no face at {at:?}: `{}` is a mesh body, which has no faces; use Convert Mesh to make it a solid first", m.name)));
+    }
     Err(bad(format!("no face at {at:?}")))
+}
+
+/// Does `at` lie on the surface of a mesh body, within the pick tolerance? Only mesh bodies:
+/// their triangles are the body itself.
+fn lies_on_mesh(b: &ModelBody, at: Vec3) -> bool {
+    if !b.body.is_mesh() {
+        return false;
+    }
+    let Some((positions, triangles)) = b.body.triangle_mesh() else { return false };
+    let tol = crate::appearance::pick_tolerance(b);
+    triangles.iter().any(|t| {
+        let [a, bb, c] = t.map(|i| positions[i as usize]);
+        crate::appearance::closest_on_triangle(at, a, bb, c).dist(at) <= tol
+    })
 }
 
 /// The edge picked, as a polyline.
@@ -254,7 +423,7 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
     if names.len() < 2 || names.len() > MAX_VERTEX_EDGES {
         return None;
     }
-    let ends: Vec<[Vec3; 2]> = names
+    let found: Vec<(*const ModelBody, usize, [Vec3; 2])> = names
         .iter()
         .map(|n| {
             // The edge with that name itself, never the one nearest the old pick, and its ends
@@ -263,12 +432,21 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
             // it, so a vertex took that edge's end (#8650).
             bodies(st).find_map(|b| {
                 let hit = crate::name_lookup::locate_edge(b, n, at).ok()?;
-                let m = b.mesh();
-                let pts = m.edges.get(hit.edge)?;
-                Some([*pts.first()?, *pts.last()?])
+                let rec = b.body.record();
+                let edge = rec.edges.get(hit.edge)?;
+                let [v0, v1] = edge.vertices;
+                let p0 = rec.vertices.get(v0 as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
+                let p1 = rec.vertices.get(v1 as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
+                Some((std::ptr::from_ref(b), hit.edge, [p0, p1]))
             })
         })
         .collect::<Option<_>>()?;
+    // Two names of a vertex name two edges: a name the point decides (where the body grew so the
+    // vertex lies inside another edge) can find an edge another name found.
+    if found.iter().enumerate().any(|(i, (b, e, _))| found.iter().take(i).any(|(c, f, _)| std::ptr::eq(*b, *c) && e == f)) {
+        return None;
+    }
+    let ends: Vec<[Vec3; 2]> = found.into_iter().map(|(_, _, ends)| ends).collect();
     let (first, rest) = ends.split_first()?;
     let tol = |p: Vec3| 1e-6 * (1.0 + p.len());
     first
@@ -306,11 +484,6 @@ fn as_circle(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64)> {
     pts.iter()
         .all(|p| ((*p - centre).len() - r).abs() <= r * 1e-3 + 1e-6 && (*p - centre).dot(unit).abs() <= r * 1e-3 + 1e-6)
         .then_some((centre, unit, r))
-}
-
-fn sketch_world(ctx: &Ctx, sketch: u64, q: Vec2) -> Result<Vec3> {
-    let ss = ctx.st.sketch(sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
-    Ok(ss.plane.to_world(q))
 }
 
 fn sketch_curve_points(ctx: &Ctx, sketch: u64, curve: &str) -> Result<Vec<Vec3>> {
@@ -358,15 +531,88 @@ pub(crate) fn point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
             _ => Err(bad(format!("`{name}` is not a point"))),
         },
         GeoRef::SketchPoint { sketch, point } => {
-            let ss = ctx.st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
-            let q =
-                ss.sketch.point_index(point).and_then(|i| ss.sketch.point(i)).ok_or_else(|| DocError::Unknown(format!("sketch point `{point}`")))?;
-            sketch_world(ctx, *sketch, q)
+            sketch_point_position(ctx.st, *sketch, point).ok_or_else(|| DocError::Unknown(format!("sketch point `{point}`")))
         }
         // A round edge or face: its centre.
         GeoRef::Edge { .. } | GeoRef::Face { .. } | GeoRef::SketchCurve { .. } => centre(ctx, g),
+        GeoRef::Snap { of, kind, at, end } => snap_point(ctx.st, of, *kind, *at, *end).or_else(|_| snap_point_ctx(ctx, of, *kind, *at)),
+        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
+            ConstructGeom::Point(p) => Ok(p),
+            _ => Err(bad("the datum is not a point (pick the O of a component)")),
+        },
         _ => Err(bad("pick a point, vertex or sketch point")),
     }
+}
+
+/// The centres of the circular edges that end a cylinder or cone face, from its B-rep (low, high
+/// along its axis), if it is one.
+fn face_axis_ends(st: &ModelState, of: &GeoRef) -> Option<Vec<Vec3>> {
+    let GeoRef::Face { at, name } = of else { return None };
+    let (b, fi, _) = face_of(st, *at, name).ok()?;
+    let (origin, axis) = match kernel::face_surface(&b.body, fi) {
+        Some(FaceSurface::Cylinder { origin, axis, .. }) => (origin, axis),
+        Some(FaceSurface::Cone { apex, axis, .. }) => (apex, axis),
+        _ => return None,
+    };
+    let tol = 1e-6 * (1.0 + b.body.size());
+    let mut ends: Vec<(f64, Vec3)> = kernel::face_edge_indices(&b.body, fi)
+        .into_iter()
+        .filter_map(|e| kernel::edge_circle(&b.body, e))
+        .filter(|c| (c.center - origin).cross(axis).len() <= tol)
+        .map(|c| ((c.center - origin).dot(axis), c.center))
+        .collect();
+    ends.sort_by(|p, q| p.0.total_cmp(&q.0));
+    ends.dedup_by(|p, q| (p.0 - q.0).abs() <= tol);
+    match ends.as_slice() {
+        [] => None,
+        [one] => Some(vec![one.1]),
+        [lo, .., hi] => Some(vec![lo.1, hi.1]),
+    }
+}
+
+/// The one of `found` nearest `at`.
+fn nearest(found: Vec<Vec3>, at: Vec3) -> Option<(usize, Vec3)> {
+    found.into_iter().enumerate().filter(|(_, p)| p.is_finite()).min_by(|(_, p), (_, q)| p.dist(at).total_cmp(&q.dist(at)))
+}
+
+/// A snap point found from the model alone: a cylinder's or cone's end centre (the `end` one,
+/// else the one nearest `at`).
+fn snap_point(st: &ModelState, of: &GeoRef, kind: SnapAt, at: Vec3, end: Option<usize>) -> Result<Vec3> {
+    match (kind, of) {
+        (SnapAt::Centre, GeoRef::Face { .. }) => {
+            let ends = face_axis_ends(st, of).ok_or_else(|| bad("the face is not a cylinder or cone"))?;
+            match end {
+                Some(i) => ends.get(i).copied(),
+                None => nearest(ends, at).map(|(_, p)| p),
+            }
+            .ok_or_else(|| bad("the snap point is gone"))
+        }
+        _ => Err(bad("not a face's snap point")),
+    }
+}
+
+/// A snap point of an edge or sketch curve (its middle or centre), or a sphere's or torus's centre.
+fn snap_point_ctx(ctx: &Ctx, of: &GeoRef, kind: SnapAt, at: Vec3) -> Result<Vec3> {
+    let found: Vec<Vec3> = match (kind, of) {
+        (SnapAt::Middle, GeoRef::Edge { .. } | GeoRef::SketchCurve { .. }) => {
+            vec![along(ctx, of, 0.5)?.0]
+        }
+        (SnapAt::Centre, GeoRef::Edge { .. } | GeoRef::SketchCurve { .. } | GeoRef::Face { .. }) => vec![centre(ctx, of)?],
+        _ => return Err(bad("a snap point is on an edge, a face or a sketch curve")),
+    };
+    nearest(found, at).map(|(_, p)| p).ok_or_else(|| bad("the snap point is gone"))
+}
+
+/// Resolve a planar point or a drawn 3D wire's `wire:index` node in the evaluated state's frame.
+/// Wire coordinates have already been placed; applying the sketch plane again would move them twice.
+pub fn sketch_point_position(st: &ModelState, sketch: u64, point: &str) -> Option<Vec3> {
+    let ss = st.sketch(sketch)?;
+    if let Some(p) = ss.sketch.point_index(point).and_then(|i| ss.sketch.point(i)) {
+        return Some(ss.plane.to_world(p));
+    }
+    let (wire, index) = point.rsplit_once(':')?;
+    let index = index.parse::<usize>().ok()?;
+    ss.sketch.wires.get(ss.sketch.wire_index(wire)?)?.fit.get(index).copied()
 }
 
 /// An edge or face of the model as a line: along a straight edge, through the centre of a
@@ -403,6 +649,23 @@ pub fn model_axis(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     Ok((o, canonical_dir(d)))
 }
 
+/// [`model_axis`] for references that may name a component's origin datum: the datum is placed
+/// through the document's placements ([`resolve_datum_in`], as the component `component` sees
+/// it), the rest as [`model_axis`] finds it in the model state. `None` for a datum asks for an
+/// evaluation.
+pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, component: u64) -> Result<(Vec3, Vec3)> {
+    match g {
+        GeoRef::Datum { datum } => {
+            let doc = doc.ok_or_else(|| bad("this axis is built from a component's origin: evaluate first"))?;
+            match resolve_datum_in(doc, datum, component)? {
+                ConstructGeom::Axis { origin, dir } => Ok((origin, dir)),
+                _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
+            }
+        }
+        _ => model_axis(st, g),
+    }
+}
+
 /// `d` or `-d`, whichever has its largest component (the first of equal ones) positive: how
 /// [`model_axis`] orients an axis, for a preview of one to point the same way.
 pub fn canonical_dir(d: Vec3) -> Vec3 {
@@ -417,6 +680,10 @@ pub fn canonical_dir(d: Vec3) -> Vec3 {
 /// A reference as a line (origin, unit direction).
 pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     match g {
+        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
+            ConstructGeom::Axis { origin, dir } => Ok((origin, dir)),
+            _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
+        },
         GeoRef::Edge { .. } | GeoRef::Face { .. } => model_line(ctx.st, g),
         GeoRef::SketchCurve { sketch, curve } => {
             let pts = sketch_curve_points(ctx, *sketch, curve)?;
@@ -442,7 +709,7 @@ pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
 /// A reference as a plane.
 pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
     match g {
-        GeoRef::Plane { plane } => ctx.doc.resolve_plane_in(ctx.vals, plane, ctx.depth + 1, Some(ctx.st)),
+        GeoRef::Plane { plane } => ctx.doc.resolve_plane_in(ctx.vals, plane, ctx.depth + 1, ctx.component, Some(ctx.st)),
         GeoRef::Face { at, name } => {
             let (b, fi, q) = face_of(ctx.st, *at, name)?;
             match kernel::face_surface(&b.body, fi) {
@@ -453,6 +720,10 @@ pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
                 _ => Err(bad("the face is not planar")),
             }
         }
+        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
+            ConstructGeom::Plane(p) => Ok(p),
+            _ => Err(bad("the datum is not a plane (pick the XY, XZ or YZ of a component)")),
+        },
         _ => Err(bad("pick a plane or planar face")),
     }
 }
@@ -670,6 +941,7 @@ pub(crate) fn source_bodies(ctx: &Ctx, refs: &[&GeoRef]) -> Vec<String> {
             GeoRef::Vertex { .. } => {
                 point(ctx, g).ok().and_then(|p| vertex_body(ctx.st, p)).map(|b| vec![b.definition_name().to_string()]).unwrap_or_default()
             }
+            GeoRef::Snap { of, .. } => source_bodies(ctx, &[of]),
             GeoRef::Axis { name } | GeoRef::ConstructPoint { name } => {
                 ctx.st.construct.iter().find(|c| c.name.as_str() == AsRef::<str>::as_ref(name)).map(|c| c.bodies.clone()).unwrap_or_default()
             }
@@ -846,11 +1118,11 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             Plane::from_normal(p, tan).ok_or_else(degenerate)
         }
         PlaneRef::ThroughPoint { base, point: at } => {
-            let b = ctx.doc.resolve_plane_in(ctx.vals, base, ctx.depth + 1, Some(ctx.st))?;
+            let b = ctx.doc.resolve_plane_in(ctx.vals, base, ctx.depth + 1, ctx.component, Some(ctx.st))?;
             let n = b.normal().normalized().ok_or_else(degenerate)?;
             Ok(Plane { origin: b.origin + n * (point(ctx, at)? - b.origin).dot(n), ..b })
         }
-        _ => ctx.doc.resolve_plane_in(ctx.vals, p, ctx.depth + 1, Some(ctx.st)),
+        _ => ctx.doc.resolve_plane_in(ctx.vals, p, ctx.depth + 1, ctx.component, Some(ctx.st)),
     }
 }
 
@@ -878,6 +1150,10 @@ impl GeoRef {
             GeoRef::Point { p } => pt(p),
             GeoRef::Vertex { at, .. } | GeoRef::Edge { at, .. } | GeoRef::Face { at, .. } => pt(at),
             GeoRef::Plane { plane: p } => plane(p),
+            GeoRef::Snap { of, at, .. } => {
+                pt(at);
+                of.map_points(pt, plane);
+            }
             _ => {}
         }
     }
@@ -901,10 +1177,15 @@ impl GeoRef {
             GeoRef::Vertex { at, edges: edges @ None } => {
                 for b in bodies(st) {
                     let tol = (b.body.size() * 1e-3).max(1e-3);
-                    let m = b.mesh();
-                    let ends_here = |e: &Vec<Vec3>| [e.first(), e.last()].into_iter().flatten().any(|q| q.dist(*at) <= tol);
+                    let rec = b.body.record();
+                    let ends_here = |e: &solidcore_record::brep::Edge| {
+                        [e.vertices[0], e.vertices[1]]
+                            .into_iter()
+                            .filter_map(|v| rec.vertices.get(v as usize).map(|pt| Vec3::new(pt.point[0], pt.point[1], pt.point[2])))
+                            .any(|q| q.dist(*at) <= tol)
+                    };
                     let mut meet: Vec<String> =
-                        m.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
+                        rec.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
                     if meet.is_empty() {
                         continue;
                     }
@@ -917,6 +1198,12 @@ impl GeoRef {
                 }
             }
             GeoRef::Plane { plane } => plane.name_picks(st),
+            GeoRef::Snap { of, kind: SnapAt::Centre, at, end: end @ None } => {
+                // Which end of a cylinder or cone: it stays that end when the face grows.
+                *end = face_axis_ends(st, of).and_then(|ends| nearest(ends, *at)).map(|(i, _)| i);
+                of.name_picks(st);
+            }
+            GeoRef::Snap { of, .. } => of.name_picks(st),
             _ => {}
         }
     }

@@ -20,7 +20,7 @@
 //!   boundary curves and given derivatives made compatible); `cur` and `der` are
 //!   `&mut` and modified the same way. `der = NULL` is `None`, `der[i] = NULL` a
 //!   `None` entry.
-//! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number.
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number.
 //! - `N_CreateSweepScale` ignores the status of `ST_GetRotationRateOfChange`; it can
 //!   only fail where upstream's inputs make it unreachable (a `curZ` that cannot be
 //!   differentiated where it was just evaluated, or a single frame sample), and the
@@ -35,7 +35,7 @@
 //!   (upstream's `NL_DEGREE` is a `short`, so it cannot be expressed there) is
 //!   `InvalidInput`.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::{compatible_knot_array, PTOL};
 use crate::nurbs::crv_basic::{curves_are_compatible, Boundary, Curve};
@@ -187,7 +187,7 @@ fn weight_section(c: &mut Curve, wt: f64, rat_c: bool) {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for a degree-1 trajectory that is not a line; errors of the
+/// [`NurbsFailure::Input`] for a degree-1 trajectory that is not a line; errors of the
 /// called routines; `InvalidInput` for the cases listed in the module notes.
 pub fn create_sweep_scale(
     cur_t: &Curve,
@@ -288,7 +288,7 @@ fn sweep_scale(
     let seg_pbnds: Vec<LinearSeg> = if pt == 1 {
         // Error check: curT better be linear.
         if !cur_t.is_line(MODEL_TOL) {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         let (start, end) = cur_t.param_bounds();
         match cur_s {
@@ -954,40 +954,22 @@ fn limit_inner_cross_derivs(net: &mut Net, k: usize) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for fewer than three curves, rational input, or boundaries
-/// that do not join (by more than `NL_MTOL`); [`NlibCode::Geometry`] when an inner
+/// [`NurbsFailure::Input`] for fewer than three curves, rational input, or boundaries
+/// that do not join (by more than `NL_MTOL`); [`NurbsFailure::Geometry`] when an inner
 /// curve's quadratic has fewer than two roots; errors of the called routines;
 /// `InvalidInput` for a `der` with fewer entries than `cur` and the cases listed in
 /// the module notes.
 pub fn fill_n_sided_hole(
     cur: &mut [Curve],
-    der: Option<&mut [Option<Curve>]>,
-    eps: f64,
-    center: Option<(Vec3, Vec3)>,
-) -> Result<NSidedFill> {
-    fill_n_sided_hole_with(cur, der, eps, center, false)
-}
-
-/// [`fill_n_sided_hole`] with the opt-in fix of WR-461 (#1170): with `stay_inside`,
-/// the cross-boundary derivatives across the inner curves are shortened where their
-/// cubic blend from the opposite boundary would cross that boundary's tangent
-/// plane (see `limit_inner_cross_derivs`).
-///
-/// # Errors
-///
-/// As [`fill_n_sided_hole`].
-pub fn fill_n_sided_hole_with(
-    cur: &mut [Curve],
     mut der: Option<&mut [Option<Curve>]>,
     eps: f64,
     center: Option<(Vec3, Vec3)>,
-    stay_inside: bool,
 ) -> Result<NSidedFill> {
     const OP: &str = OP_FILL;
 
     // Check input.
     if cur.len() < 3 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let k = cur.len() - 1;
     if let Some(d) = der.as_deref() {
@@ -1005,14 +987,14 @@ pub fn fill_n_sided_hole_with(
     for i in 0..=k {
         let c = mt(cur, i, OP)?;
         if c.is_rational() {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         if !c.is_3d() {
             c.to_3d();
         }
         if let Some(d) = der_at(&der, i) {
             if d.is_rational() {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
         }
     }
@@ -1044,7 +1026,7 @@ pub fn fill_n_sided_hole_with(
         let mr = cb.eval(first_knot(cb, OP)?, Side::Left)?;
         let a = ml - mr;
         if a.length() > MODEL_TOL {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
     }
 
@@ -1226,7 +1208,7 @@ pub fn fill_n_sided_hole_with(
         let fac = match solve_quadratic(alf, bet, gam)? {
             QuadraticRoots::Two(_, r2) => r2,
             QuadraticRoots::None | QuadraticRoots::One(_) => {
-                return Err(SolidError::nlib(OP, NlibCode::Geometry));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Geometry));
             }
         };
         let fac = fac / 3.0;
@@ -1406,9 +1388,10 @@ pub fn fill_n_sided_hole_with(
         net.make_compatible(i, k)?;
     }
 
-    if stay_inside {
-        limit_inner_cross_derivs(&mut net, k)?;
-    }
+    // Not upstream (WR-461, #1170): the cross-boundary derivatives across the inner
+    // curves are shortened where their cubic blend from the opposite boundary would cross
+    // that boundary's tangent plane.
+    limit_inner_cross_derivs(&mut net, k)?;
 
     // Fit bicubically blended Coons patches into each rectangular hole.
     let mut sur_a: Vec<Surface> = Vec::with_capacity(k + 1);
@@ -1579,10 +1562,7 @@ mod tests {
         let r = create_sweep_scale(&t, &section(), Vec3::Z, &SweepScaleOptions::default());
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -1627,10 +1607,7 @@ mod tests {
         let r = fill_n_sided_hole(&mut cur, None, 1.0, None);
         assert!(matches!(
             r,
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 

@@ -4,13 +4,13 @@ use std::{fmt, marker::PhantomData};
 
 use serde::{Deserialize, Serialize};
 use solidcraft_render::{
-    Camera,
     job::{
-        CpuBudget, CpuProgressiveOptions, DirectionalLightOptions, JobOptions, LightingPreset, PunctualLightOptions, RaytraceEnvironmentOptions,
-        RaytraceOptions, RectangleLightOptions, StudioLighting, Sun, ThinLens, ToneMap,
+        CpuBudget, CpuProgressiveOptions, DenoiseSettings, DirectionalLightOptions, JobOptions, LightingPreset, PunctualLightOptions,
+        RaytraceEnvironmentOptions, RaytraceOptions, RectangleLightOptions, StudioLighting, Sun, ThinLens, ToneMap,
     },
     lighting::environment::SkyGradient,
 };
+use solidcraft_viewport::Camera;
 
 use crate::{
     DocError, Result,
@@ -82,6 +82,18 @@ impl RenderJob {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CpuJob {
+    /// Zero selects a bounded native worker count; one retains serial transport.
+    #[serde(skip_serializing_if = "zero_threads")]
+    pub threads: u16,
+    /// Spend HDR lighting samples according to captured environment radiance.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub environment_importance_sampling: bool,
+    /// Explicit ray-footprint mip and bounded anisotropic texture filtering.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub texture_filtering: bool,
+    /// Approximate the missing microfacet bounces of rough isotropic conductors.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub metal_energy_compensation: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<solidcraft_render::job::CausticOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,6 +110,13 @@ pub struct CpuJob {
     pub path: Option<solidcraft_render::job::CpuPathOptions>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub denoise: bool,
+    #[serde(skip_serializing_if = "DenoiseSettings::is_default")]
+    pub denoise_settings: DenoiseSettings,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub denoise_diagnostics: bool,
+    /// Internal scale; saved width and height remain the exported image size.
+    #[serde(skip_serializing_if = "solidcraft_render::job::single_supersample")]
+    pub supersampling: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lens: Option<ThinLens>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -129,6 +148,10 @@ pub struct CpuJob {
 impl Default for CpuJob {
     fn default() -> Self {
         Self {
+            threads: 0,
+            environment_importance_sampling: false,
+            texture_filtering: false,
+            metal_energy_compensation: false,
             caustics: None,
             volume: None,
             sun: None,
@@ -136,6 +159,9 @@ impl Default for CpuJob {
             aging: Default::default(),
             adaptive: None,
             denoise: false,
+            denoise_settings: DenoiseSettings::default(),
+            denoise_diagnostics: false,
+            supersampling: 1,
             path: None,
             lens: None,
             output: None,
@@ -200,6 +226,10 @@ impl CpuJob {
             })
             .transpose()?;
         let options = RaytraceOptions {
+            threads: self.threads,
+            environment_importance_sampling: self.environment_importance_sampling,
+            texture_filtering: self.texture_filtering,
+            metal_energy_compensation: self.metal_energy_compensation,
             caustics: self.caustics,
             volume: self.volume,
             sun: self.sun.map(Box::new),
@@ -207,6 +237,9 @@ impl CpuJob {
             aging: (!aging.is_empty()).then(|| Box::new(aging)),
             adaptive: self.adaptive.map(Box::new),
             denoise: self.denoise,
+            denoise_settings: self.denoise_settings,
+            denoise_diagnostics: self.denoise_diagnostics,
+            supersampling: self.supersampling,
             path: self.path,
             lens: self.lens,
             output: self.output.clone(),
@@ -233,6 +266,12 @@ impl CpuJob {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct GpuJob {
+    /// Explicit ray-footprint mip and bounded anisotropic texture filtering.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub texture_filtering: bool,
+    /// Approximate the missing microfacet bounces of rough isotropic conductors.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub metal_energy_compensation: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<solidcraft_render::job::CausticOptions>,
     #[serde(skip_serializing_if = "crate::render_aging::SavedAgingStack::is_empty")]
@@ -255,6 +294,16 @@ pub struct GpuJob {
     pub seed: u32,
     pub tone_map: ToneMap,
     pub denoise: bool,
+    /// Biased firefly control; absent keeps every path contribution (see `JobOptions`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clamp_indirect: Option<f64>,
+    #[serde(skip_serializing_if = "DenoiseSettings::is_default")]
+    pub denoise_settings: DenoiseSettings,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub denoise_diagnostics: bool,
+    /// Internal scale; saved width and height remain the exported image size.
+    #[serde(skip_serializing_if = "solidcraft_render::job::single_supersample")]
+    pub supersampling: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lens: Option<ThinLens>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -269,6 +318,8 @@ impl Default for GpuJob {
     fn default() -> Self {
         let options = JobOptions::default();
         Self {
+            texture_filtering: false,
+            metal_energy_compensation: false,
             caustics: None,
             aging: Default::default(),
             nested_media: options.nested_media,
@@ -283,6 +334,10 @@ impl Default for GpuJob {
             seed: options.seed,
             tone_map: options.tone_map,
             denoise: options.denoise,
+            clamp_indirect: options.clamp_indirect,
+            denoise_settings: options.denoise_settings,
+            denoise_diagnostics: options.denoise_diagnostics,
+            supersampling: options.supersampling,
             lens: options.lens,
             lighting: options.lighting,
             environment: None,
@@ -317,6 +372,8 @@ impl GpuJob {
             environment.validate()?;
         }
         let options = JobOptions {
+            texture_filtering: self.texture_filtering,
+            metal_energy_compensation: self.metal_energy_compensation,
             caustics: self.caustics,
             aging: self.aging.parameters_only()?,
             nested_media: self.nested_media,
@@ -331,6 +388,10 @@ impl GpuJob {
             seed: self.seed,
             tone_map: self.tone_map,
             denoise: self.denoise,
+            clamp_indirect: self.clamp_indirect,
+            denoise_settings: self.denoise_settings,
+            denoise_diagnostics: self.denoise_diagnostics,
+            supersampling: self.supersampling,
             lens: self.lens,
             lighting: self.lighting,
             exposure_ev,
@@ -363,6 +424,10 @@ impl SkyEnvironment {
         }
         Ok(())
     }
+}
+
+fn zero_threads(threads: &u16) -> bool {
+    *threads == 0
 }
 
 fn unit() -> f64 {
@@ -477,4 +542,43 @@ mod cpu_volume_portable_tests {
         job.progressive = None;
         assert_eq!(serde_json::to_value(job).unwrap(), old);
     }
+}
+
+#[cfg(test)]
+#[test]
+fn portable_quality_controls_preserve_explicit_values_and_legacy_defaults() {
+    let old_cpu: CpuJob = serde_json::from_str("{}").unwrap();
+    let old_gpu: GpuJob = serde_json::from_str("{}").unwrap();
+    assert_eq!(old_cpu.threads, 0);
+    assert_eq!((old_cpu.supersampling, old_gpu.supersampling), (1, 1));
+    assert_eq!(old_cpu.denoise_settings, DenoiseSettings::default());
+    assert_eq!(old_gpu.denoise_settings, DenoiseSettings::default());
+    assert!(!old_cpu.denoise_diagnostics && !old_gpu.denoise_diagnostics);
+    assert!(old_cpu.denoise_settings.optical_filter && old_gpu.denoise_settings.optical_filter);
+    let opaque_only = DenoiseSettings { optical_filter: false, ..Default::default() };
+    for wire in [
+        serde_json::to_value(CpuJob { denoise: true, denoise_settings: opaque_only, ..Default::default() }).unwrap(),
+        serde_json::to_value(GpuJob { denoise: true, denoise_settings: opaque_only, ..Default::default() }).unwrap(),
+    ] {
+        assert_eq!(wire["denoise_settings"]["optical_filter"], false);
+    }
+    let filter = DenoiseSettings { passes: 2, strength: 0.35, firefly_suppression: false, optical_filter: false };
+    let cpu = CpuJob { threads: 4, supersampling: 2, denoise: true, denoise_settings: filter, denoise_diagnostics: true, ..Default::default() };
+    let gpu = GpuJob { samples: 128, supersampling: 2, denoise: true, denoise_settings: filter, denoise_diagnostics: true, ..Default::default() };
+    let cpu_reopened: CpuJob = serde_json::from_value(serde_json::to_value(&cpu).unwrap()).unwrap();
+    let gpu_reopened: GpuJob = serde_json::from_value(serde_json::to_value(&gpu).unwrap()).unwrap();
+    assert_eq!(cpu_reopened, cpu);
+    assert_eq!(gpu_reopened, gpu);
+    let cpu_runtime = cpu_reopened.to_runtime(-1.0).unwrap();
+    let gpu_runtime = gpu_reopened.to_runtime(-1.0).unwrap();
+    assert_eq!((cpu_runtime.threads, cpu_runtime.supersampling), (4, 2));
+    assert_eq!((gpu_runtime.samples, gpu_runtime.supersampling), (128, 2));
+    assert_eq!(cpu_runtime.denoise_settings, filter);
+    assert_eq!(gpu_runtime.denoise_settings, filter);
+    assert!(!cpu_runtime.denoise_settings.optical_filter && !gpu_runtime.denoise_settings.optical_filter);
+    assert!(cpu_runtime.denoise_diagnostics && gpu_runtime.denoise_diagnostics);
+    assert!(CpuJob { threads: 65, ..cpu.clone() }.validate(0.0).is_err());
+    assert!(GpuJob { supersampling: 3, ..gpu.clone() }.validate(0.0).is_err());
+    assert!(CpuJob { denoise_settings: DenoiseSettings { strength: f64::NAN, ..filter }, ..cpu }.validate(0.0).is_err());
+    assert!(GpuJob { denoise_settings: DenoiseSettings { passes: 4, ..filter }, ..gpu }.validate(0.0).is_err());
 }

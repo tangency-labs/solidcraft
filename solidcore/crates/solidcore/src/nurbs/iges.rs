@@ -25,7 +25,7 @@
 //!   new [`Curve`] / [`Surface`], and take the entity data as one [`Entity126`] /
 //!   [`Entity128`] instead of six / ten positional arguments. The `NL_STACKS` arguments have no counterpart and
 //!   allocation cannot fail.
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The clamp routines' "no control points left" failure (`n < 0`), which upstream
 //!   flags without an error number, is [`SolidError::Degenerate`].
@@ -41,7 +41,7 @@
 //!   [`SolidError::InvalidInput`], so the clamp and knot-correction index arithmetic
 //!   cannot overflow.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::bezier::check_short_degree;
 use crate::nurbs::crv_basic::Curve;
@@ -54,10 +54,6 @@ const OP_128: &str = "nurbs::iges::iges_128_surface";
 const OP_VALIDATE: &str = "nurbs::iges::validate";
 const OP_CLAMP: &str = "nurbs::iges::clamp";
 const OP_CORRECT: &str = "nurbs::iges::correct_knots";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
@@ -128,7 +124,7 @@ fn scale_rows(d: f64, a: &[CPoint]) -> Vec<CPoint> {
 /// (`N_IgesValidate`): `U[p] <= v[0] < v[1] <= U[m-p]` and the knots are
 /// non-decreasing.
 ///
-/// Errors with [`NlibCode::Knot`] (`NL_KNT_ERR`) when either check fails, and with
+/// Errors with [`NurbsFailure::Knots`] (`NL_KNT_ERR`) when either check fails, and with
 /// `InvalidInput` when `p > m` or `u` holds fewer than `m + 1` knots.
 pub fn validate(u: &[f64], m: usize, p: usize, v: [f64; 2]) -> Result<()> {
     let knots = u
@@ -140,12 +136,12 @@ pub fn validate(u: &[f64], m: usize, p: usize, v: [f64; 2]) -> Result<()> {
     let up = knots.get(p).copied().ok_or_else(|| oob(OP_VALIDATE))?;
     let ump = knots.get(mp).copied().ok_or_else(|| oob(OP_VALIDATE))?;
     if up > v[0] || v[0] >= v[1] || ump < v[1] {
-        return Err(nlib(OP_VALIDATE, NlibCode::Knot));
+        return Err(SolidError::nurbs(OP_VALIDATE, NurbsFailure::Knots));
     }
     for pair in knots.windows(2) {
         if let [a, b] = pair {
             if a > b {
-                return Err(nlib(OP_VALIDATE, NlibCode::Knot));
+                return Err(SolidError::nurbs(OP_VALIDATE, NurbsFailure::Knots));
             }
         }
     }
@@ -561,9 +557,9 @@ pub struct Entity128<'a> {
 /// The curve is rational unless all weights equal `w[0]`; it is clamped to `v` with
 /// [`clamp_curve`] and its knots are corrected with [`correct_curve_knots`].
 ///
-/// Errors with [`NlibCode::Degree`] for `m` outside `1..=MAX_DEGREE`,
-/// [`NlibCode::Weight`] for a weight outside `[WEIGHT_MIN, WEIGHT_MAX]`,
-/// [`NlibCode::Knot`] from [`validate`], and as [`clamp_curve`] /
+/// Errors with [`NurbsFailure::Degree`] for `m` outside `1..=MAX_DEGREE`,
+/// [`NurbsFailure::Weight`] for a weight outside `[WEIGHT_MIN, WEIGHT_MAX]`,
+/// [`NurbsFailure::Knots`] from [`validate`], and as [`clamp_curve`] /
 /// [`correct_curve_knots`]; with `InvalidInput` when an array is shorter than `k` and
 /// `m` say.
 pub fn iges_126_curve(entity: &Entity126<'_>) -> Result<Curve> {
@@ -576,7 +572,7 @@ pub fn iges_126_curve(entity: &Entity126<'_>) -> Result<Curve> {
         .ok_or_else(|| invalid(OP_126, "size overflow"))?;
 
     if !(1..=MAX_DEGREE).contains(&pp) {
-        return Err(nlib(OP_126, NlibCode::Degree));
+        return Err(SolidError::nurbs(OP_126, NurbsFailure::Degree));
     }
     let w = w
         .get(..=nn)
@@ -590,9 +586,17 @@ pub fn iges_126_curve(entity: &Entity126<'_>) -> Result<Curve> {
 
     let w0 = w.first().copied().unwrap_or(0.0);
     let mut rat = false;
-    for &wi in w {
+    for (index, &wi) in w.iter().enumerate() {
         if wi < WEIGHT_MIN || wi > WEIGHT_MAX {
-            return Err(nlib(OP_126, NlibCode::Weight));
+            return Err(SolidError::nurbs(
+                OP_126,
+                NurbsFailure::WeightOutOfRange {
+                    index,
+                    weight: wi,
+                    min: WEIGHT_MIN,
+                    max: WEIGHT_MAX,
+                },
+            ));
         }
         if wi != w0 {
             rat = true;
@@ -628,9 +632,9 @@ pub fn iges_126_curve(entity: &Entity126<'_>) -> Result<Curve> {
 /// weighted even when it is [`NOZ`]); it is clamped with [`clamp_surface`] and its
 /// knots are corrected with [`correct_surface_knots`].
 ///
-/// Errors with [`NlibCode::Degree`] for a degree outside `1..=MAX_DEGREE`,
-/// [`NlibCode::Weight`] for a weight outside `[WEIGHT_MIN, WEIGHT_MAX]`,
-/// [`NlibCode::Knot`] from [`validate`] (u first), and as [`clamp_surface`] /
+/// Errors with [`NurbsFailure::Degree`] for a degree outside `1..=MAX_DEGREE`,
+/// [`NurbsFailure::Weight`] for a weight outside `[WEIGHT_MIN, WEIGHT_MAX]`,
+/// [`NurbsFailure::Knots`] from [`validate`] (u first), and as [`clamp_surface`] /
 /// [`correct_surface_knots`]; with `InvalidInput` when an array is shorter than the
 /// indices and degrees say.
 pub fn iges_128_surface(entity: &Entity128<'_>) -> Result<Surface> {
@@ -656,7 +660,7 @@ pub fn iges_128_surface(entity: &Entity128<'_>) -> Result<Surface> {
     let ss = size(mm, qq)?;
 
     if !(1..=MAX_DEGREE).contains(&pp) || !(1..=MAX_DEGREE).contains(&qq) {
-        return Err(nlib(OP_128, NlibCode::Degree));
+        return Err(SolidError::nurbs(OP_128, NurbsFailure::Degree));
     }
     let w = w
         .get(..=nn)
@@ -678,7 +682,7 @@ pub fn iges_128_surface(entity: &Entity128<'_>) -> Result<Surface> {
     for row in w {
         for &wij in row.get(..=mm).unwrap_or(&[]) {
             if wij < WEIGHT_MIN || wij > WEIGHT_MAX {
-                return Err(nlib(OP_128, NlibCode::Weight));
+                return Err(SolidError::nurbs(OP_128, NurbsFailure::Weight));
             }
             if wij != w00 {
                 rat = true;
@@ -733,7 +737,7 @@ mod tests {
         let u = [0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0];
         assert!(validate(&u, 6, 2, [0.0, 2.0]).is_ok());
         assert!(validate(&u, 6, 2, [0.5, 1.5]).is_ok());
-        let knot = Err(nlib(OP_VALIDATE, NlibCode::Knot));
+        let knot = Err(SolidError::nurbs(OP_VALIDATE, NurbsFailure::Knots));
         assert_eq!(validate(&u, 6, 2, [1.0, 1.0]), knot);
         assert_eq!(validate(&u, 6, 2, [-0.5, 1.0]), knot);
         assert_eq!(validate(&u, 6, 2, [0.0, 2.5]), knot);
@@ -771,20 +775,25 @@ mod tests {
         let t = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
         let pts = line_pts(3);
         let e = |r: Result<Curve>| match r {
-            Err(SolidError::Nlib { code, .. }) => Some(code),
+            Err(e) => e.nurbs_failure().copied(),
             _ => None,
         };
         assert_eq!(
             e(c126(2, 0, &t, &[1.0; 3], &pts, [0.0, 1.0])),
-            Some(NlibCode::Degree)
+            Some(NurbsFailure::Degree)
         );
         assert_eq!(
             e(c126(2, 2, &t, &[1.0, 1e-4, 1.0], &pts, [0.0, 1.0])),
-            Some(NlibCode::Weight)
+            Some(NurbsFailure::WeightOutOfRange {
+                index: 1,
+                weight: 1e-4,
+                min: WEIGHT_MIN,
+                max: WEIGHT_MAX
+            })
         );
         assert_eq!(
             e(c126(2, 2, &t, &[1.0; 3], &pts, [1.0, 0.0])),
-            Some(NlibCode::Knot)
+            Some(NurbsFailure::Knots)
         );
         assert!(matches!(
             c126(2, 2, &t[..5], &[1.0; 3], &pts, [0.0, 1.0]),

@@ -4,7 +4,7 @@ use egui::Color32;
 use solidcraft_color::AnalysisColors;
 
 /// The primary (`active-3`) strokes, light then dark, that the tokens share with SolidCraft's icon artwork
-/// (`assets/icons/ui/design/palette.toml`, including its colour vision variants). ui-egui's icon tests hold them equal.
+/// (`crates/look/icons/design/palette.toml`, including its colour vision variants). The look crate's icon tests hold them equal.
 pub mod icon_strokes {
     pub const SKETCH_PRIMARY: [[u8; 3]; 2] = [[5, 127, 69], [18, 141, 69]];
     pub const CONSTRAINT_PRIMARY: [[u8; 3]; 2] = [[202, 71, 61], [193, 99, 88]];
@@ -189,6 +189,8 @@ impl Tokens {
             construction_geom: icon_primary(strokes::CONSTRUCTION_PRIMARY[0]),
             body: Color32::from_rgb(176, 186, 198),
             body_edge: Color32::from_rgb(40, 44, 52),
+            // Halfway from the edge colour to the body's: about half the edges' contrast.
+            isoparm: Color32::from_rgb(108, 115, 125),
             manipulator: Color32::from_rgb(40, 110, 220),
             joint_manipulator: Color32::from_rgb(235, 157, 0),
             joint_axis: Color32::from_rgb(0, 95, 110),
@@ -429,6 +431,7 @@ impl Tokens {
         t.grid_major = Color32::from_rgb(73, 79, 90);
         t.body = Color32::from_rgb(152, 156, 162);
         t.body_edge = Color32::from_rgb(16, 16, 18);
+        t.isoparm = Color32::from_rgb(84, 86, 90);
         t.sketch = Color32::from_rgb(92, 150, 255);
         t.sketch_fixed = Color32::from_rgb(232, 234, 238);
         t.sketch_halo = Color32::from_rgb(28, 32, 40);

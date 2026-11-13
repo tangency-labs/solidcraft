@@ -16,7 +16,7 @@
 //! | `ARC_TYPE_TOL` (private)                     | `ctl` of `N_CrvArcLength`         |
 //!
 //! Deviations:
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number (or the error of the called routine) instead of a flag
 //!   plus the global `NL_ERROR` record. The `NL_STACKS` arguments and the memory error
 //!   paths have no counterpart.
@@ -38,7 +38,7 @@
 //!   tolerance below the floating-point resolution of the curve, e.g. `0`); the port
 //!   gives up with [`SolidError::NotConverged`] after [`POLYLINE_MAX_SPLITS`] splits.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
 use crate::nurbs::bezier::calc_length;
@@ -130,7 +130,10 @@ impl Curve {
             return Err(e);
         }
         s.best.ok_or_else(|| {
-            SolidError::nlib("nurbs::crv_geom::Curve::closest_pt", NlibCode::Convergence)
+            SolidError::nurbs(
+                "nurbs::crv_geom::Curve::closest_pt",
+                NurbsFailure::NotConverged,
+            )
         })
     }
 
@@ -196,7 +199,7 @@ impl Curve {
 
             // Check #2: zero cosine.
             if float_op_is_bad(num, der * dis, FloatOp::Division) {
-                return fail(best, SolidError::nlib(OP, NlibCode::Convergence));
+                return fail(best, SolidError::nurbs(OP, NurbsFailure::NotConverged));
             }
 
             let zco = num.abs() / (der * dis);
@@ -210,7 +213,7 @@ impl Curve {
             let den = dot + der * der;
 
             if float_op_is_bad(num, den, FloatOp::Division) {
-                return fail(best, SolidError::nlib(OP, NlibCode::Convergence));
+                return fail(best, SolidError::nurbs(OP, NurbsFailure::NotConverged));
             }
 
             let uold = unew;
@@ -226,7 +229,7 @@ impl Curve {
                         ucount = 0;
                     } else {
                         if ucount >= 2 {
-                            return fail(best, SolidError::nlib(OP, NlibCode::Convergence));
+                            return fail(best, SolidError::nurbs(OP, NurbsFailure::NotConverged));
                         }
                         unew = uold;
                         ucount += 1;
@@ -239,7 +242,7 @@ impl Curve {
                         ucount = 0;
                     } else {
                         if ucount >= 2 {
-                            return fail(best, SolidError::nlib(OP, NlibCode::Convergence));
+                            return fail(best, SolidError::nurbs(OP, NurbsFailure::NotConverged));
                         }
                         unew = uold;
                         ucount += 1;
@@ -267,7 +270,7 @@ impl Curve {
 
         // If no convergence, error out.
         if k >= itlim {
-            return fail(best, SolidError::nlib(OP, NlibCode::Convergence));
+            return fail(best, SolidError::nurbs(OP, NurbsFailure::NotConverged));
         }
 
         Ok(ClosestPtSearch { best, error: None })
@@ -650,20 +653,14 @@ mod tests {
             .unwrap();
         assert!(s.best.is_none());
         assert!(matches!(
-            s.error,
-            Some(SolidError::Nlib {
-                code: NlibCode::Convergence,
-                ..
-            })
+            s.error.as_ref().and_then(SolidError::nurbs_failure),
+            Some(NurbsFailure::NotConverged)
         ));
         assert!(c
             .closest_pt(Vec3::ZERO, 2.0, 1e-9, 1e-9)
             .is_err_and(|e| matches!(
-                e,
-                SolidError::Nlib {
-                    code: NlibCode::Parameter,
-                    ..
-                }
+                e.nurbs_failure(),
+                Some(NurbsFailure::ParameterOutside { .. })
             )));
     }
 

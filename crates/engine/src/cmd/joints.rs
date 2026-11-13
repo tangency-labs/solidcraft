@@ -16,12 +16,12 @@ use solidcraft_geom::Aabb3;
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
 use crate::schema::joints::{
-    AsBuiltJointParams, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams, DeleteJointResult,
-    DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams, InspectJointResult,
-    JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop, LinkInfo, ListJointsParams, ListJointsResult,
-    ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams, NamedValue, OccurrenceDof, RackPinionParams,
-    ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveReport,
-    SolveResult, ValueUnit,
+    AsBuiltJointParams, BudgetStop, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams,
+    DeleteJointResult, DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams,
+    InspectJointResult, JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop, LinkInfo,
+    ListJointsParams, ListJointsResult, ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams,
+    NamedValue, OccurrenceDof, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams, RigidGroupResult,
+    ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -47,6 +47,9 @@ const CAM_CONTRACT: TypedContract<CamParams> = TypedContract::new();
 #[path = "joints_inspect.rs"]
 mod inspect;
 
+#[path = "assembly_constraint.rs"]
+pub(crate) mod constraint;
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("joint.origin", "Joint Origin", crate::checked!("joint.origin", joint_origin))
         .at("SOLID", "CREATE")
@@ -54,7 +57,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ORIGIN_CONTRACT)
         .output(output_schema_for::<MakeJointOriginResult>)
         .params(
-        "name?, occurrence?: id|name (default: from the pick, or the named face's component), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z]; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
+        "name?, occurrence?: id|name (default: from the pick, or the named face's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z] | plane: \"XY\"|\"XZ\"|\"YZ\"|\"o:<ids>/origin/<item>\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
     ),
     CommandSpec::new("joint.create", "Joint", crate::checked!("joint.create", joint))
         .at("SOLID", "ASSEMBLE")
@@ -64,9 +67,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<JointAddedResult>)
         .params(
         "type: rigid|revolute|slider|cylindrical|pin_slot|planar|ball, or a relation: parallel|perpendicular|angle|point_on_plane|point_on_line|line_on_plane \
-         (ties only some directions or points, made where the parts are; several between two parts add up); a, b: joint origins ({occurrence, face|circle|edge|point: [x,y,z] in world, or face|circle: \"<face name>\"; z? for a point, end?, x? as joint.origin} | origin name); \
+         (ties only some directions or points, made where the parts are; several between two parts add up); a, b: joint origins ({occurrence, face|circle|edge|point: [x,y,z] in world, or face|circle: \"<face name>\", plane: \"XY\"|\"o:<ids>/origin/<item>\"|\"<name>\", axis: \"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; z? for a point, end?, x? as joint.origin} | origin name); \
          values?: [angles in deg or expressions, distances]; limits?: [[min, max] | null…]; flip?: bool (default false: the origins are mated, \
-         b's z against a's as two faces meet; true: b's z along a's, so two origins given at one point with the same z and x stay as they are; \
+         b's z against a's as two faces meet - two plane or axis datums mate aligned, each part keeping its side of the datum, and flip mates them; \
+         true: b's z along a's, so two origins given at one point with the same z and x stay as they are; \
          a point origin without x takes its x from z, so give x on both, or use joint.as_built, to keep a turned part where it is); \
          offset?: mm or an expression; angle?: deg or an expression (an angle relation's tilt from mated; for other joints the default \
          is none, or a half turn where that turns b less, so faces that already meet stay as they are); name?; quiet?: bool (leave \
@@ -101,7 +105,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          held: [{name, requested, value, unit, why}] for each driven value that ended up elsewhere (a motion link sets it, as a screw's \
          travel follows its turn; a limit; contact; a closed loop); moved: whether any occurrence moved; \
          reason: why the joint can move nothing (suppressed: nothing is stored; its origins lost; its chain joined to nothing grounded → unconnected: \
-         the occurrence named; or, when nothing moved, the first held value's why); index?: zero-based coordinate to drive with value (the other coordinates follow); continuous?: bool (drag frame, suppress UI echo)",
+         the occurrence named; or, when nothing moved, the first held value's why); index?: zero-based coordinate to drive with value (the other coordinates follow); continuous?: bool (drag frame, suppress UI echo); stop_at_budget?: bool (default false: a contact check past its sample or work budget fails the drive; true: the drive stops at the last placement checked clear → stopped_by_budget {budget: samples|work|intersections, fraction})",
     ),
     CommandSpec::new("joint.reach", "Reach Point", crate::checked!("joint.reach", reach))
         .icon("reach")
@@ -213,7 +217,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("interference")
         .noundo()
         .params(
-        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre; unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
+        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns); exclude_pairs?: [[a, b]] (pairs left out, such as a pin in its hole: each side a body's world name or an occurrence id|name, matching every body under it; pairs_excluded counts them) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre, and a_part, b_part: {component, path: [occurrence names], path_ids} where each body sits (also on unchecked pairs); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, pairs_excluded, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
     ),
 ];
 
@@ -235,9 +239,12 @@ pub fn place(s: &mut Session) -> joints::Solution {
 
 /// Work out the offsets, angles and values joints were given as expressions again (a parameter
 /// may have changed). One that can't be worked out (its parameter gone) keeps its numbers; the
-/// solve leaves that joint out and says why.
+/// solve leaves that joint out and says why. A tangent constraint's offset is its gap plus the
+/// radius of its round face as the face is now, so the part keeps resting on the plane when the
+/// radius changes; a face that can't be found keeps the numbers it has.
 fn reexpress(s: &mut Session) {
     let params = joints::Params::new(&s.doc);
+    let st = s.model.state();
     let changed: Vec<(usize, (f64, f64, Vec<f64>))> = s
         .doc
         .assembly
@@ -246,7 +253,10 @@ fn reexpress(s: &mut Session) {
         .enumerate()
         .filter(|(_, j)| !j.exprs.is_empty())
         .filter_map(|(i, j)| {
-            let (o, a, mut q) = joints::expressed(&params, j).ok()?;
+            let (mut o, a, mut q) = joints::expressed(&params, j).ok()?;
+            if j.constraint == Some(joints::Constraint::Tangent) {
+                o += s.doc.origin_radius(&st, &j.b).ok()?;
+            }
             joints::clamp(j, &mut q);
             ((o, a) != (j.offset, j.angle) || q != j.values).then_some((i, (o, a, q)))
         })
@@ -464,44 +474,320 @@ pub(crate) fn occurrence_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result
         return Ok(o.id);
     }
     // A component name: its first occurrence.
-    s.doc.find_component(&key).and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id).ok_or_else(|| bad(cmd, format!("no occurrence `{key}`")))
+    s.doc
+        .resolve_component(&key)
+        .map_err(|error| bad(cmd, error.to_string()))?
+        .and_then(|c| s.doc.occurrence_of(c))
+        .map(|o| o.id)
+        .ok_or_else(|| bad(cmd, format!("no occurrence `{key}`")))
 }
 
 /// The occurrence whose bodies are nearest a world point (0 = root bodies).
 pub(crate) fn occurrence_at(s: &Session, p: Vec3) -> Option<u64> {
+    placement_at(s, p).map(|path| path.last().copied().unwrap_or(0))
+}
+
+/// The placement (occurrence ids from the root; empty for the root) whose bodies are nearest a
+/// world point. Each copy of a sub-assembly placed more than once is a placement of its own; on a
+/// tie, the smaller path (the earlier occurrences) wins.
+pub(crate) fn placement_at(s: &Session, p: Vec3) -> Option<Vec<u64>> {
     let st = s.model.state();
-    let mut best: Option<(f64, u64)> = None;
+    let placements = s.doc.placements();
+    let mut of: BTreeMap<u64, Vec<&(u64, Vec<u64>, solidcraft_doc::Mat)>> = BTreeMap::new();
+    for placement in &placements {
+        of.entry(placement.0).or_default().push(placement);
+    }
+    let mut best: Option<(f64, &Vec<u64>)> = None;
     for b in &st.bodies {
-        let comp = s.doc.model_body_component(b);
-        let occs: Vec<u64> = if comp == 0 { vec![0] } else { s.doc.occurrences.iter().filter(|o| o.component == comp).map(|o| o.id).collect() };
-        for occ in occs {
-            let t = if occ == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occ) };
-            let inv = solidcraft_doc::mat_inverse(&t)?;
+        // Which body a pick is on is a model decision: its exact box, not its display mesh's.
+        let Ok(bb) = b.body.exact_bounds() else { continue };
+        for (_, path, t) in of.get(&s.doc.model_body_component(b)).into_iter().flatten() {
+            // A placement that can't be undone (a hand-edited file) is skipped, not every pick.
+            let Some(inv) = solidcraft_doc::mat_inverse(t) else { continue };
             let q = solidcraft_doc::apply_point(&inv, p);
-            let bb = b.mesh().bounds();
             let c = Vec3::new(q.x.clamp(bb.min.x, bb.max.x), q.y.clamp(bb.min.y, bb.max.y), q.z.clamp(bb.min.z, bb.max.z));
             let d = c.dist(q);
-            if best.is_none_or(|(bd, _)| d < bd) {
-                best = Some((d, occ));
+            if best.is_none_or(|(bd, bp)| d < bd || (d == bd && path < bp)) {
+                best = Some((d, path));
             }
         }
     }
-    best.map(|(_, o)| o)
+    best.map(|(_, path)| path.clone())
+}
+
+/// The placement a world pick was made on, for an origin: its `path` (checked, ending at its
+/// `occurrence`), or with no occurrence given, the placement nearest the pick. `None` when the
+/// origin names its occurrence alone.
+fn picked_placement(s: &Session, v: &Value, world: Option<Vec3>, cmd: &str) -> Result<Option<Vec<u64>>> {
+    // `null` is left out, as for the other optional keys.
+    match (v.get("path").filter(|p| !p.is_null()), v.get("occurrence"), world) {
+        (Some(path), occurrence, _) => {
+            let last = path.as_array().and_then(|ids| ids.last()).cloned();
+            let id = occurrence_id(s, occurrence.or(last.as_ref()), cmd)?;
+            super::component::occurrence_path(s, v, id, cmd).map(Some)
+        }
+        (None, None, Some(world)) => placement_at(s, world).map(Some).ok_or_else(|| bad(cmd, "no body there")),
+        (None, ..) => Ok(None),
+    }
+}
+
+/// An origin's parameters with their world points and directions moved from the placement
+/// `path` to its last occurrence's first placement, where [`origin_param`] reads them (a part in
+/// a sub-assembly placed more than once is found there).
+pub(crate) fn in_first_placement(s: &Session, v: &Value, path: &[u64], cmd: &str) -> Result<Value> {
+    let placed = s.doc.path_placement(path).map(|(_, m)| m).ok_or_else(|| bad(cmd, "that occurrence path is not in the design"))?;
+    let first = joints::occurrence_world(&s.doc, path.last().copied().unwrap_or(0));
+    let to_first = solidcraft_doc::mat_inverse(&placed)
+        .map(|inv| solidcraft_doc::mat_mul(&first, &inv))
+        .ok_or_else(|| bad(cmd, "invalid occurrence placement"))?;
+    let point = |v: &mut Value| {
+        if let Some(p) = vec3(v) {
+            let p = solidcraft_doc::apply_point(&to_first, p);
+            *v = json!([p.x, p.y, p.z]);
+        }
+    };
+    let dir = |v: &mut Value| {
+        if let Some(d) = vec3(v) {
+            let d = solidcraft_doc::apply_vector(&to_first, d);
+            *v = json!([d.x, d.y, d.z]);
+        }
+    };
+    let mut out = v.clone();
+    for key in ["face", "circle", "edge", "point", "corner", "on"] {
+        out.get_mut(key).map(point);
+    }
+    out.get_mut("z").map(dir);
+    out.get_mut("x").map(dir);
+    out.get_mut("x").and_then(|x| x.get_mut("face")).map(point);
+    if let Some(frame) = out.get_mut("frame") {
+        frame.get_mut("origin").map(point);
+        frame.get_mut("z").map(dir);
+        frame.get_mut("x").map(dir);
+    }
+    Ok(out)
+}
+
+/// The occurrence path of an occurrence id, root first (the ids `Document::placement_frame`
+/// walks; the first occurrence stands in for a parent component, as `occurrence_world` does).
+fn occurrence_path(s: &Session, occurrence: u64) -> Vec<u64> {
+    let mut path = Vec::new();
+    let mut cur = s.doc.occurrences.iter().find(|o| o.id == occurrence);
+    for _ in 0..64 {
+        let Some(o) = cur else { break };
+        path.insert(0, o.id);
+        if o.parent == 0 {
+            break;
+        }
+        cur = s.doc.occurrence_of(o.parent);
+    }
+    path
+}
+
+/// The side's own origin plane: the root keeps `PlaneRef::Origin` ("XY" of the design, as
+/// before), a placement saves its exact datum, re-resolved at every solve.
+fn own_plane(s: &Session, occurrence: u64, name: &str) -> solidcraft_doc::PlaneRef {
+    match solidcraft_doc::construct::DatumItem::parse(name).filter(|_| occurrence != 0) {
+        Some(item) => solidcraft_doc::PlaneRef::Datum { datum: solidcraft_doc::construct::DatumRef { path: occurrence_path(s, occurrence), item } },
+        None => solidcraft_doc::PlaneRef::Origin { name: name.to_string() },
+    }
+}
+
+/// A side's plane from a name, in the order every resolver shares: the feature named exactly,
+/// then the datum key, then the origin planes. A bare "XY"/"XZ"/"YZ" is the side's own
+/// component's datum (the root's own when `occurrence` is 0).
+fn plane_side(s: &Session, name: &str, occurrence: u64, cmd: &str) -> Result<solidcraft_doc::PlaneRef> {
+    let trimmed = name.trim();
+    let st = s.model.state();
+    if let Some(c) = st.construct.iter().find(|c| c.name == trimmed) {
+        if matches!(c.geom, solidcraft_doc::construct::ConstructGeom::Plane(_)) {
+            return Ok(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into() });
+        }
+        return Err(bad(cmd, format!("`{trimmed}` is not a construction plane")));
+    }
+    if let Some(datum) = solidcraft_doc::construct::DatumRef::parse_key(trimmed) {
+        return Ok(solidcraft_doc::PlaneRef::Datum { datum });
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    if matches!(upper.as_str(), "XY" | "XZ" | "YZ") {
+        return Ok(own_plane(s, occurrence, &upper));
+    }
+    Err(bad(cmd, format!("no plane `{trimmed}`")))
+}
+
+/// A side's axis from a name, in the same order: the feature named exactly, then the datum key,
+/// then the origin axes. A bare "X"/"Y"/"Z" is the side's own component's axis.
+fn axis_side(s: &Session, name: &str, cmd: &str) -> Result<solidcraft_doc::joints::AxisRef> {
+    let trimmed = name.trim();
+    let st = s.model.state();
+    if let Some(c) = st.construct.iter().find(|c| c.name == trimmed) {
+        if matches!(c.geom, solidcraft_doc::construct::ConstructGeom::Axis { .. }) {
+            return Ok(solidcraft_doc::joints::AxisRef::construction(trimmed.to_string()));
+        }
+        return Err(bad(cmd, format!("`{trimmed}` is not a construction axis")));
+    }
+    if let Some(datum) = solidcraft_doc::construct::DatumRef::parse_key(trimmed) {
+        return Ok(solidcraft_doc::joints::AxisRef::datum(datum));
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    if matches!(upper.as_str(), "X" | "Y" | "Z") {
+        return Ok(solidcraft_doc::joints::AxisRef::origin(upper));
+    }
+    Err(bad(cmd, format!("no axis `{trimmed}`")))
+}
+
+/// The occurrence a string side sits on when none is given, in the order every resolver shares:
+/// the named construction feature's component, then its datum key's own placement, the root for
+/// a bare origin name, else where the pick is.
+fn side_occurrence(s: &Session, name: &str, world_pick: Option<Vec3>) -> u64 {
+    let trimmed = name.trim();
+    let st = s.model.state();
+    if let Some(c) = st.construct.iter().find(|c| c.name == trimmed) {
+        let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+        return if comp == 0 { 0 } else { s.doc.occurrence_of(comp).map(|o| o.id).unwrap_or(0) };
+    }
+    if let Some(datum) = solidcraft_doc::construct::DatumRef::parse_key(trimmed) {
+        return datum.path.last().copied().unwrap_or(0);
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    if matches!(upper.as_str(), "XY" | "XZ" | "YZ" | "X" | "Y" | "Z") {
+        return 0;
+    }
+    world_pick.map_or(0, |w| occurrence_at(s, w).unwrap_or(0))
+}
+
+/// Resolve an origin from a name, in the order every resolver shares: a construction plane or
+/// axis named exactly (bound to its component), then the origin planes ("XY", "XZ", "YZ") and
+/// axes ("X", "Y", "Z"). A named joint origin is the caller's.
+fn origin_from_name(s: &Session, name: &str, occurrence: Option<u64>, cmd: &str) -> Result<Option<JointOrigin>> {
+    let name_trim = name.trim();
+    // A construction plane or axis feature, by name, bound to its component: the side sits on
+    // that component's first occurrence unless an explicit one is given.
+    let st = s.model.state();
+    if let Some(c) = st.construct.iter().find(|c| c.name == name_trim) {
+        let occ = occurrence.unwrap_or_else(|| {
+            let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+            if comp == 0 { 0 } else { s.doc.occurrence_of(comp).map(|o| o.id).unwrap_or(0) }
+        });
+        let snap = match &c.geom {
+            solidcraft_doc::construct::ConstructGeom::Plane(_) => {
+                Snap::Plane { plane: Box::new(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into() }), pick: None, x: None }
+            }
+            solidcraft_doc::construct::ConstructGeom::Axis { .. } => {
+                Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::construction(name_trim.to_string())), pick: None, x: None }
+            }
+            _ => return Ok(None),
+        };
+        return settle(s, JointOrigin::new(occ, snap), &json!({}), cmd).map(Some);
+    }
+    let upper = name_trim.to_ascii_uppercase();
+    let occ = occurrence.unwrap_or(0);
+    if matches!(upper.as_str(), "XY" | "XZ" | "YZ") {
+        let snap = Snap::Plane { plane: Box::new(own_plane(s, occ, &upper)), pick: None, x: None };
+        return settle(s, JointOrigin::new(occ, snap), &json!({}), cmd).map(Some);
+    }
+    if matches!(upper.as_str(), "X" | "Y" | "Z") {
+        let snap = Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::origin(upper)), pick: None, x: None };
+        return settle(s, JointOrigin::new(occ, snap), &json!({}), cmd).map(Some);
+    }
+    Ok(None)
+}
+
+/// A joint origin on a plane: a construction plane by name, a placement's datum key
+/// ("o:2/origin/XY"), the root's origin planes ("XY"), or a plane definition object. Optional
+/// `pick: [x,y,z]` sets the origin along the plane; `x` sets the turn.
+fn plane_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
+    let p_val = v.get("plane").ok_or_else(|| bad(cmd, "`plane` parameter required"))?;
+    let world_pick = ["pick", "at", "point"].iter().find_map(|k| v.get(*k).and_then(vec3));
+    let occurrence = match v.get("occurrence") {
+        Some(o) => occurrence_id(s, Some(o), cmd)?,
+        None => p_val
+            .as_str()
+            .map(|name| side_occurrence(s, name, world_pick))
+            .unwrap_or_else(|| world_pick.map_or(0, |w| occurrence_at(s, w).unwrap_or(0))),
+    };
+    let t = if occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occurrence) };
+    let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
+    let local = |p: Vec3| solidcraft_doc::apply_point(&inv, p);
+    let component = component_of(s, occurrence);
+
+    let plane_ref = match p_val {
+        Value::String(name) => plane_side(s, name, occurrence, cmd)?,
+        Value::Object(_) => serde_json::from_value(p_val.clone()).map_err(|e| bad(cmd, format!("invalid plane definition: {e}")))?,
+        _ => return Err(bad(cmd, "`plane` must be a plane name (e.g. \"XY\", \"o:2/origin/XY\", \"Plane1\") or a plane definition object")),
+    };
+
+    let pick = world_pick.map(local);
+    let x = x_param(s, v, component, &inv, cmd)?;
+    let snap = Snap::Plane { plane: Box::new(plane_ref), pick, x };
+    settle(s, JointOrigin::new(occurrence, snap), v, cmd)
+}
+
+/// A joint origin on an axis: a construction axis by name, a placement's datum key
+/// ("o:2/origin/X"), the root's origin axes ("X"), or an axis definition object. Optional
+/// `pick: [x,y,z]` sets the origin along the line; `x` sets the turn.
+fn axis_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
+    let a_val = v.get("axis").ok_or_else(|| bad(cmd, "`axis` parameter required"))?;
+    let world_pick = ["pick", "at", "point"].iter().find_map(|k| v.get(*k).and_then(vec3));
+    let occurrence = match v.get("occurrence") {
+        Some(o) => occurrence_id(s, Some(o), cmd)?,
+        None => a_val
+            .as_str()
+            .map(|name| side_occurrence(s, name, world_pick))
+            .unwrap_or_else(|| world_pick.map_or(0, |w| occurrence_at(s, w).unwrap_or(0))),
+    };
+    let t = if occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occurrence) };
+    let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
+    let local = |p: Vec3| solidcraft_doc::apply_point(&inv, p);
+    let component = component_of(s, occurrence);
+
+    let axis_ref = match a_val {
+        Value::String(name) => axis_side(s, name, cmd)?,
+        Value::Object(_) => serde_json::from_value(a_val.clone()).map_err(|e| bad(cmd, format!("invalid axis definition: {e}")))?,
+        _ => return Err(bad(cmd, "`axis` must be an axis name (e.g. \"Z\", \"o:2/origin/X\", \"Axis1\") or an axis definition object")),
+    };
+
+    let pick = world_pick.map(local);
+    let x = x_param(s, v, component, &inv, cmd)?;
+    let snap = Snap::Axis { axis: Box::new(axis_ref), pick, x };
+    settle(s, JointOrigin::new(occurrence, snap), v, cmd)
 }
 
 /// A joint origin from parameters: a named origin, or a snap given in world coordinates.
 pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin> {
     let v = v.ok_or_else(|| bad(cmd, "joint origins `a` and `b` are required"))?;
     if let Value::String(name) = v {
-        return s
-            .doc
-            .assembly
-            .origins
-            .iter()
-            .find(|o| &o.name == name)
-            .map(|o| o.origin.clone())
-            .ok_or_else(|| bad(cmd, format!("no joint origin `{name}`")));
+        if let Some(o) = s.doc.assembly.origins.iter().find(|o| &o.name == name) {
+            return Ok(o.origin.clone());
+        }
+        if let Some(o) = origin_from_name(s, name, None, cmd)? {
+            return Ok(o);
+        }
+        return Err(bad(cmd, format!("no joint origin `{name}`")));
     }
+    // A plane or axis origin given in object form.
+    if v.get("plane").is_some() {
+        return plane_origin(s, v, cmd);
+    }
+    if v.get("axis").is_some() && v.get("edge").is_none() && v.get("point").is_none() {
+        return axis_origin(s, v, cmd);
+    }
+    let world = ["face", "circle", "edge", "point"].iter().find_map(|k| v.get(*k).and_then(vec3));
+    let world = world.or_else(|| v.get("frame").and_then(|f| f.get("origin")).and_then(vec3));
+    let Some(path) = picked_placement(s, v, world, cmd)? else { return origin_on_part(s, v, cmd) };
+    let (occurrence, inside) = joints::origin_anchor(&s.doc, &path);
+    let mut on_part = if inside.is_empty() { v.clone() } else { in_first_placement(s, v, &path, cmd)? };
+    if let Some(m) = on_part.as_object_mut() {
+        m.remove("path");
+        m.insert("occurrence".into(), json!(path.last().copied().unwrap_or(0)));
+    }
+    // A part in a sub-assembly placed more than once is found on its first placement, then the
+    // origin goes on the copy it was picked on (#11426).
+    let o = origin_on_part(s, &on_part, cmd)?;
+    Ok(if inside.is_empty() { o } else { JointOrigin { occurrence, inside, snap: o.snap } })
+}
+
+/// [`origin_param`] for a snap on one occurrence's own component, read at its first placement.
+fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
     // A face given by its name, as `model.faces` lists it.
     if let Some((what, name)) = ["face", "circle"].iter().find_map(|k| v.get(*k).and_then(Value::as_str).map(|n| (*k, n))) {
         return origin_by_name(s, v, what, name, cmd);
@@ -510,7 +796,7 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
     let (what, world) = match (pick, v.get("frame")) {
         (Some(x), _) => x,
         (None, Some(f)) => ("frame", f.get("origin").and_then(vec3).ok_or_else(|| bad(cmd, "`frame` needs origin and z"))?),
-        _ => return Err(bad(cmd, "a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name")),
+        _ => return Err(bad(cmd, "a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name")),
     };
     let occurrence = match v.get("occurrence") {
         Some(o) => occurrence_id(s, Some(o), cmd)?,
@@ -543,8 +829,8 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
                     let at = corner.unwrap_or(local(world));
                     let point = Snap::Point { point: at, z: Some(z), x: None };
                     let followed = snap.ok().map(|snap| joints::edge_axis(&s.doc, &st, component, snap, z));
-                    let o = followed.map(|snap| JointOrigin { occurrence, snap }).filter(|o| same_frame(s, o, at, z));
-                    return Ok(o.unwrap_or(JointOrigin { occurrence, snap: point }));
+                    let o = followed.map(|snap| JointOrigin::new(occurrence, snap)).filter(|o| same_frame(s, o, at, z));
+                    return Ok(o.unwrap_or(JointOrigin::new(occurrence, point)));
                 }
             }
         }
@@ -568,7 +854,7 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
             Snap::Frame { origin: local(world), z: local_dir(z), x: f.get("x").and_then(vec3).map(local_dir) }
         }
     };
-    let o = JointOrigin { occurrence, snap };
+    let o = JointOrigin::new(occurrence, snap);
     // A round edge's centre with the z it was picked with: its end, by name, where that is the
     // frame it shows; else a point there as before.
     if what == "circle"
@@ -577,19 +863,18 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
         let at = local(world);
         // The turn the point gave, kept.
         let point = Snap::Point { point: at, z: Some(z), x: None };
-        let px =
-            joints::resolve_origin(&s.doc, &st, &JointOrigin { occurrence, snap: point.clone() }).ok().map(|m| Vec3::new(m[0][0], m[0][1], m[0][2]));
+        let px = joints::resolve_origin(&s.doc, &st, &JointOrigin::new(occurrence, point.clone())).ok().map(|m| Vec3::new(m[0][0], m[0][1], m[0][2]));
         let turn = |snap: Snap| match (snap, px) {
             (Snap::CircleCenter { pick, face, end, x: None }, Some(x)) => Snap::CircleCenter { pick, face, end, x: Some(XRef::Dir(x)) },
             (snap, _) => snap,
         };
-        let by_wall = settle(s, JointOrigin { occurrence, snap: turn(o.snap.clone()) }, v, cmd).ok();
+        let by_wall = settle(s, JointOrigin::new(occurrence, turn(o.snap.clone())), v, cmd).ok();
         let by_centre = || {
             let snap = joints::round_end_at(&s.doc, &st, component, at)?;
-            settle(s, JointOrigin { occurrence, snap: turn(snap) }, v, cmd).ok()
+            settle(s, JointOrigin::new(occurrence, turn(snap)), v, cmd).ok()
         };
         let found = by_wall.filter(|o| same_frame(s, o, at, z)).or_else(|| by_centre().filter(|o| same_frame(s, o, at, z)));
-        return Ok(found.unwrap_or(JointOrigin { occurrence, snap: point }));
+        return Ok(found.unwrap_or(JointOrigin::new(occurrence, point)));
     }
     match settle(s, o, v, cmd) {
         Ok(o) => Ok(o),
@@ -600,7 +885,7 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
                 Some(Snap::CircleCenter { pick, face, end, .. }) => Snap::CircleCenter { pick, face, end, x: x_param(s, v, component, &inv, cmd)? },
                 _ => circle_centre(s, occurrence, local(world)).ok_or(e)?,
             };
-            settle(s, JointOrigin { occurrence, snap }, v, cmd)
+            settle(s, JointOrigin::new(occurrence, snap), v, cmd)
         }
         Err(e) => Err(e),
     }
@@ -664,7 +949,7 @@ fn origin_by_name(s: &Session, v: &Value, what: &str, name: &str, cmd: &str) -> 
     let x = x_param(s, v, component, &inv, cmd)?;
     let face = Some(name.to_string());
     let snap = if what == "face" { Snap::FaceCenter { pick, face, x } } else { Snap::CircleCenter { pick, face, end: None, x } };
-    settle(s, JointOrigin { occurrence, snap }, v, cmd)
+    settle(s, JointOrigin::new(occurrence, snap), v, cmd)
 }
 
 /// A new joint origin checked: `end?` (a circle's end, by the name of the face across its rim
@@ -689,6 +974,10 @@ fn settle(s: &Session, mut o: JointOrigin, v: &Value, cmd: &str) -> Result<Joint
     // A face or circle given no `x` keeps the x it has now, so its frame doesn't turn as the face
     // tilts.
     o.snap = o.snap.with_frame_x(Vec3::new(m[0][0], m[0][1], m[0][2]));
+    // A datum side given no pick keeps the origin it took now: the solve re-lays it onto the
+    // datum as the datum is then, instead of mapping the datum through the side's own current
+    // frame, which would move the side again on every solve.
+    o.snap = o.snap.with_datum_pick(Vec3::new(m[3][0], m[3][1], m[3][2]));
     Ok(o)
 }
 
@@ -861,16 +1150,25 @@ fn closes_loop(s: &Session, j: &Joint) -> bool {
     false
 }
 
+/// Either side sits on a plane or axis snap (a datum, a construction feature, an origin alias):
+/// the joint anchors its part to that geometry.
+fn datum_sided(j: &Joint) -> bool {
+    matches!(j.a.snap, Snap::Plane { .. } | Snap::Axis { .. }) || matches!(j.b.snap, Snap::Plane { .. } | Snap::Axis { .. })
+}
+
 fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     if s.doc.assembly.joints.len() >= 10_000 {
         return Err(EngineError::Other("too many joints".into()));
     }
     check_sides(&j.a, &j.b, "joint.create")?;
-    // Relations and loop-closing typed joints start where their parts are. A typed joint in
+    // Relations, constraints and loop-closing typed joints start where their parts are. A typed joint in
     // an open chain keeps its usual initial values; explicitly supplied values also keep theirs.
+    // A joint on a plane or axis side anchors its part to that geometry: it starts where its
+    // parts are too, so the part keeps its place on the plane (or along the axis) instead of
+    // jumping to the geometry's origin.
     if p.get("values").is_none()
         && p.get("value").is_none()
-        && (j.kind.is_relation() || closes_loop(s, &j))
+        && (j.starts_where_it_is() || closes_loop(s, &j) || datum_sided(&j))
         && let Some(q) = joints::relation_values(&s.doc, &s.model.state(), &j)
     {
         j.values = q;
@@ -1056,6 +1354,13 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let kind = kind_param(p, cmd)?;
     let a = origin_param(s, p.get("a"), cmd)?;
     let b = origin_param(s, p.get("b"), cmd)?;
+    let j = new_joint(s, p, kind, a, b, cmd)?;
+    add_joint(s, j, p)
+}
+
+/// A joint of `kind` between origins `a` and `b`, with the values, limits, flip, offset, angle and
+/// name `p` gives (as joint.create reads them), not yet added.
+fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: JointOrigin, cmd: &str) -> Result<Joint> {
     let id = s.doc_mut().allocate_id()?;
     let name = new_joint_name(s, p, kind);
     let offset = match p.get("offset") {
@@ -1079,13 +1384,15 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
         angle: angle.unwrap_or(0.0),
         suppressed: false,
         exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
+        captured: None,
+        constraint: None,
     };
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
     if angle.is_none() && !j.kind.is_relation() {
         j.angle = joints::least_turn_angle(&s.doc, &s.model.state(), &j);
     }
-    add_joint(s, j, p)
+    Ok(j)
 }
 
 fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1115,8 +1422,8 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         id,
         name,
         kind,
-        a: JointOrigin { occurrence: oa, snap: fa },
-        b: JointOrigin { occurrence: ob, snap: fb },
+        a: JointOrigin::new(oa, fa),
+        b: JointOrigin::new(ob, fb),
         values: vec![0.0; n],
         limits: limits_param(s, p, kind, cmd)?,
         flip: true, // as built: the origins coincide as they are, not mated
@@ -1124,6 +1431,8 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         angle: 0.0,
         suppressed: false,
         exprs: Default::default(),
+        captured: None,
+        constraint: None,
     };
     add_joint(s, j, p)
 }
@@ -1210,7 +1519,12 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         for &i in &driven {
             j.exprs.set_value(i, None);
         }
-        if let Some(index) = index { super::motion::drive_joint_index(s, id, q, index)? } else { super::motion::drive_joint(s, id, q, given)? }
+        let stop_at_budget = bool_(p, "stop_at_budget").unwrap_or(false);
+        if let Some(index) = index {
+            super::motion::drive_joint_index(s, id, q, index, stop_at_budget)?
+        } else {
+            super::motion::drive_joint(s, id, q, given, stop_at_budget)?
+        }
     };
     let sol = solution(s, &BTreeMap::new(), response_analysis(p));
     // How motion stopped, as `motion::drive_with_contact` says: an object, or null.
@@ -1218,6 +1532,7 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     let stopped_by_contact =
         stop("stopped_by_contact").map(serde_json::from_value::<ContactStop>).transpose().map_err(|e| bad(cmd, e.to_string()))?;
     let stopped_by_loop = stop("stopped_by_loop").map(serde_json::from_value::<LoopStop>).transpose().map_err(|e| bad(cmd, e.to_string()))?;
+    let stopped_by_budget = stop("stopped_by_budget").map(serde_json::from_value::<BudgetStop>).transpose().map_err(|e| bad(cmd, e.to_string()))?;
     let mut out = DriveJointResult {
         solved: solve_report(&sol, p),
         joint: id,
@@ -1225,6 +1540,7 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         continuous: (bool_(p, "continuous") == Some(true)).then_some(true),
         stopped_by_contact,
         stopped_by_loop,
+        stopped_by_budget,
         moved: super::motion::moved(&before, &super::motion::positions(s)).next().is_some(),
         requested: None,
         held: None,
@@ -1289,6 +1605,8 @@ fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &
             format!("{name} stopped at contact")
         } else if r["stopped_by_loop"].is_object() {
             format!("{name} stopped where a closed loop can no longer close")
+        } else if r.get("stopped_by_budget").is_some_and(Value::is_object) {
+            format!("{name} stopped where the contact check ran out of budget")
         } else {
             continue;
         };
@@ -1336,9 +1654,26 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     let before = super::motion::positions(s);
     let st = s.model.state();
     let r = joints::reach(&s.doc, &st, &joints::Reach { occurrence: occ, point: at, to, axis, joints: only });
+    let mut stopped_by_contact = None;
     let reached = match &r {
+        // Only a reach that moves something touches the design (and so adds an undo step).
+        Ok(x) if !x.values.is_empty() && s.doc.assembly.contact_enabled => {
+            // With contact sets on, the joints go toward the values found as joint.drive moves
+            // them, stopping where two parts of a set would pass into each other (#14682). No
+            // value is held on the way: the loops close from each step, so a loop the values
+            // close at both ends doesn't stop the drag in between.
+            let want: Vec<(u64, Vec<f64>)> = x.values.iter().map(|(id, q)| (*id, q.clone())).collect();
+            let (out, _) = super::motion::drive_with_contact(s, &want, &BTreeSet::new())?;
+            stopped_by_contact = out
+                .get("stopped_by_contact")
+                .filter(|v| v.is_object())
+                .cloned()
+                .map(serde_json::from_value::<ContactStop>)
+                .transpose()
+                .map_err(|e| bad(cmd, e.to_string()))?;
+            x.clone()
+        }
         Ok(x) => {
-            // Only a reach that moves something touches the design (and so adds an undo step).
             if !x.values.is_empty() {
                 let doc = s.doc_mut();
                 for (id, q) in &x.values {
@@ -1373,7 +1708,10 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         .filter_map(|id| name(*id))
         .map(|j| ReachedJoint { joint: j.id, name: j.name.clone(), values: named_value_list(j, effective.get(&j.id).unwrap_or(&j.values)) })
         .collect();
-    let stopped_by_limit = (!reached.limits.is_empty()).then(|| {
+    // A contact that stopped it came first: the limits and loop the reach found further on are
+    // not where it rests.
+    let contact_stopped = stopped_by_contact.is_some();
+    let stopped_by_limit = (!contact_stopped && !reached.limits.is_empty()).then(|| {
         reached
             .limits
             .iter()
@@ -1397,7 +1735,8 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         values,
         moved: super::motion::moved(&before, &super::motion::positions(s)).next().is_some(),
         stopped_by_limit,
-        stopped_by_loop: reached.stopped_by_loop.and_then(name).map(|j| ReachLoopStop { joint: j.name.clone() }),
+        stopped_by_loop: reached.stopped_by_loop.filter(|_| !contact_stopped).and_then(name).map(|j| ReachLoopStop { joint: j.name.clone() }),
+        stopped_by_contact,
         reason: r.err(),
         continuous: (bool_(p, "continuous") == Some(true)).then_some(true),
         param_warnings: Vec::new(),
@@ -1410,7 +1749,11 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
 fn body_centre(s: &Session, occ: u64) -> Vec3 {
     let comp = s.doc.occurrences.iter().find(|o| o.id == occ).map(|o| o.component).unwrap_or(0);
     let st = s.model.state();
-    st.bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).fold(Aabb3::EMPTY, |bb, b| bb.union(&b.mesh().bounds())).center()
+    st.bodies
+        .iter()
+        .filter(|b| s.doc.model_body_component(b) == comp)
+        .fold(Aabb3::EMPTY, |bb, b| bb.union(&b.body.exact_bounds().unwrap_or(Aabb3::EMPTY)))
+        .center()
 }
 
 fn motion_link(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1732,6 +2075,12 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
+    edit_joint(s, p, true)
+}
+
+/// joint.edit's change, also run by `assembly.constraint.edit`. `plain`: a change of kind makes a
+/// constraint a plain joint (joint.edit); the constraint command keeps the rule it has just set.
+pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Value> {
     let cmd = "joint.edit";
     let id = joint_id(s, p.get("joint"), cmd)?;
     let kind = match str_(p, "type") {
@@ -1752,10 +2101,14 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let sides = a.is_some() || b.is_some();
     if sides {
         let j = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "joint"))?;
-        check_sides(a.as_ref().unwrap_or(&j.a), b.as_ref().unwrap_or(&j.b), cmd)?;
+        let orig_a = a.as_ref().unwrap_or(&j.a);
+        let orig_b = b.as_ref().unwrap_or(&j.b);
+        check_sides(orig_a, orig_b, cmd)?;
     }
     let doc = s.doc_mut();
     let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) else { return Err(bad(cmd, "joint")) };
+    // As they were: Edit Joint sends the type, offset and flip with every edit, changed or not.
+    let (was_kind, was_offset, was_flip, was_suppressed) = (j.kind, j.offset, j.flip, j.suppressed);
     if let Some(a) = a {
         j.a = a;
     }
@@ -1765,6 +2118,14 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(k) = kind {
         let was = j.kind;
         j.kind = k;
+        // A constraint changed to another kind of joint is a plain joint now: its tag would keep
+        // restarting it, and a tangent's gap expression would leave the radius out of its offset.
+        if k != was && plain {
+            if j.constraint == Some(joints::Constraint::Tangent) {
+                j.exprs.offset = None;
+            }
+            j.constraint = None;
+        }
         j.values.resize(k.dofs().len(), 0.0);
         j.limits.resize(k.dofs().len(), None);
         j.exprs.values.truncate(k.dofs().len());
@@ -1779,6 +2140,10 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(o) = offset {
         j.offset = o;
         j.exprs.offset = typed(p.get("offset"));
+        // A tangent constraint's offset is its gap: the radius is added when it is solved.
+        if j.constraint == Some(joints::Constraint::Tangent) {
+            j.exprs.offset.get_or_insert_with(|| format!("{o} mm"));
+        }
     }
     if let Some(a) = angle {
         j.angle = a;
@@ -1804,10 +2169,23 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             j.angle = turn;
         }
     }
-    // A relation whose type, offset, tilt or flip changes starts again from where its parts are.
-    let reseat = kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some() || sides;
+    // An Angle relation whose tilt alone changes turns on from the values it has, so its part
+    // keeps to its side and a tilt past 180 degrees carries on round. Starting again from where
+    // the parts are would take the nearer of the two sides each time: the way back past 180, and
+    // either side from straight up (#12426). Not a suppressed one: its part may have moved while
+    // it was off, so it starts again from where its parts are, as before.
+    let tilt_only = angle.is_some()
+        && was_kind == JointKind::Angle
+        && !was_suppressed
+        && !sides
+        && kind.is_none_or(|k| k == was_kind)
+        && offset.is_none_or(|o| (o - was_offset).abs() <= 1e-9)
+        && bool_(p, "flip").is_none_or(|f| f == was_flip);
+    // Otherwise a relation or a constraint whose type, offset, tilt or flip changes, or whose
+    // sides move, starts again from where its parts are.
+    let reseat = !tilt_only && (kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some() || sides);
     if reseat {
-        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.kind.is_relation()).cloned();
+        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.starts_where_it_is()).cloned();
         if let Some(q) = edited.and_then(|j| joints::relation_values(&s.doc, &s.model.state(), &j))
             && let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == id)
         {
@@ -1818,7 +2196,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     // An edit that places the joint again (Edit Joint's OK, Unsuppress) meets a loop it closes as
     // joint.create does: a joint saved as a conflict before create turned its part (#9687), or
     // unsuppressed after its part was turned away, is met then. A rename alone moves nothing.
-    let placed = reseat || bool_(p, "suppressed") == Some(false);
+    let placed = reseat || tilt_only || bool_(p, "suppressed") == Some(false);
     if placed && sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
         sol = resolve(s);
     }
@@ -1901,6 +2279,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
                 frame_a: world(&j.a),
                 frame_b: world(&j.b),
                 expressions: (!j.exprs.is_empty()).then(|| j.exprs.clone()),
+                constraint: j.constraint,
             }
         })
         .collect();
@@ -2000,6 +2379,45 @@ mod reach_tests;
 #[cfg(test)]
 #[path = "joints_relations_tests.rs"]
 mod relations_tests;
+/// Capture Position: every moving joint keeps its current values (as the solver places them) as
+/// its captured position. Returns how many joints were captured.
+pub(in crate::cmd) fn capture_values(s: &mut Session) -> usize {
+    let current = joints::joint_values(&s.doc.assembly);
+    if s.doc.assembly.joints.iter().all(|j| j.kind == JointKind::Rigid) {
+        return 0;
+    }
+    let mut n = 0;
+    for j in s.doc_mut().assembly.joints.iter_mut().filter(|j| j.kind != JointKind::Rigid) {
+        let mut q = current.get(&j.id).cloned().unwrap_or_else(|| j.values.clone());
+        q.resize(j.kind.dofs().len(), 0.0);
+        j.captured = Some(q);
+        n += 1;
+    }
+    n
+}
+
+/// Revert Position: every joint with a captured position goes back to it, clamped to its limits.
+/// A joint with none (a design from before captured joint values) keeps its values. The values
+/// put back drop their expressions, as `joint.drive` does. Returns how many joints went back.
+pub(in crate::cmd) fn revert_values(s: &mut Session) -> usize {
+    if !s.doc.assembly.joints.iter().any(|j| j.captured.is_some() && j.kind != JointKind::Rigid) {
+        return 0;
+    }
+    let mut n = 0;
+    for j in s.doc_mut().assembly.joints.iter_mut().filter(|j| j.kind != JointKind::Rigid) {
+        let Some(mut q) = j.captured.clone() else { continue };
+        q.resize(j.kind.dofs().len(), 0.0);
+        joints::clamp(j, &mut q);
+        j.values = q;
+        for i in 0..j.kind.dofs().len() {
+            j.exprs.set_value(i, None);
+        }
+        n += 1;
+    }
+    resolve(s);
+    n
+}
+
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;

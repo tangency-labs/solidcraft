@@ -1885,16 +1885,12 @@ fn surf_of_revolution_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>
     }
 
     /* 13 */
-    // Analytic U Direction Domain too large (reported as test 2, as upstream; as 13, its
-    // label, with WR-538's `torus_check_reads_v_interval`)
+    // Analytic U Direction Domain too large (reported as 13, its label; upstream reports
+    // it as test 2, WR-538)
     let ivl_u = anal.u_interval();
     rtn &= r.report(
         CLASS,
-        if k.fixes.torus_check_reads_v_interval {
-            13
-        } else {
-            2
-        },
+        13,
         0,
         ivl_u.length() <= 360.0 + EFF_ZERO_DEG,
         EFF_ZERO_DEG,
@@ -2444,12 +2440,12 @@ fn sphere_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<
     Ok(rtn)
 }
 
-/// `SmTorus::AssertValid` (pinned upstream: test 4 reads the U interval, and the U
-/// and V tests report as 2 and 3; with `Kernel::fixes.torus_check_reads_v_interval`,
-/// WR-538, they read U and V and report as 3 and 4. A spindle torus's self-intersection
-/// test clears the result with no report and tests the U interval against an `acos`
-/// range; with `Kernel::fixes.torus_check_spindle_apex`, WR-539, it reports test 5 for an
-/// apex inside the V interval).
+/// `SmTorus::AssertValid` (the U and V tests read U and V and report as 3 and 4, their
+/// labels, where pinned upstream reads the U interval twice and reports them as 2 and 3,
+/// WR-538. A spindle torus's self-intersection test clears the result with no report and
+/// tests the U interval against an `acos` range; with
+/// `Kernel::fixes.torus_check_spindle_apex`, WR-539, it reports test 5 for an apex inside
+/// the V interval).
 fn torus_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<bool> {
     const CLASS: i64 = TORUS_TYPE;
     let mut rtn = true;
@@ -2509,26 +2505,21 @@ fn torus_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<b
 
     // Not upstream (WR-538, the fork's tangency-labs/smlib@0cd9d08, #482): the U and V
     // tests report as 3 and 4 (their labels), and the V test reads the V interval
-    let fixed_ids = k.fixes.torus_check_reads_v_interval;
+    // (upstream reads the U interval again)
     let ivl_u = anal.u_interval();
     rtn &= r.report(
         CLASS,
-        if fixed_ids { 3 } else { 2 },
+        3,
         0,
         ivl_u.length() <= 360.0 + EFF_ZERO_DEG,
         EFF_ZERO_DEG,
         ivl_u.length() - 360.0,
     )?;
 
-    // (upstream reads the U interval again)
-    let ivl_v = if fixed_ids {
-        anal.v_interval()
-    } else {
-        anal.u_interval()
-    };
+    let ivl_v = anal.v_interval();
     rtn &= r.report(
         CLASS,
-        if fixed_ids { 4 } else { 3 },
+        4,
         0,
         ivl_v.length() <= 360.0 + EFF_ZERO_DEG,
         EFF_ZERO_DEG,
@@ -2790,15 +2781,12 @@ mod tests {
     }
 
     /// WR-538 (the fork's tangency-labs/smlib@0cd9d08, #482): a torus whose V interval
-    /// runs past a turn. Upstream tests the U interval twice and never the V one; with
-    /// `torus_check_reads_v_interval` the V test (4) fails.
+    /// runs past a turn. Upstream tests the U interval twice and never the V one; the V
+    /// test (4) fails.
     #[test]
     fn wr_538_torus_check_reads_its_v_interval() {
         let s = torus_over(0.0, 400.0, 5.0, 1.0);
-        let mut k = Kernel::default();
-        let (_, upstream) = failed_tests(&k, &s);
-        assert!(!upstream.contains(&(TORUS_TYPE, 4)), "{upstream:?}");
-        k.fixes.torus_check_reads_v_interval = true;
+        let k = Kernel::default();
         let (ok, fixed) = failed_tests(&k, &s);
         assert!(!ok);
         assert!(fixed.contains(&(TORUS_TYPE, 4)), "{fixed:?}");

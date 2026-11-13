@@ -27,4 +27,4 @@ The desktop app writes every panic and every unclean exit to a local crash folde
 - `solidcraft-cli crashes`, `solidcraft-cli crashes show <id>`, `solidcraft-cli crashes replay <id>`
 - the `diagnostics.crash_reports` command, or the MCP `crash_reports` tool
 
-Crashes and data loss are taken as issues even while kernel work is paused (CONTRIBUTING.md, "Kernel work is paused").
+Crashes and data loss are taken first, including in kernel code, which lives in `solidcore/` (CONTRIBUTING.md, "Kernel work goes in solidcore/").
