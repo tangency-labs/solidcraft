@@ -5979,6 +5979,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
+ "solidcore-step",
  "solidcraft-color",
  "solidcraft-doc",
  "solidcraft-format",
