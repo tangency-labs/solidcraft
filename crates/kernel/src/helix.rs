@@ -1,16 +1,10 @@
 //! Helical sweeps (coils, springs) and lofts to a point (pyramids, cones).
 
 use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
-use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
-
-/// Rotate `v` about the unit axis `k` by `ang` (Rodrigues).
-fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
-    v * ang.cos() + k.cross(v) * ang.sin() + k * (k.dot(v) * (1.0 - ang.cos()))
-}
 
 /// Sweep a planar region's outer loop along a helix about `axis` through `axis_origin`:
 /// `turns` revolutions (right-handed about `axis`), rising `pitch` per turn. The profile keeps
@@ -86,45 +80,7 @@ fn helix_profile(
     Ok((k, profile))
 }
 
-/// A screw sweep of a convex polygon (in `plane`'s coordinates) as a closed triangle mesh,
-/// wound outward: `stations` sections per turn, flat end caps. Watertight by construction, for
-/// faceted booleans (modelled threads).
-pub fn sweep_helix_mesh(plane: &Plane, polygon: &[Vec2], axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64, stations: usize) -> Result<Mesh> {
-    let _span = solidcraft_profile::span("kernel", "sweep_helix_mesh");
-    let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
-    let m = polygon.len();
-    if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= 200.0 && (3..=64).contains(&m) && (8..=720).contains(&stations)) {
-        return Err(KernelError::Invalid("helix mesh: turns in (0, 200], 3…64 corners, 8…720 stations".into()));
-    }
-    let n = (turns * stations as f64).ceil() as usize;
-    let total = std::f64::consts::TAU * turns;
-    let mut mesh = Mesh::default();
-    for i in 0..=n {
-        let a = total * i as f64 / n as f64;
-        for q in polygon {
-            let w = plane.to_world(*q);
-            mesh.positions.push(axis_origin + rot(w - axis_origin, k, a) + k * (pitch * a / std::f64::consts::TAU));
-        }
-    }
-    let id = |i: usize, j: usize| u32::try_from(i * m + j % m).unwrap_or(0);
-    for i in 0..n {
-        for j in 0..m {
-            mesh.triangles.push([id(i, j), id(i + 1, j), id(i + 1, j + 1)]);
-            mesh.triangles.push([id(i, j), id(i + 1, j + 1), id(i, j + 1)]);
-        }
-    }
-    for j in 1..m - 1 {
-        mesh.triangles.push([id(0, 0), id(0, j), id(0, j + 1)]);
-        mesh.triangles.push([id(n, 0), id(n, j + 1), id(n, j)]);
-    }
-    mesh.tri_face = vec![0; mesh.triangles.len()];
-    if mesh.measure().volume < 0.0 {
-        for t in &mut mesh.triangles {
-            t.swap(1, 2);
-        }
-    }
-    Ok(mesh)
-}
+pub use crate::polybool::sweep_helix_mesh;
 
 /// A solid from a planar loop of straight segments to an apex point off its plane (a pyramid):
 /// SMLib's loft to a point.
