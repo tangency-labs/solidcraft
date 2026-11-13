@@ -393,6 +393,8 @@ fn hostile_parameters_are_refused_and_change_nothing() {
         json!({"edges": CORNERS, "diameter": 3, "along": "W"}),
         json!({"edges": CORNERS, "diameter": 3, "body": "Nope"}),
         json!({"edges": CORNERS, "diameter": 1e9}),
+        json!({"edges": CORNERS, "diameter": 3, "style": "minimal", "gap": 1e9}),
+        json!({"edges": CORNERS, "diameter": 3, "max_angle": 1e9}),
     ];
     for p in bad {
         assert!(s.execute("solid.dogbone", &p).is_err(), "{p}");
