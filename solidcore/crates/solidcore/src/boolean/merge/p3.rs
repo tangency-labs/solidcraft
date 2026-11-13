@@ -1492,7 +1492,10 @@ mod tests {
             assert!(result.breps.is_empty(), "operation {operation}");
             assert_eq!(result.surfaces.len(), regions, "operation {operation}");
             for surface in &result.surfaces {
-                assert!(surface.is_kind_of(PLANE_TYPE).unwrap(), "operation {operation}");
+                assert!(
+                    surface.is_kind_of(PLANE_TYPE).unwrap(),
+                    "operation {operation}"
+                );
             }
         }
         // an operation BooleanLists does not know is refused once both lists are built
