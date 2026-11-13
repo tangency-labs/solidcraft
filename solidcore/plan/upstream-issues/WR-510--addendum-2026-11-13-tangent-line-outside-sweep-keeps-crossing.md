@@ -7,4 +7,4 @@ With the flag removed (the addendum `flag-removed-cylinder-plane-tangent-within-
 The zone-tolerance disjunct now also needs the tangent line in the sweep; otherwise each crossing is tested as for bare surfaces. Upstream's own tangency test (`|d| >= R`, or the two crossing lines within `tol` of each other) is unchanged, and so are bare surfaces.
 
 - **Tests:** `issue1525_tangent_line_outside_sweep_keeps_crossing` asserts the crossing line at `(3 - 1e-6, sqrt(9 - (3 - 1e-6)^2))` for bare surfaces and with the zone tolerance on the plane's or the cone's face. `issue1525_plane_within_tolerance_of_wall_is_tangent` is unchanged. `docs/ssi.md` says when the crossings are tested instead.
-- **Results:** see the pull request's goldens summary.
+- **Results:** no goldens row moves (all 283 units, measured at this change on the default kernel).
