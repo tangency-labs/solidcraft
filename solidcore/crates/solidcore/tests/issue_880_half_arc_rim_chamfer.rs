@@ -174,3 +174,50 @@ fn issue_880_one_half_chamfers() {
         .lines();
     assert!(lines.is_empty(), "{lines:?}");
 }
+
+/// The volume of `b`, by the mass integrator.
+fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    brep_volume(k, b, 1e-7, &attrs).unwrap()
+}
+
+/// The first rim half chamfered by the equal offsets the setbacks 1 and 1 give
+/// (1.4437..., the goldens' `issue-880-half-arc-rim-0-setbacks-1-1`) builds a closed solid
+/// (4 faces to 7) that the check passes, as the setbacks 1 and 2 do. It was refused with
+/// 1001: at the half's End on the seam line through (6.78, 4.09, 10), the rail on the wall
+/// crossed the End's plane off the wall by more than its zone and less than the rail's
+/// tolerance, so the rail end read as off its face (#15906). The End is capped there; at
+/// the other seam vertex the chamfer runs on past the vertex and leaves the part through the
+/// rim (the global merge cuts it). The material removed lies between two wedges of the same
+/// chamfer (constant offsets d from the cut face and the wall), integrated independently in
+/// the planes square to the chamfer's spine (converged to 2e-6): the half's wedge between the
+/// End planes at both seam vertices (11.609075), which the chamfer contains, and the wedge
+/// from the capped End to the plane square to the rim where the run-on leaves the part
+/// (19.620616), which contains it, its run-on rising from the chamfer to the rim.
+#[test]
+fn issue_880_one_half_chamfers_at_equal_setbacks() {
+    let d = 1.443_730_684_954_035_7;
+    let mut k = Kernel::default();
+    let mut b = cut_cylinder(&mut k);
+    let before = volume(&k, &mut b);
+    let faces = p1::faces(&b, None).unwrap().len();
+    let e = rims(&k, &b)[0];
+    let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
+    chamfer(&mut k, &mut b, &[(e, u)], (d, d)).unwrap();
+    assert_eq!(finish(&mut k, &mut b, faces), (4, 7, true));
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let removed = before - volume(&k, &mut b);
+    assert!(
+        removed > 11.609_075 && removed < 19.620_616,
+        "removed {removed}"
+    );
+}
