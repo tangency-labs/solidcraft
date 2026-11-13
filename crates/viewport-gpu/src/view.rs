@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use solidcore_record::Vec3;
 
+use crate::environment::Environment;
 use crate::pbr;
 
 mod ao;
@@ -610,6 +611,10 @@ pub struct GpuScene {
     /// context, see-through): every one of their vertices drawn again, in this scene's palette,
     /// whose entries for their faces hold the highlight colour. No triangle is copied.
     pub recoloured: Vec<BlockTris>,
+    /// Whole highlighted bodies' edges: the model's own edge lines, drawn again from its blocks
+    /// in the highlight's colours and widths. Nothing is copied: lighting a whole assembly built
+    /// and uploaded every edge again (tens of megabytes) at each change of the hovered row.
+    pub lit_edges: Vec<LitEdges>,
     /// Whole hovered bodies the model draws as placements of shared triangles: those meshes with
     /// the body's highlight colour on each placement.
     pub hover_instanced: Vec<InstancedMesh>,
@@ -712,6 +717,34 @@ pub struct BlockTris {
     pub tris: Vec<std::ops::Range<u32>>,
     /// All of the body's vertices in the block's canonical vertex stream.
     pub vertices: std::ops::Range<u32>,
+}
+
+/// A body's edge lines in a model scene block ([`BlockBytes::lines`], by line), drawn again in
+/// three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides the
+/// edge, a dimmed line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LitEdges {
+    /// The block's key ([`SceneBlock::key`]).
+    pub block: u64,
+    pub lines: std::ops::Range<u32>,
+    pub halo: u32,
+    pub core: u32,
+    pub hidden: u32,
+}
+
+/// The largest palette index a lit line can name: its style rides in the draw's first vertex,
+/// six vertices a style, within a `u32`.
+const LIT_LINE_MAX_PALETTE: u32 = (u32::MAX / 6) >> 8;
+
+/// How a lit line is drawn (`vs_line_lit`): its palette index, whether it is lifted toward the
+/// eye over the faces beside it (as [`GpuScene::lifted_line`] with no normals), and its width
+/// (eighths of a pixel, 1 to 127). `None` for a palette index too large to carry.
+pub fn lit_line_style(c: PaletteIndex, width: f32, lifted: bool) -> Option<u32> {
+    if c.0 > LIT_LINE_MAX_PALETTE {
+        return None;
+    }
+    let eighths = if width.is_finite() { (width * 8.0).round().clamp(1.0, 127.0) as u32 } else { 8 };
+    Some((c.0 << 8) | (u32::from(lifted) << 7) | eighths)
 }
 
 /// How a built triangle is drawn: opaque, see-through (glass), faded context, or (in the
@@ -820,12 +853,32 @@ pub struct BlockBuilder {
     bodies: Vec<BodySpan>,
     /// The body being written: its first vertex and the box so far.
     spanning: Option<(u32, [[f32; 3]; 2])>,
+    /// Where the body being written ended its edge lines ([`BlockBuilder::end_edges`]).
+    edges_end: Option<u32>,
 }
 
 impl BlockBuilder {
+    /// How many lines the block has so far (a body's lines are those added while it was built).
+    pub fn lines_len(&self) -> u32 {
+        u32::try_from(self.lines.len() / LINE_SIZE).unwrap_or(u32::MAX)
+    }
+
+    /// The body being written has added all its edge lines: what follows (its vertex markers)
+    /// is not an edge.
+    pub fn end_edges(&mut self) {
+        self.edges_end = Some(self.lines_len());
+    }
+
+    /// Where the body being written ended its edge lines, when it said so
+    /// ([`BlockBuilder::end_edges`]).
+    pub fn edges_end(&self) -> Option<u32> {
+        self.edges_end
+    }
+
     /// The triangles from here to [`BlockBuilder::end_body`] are one body's (its box is kept, so
     /// it can be left out of a view it is not in).
     pub fn begin_body(&mut self) {
+        self.edges_end = None;
         let at = u32::try_from(self.vertices.len() / TRI_SIZE).unwrap_or(u32::MAX);
         self.spanning = Some((at, [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]]));
     }
@@ -1181,7 +1234,9 @@ pub struct Frame {
     /// cut body whose palette entries carry a hatch ([`Palette::set_hatch`]) is tinted toward.
     pub hatch: [[f32; 3]; solidcraft_viewport::hatch::HATCH_COLOURS],
     /// The world's up direction and 1 to shade in linear light with a sky fill that follows it
-    /// (#7974); 0 shades as before.
+    /// (#7974); 0 shades as before. Plus 2: opaque faces get their material finish (a palette
+    /// entry's PBR material, else a satin one) in a studio around that up direction. Zero (the
+    /// product preview, captures): lit as before.
     pub sky: [f32; 4],
     /// Bodies being dragged (a component's Move triad), drawn moved; `None`: none.
     pub moving: Option<MovingLayer>,
@@ -1669,6 +1724,39 @@ fn scene_bind<'a>(scene: &'a Batches, fallback: &'a wgpu::BindGroup) -> &'a wgpu
     scene.palette.as_ref().map_or(fallback, |p| &p.bind)
 }
 
+/// Draw each of `edges`' lines from the model block they are in, in the style `style` picks
+/// ([`lit_line_style`]): it rides in the first vertex (`vs_line_lit`). A block not on the GPU
+/// any more (the model changed since the highlight was built) draws nothing.
+fn lit_lines(
+    pass: &mut wgpu::RenderPass<'static>,
+    p: &wgpu::RenderPipeline,
+    blocks: &std::collections::HashMap<u64, BlockGpu>,
+    edges: &[LitEdges],
+    style: fn(&LitEdges) -> u32,
+    tally: &Tally,
+) {
+    if edges.is_empty() {
+        return;
+    }
+    pass.set_pipeline(p);
+    for e in edges {
+        let Some(batch) = blocks.get(&e.block).and_then(|b| b.lines.as_ref()) else { continue };
+        let first = style(e).saturating_mul(6);
+        // The block's lines may span several buffers: each draws its share of the range.
+        let mut at = 0u32;
+        for (buffer, count) in &batch.parts {
+            let end = at.saturating_add(*count);
+            let (from, to) = (e.lines.start.max(at), e.lines.end.min(end));
+            if from < to {
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(first..first + 6, from - at..to - at);
+                tally.segments(to - from);
+            }
+            at = end;
+        }
+    }
+}
+
 /// The blocks' buffers, then the scene's own, as one batch (the blocks' buffers are shared,
 /// not copied).
 fn joined<'a>(blocks: impl Iterator<Item = &'a Option<Batch>>, own: Option<Batch>) -> Option<Batch> {
@@ -1775,14 +1863,7 @@ fn palette_rows(palette: &Palette) -> u32 {
 }
 
 impl PaletteGpu {
-    fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        uniform: &wgpu::Buffer,
-        bgl: &wgpu::BindGroupLayout,
-        palette: Arc<Palette>,
-        written: &mut u64,
-    ) -> PaletteGpu {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, uniform: &wgpu::Buffer, bgl: &Group0, palette: Arc<Palette>, written: &mut u64) -> PaletteGpu {
         let rows = palette_rows(&palette);
         let texture = palette_texture(device, rows);
         let bytes = palette_bytes(&palette, 0, rows);
@@ -1798,13 +1879,18 @@ impl PaletteGpu {
         let materials = material_texture(device, material_rows);
         write_materials(queue, &materials, palette.materials(), 0, material_rows, written);
         let material_view = materials.create_view(&Default::default());
+        let [e3, e4, e5, e6] = bgl.environment.entries();
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_palette"),
-            layout: bgl,
+            layout: &bgl.layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&material_view) },
+                e3,
+                e4,
+                e5,
+                e6,
             ],
         });
         PaletteGpu { palette, _texture: texture, materials, material_rows, bind, rows }
@@ -1812,15 +1898,7 @@ impl PaletteGpu {
 
     /// Bring the texture up to `palette`, writing only the rows whose entries changed (or the
     /// whole texture when it must grow). The bind group is rebuilt only then.
-    fn update(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        uniform: &wgpu::Buffer,
-        bgl: &wgpu::BindGroupLayout,
-        palette: Arc<Palette>,
-        written: &mut u64,
-    ) {
+    fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, uniform: &wgpu::Buffer, bgl: &Group0, palette: Arc<Palette>, written: &mut u64) {
         if Arc::ptr_eq(&self.palette, &palette) {
             return;
         }
@@ -1932,6 +2010,8 @@ struct Batches {
     selected_blocks: Vec<BlockTris>,
     /// Whole faded or see-through bodies redrawn from the model's blocks in this scene's palette.
     recoloured: Vec<BlockTris>,
+    /// Whole highlighted bodies' edges redrawn from the model's blocks in this scene's palette.
+    lit_edges: Vec<LitEdges>,
     /// Whole highlighted bodies drawn as placements of the scene's shared triangles.
     hover_instanced: Vec<InstancedDraw>,
     selected_instanced: Vec<InstancedDraw>,
@@ -1955,7 +2035,7 @@ impl Batches {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         uniform: &wgpu::Buffer,
-        bgl: &wgpu::BindGroupLayout,
+        bgl: &Group0,
         key: u64,
         slot: &SceneSlot,
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
@@ -1974,7 +2054,7 @@ impl Batches {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         uniform: &wgpu::Buffer,
-        bgl: &wgpu::BindGroupLayout,
+        bgl: &Group0,
         key: u64,
         slot: &SceneSlot,
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
@@ -2006,6 +2086,7 @@ impl Batches {
             self.hover_blocks = sc.hover_blocks;
             self.selected_blocks = sc.selected_blocks;
             self.recoloured = sc.recoloured;
+            self.lit_edges = sc.lit_edges;
             self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref());
             self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref());
             let mut kept = std::mem::take(&mut self.blocks);
@@ -2390,6 +2471,9 @@ pub struct Renderer {
     /// the highlight's), smooth and flat.
     tri_hl_instanced: wgpu::RenderPipeline,
     tri_hl_instanced_flat: wgpu::RenderPipeline,
+    /// The highlight scene's own bodies drawn from their plans ([`GpuScene::planned`] of the
+    /// highlight, evaluated on the GPU), in their palette colours, as `tri_hl` draws built ones.
+    tri_hl_planned: wgpu::RenderPipeline,
     pbr: wgpu::RenderPipeline,
     /// `pbr` for built triangles whose palette entries name their materials (the product
     /// preview's blocks, [`TriClass::Pbr`]).
@@ -2405,13 +2489,17 @@ pub struct Renderer {
     line: wgpu::RenderPipeline,
     /// Lines behind the model (depth test >).
     line_hidden: wgpu::RenderPipeline,
+    /// The scene's own lines in another colour and width ([`LitEdges`], `vs_line_lit`), where
+    /// they are seen and where the model hides them.
+    line_lit: wgpu::RenderPipeline,
+    line_lit_hidden: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     /// Reference planes, axes and the ground shadow: as `trans` and `line`, but not cut by a section.
     guide_trans: wgpu::RenderPipeline,
     guide_line: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     /// The layout of group 0 (the uniform and a palette), for per-scene bind groups.
-    uniform_bgl: wgpu::BindGroupLayout,
+    uniform_bgl: Group0,
     /// Group 0 with a one-entry palette: draws that do not read colours (images, AO, depth).
     bind: wgpu::BindGroup,
     linear_out: bool,
@@ -2657,6 +2745,13 @@ fn access_texture(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bgl: &wgpu
 
 pub const SHADER: &str = include_str!("../shaders/viewport.wgsl");
 
+/// The layout of group 0 (the uniform, a palette and its materials, the studio) with the studio
+/// every group-0 bind group carries.
+pub(crate) struct Group0 {
+    pub layout: wgpu::BindGroupLayout,
+    pub environment: Environment,
+}
+
 fn tri_layout() -> wgpu::VertexBufferLayout<'static> {
     const A: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32, 3 => Uint32];
     wgpu::VertexBufferLayout { array_stride: TRI_SIZE as u64, step_mode: wgpu::VertexStepMode::Vertex, attributes: &A }
@@ -2820,6 +2915,7 @@ impl Renderer {
         let source = format!("{SHADER}\n{}", pbr::SOURCE);
         let module =
             device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("sc_viewport"), source: wgpu::ShaderSource::Wgsl(source.into()) });
+        let studio_layout = Environment::layout_entries();
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sc_viewport"),
             entries: &[
@@ -2851,8 +2947,14 @@ impl Renderer {
                     },
                     count: None,
                 },
+                // The studio finished faces are lit by (`Environment`).
+                studio_layout[0],
+                studio_layout[1],
+                studio_layout[2],
+                studio_layout[3],
             ],
         });
+        let environment = Environment::new(device);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sc_viewport"),
             bind_group_layouts: &[Some(&bgl)],
@@ -2868,6 +2970,7 @@ impl Renderer {
         let dummy_view = dummy_palette.create_view(&Default::default());
         let dummy_materials = material_texture(device, 1);
         let dummy_material_view = dummy_materials.create_view(&Default::default());
+        let [e3, e4, e5, e6] = environment.entries();
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_viewport"),
             layout: &bgl,
@@ -2875,6 +2978,10 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&dummy_view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&dummy_material_view) },
+                e3,
+                e4,
+                e5,
+                e6,
             ],
         });
         let moving_uniform = device.create_buffer(&wgpu::BufferDescriptor {
@@ -2885,6 +2992,7 @@ impl Renderer {
         });
         // The layer's stand-in for draws that read no colours, like `bind` (a scene with a palette
         // binds its own, with `moving_uniform`).
+        let [e3, e4, e5, e6] = environment.entries();
         let moving_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_viewport_moving"),
             layout: &bgl,
@@ -2892,6 +3000,10 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 0, resource: moving_uniform.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&dummy_view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&dummy_material_view) },
+                e3,
+                e4,
+                e5,
+                e6,
             ],
         });
         let reversed = t.reversed_depth();
@@ -3291,6 +3403,7 @@ impl Renderer {
                 pipeline("sc_xray", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
                 see_through_instanced(TriSource::Instanced, ""),
                 solid("sc_tris_hl_instanced", "fs_tri", None, highlight_depth(t.depth), TriSource::Instanced),
+                solid("sc_tris_hl_planned", "fs_tri", None, highlight_depth(t.depth), TriSource::Planned),
             )
         };
         let see_through_flat = || {
@@ -3330,6 +3443,8 @@ impl Renderer {
             (
                 pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
+                pipeline("sc_lines_lit", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+                pipeline("sc_lines_lit_hidden", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
             )
         };
         let lines_all = || {
@@ -3362,20 +3477,31 @@ impl Renderer {
             let oit = jobs.spawn(oit);
             let blits = jobs.spawn(blits);
             let resets = jobs.spawn(resets);
+            let studio = jobs.spawn(crate::environment::tables);
             let (tri, tri_marks, tri_planned, planned_marks, tri_instanced, instanced_marks) = tris.join();
             let (tri_cap, planned_cap, instanced_cap) = caps.join();
             let (tri_instanced_flat, flat_marks) = flat.join();
             let (tri_hl_hover, tri_hl_hover_built) = hover.join();
             let (tri_hl_selected, tri_hl_selected_built) = selected.join();
-            let (tri_hl, trans, glass_far, glass_near, ghost, xray, (glass_far_smooth, glass_near_smooth, trans_smooth), tri_hl_instanced) =
-                see_through_tris.join();
+            let (
+                tri_hl,
+                trans,
+                glass_far,
+                glass_near,
+                ghost,
+                xray,
+                (glass_far_smooth, glass_near_smooth, trans_smooth),
+                tri_hl_instanced,
+                tri_hl_planned,
+            ) = see_through_tris.join();
             let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
-            let (line, line_hidden) = lines.join();
+            let (line, line_hidden, line_lit, line_lit_hidden) = lines.join();
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
             let (pbr, pbr_palette, pbr_instanced) = pbr.join();
             let oit = oit.join();
+            environment.set(studio.join());
             Renderer {
                 product_depth: None,
                 product_highlights: false,
@@ -3436,6 +3562,7 @@ impl Renderer {
                 tri_hl_selected_built,
                 tri_hl_instanced,
                 tri_hl_instanced_flat,
+                tri_hl_planned,
                 pbr,
                 pbr_palette,
                 pbr_instanced,
@@ -3446,11 +3573,13 @@ impl Renderer {
                 xray,
                 line,
                 line_hidden,
+                line_lit,
+                line_lit_hidden,
                 overlay,
                 guide_trans: guide_trans.join(),
                 guide_line,
                 uniform,
-                uniform_bgl: bgl.clone(),
+                uniform_bgl: Group0 { layout: bgl.clone(), environment: environment.clone() },
                 bind,
                 linear_out: t.format.is_srgb(),
                 model: Batches::default(),
@@ -3856,6 +3985,7 @@ impl Renderer {
             let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
             res.moving.take_sharing(device, queue, &res.moving_uniform, &res.uniform_bgl, mv.key, &mv.slot, tess, oit, Some(&mut res.model));
         }
+        res.uniform_bgl.environment.upload(queue);
         let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
         res.model.take_sharing(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, tess, oit, Some(&mut res.moving));
         match &cb.moving {
@@ -3872,7 +4002,10 @@ impl Renderer {
             None => {}
         }
         res.sketch.take(device, queue, &res.uniform, &res.uniform_bgl, cb.sketch_key, &cb.sketch_slot, None, oit);
-        res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, None, oit);
+        // The highlight evaluates plans of its own where the model has none to draw again (in
+        // Wireframe, a whole lit body's faces).
+        let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
+        res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, tess, oit);
         res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, oit);
         // See-through surfaces are drawn without sorting where the device can (order-independent
         // transparency, in an offscreen frame); else their triangles are sorted for the view.
@@ -4266,6 +4399,19 @@ impl Renderer {
             pass.draw(r.vertices.clone(), 0..1);
             tally.triangles(r.vertices.len() as u32, 1);
         }
+        // Whole lit bodies the highlight evaluates from their plans itself (the model draws no
+        // faces of them to draw again: Wireframe). With the other whole bodies, before the
+        // copied triangles: a face lit over the body keeps its own colour, as above. A whole body
+        // still copied (no plan, or a plan too large for one batch) now comes after an evaluated
+        // one it overlaps, where the old copy order could put it before.
+        for d in &h.planned {
+            pass.set_pipeline(&res.tri_hl_planned);
+            pass.set_vertex_buffer(0, d.mesh.vertices.slice(..));
+            pass.set_vertex_buffer(1, d.colors.slice(..));
+            pass.set_index_buffer(d.mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..d.mesh.index_count, 0, 0..1);
+            tally.triangles(d.mesh.index_count, 1);
+        }
         // The highlight's own feedback triangles: its blocks' (kept while it is unchanged), then
         // the loose ones.
         for key in &h.block_order {
@@ -4283,6 +4429,7 @@ impl Renderer {
         lines(pass, &res.line_hidden, &m.hidden);
         in_moving(pass, &|pass, mv| lines(pass, &res.line_hidden, &mv.hidden));
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
+        lit_lines(pass, &res.line_lit_hidden, &m.blocks, &h.lit_edges, |e| e.hidden, tally);
         lines(pass, &res.line_hidden, &h.hidden);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line, &m.lines);
@@ -4290,6 +4437,9 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         lines(pass, &res.line, &sk.lines);
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
+        // Whole bodies' edges first, so an edge or a face's outline lit over them keeps its own.
+        lit_lines(pass, &res.line_lit, &m.blocks, &h.lit_edges, |e| e.halo, tally);
+        lit_lines(pass, &res.line_lit, &m.blocks, &h.lit_edges, |e| e.core, tally);
         lines(pass, &res.line, &h.lines);
         lines(pass, &res.guide_line, &h.guide_lines);
         pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);

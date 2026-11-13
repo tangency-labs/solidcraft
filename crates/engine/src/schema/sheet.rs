@@ -1,4 +1,4 @@
-//! Contracts for sheet metal feature, rule, flat pattern and bend table commands in
+//! Contracts for sheet metal feature, rule, flat pattern, DXF export and bend table commands in
 //! `cmd/sheet.rs`. Feature commands return [`FeatureResult`](super::features::FeatureResult); the
 //! others have their own replies.
 //!
@@ -846,6 +846,180 @@ pub struct BendTableParams {
     /// The file to write. Default (or blank): no file; the reply holds the table's text.
     #[serde(default)]
     pub path: Option<String>,
+}
+
+/// Export a sheet's flat pattern as a DXF drawing (AutoCAD 2000, mm): the outline, the cut-outs,
+/// the letters, the bend lines and their notes, each on the layer for its role.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExportDxfParams {
+    /// The sheet metal body. Default: the last sheet. Not with `per_body`.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The file to write. Default (or blank): no file, and the reply holds the DXF text. With
+    /// `per_body`, one file per sheet body, `<path>-<body>.dxf`.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// exact: an ellipse as ELLIPSE, splines, text outlines and the other Béziers as SPLINE.
+    /// arcs: tangent arcs and lines within 0.001 mm, for machines that read only those.
+    /// Default: exact.
+    #[serde(default)]
+    pub curves: Option<DxfCurvesParam>,
+    /// cut: the letters text cut through the sheet are cut contours on layer TEXT. etch: single
+    /// contours on layer ETCH, and the sheet keeps its material there. Text machined to a depth
+    /// is always on ETCH. Default: cut.
+    #[serde(default)]
+    pub text: Option<DxfTextParam>,
+    /// A note beside each bend line on layer BEND_NOTES, `B1 UP 90° R1`. Default: false.
+    #[serde(default)]
+    pub bend_notes: Option<bool>,
+    /// How high those notes' letters are, in mm. Default: 3; only a call with `bend_notes` uses
+    /// it, but a value out of range is refused either way.
+    #[serde(default)]
+    pub note_height: Option<DxfNoteHeight>,
+    /// The bend lines on layers BEND_UP and BEND_DOWN. Default: true; false leaves them out, for
+    /// a cutter that would cut them.
+    #[serde(default)]
+    pub bend_lines: Option<bool>,
+    /// roles: the layer for each role. single: every entity on layer 0. Default: roles.
+    #[serde(default)]
+    pub layers: Option<DxfLayersParam>,
+    /// A file for every sheet body, or their DXF texts when there is no `path`. Not with `body`.
+    /// Default: false.
+    #[serde(default)]
+    pub per_body: Option<bool>,
+}
+
+/// A DXF export's `curves`: exact or arcs, in any case (read by `sheet::dxf_curves`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DxfCurvesParam(pub(crate) crate::cmd::DxfCurves);
+
+impl<'de> Deserialize<'de> for DxfCurvesParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        v.as_str().and_then(crate::cmd::dxf_curves).map(DxfCurvesParam).ok_or_else(|| D::Error::custom("must be exact or arcs"))
+    }
+}
+
+impl JsonSchema for DxfCurvesParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DxfCurves".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "exact or arcs, in any case.", "type": "string", "pattern": "^([Ee][Xx][Aa][Cc][Tt]|[Aa][Rr][Cc][Ss])$"})
+    }
+}
+
+/// A DXF export's `text`: cut or etch, in any case (read by `sheet::dxf_text`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DxfTextParam(pub(crate) crate::cmd::DxfText);
+
+impl<'de> Deserialize<'de> for DxfTextParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        v.as_str().and_then(crate::cmd::dxf_text).map(DxfTextParam).ok_or_else(|| D::Error::custom("must be cut or etch"))
+    }
+}
+
+impl JsonSchema for DxfTextParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DxfText".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "cut or etch, in any case.", "type": "string", "pattern": "^([Cc][Uu][Tt]|[Ee][Tt][Cc][Hh])$"})
+    }
+}
+
+/// A DXF export's `layers`: false for the layer of each role, true for everything on layer 0, in
+/// any case (read by `sheet::dxf_layers`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DxfLayersParam(pub(crate) bool);
+
+impl<'de> Deserialize<'de> for DxfLayersParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        v.as_str().and_then(crate::cmd::dxf_layers).map(DxfLayersParam).ok_or_else(|| D::Error::custom("must be roles or single"))
+    }
+}
+
+impl JsonSchema for DxfLayersParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DxfLayers".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "roles or single, in any case.", "type": "string", "pattern": "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee])$"})
+    }
+}
+
+/// A DXF bend note's height: a number of mm from 0.1 to 100 (read by `sheet::dxf_note_height`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DxfNoteHeight(pub f64);
+
+impl<'de> Deserialize<'de> for DxfNoteHeight {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        v.as_f64().and_then(crate::cmd::dxf_note_height).map(DxfNoteHeight).ok_or_else(|| D::Error::custom("must be a number of mm from 0.1 to 100"))
+    }
+}
+
+impl JsonSchema for DxfNoteHeight {
+    fn schema_name() -> Cow<'static, str> {
+        "DxfNoteHeight".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "How high a bend note's letters are, in mm.",
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 100.0
+        })
+    }
+}
+
+/// What `sheet.export_dxf` returns: the file it wrote, the DXF text, or one of each per sheet body.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ExportDxfResult {
+    /// The DXF went to `path`.
+    Written {
+        path: String,
+        /// How many bend lines the drawing has, which its notes and bend layers describe.
+        bends: usize,
+        /// In the warn parameter-check mode: what the call's parameters got wrong.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
+    /// No `path`: the DXF text.
+    Text {
+        dxf: String,
+        /// How many bend lines the drawing has.
+        bends: usize,
+        /// In the warn parameter-check mode: what the call's parameters got wrong.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
+    /// `per_body`: one entry per sheet body, in the order the design lists them.
+    Files {
+        files: Vec<DxfFile>,
+        /// In the warn parameter-check mode: what the call's parameters got wrong.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
+}
+
+/// One sheet's DXF in a `per_body` reply: the file it wrote, or its text when there is no path.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct DxfFile {
+    /// The sheet metal body this drawing is for.
+    pub body: String,
+    /// The file this drawing went to. Left out when there is no `path`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// The DXF text. Left out when it went to a file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dxf: Option<String>,
+    /// How many bend lines this drawing has.
+    pub bends: usize,
 }
 
 /// The form of a bend table.

@@ -27,7 +27,7 @@
 //!   ([`crate::blend::blend_setback::fill_hole`] at its order and tolerance). The net is the
 //!   rule's patch (bound 0); its certificate is the rule's own: G1 (or G2) to the rounds
 //!   and to the other patches exactly in homogeneous coordinates, a G1 fill certified convex,
-//!   and the fill within the corner's half-spaces ([`crate::blend::blend_setback::containment`],
+//!   and the fill within the corner's half-spaces ([`crate::blend::blend_setback::containment_kept`],
 //!   certified by the convex hull). Re-certified by running the rule again from the
 //!   definition: the fill and its certificates are made anew and the net must be its patch,
 //!   number for number.
@@ -53,7 +53,7 @@
 use std::sync::Arc;
 
 use crate::blend::blend_corner::mixed::algebra::{self, Crv, Side, V4};
-use crate::blend::blend_setback::{containment, fill_hole, Face, Fill, Round};
+use crate::blend::blend_setback::{containment_kept, fill_hole, Face, Fill, Round};
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::are_same;
@@ -571,7 +571,7 @@ impl SetbackFill {
     }
 
     /// The fill the definition gives: the rule run on it ([`fill_hole`]), and its
-    /// containment certified within the tolerance ([`containment`]).
+    /// containment certified within the tolerance ([`containment_kept`]).
     ///
     /// # Errors
     ///
@@ -589,7 +589,7 @@ impl SetbackFill {
             })
             .collect();
         let fill = fill_hole(k, &self.faces, &rounds, self.order, self.tol).map_err(|r| r.error)?;
-        if containment(k, &fill, &self.faces, self.convex, self.tol)? > self.tol {
+        if containment_kept(k, &fill, &self.faces, self.tol)? > self.tol {
             return Err(refuse("a setback's fill stands past a face it meets"));
         }
         Ok(fill)

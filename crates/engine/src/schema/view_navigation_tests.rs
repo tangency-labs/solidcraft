@@ -12,6 +12,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AngleReadoutParams>(), &["enabled"]);
+    assert_keys(input_schema_for::<super::OriginAxesAcrossViewParams>(), &["enabled"]);
     assert_keys(input_schema_for::<StandardViewParams>(), &["camera"]);
     assert_keys(input_schema_for::<NormalToParams>(), &["camera"]);
     assert_keys(input_schema_for::<LayoutParams>(), &["mode"]);
@@ -246,6 +247,9 @@ fn strict_keeps_todays_errors() {
         ("view.angle_readout", json!({"enabled": 1})),
         ("view.angle_readout", json!({"enabled": "true"})),
         ("view.angle_readout", json!({"enabled": null})),
+        ("view.origin_axes_across_view", json!({"enabled": 1})),
+        ("view.origin_axes_across_view", json!({"enabled": "true"})),
+        ("view.origin_axes_across_view", json!({"enabled": null})),
     ]);
 }
 
@@ -259,6 +263,20 @@ fn angle_readout_replies_match_the_output_schema() {
         assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
         assert_eq!(r.get("param_warnings"), None, "{r}");
         assert_eq!(r["enabled"], Value::Bool(enabled));
+    }
+    assert!(!conforms(schema, schema, &json!({"enabled": "yes"})));
+    assert!(!conforms(schema, schema, &json!({})));
+}
+
+#[test]
+fn origin_axes_across_view_replies_match_the_output_schema() {
+    let schema = output_schema_for::<super::OriginAxesAcrossViewResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for enabled in [true, false] {
+        let reply = s.execute("view.origin_axes_across_view", &json!({"enabled": enabled})).unwrap();
+        assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+        assert_eq!(reply, json!({"enabled": enabled}));
     }
     assert!(!conforms(schema, schema, &json!({"enabled": "yes"})));
     assert!(!conforms(schema, schema, &json!({})));

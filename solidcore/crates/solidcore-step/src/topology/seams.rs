@@ -32,6 +32,9 @@ use super::{Builder, EdgeB, LoopB, R, index, unsupported};
 
 /// Samples per edge when following a loop around the axis.
 const SAMPLES: usize = 16;
+/// How often a Bézier piece that reaches half a turn about an axis is halved for its parts'
+/// arcs before its edge is taken to reach every angle.
+const MAX_HALVINGS: u32 = 4;
 /// Edges split to place seams, per solid.
 const MAX_SPLITS: usize = 10_000;
 
@@ -1375,8 +1378,9 @@ impl Perpendicular {
     }
 
     /// The Bézier pieces of a curve's NURBS form on `interval` (a line, circle or ellipse on its
-    /// form, [`crate::kernel::form::curve`]): each piece's arc of angles, the whole turn where its
-    /// hull is not clear of the axis, and the way its angle runs.
+    /// form, [`crate::kernel::form::curve`]): each piece's arc of angles and the way its angle
+    /// runs, a piece that reaches half a turn in halves ([`MAX_HALVINGS`]); the whole turn where a
+    /// hull is still not clear of the axis.
     pub(super) fn pieces(&self, curve: &BCurve, interval: [f64; 2], tol: f64) -> Vec<Piece> {
         let whole = || vec![Piece { arc: [0.0, TAU], pad: 0.0, runs: None }];
         let form = match curve {
@@ -1401,15 +1405,26 @@ impl Perpendicular {
         cuts.extend(knots.iter().copied().filter(|k| *k > a && *k < b));
         cuts.push(b);
         cuts.dedup();
+        // A piece that reaches half a turn about the axis (a closed spline of two pieces, each
+        // half way round: a cylinder's end as some exporters write it) has no arc of its own:
+        // halved, exactly, until each part has.
+        let mut todo: Vec<(f64, f64, u32)> = cuts.windows(2).rev().filter_map(|w| if let &[s, t] = w { Some((s, t, 0)) } else { None }).collect();
         let mut out = Vec::new();
-        for w in cuts.windows(2) {
-            let &[s, t] = w else { continue };
+        while let Some((s, t, halvings)) = todo.pop() {
             let Ok((_, piece)) = solidcore::eval::pcurve::segment(degree, knots, &homogeneous, s, t) else { return whole() };
             if piece.len() != degree + 1 || piece.iter().any(|h| !(h[3] > 0.0)) {
                 return whole();
             }
             let points: Vec<Vec3> = piece.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect();
-            let Some((arc, pad)) = self.span(&points, tol) else { return whole() };
+            let Some((arc, pad)) = self.span(&points, tol) else {
+                let middle = 0.5 * (s + t);
+                if halvings >= MAX_HALVINGS || !(s < middle && middle < t) {
+                    return whole();
+                }
+                todo.push((middle, t, halvings + 1));
+                todo.push((s, middle, halvings + 1));
+                continue;
+            };
             // The homogeneous coordinates square to the axis: the angle of the piece's points.
             let flat: Vec<[f64; 2]> = piece
                 .iter()

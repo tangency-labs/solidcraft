@@ -902,6 +902,23 @@ fn rail_edgeuse_intersect(
     result
 }
 
+/// The side edge parameters the search for a rail's end tries, in order. `defaults` are the
+/// radius-based guess and then the fixed fractions of the side edge; `corner_guess` is where the
+/// corner's section touches the side edge ([`corner_section_on_side_edge`]), tried first. At the
+/// corner's own side edge (`at_corner`) it takes the radius-based guess's place. On a side edge
+/// further along a chain every default stays after it, so the radius-based guess, which looked
+/// for the end there before the corner's section did, is still tried.
+fn rail_end_guesses(
+    corner_guess: Option<f64>,
+    at_corner: bool,
+    defaults: &[f64],
+) -> impl Iterator<Item = f64> + '_ {
+    let skip = usize::from(at_corner && corner_guess.is_some());
+    corner_guess
+        .into_iter()
+        .chain(defaults.iter().skip(skip).copied())
+}
+
 /// Where the round of `ops`'s edge touches `side_edge` at the corner `vertex`: the rail
 /// `rail_index`'s contact of the ball's section in the plane through the edge's end at
 /// `vertex`, normal to the edge there ([`edge_section`]), dropped onto the side edge within
@@ -2057,11 +2074,13 @@ impl FilletBrep {
             // vertex also where the rail's end is looked for on a side edge past it (a rail
             // rolled over a smooth far edge of its face, or one running on across a seam's
             // vertex), where the side edge's near end `cp_vertex` ends no end of the solver's
-            // edge.
-            let mut guess_edge_parameters = guess_edge_parameters;
+            // edge. On a side edge chain (the side edge's near end is not the corner's vertex)
+            // its guess goes in front of the default ones, which all stay: the radius-based
+            // guess, which looked for the end there before, is still tried next. At the corner's
+            // own side edge it takes the radius-based guess's place.
             let si = RailSolvers::geom_solver(self, g1)?;
             let section_vertex = corners.corner(corner)?.filleted_vertex();
-            if let Some(t) = corner_section_on_side_edge(
+            let corner_guess = corner_section_on_side_edge(
                 k,
                 solvers.solver_ops_mut(si)?,
                 target,
@@ -2069,12 +2088,11 @@ impl FilletBrep {
                 rail_index,
                 side_edge,
                 &ivl,
-            )? {
-                guess_edge_parameters[0] = t;
-            }
+            )?;
+            let at_corner = section_vertex == cp_vertex;
             let mut found = false;
             let mut edgeuse_parameter = 0.0;
-            for &guess in &guess_edge_parameters {
+            for guess in rail_end_guesses(corner_guess, at_corner, &guess_edge_parameters) {
                 // Temporarily change this to a constant-radius function.
                 let temp_si = if corners.corner(corner)?.is_calc_as_const_rad() {
                     let si = RailSolvers::geom_solver(self, g1)?;
@@ -2123,7 +2141,7 @@ impl FilletBrep {
                 } else {
                     None
                 };
-                for &guess in &guess_edge_parameters {
+                for guess in rail_end_guesses(corner_guess, at_corner, &guess_edge_parameters) {
                     let _ = solvers.solver(si)?;
                     let r = rail_edgeuse_intersect(
                         self,
@@ -3657,6 +3675,27 @@ fn find_stepoff_uv(
 mod tests {
     use super::*;
     use crate::nurbs::b_spline_curve::BSplineCurve;
+
+    #[test]
+    fn a_side_edge_chain_keeps_every_default_guess_after_the_corner_section() {
+        let defaults = [0.4, 0.05, 0.1, 0.23, 0.5, 0.77, 0.9, 0.95, 0.99];
+        // further along a chain: the corner's guess first, then all nine defaults, the
+        // radius-based one included
+        let chain: Vec<f64> = rail_end_guesses(Some(0.7), false, &defaults).collect();
+        assert_eq!(chain.len(), 10);
+        assert_eq!(chain[0], 0.7);
+        assert_eq!(chain[1..], defaults);
+        // at the corner's own side edge it takes the radius-based guess's place
+        let at_corner: Vec<f64> = rail_end_guesses(Some(0.7), true, &defaults).collect();
+        assert_eq!(at_corner.len(), 9);
+        assert_eq!(at_corner[0], 0.7);
+        assert_eq!(at_corner[1..], defaults[1..]);
+        // without a corner guess the defaults are tried as they are, on either edge
+        for edge in [false, true] {
+            let none: Vec<f64> = rail_end_guesses(None, edge, &defaults).collect();
+            assert_eq!(none, defaults);
+        }
+    }
 
     #[test]
     fn live_solver_lookup_retains_virtuals_and_actual_identity() {

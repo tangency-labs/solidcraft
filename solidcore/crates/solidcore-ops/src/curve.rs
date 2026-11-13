@@ -1,6 +1,7 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
 //! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
-//! blend from one curve's end to another's, circles and arcs, and a curve extended at an end.
+//! blend from one curve's end to another's, circles and arcs, a curve extended at an end, and two
+//! curves joined end to end.
 //! The curve is the record's ([`Curve`]); the knots, the map's carrying of the control points,
 //! the views' meeting, the curvature, the blend, the circles and the extension are the
 //! kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
@@ -9,7 +10,9 @@
 //! [`solidcore::query::continuity::curve_comb`], [`solidcore::curve::blend::blend_curve`],
 //! [`solidcore::curve::ellipse::Ellipse::arc`],
 //! [`solidcore::curve::ellipse::Ellipse::circle_from_3_points`],
-//! [`solidcore::nurbs::crv_basic::Curve::extend_by_dist`]). Ops checks the inputs and converts.
+//! [`solidcore::nurbs::crv_basic::Curve::extend_by_dist`],
+//! [`solidcore::nurbs::b_spline_curve::BSplineCurve::join_with`]). Ops checks the inputs and
+//! converts.
 
 use solidcore::curve::arc::ArcDefinition;
 use solidcore::curve::blend::{self as kblend, BlendEnd};
@@ -19,6 +22,7 @@ use solidcore::curve::from_parameters::{from_parameters, EdgeCurve};
 use solidcore::geom::certified::Verdict;
 use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::kernel::Kernel;
+use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_adv::p1::{Continuity, CurveEnd};
 use solidcore::nurbs::crv_geom::ToleranceKind;
 use solidcore::nurbs::geom::Interval;
@@ -541,6 +545,146 @@ pub fn extend_curve(
             extended = extended.extend_by_dist(length, ToleranceKind::Absolute, end, continuity)?;
         }
         Ok(record_of(&extended))
+    })?
+}
+
+/// `a` and `b` joined end to end into one spline (the kernel's `JoinWith`): the end of `a` that
+/// meets an end of `b` within `tolerance` (mm) is joined to it, and the joined curve runs from
+/// `a`'s other end to `b`'s other end. Both are brought to the higher degree and `b` follows on
+/// in parameter, so the joined curve is both curves exactly, with a knot of full multiplicity at
+/// the joint: it is as smooth there as the two curves meet (G1 where their tangents line up, as
+/// a half section and its mirror do). Two lines that continue each other become one line. The
+/// kernel tries `a`'s end first, then its start, each against `b`'s start, then its end.
+/// A clamped spline or rational spline each.
+///
+/// # Errors
+/// [`Error::Argument`] for a `tolerance` not finite and above 0, a curve that is not a valid
+/// clamped spline or rational spline, or a joined curve the record cannot hold (a spline joined
+/// to a rational spline, past the record's size); [`Error::Unsupported`] when no end of `a`
+/// meets an end of `b` within `tolerance` (or the kernel could not join the two there); the
+/// kernel's unported and cancelled statuses.
+pub fn join_curves(a: &Curve, b: &Curve, tolerance: f64) -> Result<Curve> {
+    if !(tolerance.is_finite() && tolerance > 0.0) {
+        return Err(Error::Argument);
+    }
+    let (na, nb) = (nurb_of(a)?, nurb_of(b)?);
+    run("curve::join_curves", |k| {
+        for (a_end, b_end) in [(true, false), (true, true), (false, false), (false, true)] {
+            let mut first = BSplineCurve::from_nurb(na.clone(), 3, false);
+            let mut second = BSplineCurve::from_nurb(nb.clone(), 3, false);
+            match first.join_with(k, a_end, &mut second, b_end, Some(tolerance)) {
+                Ok(()) => {
+                    let Some(joined) = first.gw_nurb() else {
+                        return Ok(Err(Error::Unsupported(
+                            "the joined curve has no NURBS form",
+                        )));
+                    };
+                    return Ok(record_of(joined));
+                }
+                Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
+                Err(_) => {}
+            }
+        }
+        Ok(Err(Error::Unsupported(
+            "no end of one curve meets an end of the other within the tolerance",
+        )))
+    })?
+}
+
+/// How far one curve strays from another curve or from a sheet ([`curve_deviation`],
+/// [`curve_surface_deviation`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Deviation {
+    /// The largest distance found at the stations.
+    pub max: f64,
+    /// Where on the first curve it is.
+    pub at: [f64; 3],
+    /// Its foot on the other curve or the sheet.
+    pub to: [f64; 3],
+    /// Each station's point and its foot, in order along the first curve: a comb.
+    pub comb: Vec<([f64; 3], [f64; 3])>,
+    /// The kernel's certified bound of the largest distance, where it applies (two
+    /// non-rational splines on one domain); `None` elsewhere.
+    pub bound: Option<f64>,
+}
+
+fn deviation_of(d: solidcore::query::deviation::Deviation) -> Deviation {
+    let a = |p: Point3| [p.x, p.y, p.z];
+    Deviation {
+        max: d.max,
+        at: a(d.at),
+        to: a(d.to),
+        comb: d.comb.into_iter().map(|(p, q)| (a(p), a(q))).collect(),
+        bound: d.bound,
+    }
+}
+
+/// How far curve `a` strays from curve `b`: `samples` stations at even steps of `a`'s range,
+/// each dropped on `b` (the kernel's [`solidcore::query::deviation::curve_deviation`]), the
+/// largest distance found with where it is, the station pairs, and the certified bound where it
+/// applies. The curves are splines, rational splines or polylines, each over its whole range.
+///
+/// # Errors
+/// [`Error::Argument`] for another kind of curve, one the record refuses, or a station count
+/// outside 2..=10000; the kernel's status otherwise (no station dropping onto `b`).
+pub fn curve_deviation(a: &Curve, b: &Curve, samples: usize) -> Result<Deviation> {
+    run("curve::curve_deviation", |k| {
+        let ka = match blend_input(k, a)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        let kb = match blend_input(k, b)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        Ok(
+            match solidcore::query::deviation::curve_deviation(k, &ka.curve, &kb.curve, samples) {
+                Ok(d) => Ok(deviation_of(d)),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })?
+}
+
+/// How far curve `c` strays from the one-face `sheet`: as [`curve_deviation`], each station
+/// dropped on the face's surface over its parameter box (the kernel's
+/// [`solidcore::query::deviation::curve_surface_deviation`]); no certified bound.
+///
+/// # Errors
+/// As [`curve_deviation`]; [`Error::Argument`] for a sheet that is not one face; those of
+/// [`crate::Body::from_record`].
+pub fn curve_surface_deviation(
+    c: &Curve,
+    sheet: &solidcore_record::brep::Brep,
+    samples: usize,
+) -> Result<Deviation> {
+    let (body, _) = crate::Body::from_record(sheet, true)?;
+    crate::session::read_body("curve::curve_surface_deviation", &body, |k, b| {
+        let [f] = b.face_list() else {
+            return Ok(Err(Error::Argument));
+        };
+        let face = b.face(*f)?;
+        let Some(surface) = face.surface.as_ref() else {
+            return Ok(Err(Error::Argument));
+        };
+        let kc = match blend_input(k, c)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        Ok(
+            match solidcore::query::deviation::curve_surface_deviation(
+                k,
+                &kc.curve,
+                surface,
+                &face.uv_domain,
+                samples,
+            ) {
+                Ok(d) => Ok(deviation_of(d)),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
     })?
 }
 
