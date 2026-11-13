@@ -33,6 +33,7 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_curves::create_arc;
 use solidcore::primitive::api_primitives::create_box;
+use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
@@ -206,15 +207,126 @@ fn issue_880_one_half_chamfers_at_equal_setbacks() {
     let mut k = Kernel::default();
     let mut b = cut_cylinder(&mut k);
     let before = volume(&k, &mut b);
-    let faces = p1::faces(&b, None).unwrap().len();
+    let originals = p1::faces(&b, None).unwrap();
     let e = rims(&k, &b)[0];
+    // the rim half's start (where the chamfer runs on) and middle, and its wall
+    let (v1, mid) = {
+        let curve = edge::curve(&b, e).unwrap().unwrap();
+        let ivl = edge::interval(&b, e).unwrap();
+        (
+            curve.evaluate_point(&k, ivl.min()).unwrap(),
+            curve.evaluate_point(&k, ivl.evaluate(0.5)).unwrap(),
+        )
+    };
+    let wall = edge::faces(&b, e, None)
+        .unwrap()
+        .into_iter()
+        .find(|&f| {
+            matches!(
+                b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                SurfaceKind::SurfOfExtrusion(_)
+            )
+        })
+        .unwrap();
     let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
     chamfer(&mut k, &mut b, &[(e, u)], (d, d)).unwrap();
-    assert_eq!(finish(&mut k, &mut b, faces), (4, 7, true));
+    assert_eq!(finish(&mut k, &mut b, originals.len()), (4, 7, true));
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
         .lines();
     assert!(lines.is_empty(), "{lines:?}");
+    // The chamfer's rails, on their closed forms. The ball of radius d touching both faces
+    // has its centre d inside the wall (5 - d from the axis, the line through (0, 0, -10)
+    // along (1, 0, 2)) and d below the cut face (z = 10 - d). A rail point p on the wall is a
+    // centre's foot there, so (p - d rho(p)).z = 10 - d (rho the wall's outward normal); one
+    // on the cut face is p = centre + d z, so p - d z lies 5 - d from the axis. A rail is an
+    // edge between the chamfer (a face that is neither planar nor a wall's extrusion) and the
+    // wall or the cut face (not the End's new planar cap).
+    let s5 = 5.0_f64.sqrt();
+    let axis = Vec3::new(1.0 / s5, 0.0, 2.0 / s5);
+    let origin = Point3::new(0.0, 0.0, -10.0);
+    let radial = |q: Point3| {
+        let w = q - origin;
+        w - axis * w.dot(axis)
+    };
+    let kind = |f| b.face(f).unwrap().surface.as_ref().unwrap().kind().clone();
+    let samples = |edge_id| {
+        let curve = edge::curve(&b, edge_id).unwrap().unwrap();
+        let ivl = edge::interval(&b, edge_id).unwrap();
+        (0..=64)
+            .map(|i| {
+                curve
+                    .evaluate_point(&k, ivl.evaluate(f64::from(i) / 64.0))
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+    };
+    // each rail with whether it lies on the cut face
+    let mut rails = Vec::new();
+    for edge_id in p1::edges(&b, None).unwrap() {
+        let faces = edge::faces(&b, edge_id, None).unwrap();
+        let chamfer_face = |f: &solidcore::topology::FaceId| {
+            !matches!(
+                kind(*f),
+                SurfaceKind::Plane(_) | SurfaceKind::SurfOfExtrusion(_)
+            )
+        };
+        let Some(other) = faces.iter().find(|f| !chamfer_face(f)) else {
+            continue;
+        };
+        if faces.iter().any(chamfer_face) {
+            match kind(*other) {
+                SurfaceKind::SurfOfExtrusion(_) => rails.push((edge_id, false)),
+                SurfaceKind::Plane(_) if originals.contains(other) => rails.push((edge_id, true)),
+                _ => {}
+            }
+        }
+    }
+    // Past the rim half's start the chamfer runs on and leaves the part through the rim, off
+    // the ball's closed form. Its last section is the plane through the centre of the wall
+    // rail's end on the seam line there, square to the spine (spanned by z and rho): every
+    // rail point on the half's side of it is checked, the wall rail on the half's own wall
+    // (which ends there, nearest the start) the whole length.
+    let start = rails
+        .iter()
+        .filter(|&&(edge_id, on_cut)| {
+            !on_cut && edge::faces(&b, edge_id, None).unwrap().contains(&wall)
+        })
+        .flat_map(|&(edge_id, _)| {
+            let ends = samples(edge_id);
+            [ends[0], ends[64]]
+        })
+        .min_by(|p, q| (*p - v1).length().total_cmp(&(*q - v1).length()))
+        .unwrap();
+    let rho = radial(start).unitize_or_z();
+    let centre = start - rho * d;
+    let mut normal = Vec3::new(0.0, 0.0, 1.0).cross(rho);
+    if (mid - centre).dot(normal) < 0.0 {
+        normal = -normal;
+    }
+    let (mut on_wall, mut on_cut_face) = (0, 0);
+    for &(edge_id, on_cut) in &rails {
+        for p in samples(edge_id) {
+            if (p - centre).dot(normal) < -1e-9 {
+                continue;
+            }
+            let off = if on_cut {
+                on_cut_face += 1;
+                (radial(p - Vec3::new(0.0, 0.0, d)).length() - (5.0 - d)).abs()
+            } else {
+                on_wall += 1;
+                ((p - radial(p).unitize_or_z() * d).z - (10.0 - d)).abs()
+            };
+            assert!(
+                off <= 4e-5,
+                "rail {edge_id:?} off its closed form by {off} at {p:?}"
+            );
+        }
+    }
+    assert!(
+        on_wall >= 65 && on_cut_face >= 65,
+        "{on_wall} {on_cut_face}"
+    );
     let removed = before - volume(&k, &mut b);
     assert!(
         removed > 11.609_075 && removed < 19.620_616,

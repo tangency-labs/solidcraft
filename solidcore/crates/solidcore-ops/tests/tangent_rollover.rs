@@ -667,77 +667,6 @@ fn every_ball_on_the_r3_round_lies_past_the_end_at_or_above_the_cutoff() {
     assert!(past(centre(rc - B27_FIT_MARGIN, PI / 2.0)) < 0.0);
 }
 
-/// The rails of edge 28's round in `made`, checked against the closed forms of the faces it
-/// rolls on: every edge the round made (no edge of `input` passes through its middle) that
-/// lies on the R3 round's cylinder, the pocket's sphere or the plane z = 7.5 lies, at 17
-/// points, within the edge's tolerance (1e-5) of it and within that face (the cylinder
-/// between its tangent edges x = 0 and z = 7.5, the plane past the tangent edge x = 3). At
-/// least one rail lies on each: the round rolls on the R3 round and the pocket and over the
-/// tangent edge onto z = 7.5.
-fn assert_b27_rails_on_faces(input: &Body, made: &Body, r: f64) {
-    use solidcore::query::api_queries::{edge_closest_point, get_edges};
-    let tol = 1e-5;
-    let (ki, bi) = common::kernel_copy(input);
-    let (k, b) = common::kernel_copy(made);
-    let input_edges = get_edges(&bi).unwrap();
-    let mut counts = [0; 3];
-    for e in get_edges(&b).unwrap() {
-        let edge = b.edge(e).unwrap();
-        let curve = edge.curve.as_ref().unwrap();
-        let ivl = edge.interval;
-        let pts: Vec<_> = (0..=16)
-            .map(|i| {
-                let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 16.0;
-                curve.evaluate_point(&k, t).unwrap()
-            })
-            .collect();
-        let mid = pts[8];
-        let old = input_edges.iter().any(|&f| {
-            edge_closest_point(&ki, &bi, f, mid)
-                .unwrap()
-                .closest
-                .distance
-                <= tol
-        });
-        if old {
-            continue;
-        }
-        let on_cylinder = pts
-            .iter()
-            .all(|p| ((p.x - 3.0).hypot(p.z - 4.5) - 3.0).abs() <= tol);
-        let on_sphere = pts.iter().all(|p| {
-            ((p.x - 2.5).powi(2) + (p.y - 50.0).powi(2) + p.z * p.z).sqrt() - 10.0 <= tol
-                && 10.0 - ((p.x - 2.5).powi(2) + (p.y - 50.0).powi(2) + p.z * p.z).sqrt() <= tol
-        });
-        let on_top = pts.iter().all(|p| (p.z - 7.5).abs() <= tol);
-        if on_cylinder {
-            counts[0] += 1;
-            for p in &pts {
-                assert!(
-                    p.x <= 3.0 + tol && p.z >= 4.5 - tol,
-                    "r {r}: a rail on the R3 round leaves it at {p:?}"
-                );
-            }
-        }
-        if on_sphere {
-            counts[1] += 1;
-        }
-        if on_top {
-            counts[2] += 1;
-            for p in &pts {
-                assert!(
-                    p.x >= 3.0 - tol,
-                    "r {r}: a rail on z = 7.5 leaves it at {p:?}"
-                );
-            }
-        }
-    }
-    assert!(
-        counts.iter().all(|&n| n > 0),
-        "r {r}: rails on the R3 round, the pocket and z = 7.5: {counts:?}"
-    );
-}
-
 /// The size those refusals name builds a valid solid that is smaller than the input, its rails
 /// on the faces it rolls on, and so does 1.94. Both failed with "negative interval" in the
 /// rails' trim (#15905). Just below the cutoff the section at the end on x = 0 is solved with
@@ -759,7 +688,7 @@ fn the_size_the_past_an_end_refusal_names_builds() {
         assert!(made.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
         let after = made.volume(1e-9).unwrap();
         assert!(after > 0.0 && after < before, "r {r}: {after} of {before}");
-        assert_b27_rails_on_faces(&input, &made, r);
+        assert_b27_rails_on_faces(&input, &made, r, 1e-5);
     }
 }
 
@@ -775,7 +704,7 @@ fn a_round_partly_between_the_ends_is_not_refused_past_an_end() {
         assert!(r < b27_edge_28_cutoff());
         let made = b27_edge_28(r).unwrap_or_else(|e| panic!("r {r}: {e:?}"));
         assert!(made.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
-        assert_b27_rails_on_faces(&input, &made, r);
+        assert_b27_rails_on_faces(&input, &made, r, 1e-5);
     }
 }
 
@@ -899,14 +828,16 @@ fn a_round_rolled_onto_a_taller_boss_ends_inside_the_boss_face() {
     }
 }
 
-/// [`assert_b27_rails_on_faces`] to `tol`, at more points: every edge the round made (no edge of `input`
-/// passes through its middle) that lies, at 65 points, within `tol` of the R3 round's
-/// cylinder (about x = 3, z = 4.5 along y), the pocket's sphere (radius 10 about
-/// (2.5, 50, 0)) or the plane z = 7.5, those on the cylinder within its face (between its
-/// tangent edges x = 0 and z = 7.5) and those on the plane past its tangent edge x = 3. At
-/// least one lies on each: the round rolls on the R3 round and the pocket and over the
-/// tangent edge onto z = 7.5.
-fn assert_b27_rails_on_faces_to(input: &Body, made: &Body, r: f64, tol: f64) {
+
+/// The rails of edge 28's round in `made`, checked against the closed forms of the faces it
+/// rolls on: every edge the round made (no edge of `input` passes through its middle) that
+/// lies, at 65 points, within `tol` of the R3 round's cylinder (about x = 3, z = 4.5 along y),
+/// the pocket's sphere (radius 10 about (2.5, 50, 0)) or the plane z = 7.5 lies within that
+/// face (the cylinder between its tangent edges x = 0 and z = 7.5, the plane past the tangent
+/// edge x = 3). At least one lies on each: the round rolls on the R3 round and the pocket and
+/// over the tangent edge onto z = 7.5. `tol` is the edge's tolerance (1e-5) where the rails
+/// are that close, else the rail's own tolerance (the blend's approximation tolerance, 4e-5).
+fn assert_b27_rails_on_faces(input: &Body, made: &Body, r: f64, tol: f64) {
     use solidcore::query::api_queries::{edge_closest_point, get_edges};
     let (ki, bi) = common::kernel_copy(input);
     let (k, b) = common::kernel_copy(made);
@@ -993,7 +924,7 @@ fn a_round_whose_rail_end_is_off_its_face_by_the_rails_tolerance_builds_its_end_
         );
         volume = after;
         // the rails lie on their faces to the tolerance the trace builds them to
-        assert_b27_rails_on_faces_to(&input, &made, r, 4e-5);
+        assert_b27_rails_on_faces(&input, &made, r, 4e-5);
     }
 }
 
@@ -1018,6 +949,6 @@ fn a_round_in_the_sliver_below_the_cutoff_builds_its_end_cap() {
             "r {r}: {after} after {volume}"
         );
         volume = after;
-        assert_b27_rails_on_faces_to(&input, &made, r, 4e-5);
+        assert_b27_rails_on_faces(&input, &made, r, 4e-5);
     }
 }

@@ -1149,8 +1149,9 @@ fn side_edge_in_cap(
 /// no foot keeps the classification at the rail end (unknown), as before.
 ///
 /// # Errors
-/// `SM_ERR_NULL_POINTER` for a face without surface; those of the classification, and an
-/// unported or cancelled drop.
+/// Those of the classification (a face without surface is refused there, before the
+/// foot is looked for), and an unported or cancelled drop. Any other failure to find the foot
+/// keeps the rail end's own classification.
 fn classify_rail_end(
     k: &Kernel,
     target: &mut Brep,
