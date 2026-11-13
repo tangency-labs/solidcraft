@@ -5301,6 +5301,12 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     sc
 }
 
+/// Whether a preview may draw the bodies it moves as the renderer's moving layer
+/// (`drag_layer::free_for_preview`).
+pub(crate) fn preview_layer_free(app: &SolveApp) -> bool {
+    drag_layer::free_for_preview(app)
+}
+
 /// A body's display colour (appearance, material or imported colour), if it has one.
 fn body_color(doc: &solidcraft_engine::doc::Document, b: &solidcraft_engine::doc::ModelBody) -> Option<Color32> {
     let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -5537,7 +5543,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t0 = crate::now_ms();
     // Drawn on the GPU; without one (the headless harness, tests) the model is not drawn.
     if app.viewport.gpu.is_some() {
-        let moving = if layered { drag_layer::scenes(app) } else { None };
+        // The one moving layer: a component's drag, else what a preview only moves (a Move).
+        let moving = if layered { drag_layer::scenes(app) } else { app.preview.moving_layer() };
         if !layered && key != app.viewport.key {
             let sc = build_scene(app);
             if let Ok(mut slot) = app.viewport.slot.lock() {

@@ -574,6 +574,56 @@ fn triad_drag_ends_where_the_button_was_released() {
     assert_eq!(value(&h), "20 mm", "the drag ends where the button was released");
 }
 
+/// On a GPU a Move's bodies are a layer: a step of the triad's drag changes its motion alone, and
+/// the scenes go to the renderer once. Building and uploading every moved triangle again at each
+/// step, with the ghost of where the bodies were, took a large assembly to ten frames a second.
+/// A view that draws no layer (isocurves shown) builds them where they land again.
+#[test]
+fn a_triad_drag_on_a_gpu_moves_its_layer_and_uploads_nothing() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.viewport.gpu =
+        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+    h.app.start("solid.move");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    }
+    h.frames(3);
+    let pos = |p: [f64; 2]| egui::pos2(p[0] as f32, p[1] as f32);
+    let grip = h.at(&json!({"gizmo": "x"})).unwrap();
+    let first = h.at(&json!({"gizmo": "x", "by": [10.0, 0.0, 0.0]})).unwrap();
+    let second = h.at(&json!({"gizmo": "x", "by": [20.0, 0.0, 0.0]})).unwrap();
+    h.frame_with(vec![egui::Event::PointerMoved(pos(grip))]);
+    h.frame_with(vec![egui::Event::PointerButton {
+        pos: pos(grip),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    }]);
+    h.frame_with(vec![egui::Event::PointerMoved(pos(first))]);
+    h.frames(1);
+    let layer = h.app.preview.moving_layer().expect("the moved body is a layer");
+    let still = h.app.preview.key;
+    assert!((layer.transform[3][0] - 10.0).abs() < 1e-4, "{:?}", layer.transform);
+    assert_eq!(h.app.preview.replaced, ["Body1"]);
+    assert!((h.app.preview.bounds.min.x - 10.0).abs() < 1e-6 && (h.app.preview.bounds.max.x - 30.0).abs() < 1e-6, "{:?}", h.app.preview.bounds);
+    h.frame_with(vec![egui::Event::PointerMoved(pos(second))]);
+    h.frames(1);
+    let moved = h.app.preview.moving_layer().expect("still a layer");
+    assert!((moved.transform[3][0] - 20.0).abs() < 1e-4, "{:?}", moved.transform);
+    assert_eq!((h.app.preview.key, moved.key), (still, layer.key), "a step of the drag hands the renderer no scene");
+    assert!((h.app.preview.bounds.min.x - 20.0).abs() < 1e-6, "{:?}", h.app.preview.bounds);
+    // Isocurves follow the bodies' places, which a layer moves on the GPU alone: built whole.
+    h.app.session.isocurves.push(solidcraft_engine::IsoPick { body: "Body1".into(), at: solidcore_record::Vec3::new(10.0, 15.0, 10.0), count: 3 });
+    h.frames(2);
+    assert!(h.app.preview.moving_layer().is_none() && h.app.preview.active, "drawn where it lands, in the preview's own scene");
+    assert_ne!(h.app.preview.key, still);
+    h.app.session.isocurves.clear();
+    h.frames(2);
+    assert!(h.app.preview.moving_layer().is_some(), "a layer again");
+}
+
 /// A Move dialog on the 20 × 30 × 10 box, translated 10 mm along X.
 fn translated_box() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();

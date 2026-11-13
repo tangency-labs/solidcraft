@@ -1033,6 +1033,34 @@ all six distance-preview regressions pass, covering intermediate geometry, exact
 convergence, unchanged document/undo, obsolete errors and setup changes. A separate regression
 checks the arrow's position on each held input frame.
 
+## Move drag preview: built once, moved on the GPU (2026-11-13)
+
+The Move preview draws the moved bodies from their own triangles, without evaluating the design.
+It still built a new scene at every change of the move: every triangle of the moved bodies
+transformed on the window thread, every triangle again as the ghost of where the bodies were,
+and the viewport uploaded the whole scene. Now the bodies are built once where they stand and
+the renderer draws them moved by one rigid motion, as it draws a component dragged with its
+triad (`MovingLayer`); the ghost is built once too and stays in the preview's own scene. A step
+of the drag builds and uploads nothing. Where the view draws no layer (no GPU, a section, an
+analysis or isocurves shown, a component moved and not captured) or the bodies move
+differently from each other, they are built where they land as before.
+
+Measured on a Move of 103 bodies (imported STEP parts, about 1.7 million triangles in the
+design), Ryzen 5 7600X, NVIDIA GeForce RTX 5070, Windows, release build: the triad dragged
+through the control channel (`ui.drag`), frame times taken as the gaps between frames.
+
+| Dragging the triad | `main` (`af8a0f755`) | this PR |
+|---|---|---|
+| An arrow, the distance changing at every frame: frame time (two drags of 40 steps, median of each) | 98 and 99 ms (10 fps) | 9 and 27 ms (38 to 111 fps) |
+| The same drags: worst frame | 117 and 119 ms | 33 ms |
+| The same drags: window thread per frame, median | 32 ms | 5 and 19 ms |
+| A ring, 40 steps: frame time, median and 90th percentile | 26 and 80 ms | 11 and 31 ms |
+| An arrow moved slowly (1 px a frame), 120 steps: frame time, median and 90th percentile | 8 and 78 ms | 9 and 30 ms |
+
+What is left of a frame of the drag is mostly the highlight, built again when what is under the
+pointer changes (about 16 ms with these bodies picked in the dialog). `a_move_drawn_as_a_layer_looks_as_it_did_built_where_it_lands`
+renders the preview both ways.
+
 ## Placement-only model reuse
 
 `Model::evaluate_shared(&Arc<Document>)` retains the document that produced a model and a weak
