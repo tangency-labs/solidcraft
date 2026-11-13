@@ -350,6 +350,8 @@ jobs:
             native=true
             windows=true
             gpu_paths=true
+            # Run workflow (a fork's full run too) checks SolidCore as the merge queue does.
+            if [ "$EVENT_NAME" = workflow_dispatch ]; then solidcore=true; fi
           else
             # Compare both old and new paths of renames; unknown paths run native checks.
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
@@ -801,6 +803,17 @@ jobs:
           key: ${{ github.repository }}-mesa-gpu
           path: /home/runner/.cache/mesa-gpu
           commit: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 && 'on-change' || 'false' }}
+      # On GitHub's runners (a fork with CI_RUNNER set) there is no sticky disk: keep Mesa's cache in
+      # GitHub's cache instead, keyed by the shaders, so only a fork's first run after a shader
+      # change compiles the pipeline cold.
+      - name: Restore lavapipe's shader cache (GitHub's runners)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: vars.CI_RUNNER != ''
+        continue-on-error: true
+        with:
+          path: /home/runner/.cache/mesa-gpu
+          key: mesa-gpu-${{ runner.os }}-${{ hashFiles('crates/gpu/src/**/*.wgsl') }}
+          restore-keys: mesa-gpu-${{ runner.os }}-
       # Main saves the cache; every other run restores it, read-only.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
