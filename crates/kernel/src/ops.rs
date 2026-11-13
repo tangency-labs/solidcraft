@@ -2,8 +2,10 @@
 //! from each other join without any intersection work, their records side by side.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::{part, placement::Rigid};
+use solidcore_record::Vec3;
+use solidcore_record::brep::part;
+use solidcraft_geom::brep::placement::Rigid;
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::history::{BodyHistory, History};
@@ -24,6 +26,11 @@ pub enum BoolOp {
 /// SMLib's own tags, or none where a body's order cannot be matched to SMLib's. A cut by a tool
 /// apart from the body is the body itself (its faces and edges kept), and their intersection empty.
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
+    // Stopped by its watch (an agent's request cancelled while it computes, #1989): no more
+    // booleans. One SMLib already runs to its end.
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("boolean"));
+    }
     crate::profile::timed(crate::profile::Kind::Boolean, "boolean", || {
         // A tool apart from the body (their exact boxes, grown by the tolerances, do not meet)
         // leaves a cut the body itself and an intersection nothing, with no intersection work.
@@ -45,6 +52,9 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
 /// what the operands' faces stood for (their regularization protection and the planar roles on
 /// supports it kept).
 pub fn union_all(bodies: &[&Body]) -> Result<Body> {
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("union"));
+    }
     crate::profile::timed(crate::profile::Kind::Boolean, "union_all", || {
         if bodies.is_empty() {
             return Err(KernelError::Invalid("a union of no bodies".into()));
@@ -136,7 +146,7 @@ pub(crate) fn join_pieces(pieces: Vec<Body>) -> Result<Option<Body>> {
 
 /// The records of `bodies` side by side, as one body, and where its items come from.
 fn joined(bodies: &[Body]) -> Result<(Body, part::Part)> {
-    let records: Vec<&solidcraft_geom::brep::Brep> = bodies.iter().map(Body::record).collect();
+    let records: Vec<&solidcore_record::brep::Brep> = bodies.iter().map(Body::record).collect();
     let part = part::compound(&records).map_err(|e| KernelError::Failed(format!("pieces: {e}")))?;
     // Each face's source, numbered as `compound` numbers the inputs: one after another.
     let sources: Vec<Option<crate::FaceSource>> =
@@ -151,9 +161,10 @@ fn joined(bodies: &[Body]) -> Result<(Body, part::Part)> {
 }
 
 /// Affine transform by a column-major 4x4 matrix (rotations, translations, reflections,
-/// scalings). A rigid motion moves the record itself, every parameter and index as it was; any
-/// other matrix goes through SMLib's transform. Either way the result's faces and edges are
-/// the body's, in its history.
+/// scalings). A rigid motion moves the record itself, every parameter and index as it was, and
+/// so does a scaling or shear of a body of planes, splines, lines and conics (its planes stay
+/// planes, a circle becomes an ellipse); any other matrix or body goes through SMLib's transform.
+/// Either way the result's faces and edges are the body's, in its history.
 pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "transform_matrix");
     if m.iter().flatten().any(|x| !x.is_finite()) {
@@ -164,9 +175,14 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
         return placed.with_history(history, &[body]);
     }
     let sources = body.transformed_sources(m)?;
-    let (placed, sources, paint) = match Rigid::of_matrix(&m) {
-        Some(motion) => {
-            let moved = Body::from_record(body.record().moved(&motion))?;
+    let exact = match Rigid::of_matrix(&m) {
+        // (a body with a blend by its definition is moved by the kernel, the definition with it)
+        Some(motion) => solidcraft_geom::brep::placement::moved(body.record(), &motion),
+        None => solidcraft_geom::brep::placement::mapped(body.record(), &m),
+    };
+    let (placed, sources, paint) = match exact {
+        Some(record) => {
+            let moved = Body::from_record(record)?;
             let history = History::identity(&moved);
             (moved.with_history(history, &[body])?, sources, body.paint().cloned())
         }
@@ -206,9 +222,9 @@ fn moved_from(history: Option<&History>, f: usize) -> Option<usize> {
 
 /// `body` moved by a matrix that is not a rigid motion, in SMLib, its history from SMLib's tags.
 fn transformed(body: &Body, m: &[[f64; 4]; 4]) -> Result<Body> {
-    let failed = |what: &str, e: &dyn std::fmt::Display| KernelError::Failed(format!("SMLib transform: {what}: {e}"));
+    let failed = |what: &str, e: solidcraft_smlib::Error| KernelError::smlib(format!("SMLib transform: {what}"), e);
     let (handle, order) = crate::native::smlib_body_ordered(body)?;
-    let moved = handle.tagged(0).map_err(|e| failed("tag", &e))?.transformed(m).map_err(|e| failed("operation", &e))?;
+    let moved = handle.tagged(0).map_err(|e| failed("tag", e))?.transformed(m).map_err(|e| failed("operation", e))?;
     let (result, result_order) = crate::native::body_from_smlib_ordered(&moved)?;
     let history = match (order, result_order) {
         (Some(o), Some(r)) => moved.history().ok().and_then(|h| h.history(&[o], &r).ok()),
@@ -248,7 +264,7 @@ pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: 
 
 /// Split a body with a plane: the parts on the positive and the negative side of the plane
 /// (only the non-empty ones).
-pub fn split_by_plane(body: &Body, plane: &solidcraft_geom::Plane) -> Result<Vec<Body>> {
+pub fn split_by_plane(body: &Body, plane: &solidcore_record::Plane) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "split_by_plane");
     let mut out = Vec::new();
     for positive in [true, false] {
@@ -261,7 +277,7 @@ pub fn split_by_plane(body: &Body, plane: &solidcraft_geom::Plane) -> Result<Vec
 /// cut with: the part is the body's intersection with [`half_box`] (the tool), whose history it
 /// carries, over the body and the box. The box's face in the plane, the part's cut face, is its
 /// start cap on the positive side and its end cap on the negative side.
-pub fn half_space(body: &Body, plane: &solidcraft_geom::Plane, positive: bool) -> Result<(Option<Body>, Body)> {
+pub fn half_space(body: &Body, plane: &solidcore_record::Plane, positive: bool) -> Result<(Option<Body>, Body)> {
     let _span = solidcraft_profile::span("kernel", "half_space");
     // The box's own construction roles describe no face of the design: the cut face has none.
     let tool = half_box(body, plane, positive)?.with_face_sources(None);
@@ -269,17 +285,17 @@ pub fn half_space(body: &Body, plane: &solidcraft_geom::Plane, positive: bool) -
 }
 
 /// A box covering everything of `body` on one side of a plane, its start cap in the plane.
-pub(crate) fn half_box(body: &Body, plane: &solidcraft_geom::Plane, positive: bool) -> Result<Body> {
+pub(crate) fn half_box(body: &Body, plane: &solidcore_record::Plane, positive: bool) -> Result<Body> {
     body.require_brep("split")?;
     let bb = body.exact_bounds()?;
     let reach = (bb.diagonal() + plane.origin.dist(bb.center())) * 2.0 + body.size();
     let c = plane.to_local(bb.center());
-    let sq = solidcraft_geom::Region2 {
-        outer: solidcraft_geom::Loop2::polygon(&[
-            solidcraft_geom::Vec2::new(c.x - reach, c.y - reach),
-            solidcraft_geom::Vec2::new(c.x + reach, c.y - reach),
-            solidcraft_geom::Vec2::new(c.x + reach, c.y + reach),
-            solidcraft_geom::Vec2::new(c.x - reach, c.y + reach),
+    let sq = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2::polygon(&[
+            solidcore_record::Vec2::new(c.x - reach, c.y - reach),
+            solidcore_record::Vec2::new(c.x + reach, c.y - reach),
+            solidcore_record::Vec2::new(c.x + reach, c.y + reach),
+            solidcore_record::Vec2::new(c.x - reach, c.y + reach),
         ]),
         holes: vec![],
     };

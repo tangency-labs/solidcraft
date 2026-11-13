@@ -1,0 +1,253 @@
+{
+  "area": "frames",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 100.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                25.0,
+                -50.0,
+                0.0
+              ],
+              "start": [
+                -25.0,
+                -50.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                25.0,
+                -43.0,
+                0.0
+              ],
+              "start": [
+                25.0,
+                -50.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                2.25,
+                -43.0,
+                0.0
+              ],
+              "start": [
+                25.0,
+                -43.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                2.25,
+                43.0,
+                0.0
+              ],
+              "start": [
+                2.25,
+                -43.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                25.0,
+                43.0,
+                0.0
+              ],
+              "start": [
+                2.25,
+                43.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                25.0,
+                50.0,
+                0.0
+              ],
+              "start": [
+                25.0,
+                43.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -25.0,
+                50.0,
+                0.0
+              ],
+              "start": [
+                25.0,
+                50.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -25.0,
+                43.0,
+                0.0
+              ],
+              "start": [
+                -25.0,
+                50.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -2.25,
+                43.0,
+                0.0
+              ],
+              "start": [
+                -25.0,
+                43.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -2.25,
+                -43.0,
+                0.0
+              ],
+              "start": [
+                -2.25,
+                43.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -25.0,
+                -43.0,
+                0.0
+              ],
+              "start": [
+                -2.25,
+                -43.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -25.0,
+                -50.0,
+                0.0
+              ],
+              "start": [
+                -25.0,
+                -43.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-frame-profile-insert-i-beam-extruded",
+  "expected": {
+    "bbox": {
+      "max": [
+        25,
+        50,
+        100
+      ],
+      "min": [
+        -25,
+        -50,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 14,
+    "method": "section 2*50*7 + 4.5*(100-14) = 1087, centred on the origin: V = 108700; faces 12 sides + 2 ends",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 108700.0,
+    "what": "an I-beam profile (100x50, web 4.5, flanges 7, sharp roots) inserted into a sketch and extruded 100"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 14,
+      "vertices": 24
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 41274.0,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 14,
+      "vertices": 24,
+      "volume_mm3": 108699.99999999996
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "an I-beam profile (100x50, web 4.5, flanges 7, sharp roots) inserted into a sketch and extruded 100",
+  "why_not": []
+}

@@ -5,7 +5,7 @@
 //! large, and the largest size that fits is found by searching ([`crate::fillet_max`],
 //! [`crate::chamfer_max`]).
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::{Body, BoolOp, ChamferSide, KernelError, build::box_solid, ops::boolean};
 
@@ -88,7 +88,7 @@ fn chamfers_crossing_each_other_are_refused() {
     too_large(crate::chamfer(&rib, &edges, 3.0));
     too_large(crate::fillet(&rib, &edges, 3.0));
     assert_eq!(crate::chamfer_max(&rib, &edges, 3.0).unwrap().map(|x| x.0), Some(2.0));
-    assert_eq!(crate::fillet_max(&rib, &edges, 3.0).unwrap().map(|x| x.0), Some(2.0));
+    assert_eq!(crate::fillet_max(&rib, &edges, 3.0, crate::FilletTurn::Mitre).unwrap().map(|x| x.0), Some(2.0));
     // Below half the width both build.
     let b = crate::chamfer(&rib, &edges, 1.5).unwrap();
     assert!((b.volume_at(0.01).unwrap() - (3200.0 - 2.0 * 0.5 * 1.5 * 1.5 * 40.0)).abs() < 1e-6);
@@ -113,5 +113,28 @@ fn chamfers_meeting_at_a_corner_still_build() {
     // 5 mm corner cube the two cylinders' intersection is kept, ∫₀⁵ (25 − w²) dw = 250/3 of 125.
     let v = crate::measure(&crate::fillet(&b, &edges, 5.0).unwrap()).unwrap().volume;
     let want = 8000.0 - 4.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 25.0 * 10.0 - 4.0 * (125.0 - 250.0 / 3.0);
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+}
+
+/// A round that would cut through the wall above a closed cavity into it is refused as too large,
+/// naming where it opens; a smaller one builds. The 40 × 20 × 20 block's cavity (x 30 to 38,
+/// y 2 to 18, z 10 to 18) has its corner edge 2 mm in from both faces of the top edge at x = 40:
+/// in the section the round's centre is at (40 − r, 20 − r), and its arc reaches the corner
+/// (38, 18) where (r − 2)² · 2 = r², r = 4 + 2√2 ≈ 6.83, at the middle of the 16 mm the corner
+/// runs along. The cavity's other corners and the block's own edges open only much later
+/// (r ≈ 18 and beyond), so a small round classifies none of their points.
+#[test]
+fn a_round_through_the_wall_into_a_cavity_is_refused_and_a_smaller_one_builds() {
+    let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(40.0, 20.0, 20.0)).unwrap();
+    let hollow = cut(&b, [30.0, 2.0, 10.0], [38.0, 18.0, 18.0]);
+    let why = too_large(crate::fillet(&hollow, &[EDGE], 7.0));
+    assert!(why.contains("into the hollow at (38.000, 10.000, 18.000)"), "{why}");
+    // Well under the radius it opens at it builds, the round removing
+    // (1 − π/4) r² of section along the 20 mm edge.
+    let r = 5.0;
+    let f = crate::fillet(&hollow, &[EDGE], r).unwrap();
+    assert!(f.validity().is_empty(), "{:?}", f.validity());
+    let want = 16000.0 - 8.0 * 16.0 * 8.0 - (1.0 - std::f64::consts::FRAC_PI_4) * r * r * 20.0;
+    let v = crate::measure(&f).unwrap().volume;
     assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
 }

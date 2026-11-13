@@ -6,10 +6,11 @@
 //! [`PathSeg::Bezier`] ([`SpaceBezier`]); [`PointPath::points`] is its polyline, for what takes
 //! points (rails, curve networks).
 
-use solidcraft_geom::brep;
+use solidcore_record::brep;
+use solidcore_record::{MAX_BEZIER_CTRL, MAX_BEZIER_DEGREE, Plane, Region2, Vec3};
 use solidcraft_geom::bspline::{HPoint, bezier_point, segment};
 use solidcraft_geom::catmull_rom;
-use solidcraft_geom::{MAX_BEZIER_CTRL, MAX_BEZIER_DEGREE, Plane, Region2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::{KernelError, PathSeg, Result, SweepControl};
@@ -189,7 +190,7 @@ pub fn project_onto_face(
     body: &Body,
     face_at: Vec3,
     plane: &Plane,
-    segs: &[solidcraft_geom::Seg2],
+    segs: &[solidcore_record::Seg2],
     direction: Vec3,
 ) -> Result<Vec<(brep::Curve, [f64; 2])>> {
     if !(face_at.is_finite() && direction.is_finite() && direction.len() > 1e-12) || segs.is_empty() || segs.len() > 4096 {
@@ -306,14 +307,14 @@ pub fn curve_path(c: &brep::Curve, [t0, t1]: [f64; 2]) -> Result<Vec<PathSeg>> {
 /// segment's way: a line, a circle (an arc's; clockwise ones on the frame turned over), a cubic
 /// or Bézier as a spline of its degree, a conic as a rational quadratic. `None` for a segment
 /// with non-finite numbers.
-pub fn sketch_record_curve(plane: &Plane, s: &solidcraft_geom::Seg2) -> Option<(brep::Curve, [f64; 2])> {
-    use solidcraft_geom::Seg2;
-    let w = |p: solidcraft_geom::Vec2| {
+pub fn sketch_record_curve(plane: &Plane, s: &solidcore_record::Seg2) -> Option<(brep::Curve, [f64; 2])> {
+    use solidcore_record::Seg2;
+    let w = |p: solidcore_record::Vec2| {
         let q = plane.to_world(p);
         [q.x, q.y, q.z]
     };
     let d = |v: Vec3| [v.x, v.y, v.z];
-    let bezier = |pts: &[solidcraft_geom::Vec2]| {
+    let bezier = |pts: &[solidcore_record::Vec2]| {
         let n = pts.len().checked_sub(1)?;
         let knots = std::iter::repeat_n(0.0, n + 1).chain(std::iter::repeat_n(1.0, n + 1)).collect();
         Some((brep::Curve::Spline { knots, points: pts.iter().map(|p| w(*p)).collect() }, [0.0, 1.0]))
@@ -328,7 +329,7 @@ pub fn sketch_record_curve(plane: &Plane, s: &solidcraft_geom::Seg2) -> Option<(
         Seg2::Cubic { p0, p1, p2, p3 } => bezier(&[p0, p1, p2, p3])?,
         Seg2::Bezier { n, p } => bezier(p.get(..=usize::from(n))?)?,
         Seg2::Conic { a, apex, b, w: wt } => {
-            let h = |p: solidcraft_geom::Vec2, k: f64| {
+            let h = |p: solidcore_record::Vec2, k: f64| {
                 let q = w(p);
                 [q[0] * k, q[1] * k, q[2] * k, k]
             };

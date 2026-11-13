@@ -2,7 +2,7 @@
 //! of the crossing meet, which a mesh intersection cannot trace and a boolean cannot take in the
 //! middle of a face.
 use crate::*;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use std::f64::consts::PI;
 
 const SIDE: f64 = 45.0;

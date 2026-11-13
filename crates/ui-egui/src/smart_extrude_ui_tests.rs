@@ -3,6 +3,7 @@
 use crate::dialogs::{Dialog, Kind};
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 const JOIN: usize = 1;
 const CUT: usize = 2;
@@ -136,7 +137,7 @@ fn a_new_start_object_decides_the_operation_again() {
     let b = st.bodies.first().expect("the box");
     let bottom =
         (0..64).find(|i| b.body.planar_face(*i).is_some_and(|p| p.normal().z < -0.99 && p.origin.z.abs() < 1e-9)).expect("the box's bottom face");
-    let face = solidcraft_engine::Sel::Face { body: b.name.clone(), index: bottom, point: solidcraft_engine::geom::Vec3::new(10.0, 10.0, 0.0) };
+    let face = solidcraft_engine::Sel::Face { body: b.name.clone(), index: bottom, point: solidcore_record::Vec3::new(10.0, 10.0, 0.0) };
     if let Some(d) = &mut h.app.dialog {
         let mut from = crate::selection::SelInput::new("From Object", crate::selection::FACES | crate::selection::VERTICES, false);
         from.items.push(face);
@@ -163,7 +164,7 @@ fn press_pull_drags_a_hole_wall() {
     h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
     h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
     h.settle();
-    let p = solidcraft_engine::geom::Vec3::new(25.0, 15.0, 10.0);
+    let p = solidcore_record::Vec3::new(25.0, 15.0, 10.0);
     h.app.session.selection = vec![solidcraft_engine::Sel::Face { body: "Body1".into(), index: wall, point: p }];
     h.step(&json!({"start":"solid.press_pull"})).unwrap();
     h.frames(2);

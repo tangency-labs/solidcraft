@@ -1,0 +1,153 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "561-extrude-the-start-face-of-a-coil",
+  "expected": {
+    "body_count": 1,
+    "method": "the coil is 4 x 4 wire at radius 20 turned 3 times by the screw: V = 16 * 2 pi 20 * 3 = 6032.1. The start face is the 4 x 4 section in the plane y = 0 at x 18..22, z -2..2; extruding it 5 mm out of the plane (into free space, away from the wire) adds 16 * 5 = 80: V = 6112.1.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#561",
+      "tangency-labs/solidcraft#677"
+    ],
+    "volume_mm3": 6111.857894892402,
+    "what": "the start face of a 3-turn square-wire coil (4 mm wire, pitch 8, centre diameter 40) extruded 5 mm"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 60,
+      "faces": 30,
+      "vertices": 32
+    }
+  },
+  "records": "561-extrude-the-start-face-of-a-coil.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6149.9838376780945,
+      "body_count": 1,
+      "edges": 50,
+      "faces": 20,
+      "vertices": 32,
+      "volume_mm3": 6111.857894892847
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#561",
+    "tangency-labs/solidcraft#677"
+  ],
+  "traced_ops": [
+    "screw_sweep",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the start face of a 3-turn square-wire coil (4 mm wire, pitch 8, centre diameter 40) extruded 5 mm",
+  "why_not": []
+}

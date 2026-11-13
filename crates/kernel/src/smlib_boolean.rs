@@ -16,8 +16,8 @@ mod smlib {
     use crate::validation::{Checked, Step};
     use crate::{KernelError, Result, record};
 
-    fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-        KernelError::Failed(format!("SMLib boolean: {what}: {e}"))
+    fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+        KernelError::smlib(format!("SMLib boolean: {what}"), e)
     }
 
     /// `a` and `b` combined by `op` in SMLib, with the history SMLib's tags give (none where a

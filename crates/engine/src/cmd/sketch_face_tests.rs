@@ -1,6 +1,7 @@
 use crate::Session;
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap_or_else(|error| panic!("{command} {params}: {error}"))
@@ -417,6 +418,8 @@ fn angled_attachment_tracks_source_plane_and_reopens() {
         axis_dir: Vec3::X,
         angle: "90 deg".into(),
         line: None,
+        direction_only: false,
+        pivot: None,
     };
     s.refresh();
     let height = s.doc.find_feature("BaseFeature").unwrap().param_names[2].clone();
@@ -526,7 +529,7 @@ fn rounded_enclosure_shell_side_and_floor_attach_through_width_wall_and_reopen()
         assert!(!mesh.contains(Vec3::new(49., 0., 12.)), "USB must remain open after resize/reopen");
         assert!(mesh.contains(Vec3::new(49., 15., 12.)), "adjacent right wall remains solid");
         assert!(mesh.contains(Vec3::new(-49., 0., 12.)), "opposite wall must stay solid");
-        let seed = state.sketch(floor).unwrap().plane.to_world(solidcraft_geom::Vec2::new(40., 20.)) + Vec3::Z * 6.;
+        let seed = state.sketch(floor).unwrap().plane.to_world(solidcore_record::Vec2::new(40., 20.)) + Vec3::Z * 6.;
         assert!(mesh.contains(seed), "seed boss starts on current floor");
         for shift in [Vec3::ZERO, Vec3::new(-80., 0., 0.), Vec3::new(0., -40., 0.), Vec3::new(-80., -40., 0.)] {
             assert!(mesh.contains(seed + shift), "each patterned boss must survive resize/reopen at {:?}", seed + shift);
@@ -891,4 +894,91 @@ fn activate_part_makes_the_sketch_in_the_faces_component() {
         draw(&mut s);
         assert!(s.model.result(id).unwrap().error.is_none());
     }
+}
+/// #14346: a side of a loft through three sections, flat but built as a B-spline patch, is a
+/// planar face a sketch can lie on and an extrude can start on. Its y− side is a trapezoid, 20
+/// and 12 wide and √404 along its slope, so 5 mm out from it adds its area × 5.
+#[test]
+fn a_flat_side_of_a_three_section_loft_takes_a_sketch_and_an_extrude() {
+    let mut s = Session::default();
+    for (name, z, [x, y]) in [("S0", 0, [10, 6]), ("S1", 10, [8, 5]), ("S2", 20, [6, 4])] {
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-x, -y], "p1": [x, y]}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    run(&mut s, "solid.loft", json!({"sections": [{"sketch": "S0"}, {"sketch": "S1"}, {"sketch": "S2"}], "body_name": "L3"}));
+    let side = {
+        let world = s.world_state().unwrap();
+        let body = world.body("L3").unwrap();
+        let face = body
+            .body
+            .faces(0.01)
+            .unwrap()
+            .into_iter()
+            .find(|face| face.centroid.y < -4.0 && face.centroid.z > 1.0 && face.centroid.z < 19.0)
+            .unwrap();
+        json!({"body": "L3", "index": face.index, "face": [face.centroid.x, face.centroid.y, face.centroid.z]})
+    };
+    let sketch = run(&mut s, "sketch.create", json!({"plane": side.clone(), "name": "OnSide"}))["sketch"].as_u64().unwrap();
+    let normal = s.model.state().sketch(sketch).unwrap().plane.normal();
+    assert!(normal.dot(Vec3::new(0.0, -10.0, 1.0).normalized().unwrap()) > 1.0 - 1e-9, "{normal:?}");
+    run(&mut s, "sketch.finish", json!({}));
+    let volume = |s: &mut Session| run(s, "inspect.measure", json!({"bodies": ["L3"]}))["bodies"][0]["volume_mm3"].as_f64().unwrap();
+    let before = volume(&mut s);
+    run(&mut s, "solid.extrude", json!({"face": side["face"], "face_body": "L3", "distance": "5 mm", "direction": "positive", "operation": "join"}));
+    let added = (volume(&mut s) - before) / 5.0;
+    let area = (20.0 + 12.0) / 2.0 * 404f64.sqrt();
+    assert!((added - area).abs() < 1e-6 * area, "{added} vs {area}");
+}
+
+/// Attaching a sketch to a flat face of a large imported body with many B-spline faces meshed
+/// the whole body twice, at a tenth of the chord the model meshes it at, to find where the point
+/// lies: tens of seconds a click. The capture reads the model's own mesh of the body, which a
+/// pick has already made, so it meshes nothing; with only a point, the exact flatness check runs
+/// only for the face the point is on. Counted with the kernel's tessellation time on this thread,
+/// which is exactly zero when nothing is meshed.
+#[test]
+fn a_sketch_on_a_face_of_an_imported_spline_body_meshes_nothing_more() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-attach-mesh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("lofted.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    // Sections that do not scale linearly with height, so every side is a curved B-spline patch.
+    for (name, z, r) in [("S0", 0, 40.0), ("S1", 20, 28.0), ("S2", 40, 36.0)] {
+        run(&mut src, "sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name}));
+        run(&mut src, "sketch.polygon.inscribed", json!({"center": [0, 0], "radius": r, "sides": 48}));
+        run(&mut src, "sketch.finish", json!({}));
+    }
+    run(&mut src, "solid.loft", json!({"sections": [{"sketch": "S0"}, {"sketch": "S1"}, {"sketch": "S2"}], "body_name": "L"}));
+    run(&mut src, "file.export", json!({"path": path}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (name, bottom, curved) = {
+        let world = s.world_state().unwrap();
+        let body = &world.bodies[0];
+        let faces = body.body.faces(0.01).unwrap();
+        let bottom = faces.iter().find(|face| face.plane_normal.is_some_and(|n| n.z < -0.999)).unwrap().clone();
+        let curved = (0..body.body.face_count()).filter(|i| body.body.planar_face(*i).is_none()).count();
+        (body.name.clone(), bottom, curved)
+    };
+    assert!(curved >= 48, "the sides are curved B-spline faces: {curved}");
+    // The model's mesh of the body, as the viewport's pick made it.
+    for body in &s.model.state().bodies {
+        body.mesh();
+    }
+    let at = [bottom.centroid.x + 5.0, bottom.centroid.y - 3.0, 0.0];
+    let picks = [("exact", json!({"body": name, "index": bottom.index, "face": at})), ("point", json!({"face": at}))];
+    for (kind, pick) in picks {
+        let (made, times) = solidcraft_kernel::profile::capture(|| s.execute("sketch.create", &json!({"plane": pick, "name": kind})));
+        let made = made.unwrap_or_else(|error| panic!("{kind}: {error}"));
+        assert_eq!(times.tessellate_ms, 0.0, "{kind}: the body was meshed again");
+        assert_eq!(made["attachment"], json!("exact_face"), "{kind}: {made}");
+        let plane = s.model.state().sketch(made["sketch"].as_u64().unwrap()).unwrap().plane;
+        assert!(plane.normal().z < -1.0 + 1e-9 && plane.origin.z.abs() < 1e-9, "{kind}: {plane:?}");
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    // A point on the cap's plane but off the cap is on no face.
+    let off = s.execute("sketch.create", &json!({"plane": {"body": name, "index": bottom.index, "face": [100, 0, 0]}}));
+    assert!(off.is_err(), "{off:?}");
 }

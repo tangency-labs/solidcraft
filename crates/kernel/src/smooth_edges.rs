@@ -14,9 +14,11 @@
 //! display-only: the edge keeps its identity, stays pickable and stays in the wireframe, and its
 //! faces stay apart (pieces of one surface are [`crate::topo::seam_flags`]'s business). Unknown
 //! geometry (a station that does not evaluate) keeps its existing presentation.
+use solidcore_record::Vec3;
+use solidcore_record::brep::{Brep, Loop, Shell};
+use solidcraft_geom::Mesh;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::brep::{Brep, Loop, Shell};
-use solidcraft_geom::{Mesh, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 
@@ -24,8 +26,14 @@ const MAX_FACES: usize = 50_000;
 const MAX_EDGES: usize = 200_000;
 /// Surface evaluations one body may spend (two per station).
 const WORK: usize = 2_000_000;
-/// Stations along each edge: the middles of this many equal parameter spans, so neither end
-/// (where a pole or a vertex of a degenerate face sits) is one.
+/// Stations along each edge: the middles of this many equal parameter spans, and the edge's
+/// two ends, its exact end parameters (a join is G2 only if it is at its ends too: a G2 corner
+/// patch meets its round G2 along the middle of its side but only G1 where the side ends on a
+/// face, #13542). An end where the normal is undefined (a pole, an apex) or that does not
+/// evaluate says nothing and is skipped; the middles keep their rule. This is still sampling:
+/// a join that departs from G2 only between stations reads smooth. The certified decision is a
+/// whole-edge G2 enclosure (tangency-labs/solidcraft#13914); moving these stations onto
+/// solidcore's continuity measure is tangency-labs/solidcraft#14171.
 const STATIONS: usize = 8;
 /// Largest angle between the faces' normals, in radians, that still counts as tangent: half a
 /// degree. Shading is the visible trace of a join: across a crease of angle θ the lit intensity
@@ -157,13 +165,13 @@ fn station(face: &FaceEval, uv: [f64; 2]) -> Option<Option<Station>> {
     Some(Some(Station { point, normal: unit * face.side, su, sv, second, curvature }))
 }
 
-/// How the two uses of edge `e` meet: their faces' outward normals compared at [`STATIONS`]
-/// stations, each through its own pcurve.
+/// How the two uses of edge `e` meet: their faces' outward normals compared at the middles of
+/// [`STATIONS`] spans and at the edge's two ends, each through its own pcurve.
 fn join(record: &Brep, faces: &[Option<FaceEval>], e: usize, length: f64, work: &mut usize) -> Join {
     let unknown = Join::default();
     let Some(edge) = record.edges.get(e) else { return unknown };
     let [a, b] = edge.uses.as_slice() else { return unknown };
-    let side = |u: &solidcraft_geom::brep::EdgeUseRef| {
+    let side = |u: &solidcore_record::brep::EdgeUseRef| {
         let face = faces.get(u.face as usize)?.as_ref()?;
         let Loop::Edges { edges } = record.faces.get(u.face as usize)?.loops.get(u.r#loop as usize)? else { return None };
         let used = edges.get(u.position as usize)?;
@@ -176,13 +184,19 @@ fn join(record: &Brep, faces: &[Option<FaceEval>], e: usize, length: f64, work: 
     }
     let curve = CurveEval::new(edge.parameters()).ok();
     let (mut measured, mut smooth, mut crease) = (false, true, false);
-    for k in 0..STATIONS {
+    // The middles of the spans, then the two ends (`true`: an end, skipped where it says nothing).
+    let middles = (0..STATIONS).map(|k| (t0 + (t1 - t0) * (k as f64 + 0.5) / STATIONS as f64, false));
+    for (t, end) in middles.chain([(t0, true), (t1, true)]) {
         let Some(left) = work.checked_sub(2) else { return unknown };
         *work = left;
-        let t = t0 + (t1 - t0) * (k as f64 + 0.5) / STATIONS as f64;
-        let (Some(ua), Some(ub)) = (pa.eval(t), pb.eval(t)) else { return unknown };
-        let (Some(sa), Some(sb)) = (station(fa, ua), station(fb, ub)) else { return unknown };
-        let (Some(sa), Some(sb)) = (sa, sb) else { continue };
+        let evaluated =
+            solidcore_ops::pcurve::eval(pa, t).zip(solidcore_ops::pcurve::eval(pb, t)).and_then(|(ua, ub)| station(fa, ua).zip(station(fb, ub)));
+        let (sa, sb) = match evaluated {
+            Some((Some(sa), Some(sb))) => (sa, sb),
+            Some(_) => continue,
+            None if end => continue,
+            None => return unknown,
+        };
         let angle = sa.normal.cross(sb.normal).len().atan2(sa.normal.dot(sb.normal));
         if !angle.is_finite() {
             return unknown;
@@ -344,8 +358,8 @@ fn whole_joins(record: &Brep, measured: &[usize], smooth: &mut [bool], mut work:
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use solidcraft_geom::brep::Surface;
-    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    use solidcore_record::brep::Surface;
+    use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
     fn circle(radius: f64, count: usize) -> Loop2 {
         let step = std::f64::consts::TAU / count as f64;
@@ -430,11 +444,12 @@ mod tests {
         assert!(classify(&body, &mesh, 0).0.iter().all(|f| !*f));
     }
 
-    /// A G2 corner patch's sides are G2 to their rounds except near the faces they end on, and
-    /// SMLib holds each side as two edges: the side is one join, drawn whole, not up to the
-    /// vertex in its middle where the G2 half begins (the 20 mm box's r3 corner).
+    /// A G2 corner patch's sides are G2 to their rounds except near the faces they end on: each
+    /// side is one join, drawn whole (the 20 mm box's r3 corner). Since tangency-labs/solidcore#2988 the
+    /// corner SMLib leaves open is the blend corner's Setback, whose sections are not split, so
+    /// each side is one edge (the N x N patch before it held each side as two).
     #[test]
-    fn a_seam_split_in_two_edges_is_drawn_whole() {
+    fn a_g2_corner_s_side_to_its_round_is_drawn_whole() {
         let body = crate::box_solid(Vec3::ZERO, Vec3::new(20., 20., 20.)).unwrap();
         let picks = [Vec3::new(20., 20., 10.), Vec3::new(20., 10., 20.), Vec3::new(10., 20., 20.)];
         let g2 = crate::fillet_g2_corners(&body, &picks, 3., &[]).unwrap();
@@ -450,8 +465,27 @@ mod tests {
         for round in rounds {
             let side: Vec<usize> =
                 (0..mesh.edges.len()).filter(|e| mesh.edge_faces[*e].contains(&patch) && mesh.edge_faces[*e].contains(&round)).collect();
-            assert_eq!(side.len(), 2, "SMLib splits the side in two: {side:?}");
+            assert_eq!(side.len(), 1, "the Setback's section is one edge (tangency-labs/solidcore#2988): {side:?}");
             assert!(side.iter().all(|e| mesh.shaded_edge_visible(*e)), "the side to round {round} is drawn whole: {side:?}");
+        }
+    }
+
+    /// The edges' ends are measured too, and a join that is G2 at them stays hidden: the ring's
+    /// wall joins, pieces of one cubic spline, are G2 along their whole length, ends included,
+    /// so measuring the ends turns none of them visible (#13542).
+    #[test]
+    fn measuring_the_ends_keeps_a_g2_join_hidden() {
+        for count in [8, 16] {
+            let body = ring(count);
+            let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
+            assert_eq!(mesh.edges.len(), 6 * count);
+            let vertical: Vec<usize> =
+                (0..mesh.edges.len()).filter(|i| (mesh.edges[*i].first().unwrap().z - mesh.edges[*i].last().unwrap().z).abs() > 2.9).collect();
+            assert_eq!(vertical.len(), 2 * count);
+            for i in vertical {
+                assert!(mesh.smooth_edges[i], "{count}: wall join {i} is G2, ends included");
+                assert!(!mesh.shaded_edge_visible(i), "{count}: wall join {i}");
+            }
         }
     }
 
@@ -550,6 +584,33 @@ mod tests {
         }
     }
 
+    /// Drawing is its own angle ([`ANGLE`], half a degree), not the tangent chain's 2°: the
+    /// upright edges of a prism whose outline turns 1° at every vertex are all drawn, and those of
+    /// one turning 0.4° are all hidden.
+    #[test]
+    fn edge_drawing_still_hides_a_join_only_under_half_a_degree() {
+        let uprights = |n: usize| {
+            let at = |k: usize| {
+                let a = std::f64::consts::TAU * k as f64 / n as f64;
+                Vec2::new(20. * a.cos(), 20. * a.sin())
+            };
+            let outer = Loop2::polygon(&(0..n).map(at).collect::<Vec<_>>());
+            let body = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 3.).unwrap().remove(0);
+            let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
+            let upright: Vec<bool> = mesh
+                .edges
+                .iter()
+                .zip(&mesh.smooth_edges)
+                .filter(|(line, _)| line.first().zip(line.last()).is_some_and(|(a, b)| (a.z - b.z).abs() > 1.))
+                .map(|(_, smooth)| *smooth)
+                .collect();
+            assert_eq!(upright.len(), n);
+            upright
+        };
+        assert!(uprights(360).iter().all(|smooth| !smooth), "1° is drawn");
+        assert!(uprights(900).iter().all(|smooth| *smooth), "0.4° is hidden");
+    }
+
     /// A plane tangent to a cylinder (a D-shaped prism): one tangent plane, but the curvature
     /// jumps from 0 to 1 / radius, so the join is drawn.
     #[test]
@@ -584,7 +645,7 @@ mod tests {
     fn a_degenerate_normal_says_nothing() {
         let face = FaceEval {
             surface: SurfaceEval::new(&Surface::Sphere {
-                frame: solidcraft_geom::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] },
+                frame: solidcore_record::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] },
                 radius: 2.,
             })
             .unwrap(),

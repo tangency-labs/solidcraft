@@ -1,0 +1,132 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              16.03150366062692,
+              18.002543813261397,
+              8.333333333333332
+            ]
+          ],
+          "tolerance": 0.05153982032022076
+        },
+        "thickness": -2.5
+      }
+    }
+  ],
+  "case": "4010-shell-open-at-through-hole-wall",
+  "expected": {
+    "body_count": 1,
+    "center_of_mass": [
+      20,
+      15,
+      6.25
+    ],
+    "method": "plate 40x30x12.5 minus hole r5; cavity = inward offset box 35x25x7.5 minus the hole's cylinder (r=5 stays as the wall, height 7.5) open to the hole. V=(15000-pi*25*12.5)-(6562.5-pi*25*7.5); centroid (20,15,6.25) by symmetry",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4010"
+    ],
+    "volume_mm3": 8044.8009183012755,
+    "what": "plate with a through hole shelled 2.5 mm with only the hole's wall removed"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 30,
+      "faces": 14,
+      "vertices": 20
+    }
+  },
+  "records": "4010-shell-open-at-through-hole-wall.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6642.920367326635,
+      "body_count": 1,
+      "edges": 30,
+      "faces": 14,
+      "vertices": 20,
+      "volume_mm3": 8044.800918322474
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4010"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "plate with a through hole shelled 2.5 mm with only the hole's wall removed",
+  "why_not": []
+}

@@ -2,10 +2,11 @@
 //! Revolve, Circular Pattern and Plane at Angle turn about a circular edge's or a cylinder's
 //! axis, and follow it when a parameter moves the cylinder.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 use crate::view::construction_planes;

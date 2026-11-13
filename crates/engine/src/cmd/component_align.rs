@@ -3,8 +3,9 @@
 //! without modifying shared component geometry across other instances.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{IDENTITY, mat_inverse, mat_mul, rigid};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::{occurrence, occurrence_path, valid_position};
 use crate::params::{bad, vec3};
@@ -106,7 +107,7 @@ fn world_pick(
             return Err(bad(cmd, format!("give `{pk}_plane` or `{pk}`/`{fk}`, not both")));
         }
         let world = s.world_state()?;
-        let pl = s.placed_document().resolve_plane_in(vals, pl_ref, 0, Some(&*world)).map_err(|e| bad(cmd, e.to_string()))?;
+        let pl = s.placed_document().resolve_plane_in(vals, pl_ref, 0, 0, Some(&*world)).map_err(|e| bad(cmd, e.to_string()))?;
         return Ok((pl.origin, Some(pl.normal())));
     }
     if let Some(fv) = p.get(fk) {

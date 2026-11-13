@@ -9,7 +9,7 @@
   "rel": 1e-06
  },
  "surface_types": [
-  "bspline",
+  "blend",
   "cone",
   "cylinder",
   "plane"

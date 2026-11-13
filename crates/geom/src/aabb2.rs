@@ -1,6 +1,7 @@
 //! A box in the plane, the 2D [`crate::Aabb3`].
 
-use crate::Vec2;
+use crate::prelude::*;
+use solidcore_record::Vec2;
 
 /// Axis-aligned box in the plane; [`Aabb2::EMPTY`] (low +∞, high −∞) holds nothing.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -1,0 +1,169 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  80.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  80.0,
+                  0.0,
+                  20.0
+                ]
+              ],
+              "index": 10
+            },
+            {
+              "at": [
+                [
+                  80.0,
+                  20.0,
+                  0.0
+                ],
+                [
+                  80.0,
+                  20.0,
+                  20.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              80.0,
+              0.0,
+              10.0
+            ],
+            [
+              80.0,
+              20.0,
+              10.0
+            ]
+          ],
+          "tolerance": 4.243640687119286
+        },
+        "kind": "round",
+        "sizes": [
+          10.0,
+          10.0
+        ]
+      }
+    }
+  ],
+  "case": "4782-fillet-full-round-two-end-verticals",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "faces": 6,
+    "method": "box 80x20x20, the end x=80 rounded r10 on both vertical edges: removed 2 (1-pi/4) r^2 H; the end face is used up, the rounds meet along x=70..80's middle line tangentially: 4 planes + 2 rounds",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4782"
+    ],
+    "volume_mm3": 31141.592653589792,
+    "what": "both vertical edges of a 20 mm wide box end rounded r10, half the width: the rounds meet tangent and use up the end face (a full round)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "4782-fillet-full-round-two-end-verticals.bodies.json.gz",
+  "result": [
+    {
+      "body": "Box",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6942.47779607685,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 31141.592653525397
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4782"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it",
+    "faces: graded merged across analytic surfaces (6), the records have 7"
+  ],
+  "what": "both vertical edges of a 20 mm wide box end rounded r10, half the width: the rounds meet tangent and use up the end face (a full round)",
+  "why_not": []
+}

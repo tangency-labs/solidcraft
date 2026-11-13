@@ -13,11 +13,12 @@
 //! stays a revolution, which the import sends as its exact rational B-spline; any other spline
 //! stays a spline.
 
+use solidcraft_geom::prelude::*;
 use std::borrow::Cow;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep as b;
+use solidcore_record::Vec3;
+use solidcore_record::brep as b;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 
 use super::{R, Unsupported};

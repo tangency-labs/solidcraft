@@ -1,0 +1,3058 @@
+Version 42
+Healer Version 10
+//Brep Starts
+1e0 0e0 0e0 - Color
+1e-5 - Brep ZoneTol3d
+1 - is Manifold:[1 = is, 0 = isn't]
+0 - has Composites:[1 = does, 0 = doesn't]
+
+//Region Data
+2 Regions In Brep
+0 - Start Region
+//Index, Flags, UserId1, UserId2, Number Of Shells, First Shell, Is void Region
+0 0 0 0 1 0 1
+1 0 0 0 1 1 0
+
+//Shell Data
+2 Shells In Brep
+//Index, Flags, UserId1, UserId2, 0(Faceuse), Orientation, Number Of Faceuses, Start Faceuse
+//Index, Flags, UserId1, UserId2, 1(WireEdge), Edge
+//Index, Flags, UserId1, UserId2, 2(Vertex), Vertex
+0 0 0 0 0 1 19 0
+1 0 0 0 0 1 19 19
+
+//Composite Face Data
+0 Composite Faces In Brep
+
+//Faceuse Data
+38 Faceuses In Brep
+//Index, Flags, UserId1, UserId2, Face, Orientation
+0 0 0 0 0 1
+1 0 0 0 1 1
+2 0 0 0 2 1
+3 0 0 0 3 1
+4 0 0 0 4 1
+5 0 0 0 5 1
+6 0 0 0 6 1
+7 0 0 0 7 1
+8 0 0 0 8 1
+9 0 0 0 9 1
+10 0 0 0 10 0
+11 0 0 0 11 0
+12 0 0 0 12 0
+13 0 0 0 13 0
+14 0 0 0 14 0
+15 0 0 0 15 0
+16 0 0 0 16 0
+17 0 0 0 17 0
+18 0 0 0 18 0
+19 0 0 0 0 0
+20 0 0 0 1 0
+21 0 0 0 2 0
+22 0 0 0 3 0
+23 0 0 0 4 0
+24 0 0 0 5 0
+25 0 0 0 6 0
+26 0 0 0 7 0
+27 0 0 0 8 0
+28 0 0 0 9 0
+29 0 0 0 10 1
+30 0 0 0 11 1
+31 0 0 0 12 1
+32 0 0 0 13 1
+33 0 0 0 14 1
+34 0 0 0 15 1
+35 0 0 0 16 1
+36 0 0 0 17 1
+37 0 0 0 18 1
+
+//Face Data
+19 Faces In Brep
+//Index, Flags, UserId1, UserId2, Tol, Surface, Outer Loop, # of Loops, Naturally Trimmed
+//UMin, UMax, VMin, VMax
+0 0 0 0 1e-5 0 0 1 2
+0e0 7e1 0e0 3.3e1
+1 0 0 0 1e-5 1 1 1 2
+0e0 5e1 0e0 3.3e1
+2 0 0 0 1e-5 2 2 1 2
+0e0 5e1 0e0 3.3e1
+3 0 0 0 1e-5 3 3 1 2
+0e0 7e1 0e0 3.3e1
+4 0 0 0 1e-5 4 4 1 2
+0e0 9.46255779374689e1 0e0 9.46255779374689e1
+5 0 0 0 1e-5 5 5 2 2
+0e0 9.46255779374689e1 0e0 9.46255779374689e1
+6 0 0 0 1e-5 6 7 1 2
+0e0 1e0 2.5e-1 7.5e-1
+7 0 0 0 1e-5 7 8 1 2
+0e0 1e0 2.5e-1 7.5e-1
+8 0 0 0 1e-5 8 9 1 2
+0e0 1e0 2.5e-1 7.5e-1
+9 0 0 0 1e-5 9 10 1 2
+0e0 1e0 2.5e-1 7.5e-1
+10 0 0 0 1e-5 10 11 1 2
+0e0 1e0 2.803030303030303e-1 7.5e-1
+11 0 0 0 1e-5 11 12 1 2
+1.4312788968734452e1 8.031278896873445e1 2.4312788968734452e1 7.031278896873445e1
+12 0 0 0 1e-5 12 13 1 2
+5.999999999999993e0 4.400000000000001e1 1.9999999999999982e0 3.3e1
+13 0 0 0 1e-5 13 14 1 2
+0e0 1e0 2.803030303030303e-1 7.5e-1
+14 0 0 0 1e-5 14 15 1 2
+5.999999999999989e0 6.4e1 1.9999999999999982e0 3.3e1
+15 0 0 0 1e-5 15 16 1 2
+0e0 1e0 2.803030303030303e-1 7.5e-1
+16 0 0 0 1e-5 16 17 1 2
+5.999999999999993e0 4.400000000000001e1 1.9999999999999982e0 3.3e1
+17 0 0 0 1e-5 17 18 1 2
+0e0 1e0 2.803030303030303e-1 7.5e-1
+18 0 0 0 1e-5 18 19 1 2
+5.999999999999989e0 6.4e1 1.9999999999999982e0 3.3e1
+
+//Loop Data
+20 Loops In Brep
+//Index, Flags, UserId1, UserId2, 0(Edgeuse), # Of Edgeuses, Start Edgeuse
+//Index, Flags, UserId1, UserId2, 1(Vertex), Vertex
+0 0 0 0 0 4 0
+1 0 0 0 0 4 4
+2 0 0 0 0 4 8
+3 0 0 0 0 4 12
+4 0 0 0 0 8 16
+5 0 0 0 0 8 24
+6 0 0 0 0 8 32
+7 0 0 0 0 4 40
+8 0 0 0 0 4 44
+9 0 0 0 0 4 48
+10 0 0 0 0 4 52
+11 0 0 0 0 4 56
+12 0 0 0 0 8 60
+13 0 0 0 0 4 68
+14 0 0 0 0 4 72
+15 0 0 0 0 4 76
+16 0 0 0 0 4 80
+17 0 0 0 0 4 84
+18 0 0 0 0 4 88
+19 0 0 0 0 4 92
+
+//Composite Edge Data
+0 Composite Edges In Brep
+
+//Edgeuse Data
+96 Edgeuses In Brep
+//Index, Flags, UserId1, UserId2, MateFlags, MateUserId1, MateUserId2, 0(Edge), Edge, Loop, Orientation, UV Curve, Next EU, Mate Next EU
+//Index, Flags, UserId1, UserId2, MateFlags, MateUserId1, MateUserId2, 1(Vertex), Vertex, Loop, Orientation, UV Curve
+//Index, Flags, UserId1, UserId2, MateFlags, MateUserId1, MateUserId2, 2(Wire Edge), Edge, Shell, Orientation, UV Curve
+//Index, Flags, UserId1, UserId2, MateFlags, MateUserId1, MateUserId2, 3(Vertex At Pole), Vertex, Loop, Orientation, UV Curve
+0 0 0 0 0 0 0 0 0 0 1 9999999 44 0
+1 0 0 0 0 0 0 0 1 0 0 9999999 -2 -30
+2 0 0 0 0 0 0 0 2 0 0 9999999 -3 -55
+3 0 0 0 0 0 0 0 3 0 1 9999999 19 3
+4 0 0 0 0 0 0 0 4 1 1 9999999 40 4
+5 0 0 0 0 0 0 0 5 1 0 9999999 -6 -32
+6 0 0 0 0 0 0 0 6 1 0 9999999 -7 -47
+7 0 0 0 0 0 0 0 7 1 1 9999999 17 7
+8 0 0 0 0 0 0 0 8 2 0 9999999 -9 -51
+9 0 0 0 0 0 0 0 9 2 1 9999999 21 9
+10 0 0 0 0 0 0 0 10 2 1 9999999 52 10
+11 0 0 0 0 0 0 0 11 2 0 9999999 -12 -28
+12 0 0 0 0 0 0 0 12 3 0 9999999 -13 -43
+13 0 0 0 0 0 0 0 13 3 1 9999999 23 13
+14 0 0 0 0 0 0 0 14 3 1 9999999 48 14
+15 0 0 0 0 0 0 0 15 3 0 9999999 -16 -26
+16 0 0 0 0 0 0 0 16 4 0 9999999 -17 -42
+17 0 0 0 0 0 0 0 7 4 0 9999999 -18 -8
+18 0 0 0 0 0 0 0 17 4 0 9999999 -19 -46
+19 0 0 0 0 0 0 0 3 4 0 9999999 -20 -4
+20 0 0 0 0 0 0 0 18 4 0 9999999 -21 -54
+21 0 0 0 0 0 0 0 9 4 0 9999999 -22 -10
+22 0 0 0 0 0 0 0 19 4 0 9999999 -23 -50
+23 0 0 0 0 0 0 0 13 4 0 9999999 -24 -14
+24 0 0 0 0 0 0 0 20 5 0 9999999 -25 -44
+25 0 0 0 0 0 0 0 15 5 1 9999999 15 25
+26 0 0 0 0 0 0 0 21 5 0 9999999 -27 -52
+27 0 0 0 0 0 0 0 11 5 1 9999999 11 27
+28 0 0 0 0 0 0 0 22 5 0 9999999 -29 -56
+29 0 0 0 0 0 0 0 1 5 1 9999999 1 29
+30 0 0 0 0 0 0 0 23 5 0 9999999 -31 -48
+31 0 0 0 0 0 0 0 5 5 1 9999999 5 31
+32 0 0 0 0 0 0 0 24 6 1 9999999 -60 32
+33 0 0 0 0 0 0 0 25 6 0 9999999 -34 93
+34 0 0 0 0 0 0 0 26 6 1 9999999 -92 34
+35 0 0 0 0 0 0 0 27 6 0 9999999 -36 87
+36 0 0 0 0 0 0 0 28 6 1 9999999 -84 36
+37 0 0 0 0 0 0 0 29 6 0 9999999 -38 79
+38 0 0 0 0 0 0 0 30 6 1 9999999 -76 38
+39 0 0 0 0 0 0 0 31 6 0 9999999 -40 69
+40 0 0 0 0 0 0 0 4 7 0 0 -41 -5
+41 0 0 0 0 0 0 0 16 7 1 1 16 41
+42 0 0 0 0 0 0 0 12 7 1 2 12 42
+43 0 0 0 0 0 0 0 20 7 1 3 24 43
+44 0 0 0 0 0 0 0 0 8 0 4 -45 -1
+45 0 0 0 0 0 0 0 17 8 1 5 18 45
+46 0 0 0 0 0 0 0 6 8 1 6 6 46
+47 0 0 0 0 0 0 0 23 8 1 7 30 47
+48 0 0 0 0 0 0 0 14 9 0 8 -49 -15
+49 0 0 0 0 0 0 0 19 9 1 9 22 49
+50 0 0 0 0 0 0 0 8 9 1 10 8 50
+51 0 0 0 0 0 0 0 21 9 1 11 26 51
+52 0 0 0 0 0 0 0 10 10 0 12 -53 -11
+53 0 0 0 0 0 0 0 18 10 1 13 20 53
+54 0 0 0 0 0 0 0 2 10 1 14 2 54
+55 0 0 0 0 0 0 0 22 10 1 15 28 55
+56 0 0 0 0 0 0 0 34 11 0 16 -57 -93
+57 0 0 0 0 0 0 0 33 11 1 17 62 57
+58 0 0 0 0 0 0 0 32 11 1 18 70 58
+59 0 0 0 0 0 0 0 24 11 1 19 -33 59
+60 0 0 0 0 0 0 0 41 12 0 9999999 -61 -74
+61 0 0 0 0 0 0 0 40 12 0 9999999 -62 -72
+62 0 0 0 0 0 0 0 33 12 0 9999999 -63 -58
+63 0 0 0 0 0 0 0 39 12 0 9999999 -64 -96
+64 0 0 0 0 0 0 0 38 12 0 9999999 -65 -90
+65 0 0 0 0 0 0 0 37 12 0 9999999 -66 -86
+66 0 0 0 0 0 0 0 36 12 0 9999999 -67 -82
+67 0 0 0 0 0 0 0 35 12 0 9999999 -68 -78
+68 0 0 0 0 0 0 0 42 13 1 9999999 72 68
+69 0 0 0 0 0 0 0 31 13 0 9999999 -70 39
+70 0 0 0 0 0 0 0 32 13 0 9999999 -71 -59
+71 0 0 0 0 0 0 0 40 13 1 9999999 61 71
+72 0 0 0 0 0 0 0 42 14 0 20 -73 -69
+73 0 0 0 0 0 0 0 41 14 1 21 60 73
+74 0 0 0 0 0 0 0 43 14 1 22 76 74
+75 0 0 0 0 0 0 0 30 14 1 23 -39 75
+76 0 0 0 0 0 0 0 43 15 0 9999999 -77 -75
+77 0 0 0 0 0 0 0 35 15 1 9999999 67 77
+78 0 0 0 0 0 0 0 44 15 1 9999999 80 78
+79 0 0 0 0 0 0 0 29 15 0 9999999 -80 37
+80 0 0 0 0 0 0 0 44 16 0 24 -81 -79
+81 0 0 0 0 0 0 0 36 16 1 25 66 81
+82 0 0 0 0 0 0 0 45 16 1 26 84 82
+83 0 0 0 0 0 0 0 28 16 1 27 -37 83
+84 0 0 0 0 0 0 0 45 17 0 9999999 -85 -83
+85 0 0 0 0 0 0 0 37 17 1 9999999 65 85
+86 0 0 0 0 0 0 0 46 17 1 9999999 88 86
+87 0 0 0 0 0 0 0 27 17 0 9999999 -88 35
+88 0 0 0 0 0 0 0 46 18 0 28 -89 -87
+89 0 0 0 0 0 0 0 38 18 1 29 64 89
+90 0 0 0 0 0 0 0 47 18 1 30 94 90
+91 0 0 0 0 0 0 0 26 18 1 31 -35 91
+92 0 0 0 0 0 0 0 34 19 1 9999999 56 92
+93 0 0 0 0 0 0 0 25 19 0 9999999 -94 33
+94 0 0 0 0 0 0 0 47 19 0 9999999 -95 -91
+95 0 0 0 0 0 0 0 39 19 1 9999999 63 95
+
+//Edge Data
+48 Edges In Brep
+//Index, Flags, UserId1, UserId2, Tol, Curve, Start Vertex, End Vertex, Primary Edgeuse, Param Min, Param Max
+0 0 0 0 4e-5 0 0 1 -1 2.5e-1 7.5e-1
+1 0 0 0 1e-5 1 2 1 1 8.571428571428572e-2 9.142857142857143e-1
+2 0 0 0 4e-5 2 3 2 2 2.5e-1 7.5e-1
+3 0 0 0 1e-5 3 3 0 -4 8.571428571428572e-2 9.142857142857143e-1
+4 0 0 0 4e-5 4 4 5 -5 2.5e-1 7.5e-1
+5 0 0 0 1e-5 5 6 5 5 1.2e-1 8.8e-1
+6 0 0 0 4e-5 6 7 6 6 2.5e-1 7.5e-1
+7 0 0 0 1e-5 7 7 4 -8 1.2e-1 8.8e-1
+8 0 0 0 4e-5 8 8 9 8 2.5e-1 7.5e-1
+9 0 0 0 1e-5 9 8 10 -10 1.2e-1 8.8e-1
+10 0 0 0 4e-5 10 10 11 -11 2.5e-1 7.5e-1
+11 0 0 0 1e-5 11 9 11 11 1.2e-1 8.8e-1
+12 0 0 0 4e-5 12 12 13 12 2.5e-1 7.5e-1
+13 0 0 0 1e-5 13 12 14 -14 8.571428571428572e-2 9.142857142857143e-1
+14 0 0 0 4e-5 14 14 15 -15 2.5e-1 7.5e-1
+15 0 0 0 1e-5 15 13 15 15 8.571428571428572e-2 9.142857142857143e-1
+16 0 0 0 4e-5 16 4 12 16 0e0 1e0
+17 0 0 0 4e-5 17 0 7 18 0e0 1e0
+18 0 0 0 4e-5 18 10 3 20 0e0 1e0
+19 0 0 0 4e-5 19 14 8 22 0e0 1e0
+20 0 0 0 4e-5 20 13 5 24 0e0 1e0
+21 0 0 0 4e-5 21 9 15 26 0e0 1e0
+22 0 0 0 4e-5 22 2 11 28 0e0 1e0
+23 0 0 0 4e-5 23 6 1 30 0e0 1e0
+24 0 0 0 8e-5 24 16 17 -33 0e0 1e0
+25 0 0 0 2e-5 25 18 17 33 0e0 1e0
+26 0 0 0 8e-5 26 18 19 -35 0e0 1e0
+27 0 0 0 2e-5 27 20 19 35 0e0 1e0
+28 0 0 0 8e-5 28 20 21 -37 0e0 1e0
+29 0 0 0 2e-5 29 22 21 37 0e0 1e0
+30 0 0 0 8e-5 30 22 23 -39 0e0 1e0
+31 0 0 0 2e-5 31 16 23 39 0e0 1e0
+32 0 0 0 8e-5 32 24 16 -59 0e0 1e0
+33 0 0 0 8e-5 33 25 24 -58 0e0 1e0
+34 0 0 0 8e-5 34 25 17 56 0e0 1e0
+35 0 0 0 2e-5 35 26 27 67 1.777777777777778e-1 8.222222222222224e-1
+36 0 0 0 8e-5 36 27 28 66 0e0 1e0
+37 0 0 0 2e-5 37 28 29 65 2.2857142857142848e-1 7.714285714285714e-1
+38 0 0 0 8e-5 38 29 30 64 0e0 1e0
+39 0 0 0 2e-5 39 30 25 63 1.7777777777777787e-1 8.222222222222224e-1
+40 0 0 0 2e-5 40 24 31 61 2.2857142857142848e-1 7.714285714285714e-1
+41 0 0 0 8e-5 41 31 26 60 0e0 1e0
+42 0 0 0 8e-5 42 31 23 -69 0e0 1e0
+43 0 0 0 8e-5 43 26 22 -75 0e0 1e0
+44 0 0 0 8e-5 44 27 21 -79 0e0 1e0
+45 0 0 0 8e-5 45 28 20 -83 0e0 1e0
+46 0 0 0 8e-5 46 29 19 -87 0e0 1e0
+47 0 0 0 8e-5 47 30 18 -91 0e0 1e0
+
+//Vertex Data
+32 Vertices In Brep
+//Index, Flags, UserId1, UserId2, Tol, X, Y, Z
+0 0 0 0 4e-5 -2.9e1 2.5e1 0e0
+1 0 0 0 4e-5 -2.9e1 2.5e1 3.3e1
+2 0 0 0 4e-5 2.9e1 2.5e1 3.3e1
+3 0 0 0 4e-5 2.9e1 2.5e1 0e0
+4 0 0 0 4e-5 -3.5e1 -1.9e1 0e0
+5 0 0 0 4e-5 -3.5e1 -1.9e1 3.3e1
+6 0 0 0 4e-5 -3.5e1 1.9e1 3.3e1
+7 0 0 0 4e-5 -3.5e1 1.9e1 0e0
+8 0 0 0 4e-5 3.5e1 -1.9e1 0e0
+9 0 0 0 4e-5 3.5e1 -1.9e1 3.3e1
+10 0 0 0 4e-5 3.5e1 1.9e1 0e0
+11 0 0 0 4e-5 3.5e1 1.9e1 3.3e1
+12 0 0 0 4e-5 -2.9e1 -2.5e1 0e0
+13 0 0 0 4e-5 -2.9e1 -2.5e1 3.3e1
+14 0 0 0 4e-5 2.9e1 -2.5e1 0e0
+15 0 0 0 4e-5 2.9e1 -2.5e1 3.3e1
+16 0 0 0 8e-5 -3.3e1 1.9000000000000004e1 3.3e1
+17 0 0 0 8e-5 -2.9e1 2.3e1 3.3e1
+18 0 0 0 8e-5 2.900000000000001e1 2.2999999999999996e1 3.3e1
+19 0 0 0 8e-5 3.3e1 1.9000000000000007e1 3.3e1
+20 0 0 0 8e-5 3.3e1 -1.9000000000000004e1 3.3e1
+21 0 0 0 8e-5 2.9e1 -2.3e1 3.3e1
+22 0 0 0 8e-5 -2.900000000000001e1 -2.2999999999999996e1 3.3e1
+23 0 0 0 8e-5 -3.3e1 -1.9000000000000007e1 3.3e1
+24 0 0 0 8.000403564115469e-5 -3.299999999596436e1 1.9000000000000032e1 2e0
+25 0 0 0 8.010880221346104e-5 -2.8999999999999908e1 2.2999999891197785e1 2e0
+26 0 0 0 8.000403564115469e-5 -2.900000000000004e1 -2.299999999596436e1 2e0
+27 0 0 0 8.010880221346104e-5 2.89999999999999e1 -2.2999999891197785e1 2e0
+28 0 0 0 8.000403564115466e-5 3.299999999596436e1 -1.9000000000000032e1 2e0
+29 0 0 0 8.01088022152374e-5 3.299999989119779e1 1.8999999999999893e1 2e0
+30 0 0 0 8.00040356429311e-5 2.9000000000000036e1 2.299999999596436e1 2e0
+31 0 0 0 8.01088022152374e-5 -3.299999989119779e1 -1.8999999999999893e1 2e0
+
+// UV-Curve Data
+32 UV-Curves In Brep
+0 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.5e-1 1e0
+0e0 7.5e-1 1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+1 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.5e-1 1e0
+1e0 2.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+2 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 2.5e-1 1e0
+1e0 7.5e-1 1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+3 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 7.5e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+4 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.5e-1 1e0
+0e0 7.5e-1 1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+5 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.5e-1 1e0
+1e0 2.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+6 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 2.5e-1 1e0
+1e0 7.5e-1 1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+7 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 7.5e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+8 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.5e-1 1e0
+0e0 7.5e-1 1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+9 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.5e-1 1e0
+1e0 2.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+10 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 2.5e-1 1e0
+1e0 7.5e-1 1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+11 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 7.5e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+12 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.5e-1 1e0
+0e0 7.5e-1 1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+13 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.5e-1 1e0
+1e0 2.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+14 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 2.5e-1 1e0
+1e0 7.5e-1 1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+15 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 7.5e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+16 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.803030303030303e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+17 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.803030303030303e-1 1e0
+1e0 2.803030303030303e-1 1e0
+0e0
+0e0
+1e0
+1e0
+18 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 2.803030303030303e-1 1e0
+1e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+19 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 7.5e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+20 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.803030303030303e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+21 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.803030303030303e-1 1e0
+1e0 2.803030303030303e-1 1e0
+0e0
+0e0
+1e0
+1e0
+22 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 2.803030303030303e-1 1e0
+1e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+23 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 7.5e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+24 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.803030303030303e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+25 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.803030303030303e-1 1e0
+1e0 2.803030303030303e-1 1e0
+0e0
+0e0
+1e0
+1e0
+26 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 2.803030303030303e-1 1e0
+1e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+27 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 7.5e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+28 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.803030303030303e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+29 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+0e0 2.803030303030303e-1 1e0
+1e0 2.803030303030303e-1 1e0
+0e0
+0e0
+1e0
+1e0
+30 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 2.803030303030303e-1 1e0
+1e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+31 - UV-Curve:
+Object Type 14033
+Curve Dim 2
+1 Number of Control Points 
+1 Degree 
+1 RationalFlag 
+2 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+6 BSplineCurveForm Enum
+1e0 7.5e-1 1e0
+0e0 7.5e-1 1e0
+0e0
+0e0
+1e0
+1e0
+
+// 3D-Curve Data
+48 3D-Curves In Brep
+0 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-2.9e1 2.5e1 -1.65e1 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+6.6e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-2.9e1 2.5e1 -8.14814385e7
+-2.9e1 2.5e1 8.14814055e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+1 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+3.5e1 2.5e1 3.3e1 SmLine Line Point 
+-1e0 0e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+7e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+8.6419725e7 2.5e1 3.3e1
+-8.6419655e7 2.5e1 3.3e1
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+2 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+2.9e1 2.5e1 -1.65e1 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+6.6e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+2.9e1 2.5e1 -8.14814385e7
+2.9e1 2.5e1 8.14814055e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+3 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+3.5e1 2.5e1 0e0 SmLine Line Point 
+-1e0 0e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+7e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+8.6419725e7 2.5e1 0e0
+-8.6419655e7 2.5e1 0e0
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+4 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-3.5e1 -1.9e1 -1.65e1 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+6.6e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-3.5e1 -1.9e1 -8.14814385e7
+-3.5e1 -1.9e1 8.14814055e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+5 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-3.5e1 2.5e1 3.3e1 SmLine Line Point 
+0e0 -1e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+5e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-3.5e1 6.1728375e7 3.3e1
+-3.5e1 -6.1728325e7 3.3e1
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+6 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-3.5e1 1.9e1 -1.65e1 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+6.6e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-3.5e1 1.9e1 -8.14814385e7
+-3.5e1 1.9e1 8.14814055e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+7 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-3.5e1 2.5e1 0e0 SmLine Line Point 
+0e0 -1e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+5e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-3.5e1 6.1728375e7 0e0
+-3.5e1 -6.1728325e7 0e0
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+8 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+3.5e1 -1.9e1 -1.65e1 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+6.6e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+3.5e1 -1.9e1 -8.14814385e7
+3.5e1 -1.9e1 8.14814055e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+9 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+3.5e1 -2.5e1 0e0 SmLine Line Point 
+0e0 1e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+5e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+3.5e1 -6.1728375e7 0e0
+3.5e1 6.1728325e7 0e0
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+10 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+3.5e1 1.9e1 -1.65e1 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+6.6e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+3.5e1 1.9e1 -8.14814385e7
+3.5e1 1.9e1 8.14814055e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+11 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+3.5e1 -2.5e1 3.3e1 SmLine Line Point 
+0e0 1e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+5e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+3.5e1 -6.1728375e7 3.3e1
+3.5e1 6.1728325e7 3.3e1
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+12 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-2.9e1 -2.5e1 -1.65e1 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+6.6e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-2.9e1 -2.5e1 -8.14814385e7
+-2.9e1 -2.5e1 8.14814055e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+13 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-3.5e1 -2.5e1 0e0 SmLine Line Point 
+1e0 0e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+7e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-8.6419725e7 -2.5e1 0e0
+8.6419655e7 -2.5e1 0e0
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+14 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+2.9e1 -2.5e1 -1.65e1 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+6.6e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+2.9e1 -2.5e1 -8.14814385e7
+2.9e1 -2.5e1 8.14814055e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+15 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-3.5e1 -2.5e1 3.3e1 SmLine Line Point 
+1e0 0e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+7e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-8.6419725e7 -2.5e1 3.3e1
+8.6419655e7 -2.5e1 3.3e1
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+16 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+-2.9e1 -1.9e1 0e0 SmEllipse Axis Origin 
+-1e0 0e0 0e0 SmEllipse X Axis
+0e0 -1e0 0e0 SmEllipse Y Axis
+0e0 9e1 SmEllipse angular arc domain in degrees 
+6e0 SmEllipse X_Axis radius 
+6e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-3.5e1 -1.9e1 0e0 1e0
+-2.4748737341529164e1 -1.767766952966369e1 0e0 7.071067811865476e-1
+-2.9e1 -2.5e1 0e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+17 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+-2.9e1 1.9e1 0e0 SmEllipse Axis Origin 
+0e0 1e0 0e0 SmEllipse X Axis
+-1e0 0e0 0e0 SmEllipse Y Axis
+0e0 9e1 SmEllipse angular arc domain in degrees 
+6e0 SmEllipse X_Axis radius 
+6e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-2.9e1 2.5e1 0e0 1e0
+-2.4748737341529164e1 1.767766952966369e1 0e0 7.071067811865476e-1
+-3.5e1 1.9e1 0e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+18 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+2.9e1 1.9e1 0e0 SmEllipse Axis Origin 
+1e0 0e0 0e0 SmEllipse X Axis
+0e0 1e0 0e0 SmEllipse Y Axis
+0e0 9e1 SmEllipse angular arc domain in degrees 
+6e0 SmEllipse X_Axis radius 
+6e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+3.5e1 1.9e1 0e0 1e0
+2.4748737341529164e1 1.767766952966369e1 0e0 7.071067811865476e-1
+2.9e1 2.5e1 0e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+19 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+2.9e1 -1.9e1 0e0 SmEllipse Axis Origin 
+0e0 -1e0 0e0 SmEllipse X Axis
+1e0 0e0 -0e0 SmEllipse Y Axis
+0e0 9e1 SmEllipse angular arc domain in degrees 
+6e0 SmEllipse X_Axis radius 
+6e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+2.9e1 -2.5e1 0e0 1e0
+2.4748737341529164e1 -1.767766952966369e1 0e0 7.071067811865476e-1
+3.5e1 -1.9e1 0e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+20 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+-2.9e1 -1.9e1 3.3e1 SmEllipse Axis Origin 
+-1e0 0e0 0e0 SmEllipse X Axis
+0e0 1e0 0e0 SmEllipse Y Axis
+-9e1 0e0 SmEllipse angular arc domain in degrees 
+6e0 SmEllipse X_Axis radius 
+6e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+-9e1 0e0 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-2.9e1 -2.5e1 3.3e1 1e0
+-2.4748737341529164e1 -1.767766952966369e1 2.333452377915607e1 7.071067811865476e-1
+-3.5e1 -1.9e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+21 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+2.9e1 -1.9e1 3.3e1 SmEllipse Axis Origin 
+0e0 -1e0 0e0 SmEllipse X Axis
+-1e0 -0e0 0e0 SmEllipse Y Axis
+-9e1 0e0 SmEllipse angular arc domain in degrees 
+6e0 SmEllipse X_Axis radius 
+6e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+-9e1 0e0 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+3.5e1 -1.9e1 3.3e1 1e0
+2.4748737341529164e1 -1.767766952966369e1 2.333452377915607e1 7.071067811865476e-1
+2.9e1 -2.5e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+22 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+2.9e1 1.9e1 3.3e1 SmEllipse Axis Origin 
+1e0 0e0 0e0 SmEllipse X Axis
+0e0 -1e0 0e0 SmEllipse Y Axis
+-9e1 0e0 SmEllipse angular arc domain in degrees 
+6e0 SmEllipse X_Axis radius 
+6e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+-9e1 0e0 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+2.9e1 2.5e1 3.3e1 1e0
+2.4748737341529164e1 1.767766952966369e1 2.333452377915607e1 7.071067811865476e-1
+3.5e1 1.9e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+23 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+-2.9e1 1.9e1 3.3e1 SmEllipse Axis Origin 
+0e0 1e0 0e0 SmEllipse X Axis
+1e0 -0e0 0e0 SmEllipse Y Axis
+-9e1 0e0 SmEllipse angular arc domain in degrees 
+6e0 SmEllipse X_Axis radius 
+6e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+-9e1 0e0 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-3.5e1 1.9e1 3.3e1 1e0
+-2.4748737341529164e1 1.767766952966369e1 2.333452377915607e1 7.071067811865476e-1
+-2.9e1 2.5e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+24 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+-2.9000000000000007e1 1.9000000000000007e1 3.3e1 SmEllipse Axis Origin 
+1.1842378929335016e-15 1e0 0e0 SmEllipse X Axis
+1e0 -1.1842378929335016e-15 0e0 SmEllipse Y Axis
+-9.000000000000018e1 4.263256414560601e-14 SmEllipse angular arc domain in degrees 
+3.999999999999991e0 SmEllipse X_Axis radius 
+3.999999999999991e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+-9.000000000000018e1 4.263256414560601e-14 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-3.3e1 1.9e1 3.3e1 1e0
+-2.3334523779156044e1 1.6263455967290575e1 2.3334523779156036e1 7.071067811865466e-1
+-2.9000000000000004e1 2.3e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+25 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+2.9000000000000007e1 2.3e1 3.3e1 SmLine Line Point 
+-1e0 0e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+5.800000000000001e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+7.160491500000001e7 2.3e1 3.3e1
+-7.160485700000001e7 2.3e1 3.3e1
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+26 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+2.900000000000003e1 1.900000000000002e1 3.3e1 SmEllipse Axis Origin 
+1e0 -3.5527136788005175e-15 0e0 SmEllipse X Axis
+-3.5527136788005175e-15 -1e0 0e0 SmEllipse Y Axis
+-9.000000000000051e1 -5.684341886080802e-14 SmEllipse angular arc domain in degrees 
+3.9999999999999707e0 SmEllipse X_Axis radius 
+3.9999999999999707e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+-9.000000000000051e1 -5.684341886080802e-14 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+2.9000000000000007e1 2.2999999999999993e1 3.3e1 1e0
+2.3334523779155976e1 1.6263455967290533e1 2.333452377915597e1 7.071067811865445e-1
+3.3e1 1.9000000000000007e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+27 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+3.3e1 -1.900000000000001e1 3.3e1 SmLine Line Point 
+0e0 1e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+3.8000000000000014e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+3.3e1 -4.6913565000000015e7 3.3e1
+3.3e1 4.6913527000000015e7 3.3e1
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+28 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+2.9000000000000007e1 -1.9000000000000007e1 3.3e1 SmEllipse Axis Origin 
+-1.1842378929335016e-15 -1e0 0e0 SmEllipse X Axis
+-1e0 1.1842378929335016e-15 -0e0 SmEllipse Y Axis
+-9.000000000000018e1 4.263256414560601e-14 SmEllipse angular arc domain in degrees 
+3.999999999999991e0 SmEllipse X_Axis radius 
+3.999999999999991e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+-9.000000000000018e1 4.263256414560601e-14 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+3.3e1 -1.9e1 3.3e1 1e0
+2.3334523779156044e1 -1.6263455967290575e1 2.3334523779156036e1 7.071067811865466e-1
+2.9000000000000004e1 -2.3e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+29 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-2.9000000000000007e1 -2.3e1 3.3e1 SmLine Line Point 
+1e0 0e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+5.800000000000001e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-7.160491500000001e7 -2.3e1 3.3e1
+7.160485700000001e7 -2.3e1 3.3e1
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+30 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+-2.900000000000003e1 -1.900000000000002e1 3.3e1 SmEllipse Axis Origin 
+-1e0 3.5527136788005175e-15 0e0 SmEllipse X Axis
+3.5527136788005175e-15 1e0 0e0 SmEllipse Y Axis
+-9.000000000000051e1 -5.684341886080802e-14 SmEllipse angular arc domain in degrees 
+3.9999999999999707e0 SmEllipse X_Axis radius 
+3.9999999999999707e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+-9.000000000000051e1 -5.684341886080802e-14 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-2.9000000000000007e1 -2.2999999999999993e1 3.3e1 1e0
+-2.3334523779155976e1 -1.6263455967290533e1 2.333452377915597e1 7.071067811865445e-1
+-3.3e1 -1.9000000000000007e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+31 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-3.3e1 1.900000000000001e1 3.3e1 SmLine Line Point 
+0e0 -1e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+3.8000000000000014e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-3.3e1 4.6913565000000015e7 3.3e1
+-3.3e1 -4.6913527000000015e7 3.3e1
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+32 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-3.3e1 1.9000000000000007e1 1.9999999999999982e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+3.1e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-3.3e1 1.9000000000000007e1 -3.8271575e7
+-3.3e1 1.9000000000000007e1 3.8271579e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+33 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+-2.9000000000000007e1 1.9000000000000007e1 1.9999999999999982e0 SmEllipse Axis Origin 
+1.1842378929335016e-15 1e0 0e0 SmEllipse X Axis
+-1e0 1.1842378929335016e-15 0e0 SmEllipse Y Axis
+1.6962958301138735e-14 9.000000000000024e1 SmEllipse angular arc domain in degrees 
+3.999999999999991e0 SmEllipse X_Axis radius 
+3.999999999999991e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+1.6962958301138735e-14 9.000000000000024e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-2.9000000000000004e1 2.3e1 1.9999999999999982e0 1e0
+-2.3334523779156044e1 1.6263455967290575e1 1.4142135623730918e0 7.071067811865466e-1
+-3.3e1 1.9e1 1.9999999999999982e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+34 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-2.9000000000000007e1 2.3e1 1.9999999999999982e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+3.1e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-2.9000000000000007e1 2.3e1 -3.8271575e7
+-2.9000000000000007e1 2.3e1 3.8271579e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+35 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-4.5000000000000014e1 -2.3e1 2e0 SmLine Line Point 
+1e0 0e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+9e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-1.11111075e8 -2.3e1 2e0
+1.11110985e8 -2.3e1 2e0
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+36 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+2.9000000000000007e1 -1.9000000000000007e1 1.9999999999999982e0 SmEllipse Axis Origin 
+-1.1842378929335016e-15 -1e0 0e0 SmEllipse X Axis
+1e0 -1.1842378929335016e-15 0e0 SmEllipse Y Axis
+1.6962958301138735e-14 9.000000000000024e1 SmEllipse angular arc domain in degrees 
+3.999999999999991e0 SmEllipse X_Axis radius 
+3.999999999999991e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+1.6962958301138735e-14 9.000000000000024e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+2.9000000000000004e1 -2.3e1 1.9999999999999982e0 1e0
+2.3334523779156044e1 -1.6263455967290575e1 1.4142135623730918e0 7.071067811865466e-1
+3.3e1 -1.9e1 1.9999999999999982e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+37 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+3.3e1 -3.5e1 2e0 SmLine Line Point 
+0e0 1e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+7e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+3.3e1 -8.6419725e7 2e0
+3.3e1 8.6419655e7 2e0
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+38 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+2.900000000000003e1 1.900000000000002e1 1.9999999999999982e0 SmEllipse Axis Origin 
+1e0 -3.5527136788005175e-15 0e0 SmEllipse X Axis
+3.5527136788005175e-15 1e0 -0e0 SmEllipse Y Axis
+-4.971824054123734e-28 9.000000000000045e1 SmEllipse angular arc domain in degrees 
+3.9999999999999707e0 SmEllipse X_Axis radius 
+3.9999999999999707e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+-4.971824054123734e-28 9.000000000000045e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+3.3e1 1.9000000000000007e1 1.9999999999999982e0 1e0
+2.3334523779155976e1 1.6263455967290533e1 1.4142135623730876e0 7.071067811865445e-1
+2.9000000000000007e1 2.2999999999999993e1 1.9999999999999982e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+39 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+4.500000000000001e1 2.3e1 2e0 SmLine Line Point 
+-1e0 0e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+9e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+1.11111075e8 2.3e1 2e0
+-1.11110985e8 2.3e1 2e0
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+40 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-3.3e1 3.5e1 2e0 SmLine Line Point 
+0e0 -1e0 0e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+7e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-3.3e1 8.6419725e7 2e0
+-3.3e1 -8.6419655e7 2e0
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+41 - 3D-Curve
+Object Type 14021
+Curve Dim 3
+-2.900000000000003e1 -1.900000000000002e1 1.9999999999999982e0 SmEllipse Axis Origin 
+-1e0 3.5527136788005175e-15 0e0 SmEllipse X Axis
+-3.5527136788005175e-15 -1e0 0e0 SmEllipse Y Axis
+-4.971824054123734e-28 9.000000000000045e1 SmEllipse angular arc domain in degrees 
+3.9999999999999707e0 SmEllipse X_Axis radius 
+3.9999999999999707e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+-4.971824054123734e-28 9.000000000000045e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-3.3e1 -1.9000000000000007e1 1.9999999999999982e0 1e0
+-2.3334523779155976e1 -1.6263455967290533e1 1.4142135623730876e0 7.071067811865445e-1
+-2.9000000000000007e1 -2.2999999999999993e1 1.9999999999999982e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+42 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-3.3e1 -1.900000000000002e1 1.9999999999999982e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+3.1e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-3.3e1 -1.900000000000002e1 -3.8271575e7
+-3.3e1 -1.900000000000002e1 3.8271579e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+43 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+-2.900000000000003e1 -2.2999999999999993e1 1.9999999999999982e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+3.1e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-2.900000000000003e1 -2.2999999999999993e1 -3.8271575e7
+-2.900000000000003e1 -2.2999999999999993e1 3.8271579e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+44 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+2.9000000000000007e1 -2.3e1 1.9999999999999982e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+3.1e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+2.9000000000000007e1 -2.3e1 -3.8271575e7
+2.9000000000000007e1 -2.3e1 3.8271579e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+45 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+3.3e1 -1.9000000000000007e1 1.9999999999999982e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+3.1e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+3.3e1 -1.9000000000000007e1 -3.8271575e7
+3.3e1 -1.9000000000000007e1 3.8271579e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+46 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+3.3e1 1.900000000000002e1 1.9999999999999982e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+3.1e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+3.3e1 1.900000000000002e1 -3.8271575e7
+3.3e1 1.900000000000002e1 3.8271579e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+47 - 3D-Curve
+Object Type 14010
+Curve Dim 3
+2.900000000000003e1 2.2999999999999993e1 1.9999999999999982e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+-1.234567e6 1.234567e6 SmLine Line Domain 
+3.1e1 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+2.900000000000003e1 2.2999999999999993e1 -3.8271575e7
+2.900000000000003e1 2.2999999999999993e1 3.8271579e7
+-1.234567e6
+-1.234567e6
+1.234567e6
+1.234567e6
+
+//Surface Data
+19 Surfaces In Brep
+0 - Surface
+Object Type 15011
+3.5e1 2.5e1 0e0 SmPlane Placement Origin 
+-1e0 0e0 0e0 SmPlane Placement X Axis 
+0e0 0e0 1e0 SmPlane Placement Y Axis 
+0e0 0e0 7e1 3.3e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+3.5e1 2.5e1 0e0
+3.5e1 2.5e1 3.3e1
+-3.5e1 2.5e1 0e0
+-3.5e1 2.5e1 3.3e1
+0e0
+0e0
+7e1
+7e1
+0e0
+0e0
+3.3e1
+3.3e1
+1 - Surface
+Object Type 15011
+-3.5e1 2.5e1 0e0 SmPlane Placement Origin 
+0e0 -1e0 0e0 SmPlane Placement X Axis 
+0e0 0e0 1e0 SmPlane Placement Y Axis 
+0e0 0e0 5e1 3.3e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+-3.5e1 2.5e1 0e0
+-3.5e1 2.5e1 3.3e1
+-3.5e1 -2.5e1 0e0
+-3.5e1 -2.5e1 3.3e1
+0e0
+0e0
+5e1
+5e1
+0e0
+0e0
+3.3e1
+3.3e1
+2 - Surface
+Object Type 15011
+3.5e1 -2.5e1 0e0 SmPlane Placement Origin 
+0e0 1e0 0e0 SmPlane Placement X Axis 
+0e0 0e0 1e0 SmPlane Placement Y Axis 
+0e0 0e0 5e1 3.3e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+3.5e1 -2.5e1 0e0
+3.5e1 -2.5e1 3.3e1
+3.5e1 2.5e1 0e0
+3.5e1 2.5e1 3.3e1
+0e0
+0e0
+5e1
+5e1
+0e0
+0e0
+3.3e1
+3.3e1
+3 - Surface
+Object Type 15011
+-3.5e1 -2.5e1 0e0 SmPlane Placement Origin 
+1e0 0e0 0e0 SmPlane Placement X Axis 
+-0e0 0e0 1e0 SmPlane Placement Y Axis 
+0e0 0e0 7e1 3.3e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+-3.5e1 -2.5e1 0e0
+-3.5e1 -2.5e1 3.3e1
+3.5e1 -2.5e1 0e0
+3.5e1 -2.5e1 3.3e1
+0e0
+0e0
+7e1
+7e1
+0e0
+0e0
+3.3e1
+3.3e1
+4 - Surface
+Object Type 15011
+4.731278896873445e1 -4.731278896873445e1 0e0 SmPlane Placement Origin 
+-1e0 0e0 0e0 SmPlane Placement X Axis 
+0e0 1e0 0e0 SmPlane Placement Y Axis 
+0e0 0e0 9.46255779374689e1 9.46255779374689e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+4.731278896873445e1 -4.731278896873445e1 0e0
+4.731278896873445e1 4.731278896873445e1 0e0
+-4.731278896873445e1 -4.731278896873445e1 0e0
+-4.731278896873445e1 4.731278896873445e1 0e0
+0e0
+0e0
+9.46255779374689e1
+9.46255779374689e1
+0e0
+0e0
+9.46255779374689e1
+9.46255779374689e1
+5 - Surface
+Object Type 15011
+4.731278896873445e1 -4.731278896873445e1 3.3e1 SmPlane Placement Origin 
+0e0 1e0 0e0 SmPlane Placement X Axis 
+-1e0 0e0 0e0 SmPlane Placement Y Axis 
+0e0 0e0 9.46255779374689e1 9.46255779374689e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+4.731278896873445e1 -4.731278896873445e1 3.3e1
+-4.731278896873445e1 -4.731278896873445e1 3.3e1
+4.731278896873445e1 4.731278896873445e1 3.3e1
+-4.731278896873445e1 4.731278896873445e1 3.3e1
+0e0
+0e0
+9.46255779374689e1
+9.46255779374689e1
+0e0
+0e0
+9.46255779374689e1
+9.46255779374689e1
+6 - Surface
+Object Type 15013
+5.999999999999971e0 SmCone Radius of the cone in the plane passing through origin 
+0e0 SmCone SemiAngleDeg between -90 and 90 
+0 SmCone InsideOutFlag: FALSE= m_vPosition.ZAxis points from bot to top of Nurb, TRUE=Inverted 
+0 SmSurfOfRevolution Make Nurb GenCurve Flag, FALSE=Unbounded analytic, TRUE=bounded 
+1 SmSurfOfRevolution Planar Generator Curve 
+-2.900000000000003e1 -1.900000000000002e1 0e0 SmSurfOfRevolution Placement Origin 
+-1e0 3.5527136788005175e-15 0e0 SmSurfOfRevolution Placement X Axis 
+-3.5527136788005175e-15 -1e0 0e0 SmSurfOfRevolution Placement Y Axis 
+0e0 0e0 9.00000000000005e1 3.3e1 SmSurfOfRevolution AnalUVDomain 
+0 SmSurfOfRevolution SwapUV Boolean 
+ SmSurfOfRevolution->GenCurve 
+Object Type 14010
+Curve Dim 3
+-3.5e1 -1.9e1 0e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+0e0 3.3e1 SmLine Line Domain 
+1e0 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-3.5e1 -1.9e1 0e0
+-3.5e1 -1.9e1 3.3e1
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+ SmSurfOfRevolution->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+1 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.00000000000005e1 
+1 
+ SmPolarConversion->CurveBeingConverted 
+Object Type 14021
+Curve Dim 3
+-2.900000000000003e1 -1.900000000000002e1 0e0 SmEllipse Axis Origin 
+-1e0 3.5527136788005175e-15 0e0 SmEllipse X Axis
+-3.5527136788005175e-15 -1e0 0e0 SmEllipse Y Axis
+0e0 9.00000000000005e1 SmEllipse angular arc domain in degrees 
+5.999999999999972e0 SmEllipse X_Axis radius 
+5.999999999999972e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.00000000000005e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-3.5e1 -1.9e1 0e0 1e0
+-2.4748737341529164e1 -1.767766952966369e1 0e0 7.071067811865476e-1
+-2.9e1 -2.5e1 0e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2 1
+2 1
+1
+1 BSplineSurface Knot Type Flag 
+4 BSplineSurfaceForm Flag 
+-3.5e1 -1.9e1 0e0 1e0
+-3.5e1 -1.9e1 3.3e1 1e0
+-2.4748737341529164e1 -1.767766952966369e1 0e0 7.071067811865476e-1
+-2.4748737341529164e1 -1.767766952966369e1 2.333452377915607e1 7.071067811865476e-1
+-2.9e1 -2.5e1 0e0 1e0
+-2.9e1 -2.5e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+7 - Surface
+Object Type 15013
+5.999999999999991e0 SmCone Radius of the cone in the plane passing through origin 
+0e0 SmCone SemiAngleDeg between -90 and 90 
+0 SmCone InsideOutFlag: FALSE= m_vPosition.ZAxis points from bot to top of Nurb, TRUE=Inverted 
+0 SmSurfOfRevolution Make Nurb GenCurve Flag, FALSE=Unbounded analytic, TRUE=bounded 
+1 SmSurfOfRevolution Planar Generator Curve 
+-2.9000000000000007e1 1.9000000000000007e1 0e0 SmSurfOfRevolution Placement Origin 
+1.1842378929335016e-15 1e0 0e0 SmSurfOfRevolution Placement X Axis 
+-1e0 1.1842378929335016e-15 0e0 SmSurfOfRevolution Placement Y Axis 
+0e0 0e0 9.000000000000014e1 3.3e1 SmSurfOfRevolution AnalUVDomain 
+0 SmSurfOfRevolution SwapUV Boolean 
+ SmSurfOfRevolution->GenCurve 
+Object Type 14010
+Curve Dim 3
+-2.9e1 2.5e1 0e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+0e0 3.3e1 SmLine Line Domain 
+1e0 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-2.9e1 2.5e1 0e0
+-2.9e1 2.5e1 3.3e1
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+ SmSurfOfRevolution->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+1 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.000000000000014e1 
+1 
+ SmPolarConversion->CurveBeingConverted 
+Object Type 14021
+Curve Dim 3
+-2.9000000000000007e1 1.9000000000000007e1 0e0 SmEllipse Axis Origin 
+1.1842378929335016e-15 1e0 0e0 SmEllipse X Axis
+-1e0 1.1842378929335016e-15 0e0 SmEllipse Y Axis
+0e0 9.000000000000014e1 SmEllipse angular arc domain in degrees 
+5.999999999999992e0 SmEllipse X_Axis radius 
+5.999999999999992e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.000000000000014e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-2.9e1 2.5e1 0e0 1e0
+-2.4748737341529164e1 1.767766952966369e1 0e0 7.071067811865476e-1
+-3.5e1 1.9e1 0e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2 1
+2 1
+1
+1 BSplineSurface Knot Type Flag 
+4 BSplineSurfaceForm Flag 
+-2.9e1 2.5e1 0e0 1e0
+-2.9e1 2.5e1 3.3e1 1e0
+-2.4748737341529164e1 1.767766952966369e1 0e0 7.071067811865476e-1
+-2.4748737341529164e1 1.767766952966369e1 2.333452377915607e1 7.071067811865476e-1
+-3.5e1 1.9e1 0e0 1e0
+-3.5e1 1.9e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+8 - Surface
+Object Type 15013
+5.999999999999991e0 SmCone Radius of the cone in the plane passing through origin 
+0e0 SmCone SemiAngleDeg between -90 and 90 
+0 SmCone InsideOutFlag: FALSE= m_vPosition.ZAxis points from bot to top of Nurb, TRUE=Inverted 
+0 SmSurfOfRevolution Make Nurb GenCurve Flag, FALSE=Unbounded analytic, TRUE=bounded 
+1 SmSurfOfRevolution Planar Generator Curve 
+2.9000000000000007e1 -1.9000000000000007e1 0e0 SmSurfOfRevolution Placement Origin 
+-1.1842378929335016e-15 -1e0 0e0 SmSurfOfRevolution Placement X Axis 
+1e0 -1.1842378929335016e-15 0e0 SmSurfOfRevolution Placement Y Axis 
+0e0 0e0 9.000000000000014e1 3.3e1 SmSurfOfRevolution AnalUVDomain 
+0 SmSurfOfRevolution SwapUV Boolean 
+ SmSurfOfRevolution->GenCurve 
+Object Type 14010
+Curve Dim 3
+2.9e1 -2.5e1 0e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+0e0 3.3e1 SmLine Line Domain 
+1e0 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+2.9e1 -2.5e1 0e0
+2.9e1 -2.5e1 3.3e1
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+ SmSurfOfRevolution->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+1 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.000000000000014e1 
+1 
+ SmPolarConversion->CurveBeingConverted 
+Object Type 14021
+Curve Dim 3
+2.9000000000000007e1 -1.9000000000000007e1 0e0 SmEllipse Axis Origin 
+-1.1842378929335016e-15 -1e0 0e0 SmEllipse X Axis
+1e0 -1.1842378929335016e-15 0e0 SmEllipse Y Axis
+0e0 9.000000000000014e1 SmEllipse angular arc domain in degrees 
+5.999999999999992e0 SmEllipse X_Axis radius 
+5.999999999999992e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.000000000000014e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+2.9e1 -2.5e1 0e0 1e0
+2.4748737341529164e1 -1.767766952966369e1 0e0 7.071067811865476e-1
+3.5e1 -1.9e1 0e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2 1
+2 1
+1
+1 BSplineSurface Knot Type Flag 
+4 BSplineSurfaceForm Flag 
+2.9e1 -2.5e1 0e0 1e0
+2.9e1 -2.5e1 3.3e1 1e0
+2.4748737341529164e1 -1.767766952966369e1 0e0 7.071067811865476e-1
+2.4748737341529164e1 -1.767766952966369e1 2.333452377915607e1 7.071067811865476e-1
+3.5e1 -1.9e1 0e0 1e0
+3.5e1 -1.9e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+9 - Surface
+Object Type 15013
+5.999999999999971e0 SmCone Radius of the cone in the plane passing through origin 
+0e0 SmCone SemiAngleDeg between -90 and 90 
+0 SmCone InsideOutFlag: FALSE= m_vPosition.ZAxis points from bot to top of Nurb, TRUE=Inverted 
+0 SmSurfOfRevolution Make Nurb GenCurve Flag, FALSE=Unbounded analytic, TRUE=bounded 
+1 SmSurfOfRevolution Planar Generator Curve 
+2.900000000000003e1 1.900000000000002e1 0e0 SmSurfOfRevolution Placement Origin 
+1e0 -3.5527136788005175e-15 0e0 SmSurfOfRevolution Placement X Axis 
+3.5527136788005175e-15 1e0 -0e0 SmSurfOfRevolution Placement Y Axis 
+0e0 0e0 9.00000000000005e1 3.3e1 SmSurfOfRevolution AnalUVDomain 
+0 SmSurfOfRevolution SwapUV Boolean 
+ SmSurfOfRevolution->GenCurve 
+Object Type 14010
+Curve Dim 3
+3.5e1 1.9e1 0e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+0e0 3.3e1 SmLine Line Domain 
+1e0 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+3.5e1 1.9e1 0e0
+3.5e1 1.9e1 3.3e1
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+ SmSurfOfRevolution->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+1 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.00000000000005e1 
+1 
+ SmPolarConversion->CurveBeingConverted 
+Object Type 14021
+Curve Dim 3
+2.900000000000003e1 1.900000000000002e1 0e0 SmEllipse Axis Origin 
+1e0 -3.5527136788005175e-15 0e0 SmEllipse X Axis
+3.5527136788005175e-15 1e0 -0e0 SmEllipse Y Axis
+0e0 9.00000000000005e1 SmEllipse angular arc domain in degrees 
+5.999999999999972e0 SmEllipse X_Axis radius 
+5.999999999999972e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.00000000000005e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+3.5e1 1.9e1 0e0 1e0
+2.4748737341529164e1 1.767766952966369e1 0e0 7.071067811865476e-1
+2.9e1 2.5e1 0e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2 1
+2 1
+1
+1 BSplineSurface Knot Type Flag 
+4 BSplineSurfaceForm Flag 
+3.5e1 1.9e1 0e0 1e0
+3.5e1 1.9e1 3.3e1 1e0
+2.4748737341529164e1 1.767766952966369e1 0e0 7.071067811865476e-1
+2.4748737341529164e1 1.767766952966369e1 2.333452377915607e1 7.071067811865476e-1
+2.9e1 2.5e1 0e0 1e0
+2.9e1 2.5e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2.5e-1
+2.5e-1
+7.5e-1
+7.5e-1
+10 - Surface
+Object Type 15013
+3.9999999999999813e0 SmCone Radius of the cone in the plane passing through origin 
+0e0 SmCone SemiAngleDeg between -90 and 90 
+0 SmCone InsideOutFlag: FALSE= m_vPosition.ZAxis points from bot to top of Nurb, TRUE=Inverted 
+0 SmSurfOfRevolution Make Nurb GenCurve Flag, FALSE=Unbounded analytic, TRUE=bounded 
+1 SmSurfOfRevolution Planar Generator Curve 
+-2.9000000000000014e1 1.9000000000000018e1 1.9999999999999987e0 SmSurfOfRevolution Placement Origin 
+2.6645352591003875e-15 1e0 0e0 SmSurfOfRevolution Placement X Axis 
+-1e0 2.6645352591003875e-15 0e0 SmSurfOfRevolution Placement Y Axis 
+0e0 0e0 9.00000000000004e1 3.1e1 SmSurfOfRevolution AnalUVDomain 
+0 SmSurfOfRevolution SwapUV Boolean 
+ SmSurfOfRevolution->GenCurve 
+Object Type 14010
+Curve Dim 3
+-2.9000000000000004e1 2.3e1 1.9999999999999987e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+0e0 3.1e1 SmLine Line Domain 
+1e0 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-2.9000000000000004e1 2.3e1 1.9999999999999987e0
+-2.9000000000000004e1 2.3e1 3.3e1
+2.803030303030303e-1
+2.803030303030303e-1
+7.5e-1
+7.5e-1
+ SmSurfOfRevolution->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+1 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.00000000000004e1 
+1 
+ SmPolarConversion->CurveBeingConverted 
+Object Type 14021
+Curve Dim 3
+-2.9000000000000014e1 1.9000000000000018e1 1.9999999999999982e0 SmEllipse Axis Origin 
+2.6645352591003875e-15 1e0 0e0 SmEllipse X Axis
+-1e0 2.6645352591003875e-15 0e0 SmEllipse Y Axis
+0e0 9.00000000000004e1 SmEllipse angular arc domain in degrees 
+3.9999999999999822e0 SmEllipse X_Axis radius 
+3.9999999999999822e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.00000000000004e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-2.9000000000000004e1 2.3e1 1.9999999999999982e0 1e0
+-2.3334523779156044e1 1.6263455967290575e1 1.4142135623730918e0 7.071067811865466e-1
+-3.3e1 1.9e1 1.9999999999999982e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2 1
+2 1
+1
+1 BSplineSurface Knot Type Flag 
+4 BSplineSurfaceForm Flag 
+-2.9000000000000004e1 2.3e1 1.9999999999999982e0 1e0
+-2.9000000000000004e1 2.3e1 3.3e1 1e0
+-2.3334523779156044e1 1.6263455967290575e1 1.4142135623730918e0 7.071067811865466e-1
+-2.3334523779156044e1 1.6263455967290575e1 2.3334523779156036e1 7.071067811865466e-1
+-3.3e1 1.9e1 1.9999999999999982e0 1e0
+-3.3e1 1.9e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2.803030303030303e-1
+2.803030303030303e-1
+7.5e-1
+7.5e-1
+11 - Surface
+Object Type 15011
+4.731278896873445e1 -4.731278896873445e1 2e0 SmPlane Placement Origin 
+-1e0 0e0 0e0 SmPlane Placement X Axis 
+0e0 1e0 0e0 SmPlane Placement Y Axis 
+1.4312788968734452e1 2.4312788968734452e1 8.031278896873445e1 7.031278896873445e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+3.3e1 -2.3e1 2e0
+3.3e1 2.3e1 2e0
+-3.3e1 -2.3e1 2e0
+-3.3e1 2.3e1 2e0
+1.4312788968734452e1
+1.4312788968734452e1
+8.031278896873445e1
+8.031278896873445e1
+2.4312788968734452e1
+2.4312788968734452e1
+7.031278896873445e1
+7.031278896873445e1
+12 - Surface
+Object Type 15011
+-3.3e1 2.5e1 0e0 SmPlane Placement Origin 
+0e0 -1e0 0e0 SmPlane Placement X Axis 
+0e0 0e0 1e0 SmPlane Placement Y Axis 
+5.999999999999993e0 1.9999999999999982e0 4.400000000000001e1 3.3e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+-3.3e1 1.9000000000000007e1 1.9999999999999982e0
+-3.3e1 1.9000000000000007e1 3.3e1
+-3.3e1 -1.9000000000000007e1 1.9999999999999982e0
+-3.3e1 -1.9000000000000007e1 3.3e1
+5.999999999999993e0
+5.999999999999993e0
+4.400000000000001e1
+4.400000000000001e1
+1.9999999999999982e0
+1.9999999999999982e0
+3.3e1
+3.3e1
+13 - Surface
+Object Type 15013
+3.999999999999956e0 SmCone Radius of the cone in the plane passing through origin 
+0e0 SmCone SemiAngleDeg between -90 and 90 
+0 SmCone InsideOutFlag: FALSE= m_vPosition.ZAxis points from bot to top of Nurb, TRUE=Inverted 
+0 SmSurfOfRevolution Make Nurb GenCurve Flag, FALSE=Unbounded analytic, TRUE=bounded 
+1 SmSurfOfRevolution Planar Generator Curve 
+-2.9000000000000043e1 -1.9000000000000032e1 1.9999999999999982e0 SmSurfOfRevolution Placement Origin 
+-1e0 6.217248937900943e-15 5.329070518200808e-15 SmSurfOfRevolution Placement X Axis 
+-6.217248937900943e-15 -1e0 0e0 SmSurfOfRevolution Placement Y Axis 
+0e0 0e0 9.000000000000087e1 3.099999999999998e1 SmSurfOfRevolution AnalUVDomain 
+0 SmSurfOfRevolution SwapUV Boolean 
+ SmSurfOfRevolution->GenCurve 
+Object Type 14010
+Curve Dim 3
+-3.3e1 -1.9000000000000007e1 2.0000000000000195e0 SmLine Line Point 
+5.329070518200808e-15 -3.31321580192832e-29 1e0 SmLine Line Vector 
+0e0 3.099999999999998e1 SmLine Line Domain 
+1e0 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+-3.3e1 -1.9000000000000007e1 2.0000000000000195e0
+-3.299999999999984e1 -1.9000000000000007e1 3.3e1
+2.803030303030303e-1
+2.803030303030303e-1
+7.5e-1
+7.5e-1
+ SmSurfOfRevolution->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+1 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.000000000000087e1 
+1 
+ SmPolarConversion->CurveBeingConverted 
+Object Type 14021
+Curve Dim 3
+-2.9000000000000043e1 -1.9000000000000032e1 1.9999999999999862e0 SmEllipse Axis Origin 
+-1e0 6.217248937900943e-15 5.329070518200808e-15 SmEllipse X Axis
+-6.217248937900943e-15 -1e0 0e0 SmEllipse Y Axis
+0e0 9.000000000000087e1 SmEllipse angular arc domain in degrees 
+3.999999999999957e0 SmEllipse X_Axis radius 
+3.999999999999957e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.000000000000087e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+-3.3e1 -1.9000000000000007e1 1.9999999999999982e0 1e0
+-2.3334523779155976e1 -1.6263455967290533e1 1.4142135623730876e0 7.071067811865445e-1
+-2.9000000000000007e1 -2.2999999999999993e1 1.9999999999999982e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2 1
+2 1
+1
+1 BSplineSurface Knot Type Flag 
+4 BSplineSurfaceForm Flag 
+-3.3e1 -1.9000000000000007e1 1.9999999999999982e0 1e0
+-3.3e1 -1.9000000000000007e1 3.3e1 1e0
+-2.3334523779155976e1 -1.6263455967290533e1 1.4142135623730876e0 7.071067811865445e-1
+-2.3334523779155976e1 -1.6263455967290533e1 2.333452377915597e1 7.071067811865445e-1
+-2.9000000000000007e1 -2.2999999999999993e1 1.9999999999999982e0 1e0
+-2.9000000000000007e1 -2.2999999999999993e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2.803030303030303e-1
+2.803030303030303e-1
+7.5e-1
+7.5e-1
+14 - Surface
+Object Type 15011
+-3.5e1 -2.3e1 0e0 SmPlane Placement Origin 
+1e0 0e0 0e0 SmPlane Placement X Axis 
+-0e0 0e0 1e0 SmPlane Placement Y Axis 
+5.999999999999989e0 1.9999999999999982e0 6.4e1 3.3e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+-2.900000000000001e1 -2.3e1 1.9999999999999982e0
+-2.900000000000001e1 -2.3e1 3.3e1
+2.9e1 -2.3e1 1.9999999999999982e0
+2.9e1 -2.3e1 3.3e1
+5.999999999999989e0
+5.999999999999989e0
+6.4e1
+6.4e1
+1.9999999999999982e0
+1.9999999999999982e0
+3.3e1
+3.3e1
+15 - Surface
+Object Type 15013
+3.9999999999999813e0 SmCone Radius of the cone in the plane passing through origin 
+0e0 SmCone SemiAngleDeg between -90 and 90 
+0 SmCone InsideOutFlag: FALSE= m_vPosition.ZAxis points from bot to top of Nurb, TRUE=Inverted 
+0 SmSurfOfRevolution Make Nurb GenCurve Flag, FALSE=Unbounded analytic, TRUE=bounded 
+1 SmSurfOfRevolution Planar Generator Curve 
+2.9000000000000014e1 -1.9000000000000018e1 1.9999999999999987e0 SmSurfOfRevolution Placement Origin 
+-2.6645352591003875e-15 -1e0 0e0 SmSurfOfRevolution Placement X Axis 
+1e0 -2.6645352591003875e-15 0e0 SmSurfOfRevolution Placement Y Axis 
+0e0 0e0 9.00000000000004e1 3.1e1 SmSurfOfRevolution AnalUVDomain 
+0 SmSurfOfRevolution SwapUV Boolean 
+ SmSurfOfRevolution->GenCurve 
+Object Type 14010
+Curve Dim 3
+2.9000000000000004e1 -2.3e1 1.9999999999999987e0 SmLine Line Point 
+0e0 0e0 1e0 SmLine Line Vector 
+0e0 3.1e1 SmLine Line Domain 
+1e0 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+2.9000000000000004e1 -2.3e1 1.9999999999999987e0
+2.9000000000000004e1 -2.3e1 3.3e1
+2.803030303030303e-1
+2.803030303030303e-1
+7.5e-1
+7.5e-1
+ SmSurfOfRevolution->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+1 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.00000000000004e1 
+1 
+ SmPolarConversion->CurveBeingConverted 
+Object Type 14021
+Curve Dim 3
+2.9000000000000014e1 -1.9000000000000018e1 1.9999999999999982e0 SmEllipse Axis Origin 
+-2.6645352591003875e-15 -1e0 0e0 SmEllipse X Axis
+1e0 -2.6645352591003875e-15 0e0 SmEllipse Y Axis
+0e0 9.00000000000004e1 SmEllipse angular arc domain in degrees 
+3.9999999999999822e0 SmEllipse X_Axis radius 
+3.9999999999999822e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.00000000000004e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+2.9000000000000004e1 -2.3e1 1.9999999999999982e0 1e0
+2.3334523779156044e1 -1.6263455967290575e1 1.4142135623730918e0 7.071067811865466e-1
+3.3e1 -1.9e1 1.9999999999999982e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2 1
+2 1
+1
+1 BSplineSurface Knot Type Flag 
+4 BSplineSurfaceForm Flag 
+2.9000000000000004e1 -2.3e1 1.9999999999999982e0 1e0
+2.9000000000000004e1 -2.3e1 3.3e1 1e0
+2.3334523779156044e1 -1.6263455967290575e1 1.4142135623730918e0 7.071067811865466e-1
+2.3334523779156044e1 -1.6263455967290575e1 2.3334523779156036e1 7.071067811865466e-1
+3.3e1 -1.9e1 1.9999999999999982e0 1e0
+3.3e1 -1.9e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2.803030303030303e-1
+2.803030303030303e-1
+7.5e-1
+7.5e-1
+16 - Surface
+Object Type 15011
+3.3e1 -2.5e1 0e0 SmPlane Placement Origin 
+0e0 1e0 0e0 SmPlane Placement X Axis 
+0e0 0e0 1e0 SmPlane Placement Y Axis 
+5.999999999999993e0 1.9999999999999982e0 4.400000000000001e1 3.3e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+3.3e1 -1.9000000000000007e1 1.9999999999999982e0
+3.3e1 -1.9000000000000007e1 3.3e1
+3.3e1 1.9000000000000007e1 1.9999999999999982e0
+3.3e1 1.9000000000000007e1 3.3e1
+5.999999999999993e0
+5.999999999999993e0
+4.400000000000001e1
+4.400000000000001e1
+1.9999999999999982e0
+1.9999999999999982e0
+3.3e1
+3.3e1
+17 - Surface
+Object Type 15013
+3.999999999999956e0 SmCone Radius of the cone in the plane passing through origin 
+0e0 SmCone SemiAngleDeg between -90 and 90 
+0 SmCone InsideOutFlag: FALSE= m_vPosition.ZAxis points from bot to top of Nurb, TRUE=Inverted 
+0 SmSurfOfRevolution Make Nurb GenCurve Flag, FALSE=Unbounded analytic, TRUE=bounded 
+1 SmSurfOfRevolution Planar Generator Curve 
+2.9000000000000043e1 1.9000000000000032e1 1.9999999999999982e0 SmSurfOfRevolution Placement Origin 
+1e0 -6.217248937900943e-15 5.329070518200808e-15 SmSurfOfRevolution Placement X Axis 
+6.217248937900943e-15 1e0 -0e0 SmSurfOfRevolution Placement Y Axis 
+0e0 0e0 9.000000000000087e1 3.099999999999998e1 SmSurfOfRevolution AnalUVDomain 
+0 SmSurfOfRevolution SwapUV Boolean 
+ SmSurfOfRevolution->GenCurve 
+Object Type 14010
+Curve Dim 3
+3.3e1 1.9000000000000007e1 2.0000000000000195e0 SmLine Line Point 
+-5.329070518200808e-15 3.31321580192832e-29 1e0 SmLine Line Vector 
+0e0 3.099999999999998e1 SmLine Line Domain 
+1e0 SmLine Line Scale 
+0 SmLine InsideOut Flag 
+1 Number of Control Points 
+1 Degree 
+0 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+0 BSplineCurveForm Enum
+3.3e1 1.9000000000000007e1 2.0000000000000195e0
+3.299999999999984e1 1.9000000000000007e1 3.3e1
+2.803030303030303e-1
+2.803030303030303e-1
+7.5e-1
+7.5e-1
+ SmSurfOfRevolution->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+1 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.000000000000087e1 
+1 
+ SmPolarConversion->CurveBeingConverted 
+Object Type 14021
+Curve Dim 3
+2.9000000000000043e1 1.9000000000000032e1 1.9999999999999862e0 SmEllipse Axis Origin 
+1e0 -6.217248937900943e-15 5.329070518200808e-15 SmEllipse X Axis
+6.217248937900943e-15 1e0 -0e0 SmEllipse Y Axis
+0e0 9.000000000000087e1 SmEllipse angular arc domain in degrees 
+3.999999999999957e0 SmEllipse X_Axis radius 
+3.999999999999957e0 SmEllipse Y_Axis radius 
+0 SmEllipse InsideOut Flag 
+ SmEllipse->PolarConverter 
+1 SmPolarConversion PolarConversionPossible - TRUE=tables are initialized 
+2 SmPolarConversion Number of Natural Knots 
+2 SmPolarConversion Number of Angles 
+1 SmPolarConversion Number of ExactConversion Flags 
+0 SmPolarConversion TRUE = Has Curve for stored conversions, FALSE = back pointer 
+0e0 1e0 
+0e0 9.000000000000087e1 
+1 
+Has No Copy of SmPolarConversion->CurveBeingConverted 
+2 Number of Control Points 
+2 Degree 
+1 RationalFlag 
+3 Dimension 
+1 Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, 4=3d Rational
+1 BSplineCurveForm Enum
+3.3e1 1.9000000000000007e1 1.9999999999999982e0 1e0
+2.3334523779155976e1 1.6263455967290533e1 1.4142135623730876e0 7.071067811865445e-1
+2.9000000000000007e1 2.2999999999999993e1 1.9999999999999982e0 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2 1
+2 1
+1
+1 BSplineSurface Knot Type Flag 
+4 BSplineSurfaceForm Flag 
+3.3e1 1.9000000000000007e1 1.9999999999999982e0 1e0
+3.3e1 1.9000000000000007e1 3.3e1 1e0
+2.3334523779155976e1 1.6263455967290533e1 1.4142135623730876e0 7.071067811865445e-1
+2.3334523779155976e1 1.6263455967290533e1 2.333452377915597e1 7.071067811865445e-1
+2.9000000000000007e1 2.2999999999999993e1 1.9999999999999982e0 1e0
+2.9000000000000007e1 2.2999999999999993e1 3.3e1 1e0
+0e0
+0e0
+0e0
+1e0
+1e0
+1e0
+2.803030303030303e-1
+2.803030303030303e-1
+7.5e-1
+7.5e-1
+18 - Surface
+Object Type 15011
+3.5e1 2.3e1 0e0 SmPlane Placement Origin 
+-1e0 0e0 0e0 SmPlane Placement X Axis 
+0e0 0e0 1e0 SmPlane Placement Y Axis 
+5.999999999999989e0 1.9999999999999982e0 6.4e1 3.3e1 SmPlane AnalUVDomain 
+1e0 1e0 SmPlane UV Scale 
+1 1
+1 1
+0
+1 BSplineSurface Knot Type Flag 
+9 BSplineSurfaceForm Flag 
+2.900000000000001e1 2.3e1 1.9999999999999982e0
+2.900000000000001e1 2.3e1 3.3e1
+-2.9e1 2.3e1 1.9999999999999982e0
+-2.9e1 2.3e1 3.3e1
+5.999999999999989e0
+5.999999999999989e0
+6.4e1
+6.4e1
+1.9999999999999982e0
+1.9999999999999982e0
+3.3e1
+3.3e1

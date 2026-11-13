@@ -1,0 +1,1159 @@
+{
+ "cases": [
+  {
+   "name": "crvToOffset_inh_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 2.0,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvToOffset_neg_inh_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": -2.0,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvToOffset_chord_tan_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "chord_length",
+    "deg": 3,
+    "tangents": true,
+    "d": 2.0,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvToOffset_uniform_d2_tan",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "uniform",
+    "deg": 2,
+    "tangents": true,
+    "d": 2.0,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvToOffset_centrip_d5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "centripetal",
+    "deg": 5,
+    "tangents": false,
+    "d": 2.0,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvToOffset_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 1,
+    "tangents": false,
+    "d": 2.0,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "crvToOffset_inh_tan_d4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 4,
+    "tangents": true,
+    "d": 2.0,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvToOffset_bneg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     -2
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 2.0,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvToOffset_tol0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 2.0,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_bzero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     0
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 2.0,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvToOffset_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.0,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "closedCurve_inh_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_neg_inh_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": -0.5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_chord_tan_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "chord_length",
+    "deg": 3,
+    "tangents": true,
+    "d": 0.5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_uniform_d2_tan",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "uniform",
+    "deg": 2,
+    "tangents": true,
+    "d": 0.5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_centrip_d5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "centripetal",
+    "deg": 5,
+    "tangents": false,
+    "d": 0.5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 1,
+    "tangents": false,
+    "d": 0.5,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "closedCurve_inh_tan_d4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 4,
+    "tangents": true,
+    "d": 0.5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_bneg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     -2
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_tol0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.5,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "closedCurve_bzero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     0
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_inh_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.3,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_neg_inh_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": -0.3,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_chord_tan_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "chord_length",
+    "deg": 3,
+    "tangents": true,
+    "d": 0.3,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_uniform_d2_tan",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "uniform",
+    "deg": 2,
+    "tangents": true,
+    "d": 0.3,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_centrip_d5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "centripetal",
+    "deg": 5,
+    "tangents": false,
+    "d": 0.3,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 1,
+    "tangents": false,
+    "d": 0.3,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvTrim1_inh_tan_d4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 4,
+    "tangents": true,
+    "d": 0.3,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_bneg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     -2
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.3,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_tol0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.3,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvTrim1_bzero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     0
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.3,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_inh_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": -0.4,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_neg_inh_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.4,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_chord_tan_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "chord_length",
+    "deg": 3,
+    "tangents": true,
+    "d": -0.4,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_uniform_d2_tan",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "uniform",
+    "deg": 2,
+    "tangents": true,
+    "d": -0.4,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_centrip_d5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "centripetal",
+    "deg": 5,
+    "tangents": false,
+    "d": -0.4,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 1,
+    "tangents": false,
+    "d": -0.4,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvTrim2_inh_tan_d4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 4,
+    "tangents": true,
+    "d": -0.4,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_bneg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     -2
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": -0.4,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_tol0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": -0.4,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvTrim2_bzero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     0
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": -0.4,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_inh_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 5.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_neg_inh_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": -5.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_chord_tan_d3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "chord_length",
+    "deg": 3,
+    "tangents": true,
+    "d": 5.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_uniform_d2_tan",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "uniform",
+    "deg": 2,
+    "tangents": true,
+    "d": 5.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_centrip_d5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "centripetal",
+    "deg": 5,
+    "tangents": false,
+    "d": 5.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_d1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 1,
+    "tangents": false,
+    "d": 5.0,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "DropCurveCurve_inh_tan_d4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 4,
+    "tangents": true,
+    "d": 5.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_bneg",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     -2
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 5.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_tol0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 5.0,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_bzero",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     0
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 5.0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_d0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; NL_SrfOffset N_SrfOffset* calls N_CrvOffsetPtSampling for planar extrusion/revolution profiles, reached by prog_test my_test_ss_nurb / my_test_GlobalCSI / my_test_surface_curve_intersect)",
+   "inputs": {
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b": [
+     0,
+     0,
+     1
+    ],
+    "par": "inherited",
+    "deg": 3,
+    "tangents": false,
+    "d": 0.0,
+    "tol": 0.001
+   }
+  }
+ ]
+}

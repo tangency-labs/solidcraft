@@ -139,6 +139,8 @@ fn vents() -> Value {
 
 #[cfg(test)]
 mod tests {
+    use solidcraft_geom::MeshGeom;
+
     #[test]
     fn plate_boss_and_bore_planes_follow_thickness_without_weak_face_references() {
         let mut session = crate::Session::default();
@@ -164,17 +166,17 @@ mod tests {
         let world = session.world_state().unwrap();
         let plate = world.body("Plate").unwrap().mesh();
         assert!((plate.bounds().max.z - 26.).abs() < 1e-6);
-        assert!(plate.contains(solidcraft_geom::Vec3::new(5., 25., 10.)));
-        assert!(plate.contains(solidcraft_geom::Vec3::new(40., 35., 24.)));
-        assert!(!plate.contains(solidcraft_geom::Vec3::new(40., 25., 24.)));
-        assert!(!plate.contains(solidcraft_geom::Vec3::new(40., 25., 2.)));
-        assert!(plate.contains(solidcraft_geom::Vec3::new(40., 35., 2.)));
+        assert!(plate.contains(solidcore_record::Vec3::new(5., 25., 10.)));
+        assert!(plate.contains(solidcore_record::Vec3::new(40., 35., 24.)));
+        assert!(!plate.contains(solidcore_record::Vec3::new(40., 25., 24.)));
+        assert!(!plate.contains(solidcore_record::Vec3::new(40., 25., 2.)));
+        assert!(plate.contains(solidcore_record::Vec3::new(40., 35., 2.)));
         let reopened = crate::Session::new(solidcraft_doc::Document::from_json(&session.doc.to_json()).unwrap());
         assert!((reopened.model.state().sketch(bore).unwrap().plane.origin.z - 26.).abs() < 1e-6);
         let reopened_world = reopened.world_state().unwrap();
         let reopened_plate = reopened_world.body("Plate").unwrap().mesh();
-        assert!(!reopened_plate.contains(solidcraft_geom::Vec3::new(40., 25., 2.)));
-        assert!(reopened_plate.contains(solidcraft_geom::Vec3::new(40., 35., 2.)));
+        assert!(!reopened_plate.contains(solidcore_record::Vec3::new(40., 25., 2.)));
+        assert!(reopened_plate.contains(solidcore_record::Vec3::new(40., 35., 2.)));
     }
 
     /// Every built-in sample builds without a failing feature or joint, and without a panic on

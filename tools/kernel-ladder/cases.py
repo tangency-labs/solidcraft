@@ -355,11 +355,11 @@ Yfit = f1(hh1 / 2)[1][0]
 assert abs(f1(hh1 / 2)[1][1]) < 1e-12
 case(T4, "009-extrude-periodic-fit-spline", "a closed periodic fit-point spline through 6 points, extruded 10",
      sketch("XY", C("sketch.spline.fit_point", points=[[20, 0], [10, 17], [-10, 17], [-20, 0], [-10, -17], [10, -17]], periodic=True)) + [C("solid.extrude", distance=10)],
-     {"body_count": 1, "tolerance": {"rel": 1e-5}, "volume_mm3": 10 * Afit, "area_mm2": 2 * Afit + 10 * Lfit, "center_of_mass": [0, 0, 5], "faces": 8, "edges": 18, "vertices": 12,
+     {"body_count": 1, "tolerance": {"rel": 1e-5}, "volume_mm3": 10 * Afit, "area_mm2": 2 * Afit + 10 * Lfit, "center_of_mass": [0, 0, 5], "faces": 3, "edges": 3, "vertices": 2,
       "bbox": {"min": [-20, -Yfit, 0], "max": [20, Yfit, 10]}},
      "a periodic fit spline is the cyclic C2 cubic through its points with chord-length knots (crates/sketch/src/periodic.rs); A = 1/2 loop int (x y' - y x') over its six spans "
-     "(Gauss, exact on the polynomials) = %.9f, its length L by Gauss = %.9f; V = 10 A, area 2 A + 10 L. Faces: one side face per span + the caps; edges 6 + 6 + 6 vertical; "
-     "vertices 12. The points are symmetric about both axes, so the curve is: x reaches 20 at (+-20, 0) (vertical tangent there), y reaches %.9f between (10, 17) and (-10, 17); "
+     "(Gauss, exact on the polynomials) = %.9f, its length L by Gauss = %.9f; V = 10 A, area 2 A + 10 L. Faces: one side face over the whole periodic curve + the two caps; "
+     "edges: top loop, bottom loop, one seam; vertices: the seam's two ends. The points are symmetric about both axes, so the curve is: x reaches 20 at (+-20, 0) (vertical tangent there), y reaches %.9f between (10, 17) and (-10, 17); "
      "centre of mass (0, 0, 5)" % (Afit, Lfit, Yfit))
 Pw = [[40, 22], [37, 34], [23, 34], [20, 22]]
 Awin = bez_area_under(Pw, 22)

@@ -1,0 +1,1481 @@
+{
+  "cases": [
+    {
+      "name": "empty_maps",
+      "inputs": {
+        "steps": [],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "first_same_image_survives",
+      "inputs": {
+        "steps": [
+          [
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            2,
+            0
+          ],
+          [
+            0,
+            8,
+            9,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_higher_preserves_first",
+      "inputs": {
+        "steps": [
+          [
+            1,
+            0,
+            16,
+            0
+          ],
+          [
+            1,
+            0,
+            17,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "edge_higher_overwrites_leaves_reverse",
+      "inputs": {
+        "steps": [
+          [
+            1,
+            16,
+            32,
+            0
+          ],
+          [
+            1,
+            16,
+            33,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "null_key_and_null_value",
+      "inputs": {
+        "steps": [
+          [
+            5,
+            64,
+            1,
+            0
+          ],
+          [
+            0,
+            2,
+            64,
+            0
+          ],
+          [
+            0,
+            2,
+            3,
+            0
+          ],
+          [
+            5,
+            64,
+            5,
+            2
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "both_original_error",
+      "inputs": {
+        "steps": [
+          [
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            2,
+            3,
+            0
+          ],
+          [
+            2,
+            0,
+            2,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "original_first_self_map",
+      "inputs": {
+        "steps": [
+          [
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            2,
+            0,
+            1,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "original_second_self_map",
+      "inputs": {
+        "steps": [
+          [
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            2,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "original_first_unrelated",
+      "inputs": {
+        "steps": [
+          [
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            2,
+            0,
+            2,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "original_second_unrelated",
+      "inputs": {
+        "steps": [
+          [
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            2,
+            2,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "both_copies_error",
+      "inputs": {
+        "steps": [
+          [
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            2,
+            3,
+            0
+          ],
+          [
+            2,
+            1,
+            3,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "first_copy_kept",
+      "inputs": {
+        "steps": [
+          [
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            2,
+            1,
+            4,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "second_copy_kept",
+      "inputs": {
+        "steps": [
+          [
+            0,
+            0,
+            1,
+            0
+          ],
+          [
+            2,
+            4,
+            1,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "both_higher_error",
+      "inputs": {
+        "steps": [
+          [
+            1,
+            0,
+            16,
+            0
+          ],
+          [
+            1,
+            1,
+            17,
+            0
+          ],
+          [
+            2,
+            16,
+            17,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "first_higher_kept",
+      "inputs": {
+        "steps": [
+          [
+            1,
+            0,
+            16,
+            0
+          ],
+          [
+            2,
+            16,
+            17,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "second_higher_kept",
+      "inputs": {
+        "steps": [
+          [
+            1,
+            0,
+            16,
+            0
+          ],
+          [
+            2,
+            17,
+            16,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "both_lower_error",
+      "inputs": {
+        "steps": [
+          [
+            1,
+            0,
+            16,
+            0
+          ],
+          [
+            1,
+            1,
+            17,
+            0
+          ],
+          [
+            2,
+            0,
+            1,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "first_lower_kept",
+      "inputs": {
+        "steps": [
+          [
+            1,
+            0,
+            16,
+            0
+          ],
+          [
+            2,
+            0,
+            1,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "second_lower_kept",
+      "inputs": {
+        "steps": [
+          [
+            1,
+            0,
+            16,
+            0
+          ],
+          [
+            2,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "unmapped_keeps_first",
+      "inputs": {
+        "steps": [
+          [
+            2,
+            4,
+            5,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "one_sided_erasure",
+      "inputs": {
+        "steps": [
+          [
+            0,
+            16,
+            17,
+            0
+          ],
+          [
+            3,
+            16,
+            0,
+            0
+          ],
+          [
+            2,
+            17,
+            18,
+            0
+          ],
+          [
+            4,
+            17,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "zero_repetitions_still_assigned",
+      "inputs": {
+        "steps": [
+          [
+            6,
+            0,
+            0,
+            0
+          ],
+          [
+            12,
+            0,
+            0,
+            741
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "geometry_defaults_0",
+      "inputs": {
+        "steps": [
+          [
+            7,
+            0,
+            0,
+            0
+          ],
+          [
+            7,
+            0,
+            0,
+            1
+          ],
+          [
+            7,
+            0,
+            0,
+            4
+          ],
+          [
+            7,
+            0,
+            0,
+            5
+          ],
+          [
+            8,
+            0,
+            0,
+            0
+          ],
+          [
+            9,
+            0,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_helper_kind0_op10",
+      "inputs": {
+        "steps": [
+          [
+            10,
+            0,
+            0,
+            0
+          ],
+          [
+            10,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_axis_kind0_op10",
+      "inputs": {
+        "steps": [
+          [
+            10,
+            1,
+            0,
+            0
+          ],
+          [
+            10,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          0,
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "name": "vertex_helper_kind0_op11",
+      "inputs": {
+        "steps": [
+          [
+            11,
+            0,
+            0,
+            0
+          ],
+          [
+            11,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_axis_kind0_op11",
+      "inputs": {
+        "steps": [
+          [
+            11,
+            1,
+            0,
+            0
+          ],
+          [
+            11,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          0,
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "name": "geometry_defaults_1",
+      "inputs": {
+        "steps": [
+          [
+            7,
+            0,
+            0,
+            0
+          ],
+          [
+            7,
+            0,
+            0,
+            1
+          ],
+          [
+            7,
+            0,
+            0,
+            4
+          ],
+          [
+            7,
+            0,
+            0,
+            5
+          ],
+          [
+            8,
+            0,
+            0,
+            0
+          ],
+          [
+            9,
+            0,
+            0,
+            0
+          ]
+        ],
+        "kind": 1,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_helper_kind1_op10",
+      "inputs": {
+        "steps": [
+          [
+            10,
+            0,
+            0,
+            0
+          ],
+          [
+            10,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 1,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_axis_kind1_op10",
+      "inputs": {
+        "steps": [
+          [
+            10,
+            1,
+            0,
+            0
+          ],
+          [
+            10,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 1,
+        "vector": [
+          0,
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "name": "vertex_helper_kind1_op11",
+      "inputs": {
+        "steps": [
+          [
+            11,
+            0,
+            0,
+            0
+          ],
+          [
+            11,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 1,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_axis_kind1_op11",
+      "inputs": {
+        "steps": [
+          [
+            11,
+            1,
+            0,
+            0
+          ],
+          [
+            11,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 1,
+        "vector": [
+          0,
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "name": "geometry_defaults_2",
+      "inputs": {
+        "steps": [
+          [
+            7,
+            0,
+            0,
+            0
+          ],
+          [
+            7,
+            0,
+            0,
+            1
+          ],
+          [
+            7,
+            0,
+            0,
+            4
+          ],
+          [
+            7,
+            0,
+            0,
+            5
+          ],
+          [
+            8,
+            0,
+            0,
+            0
+          ],
+          [
+            9,
+            0,
+            0,
+            0
+          ]
+        ],
+        "kind": 2,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_helper_kind2_op10",
+      "inputs": {
+        "steps": [
+          [
+            10,
+            0,
+            0,
+            0
+          ],
+          [
+            10,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 2,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_axis_kind2_op10",
+      "inputs": {
+        "steps": [
+          [
+            10,
+            1,
+            0,
+            0
+          ],
+          [
+            10,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 2,
+        "vector": [
+          0,
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "name": "vertex_helper_kind2_op11",
+      "inputs": {
+        "steps": [
+          [
+            11,
+            0,
+            0,
+            0
+          ],
+          [
+            11,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 2,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_axis_kind2_op11",
+      "inputs": {
+        "steps": [
+          [
+            11,
+            1,
+            0,
+            0
+          ],
+          [
+            11,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 2,
+        "vector": [
+          0,
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "name": "vertex_scale_1e-09",
+      "inputs": {
+        "steps": [
+          [
+            10,
+            1,
+            0,
+            0
+          ],
+          [
+            11,
+            2,
+            0,
+            0
+          ]
+        ],
+        "kind": 1,
+        "vector": [
+          1e-09,
+          2e-09,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_scale_1e-05",
+      "inputs": {
+        "steps": [
+          [
+            10,
+            1,
+            0,
+            0
+          ],
+          [
+            11,
+            2,
+            0,
+            0
+          ]
+        ],
+        "kind": 1,
+        "vector": [
+          1e-05,
+          2e-05,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_scale_100000.0",
+      "inputs": {
+        "steps": [
+          [
+            10,
+            1,
+            0,
+            0
+          ],
+          [
+            11,
+            2,
+            0,
+            0
+          ]
+        ],
+        "kind": 1,
+        "vector": [
+          100000.0,
+          200000.0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vertex_scale_1e+100",
+      "inputs": {
+        "steps": [
+          [
+            10,
+            1,
+            0,
+            0
+          ],
+          [
+            11,
+            2,
+            0,
+            0
+          ]
+        ],
+        "kind": 1,
+        "vector": [
+          1e+100,
+          2e+100,
+          0
+        ]
+      }
+    },
+    {
+      "name": "null_brep_early_return",
+      "inputs": {
+        "steps": [
+          [
+            13,
+            0,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "tag_profile_curve_metadata_and_ordinal",
+      "inputs": {
+        "steps": [
+          [
+            12,
+            0,
+            0,
+            741
+          ],
+          [
+            14,
+            16,
+            17,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "tag_profile_preserves_existing_tags",
+      "inputs": {
+        "steps": [
+          [
+            12,
+            0,
+            0,
+            741
+          ],
+          [
+            14,
+            16,
+            17,
+            0
+          ],
+          [
+            12,
+            0,
+            0,
+            888
+          ],
+          [
+            14,
+            17,
+            16,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "tag_profile_duplicate_edges",
+      "inputs": {
+        "steps": [
+          [
+            14,
+            18,
+            18,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "tag_profile_distinct_brep_namespaces",
+      "inputs": {
+        "steps": [
+          [
+            14,
+            16,
+            24,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "tag_profile_even_when_tagging_flag_false",
+      "inputs": {
+        "steps": [
+          [
+            12,
+            0,
+            0,
+            24
+          ],
+          [
+            14,
+            22,
+            23,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "rotation_axis_tolerance_9.99e-06",
+      "inputs": {
+        "steps": [
+          [
+            11,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 2,
+        "vector": [
+          9.99e-06,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "rotation_axis_tolerance_1e-05",
+      "inputs": {
+        "steps": [
+          [
+            11,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 2,
+        "vector": [
+          1e-05,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "rotation_axis_tolerance_1.001e-05",
+      "inputs": {
+        "steps": [
+          [
+            11,
+            1,
+            0,
+            0
+          ]
+        ],
+        "kind": 2,
+        "vector": [
+          1.001e-05,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "selected_do_sweep_kind0_deferred",
+      "inputs": {
+        "steps": [
+          [
+            15,
+            0,
+            0,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          0,
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "name": "selected_do_sweep_kind1_deferred",
+      "inputs": {
+        "steps": [
+          [
+            15,
+            0,
+            0,
+            0
+          ]
+        ],
+        "kind": 1,
+        "vector": [
+          0,
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "name": "selected_do_sweep_kind2_deferred",
+      "inputs": {
+        "steps": [
+          [
+            15,
+            0,
+            0,
+            0
+          ]
+        ],
+        "kind": 2,
+        "vector": [
+          0,
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "name": "exact_large_tag_ids_and_repetition_bits",
+      "inputs": {
+        "steps": [
+          [
+            12,
+            0,
+            0,
+            9223372036854775807
+          ],
+          [
+            14,
+            16,
+            17,
+            0
+          ],
+          [
+            6,
+            0,
+            0,
+            -1
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "negative_tag_id_preserved",
+      "inputs": {
+        "steps": [
+          [
+            12,
+            0,
+            0,
+            -9223372036854775808
+          ],
+          [
+            14,
+            16,
+            17,
+            0
+          ]
+        ],
+        "kind": 0,
+        "vector": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "selected_axis_vertices_are_distinct_from_script_pool",
+      "inputs": {
+        "kind": 2,
+        "vector": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "steps": [
+          [
+            15,
+            0,
+            0,
+            0
+          ],
+          [
+            15,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            1,
+            0
+          ]
+        ]
+      }
+    }
+  ]
+}

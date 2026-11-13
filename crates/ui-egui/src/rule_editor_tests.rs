@@ -1,6 +1,7 @@
 //! Freeze rule-manager commands, reload policy and published row/control identities.
-use crate::{SolveApp, dialogs::Kind, dialogs_plastic::Pl, dialogs_sheet::Sm, scenario, theme::Tokens};
+use crate::{SolveApp, dialogs::Kind, dialogs_plastic::Pl, dialogs_sheet::Sm, scenario};
 use serde_json::{Value, json};
+use solidcraft_theme::Tokens;
 
 const SHEET_ROWS: &[&str] = &[
     "Rule",
@@ -143,7 +144,7 @@ fn plastic_rule_editor_contract() {
 
 #[test]
 fn sheet_rule_editor_delete_reloads_and_plastic_has_no_delete() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.set", json!({"layout":layout}));

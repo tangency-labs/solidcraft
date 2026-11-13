@@ -177,3 +177,31 @@ fn a_body_name_that_is_no_body_is_refused() {
         "nothing is near `Typo`"
     );
 }
+
+/// `exclude_pairs` leaves a pair out by body or by occurrence, and each pair reported says where
+/// its bodies sit (#5963).
+#[test]
+fn excluded_pairs_are_left_out_and_pairs_name_their_place() {
+    let mut s = Session::default();
+    for (name, x) in [("Pin", 0), ("Hole", 5)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10, "base": [x, 0, 0], "body_name": name}));
+    }
+    let i = run(&mut s, "inspect.interference", json!({}));
+    assert_eq!((i["count"].as_u64(), i["pairs_excluded"].as_u64()), (Some(1), Some(0)), "{i}");
+    let hit = &i["interferences"][0];
+    for side in ["a", "b"] {
+        let part = &hit[format!("{side}_part")];
+        let component = part["component"].as_str().unwrap_or_default();
+        assert!(["Pin", "Hole"].contains(&component), "{hit}");
+        assert_eq!(part["path"], json!([format!("{component}:1")]), "{hit}");
+    }
+    for pair in [json!(["Pin", "Hole"]), json!(["Hole:1", "Pin:1"]), json!([hit["a"], hit["b"]])] {
+        let i = run(&mut s, "inspect.interference", json!({"exclude_pairs": [pair]}));
+        assert_eq!((i["count"].as_u64(), i["pairs_excluded"].as_u64()), (Some(0), Some(1)), "{pair}: {i}");
+    }
+    for bad in [json!("Pin"), json!([["Pin"]]), json!([["Pin", "Nope"]]), json!([["root", "Pin"]])] {
+        assert!(s.execute("inspect.interference", &json!({"exclude_pairs": bad})).is_err(), "{bad}");
+    }
+}

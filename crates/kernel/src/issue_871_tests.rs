@@ -1,6 +1,6 @@
 //! #871: a fillet that opened holes in the model must be refused, not accepted.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::{Body, BoolOp, build::box_solid, ops::boolean};
 

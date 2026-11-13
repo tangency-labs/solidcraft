@@ -4,7 +4,8 @@
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -308,14 +309,123 @@ fn a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone()
     run(&mut s, "solid.fillet", json!({"edges": [[0, -11, 10]], "radius": 1, "name": "Round"}));
     assert!(volume(&mut s, "Body1") < volume_before);
     let filleted = volume(&mut s, "Body1");
+    let filleted_faces = faces(&mut s, "Body1");
     let round_id = s.doc.features.iter().position(|f| f.name == "Round").unwrap();
     assert!(s.doc.features[round_id].edge_names.iter().all(|name| !name.contains(&tab_name)), "{:?}", s.doc.features[round_id].edge_names);
 
     // A design saved while the wall was named after the tab still finds its edge.
     let mut saved = (*s.doc).clone();
     saved.features[round_id].edge_names = vec![format!("F2:top|{tab_name}:side:l4#[F2:side:l1]")];
-    let mut reopened = Session::opened_at(saved, None, None);
+    let mut reopened = Session::opened_at(saved.clone(), None, None);
     let result = reopened.model.result(reopened.doc.features[round_id].id).unwrap();
     assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
     assert!((volume(&mut reopened, "Body1") - filleted).abs() < 1e-6);
+    // The same edge: the plate is symmetric, so the volume alone would take a round on a mirrored
+    // edge as well. Every face of the body filleted fresh is there, where it was.
+    let reopened_faces = faces(&mut reopened, "Body1");
+    assert_eq!(reopened_faces.len(), filleted_faces.len(), "{reopened_faces:?}");
+    for face in &filleted_faces {
+        assert!(reopened_faces.iter().any(|f| vec(&f["point"]).dist(vec(&face["point"])) < 1e-6), "{face} is not in {reopened_faces:?}");
+    }
+
+    // Only the point says which edge that old name meant, and only among the edges of the face the
+    // name still finds. Each of these still asks for the edge again: a point on the wall but on no
+    // edge; the corner where the wall's top edge meets the plate's straight side; a face of a
+    // feature that made nothing on the body (removed, not renamed); the plate's bottom, which the
+    // wall's top edge does not bound.
+    let on_edge = Vec3::new(0.0, -11.0, 10.0);
+    for (name, at) in [
+        (format!("F2:top|{tab_name}:side:l4#[F2:side:l1]"), Vec3::new(0.0, -11.0, 5.0)),
+        (format!("F2:top|{tab_name}:side:l4#[F2:side:l1]"), Vec3::new(57.0_f64.sqrt(), -8.0, 10.0)),
+        ("F2:top|F99:side:l4#[F2:side:l1]".to_string(), on_edge),
+        (format!("F2:start|{tab_name}:side:l4#[F2:side:l1]"), on_edge),
+    ] {
+        let mut off = saved.clone();
+        off.features[round_id].edge_names = vec![name.clone()];
+        if let solidcraft_doc::FeatureKind::Fillet { edges, .. } = &mut off.features[round_id].kind {
+            edges[0].0 = at;
+        }
+        let reopened = Session::opened_at(off, None, None);
+        let result = reopened.model.result(reopened.doc.features[round_id].id).unwrap();
+        assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{name} at {at:?}: {:?}", result.error);
+    }
+}
+
+/// A 40 x 20 x 10 plate with a bar joined across its top from x = `x0` to `x1` (y -5…25, 5 high),
+/// splitting the top into two faces of one stem, told apart by their neighbours, and a chamfer on
+/// the plate's front top edge left of the bar, picked at (5, 0, 10). Returns the chamfer's index.
+fn plate_split_by_a_bar(s: &mut Session, x0: f64, x1: f64) -> usize {
+    run(s, "sketch.create", json!({"plane": "XY"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 10, "name": "Plate"}));
+    run(s, "sketch.create", json!({"plane": {"face": [x0 / 2.0, 10, 10]}, "project_edges": false}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [x0, -5], "p1": [x1, 25]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 5, "operation": "join", "name": "Bar"}));
+    run(s, "solid.chamfer", json!({"edges": [[5, 0, 10]], "distance": 1, "name": "Bevel"}));
+    s.doc.features.iter().position(|f| f.name == "Bevel").unwrap()
+}
+
+/// A design saved with the plate's top named after other neighbours than it has now (a later
+/// join, or another build, named the walls around it otherwise), on a body with two top faces of
+/// that stem: no face answers to the name exactly, and the saved pick decides, on the one edge
+/// between the front side and a top face whose exact curve it lies on.
+#[test]
+fn a_chamfer_saved_under_a_top_faces_old_neighbours_is_found_at_its_pick() {
+    let mut s = Session::default();
+    let bevel = plate_split_by_a_bar(&mut s, 15.0, 25.0);
+    let tops: Vec<String> =
+        faces(&mut s, "Body1").iter().filter_map(|f| f["name"].as_str().map(str::to_string)).filter(|n| n.starts_with("F2:top#[")).collect();
+    assert_eq!(tops.len(), 2, "{tops:?}");
+    let picked = s.doc.features[bevel].edge_names.clone();
+    assert_eq!(picked, vec!["F2:side:l1|F2:top#[F2:side:l4,F4:side:l4]".to_string()]);
+    let (chamfered, chamfered_faces) = (volume(&mut s, "Body1"), faces(&mut s, "Body1"));
+
+    // F4:side:l1 (the bar's far wall) bounds neither top face: the name answers to both by stem only.
+    let stale = "F2:side:l1|F2:top#[F2:side:l4,F4:side:l1]";
+    let mut saved = (*s.doc).clone();
+    saved.features[bevel].edge_names = vec![stale.to_string()];
+    let mut reopened = Session::opened_at(saved.clone(), None, None);
+    let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
+    assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
+    assert!((volume(&mut reopened, "Body1") - chamfered).abs() < 1e-6);
+    // The same edge, not the one right of the bar (the plate is symmetric about it).
+    let reopened_faces = faces(&mut reopened, "Body1");
+    assert_eq!(reopened_faces.len(), chamfered_faces.len(), "{reopened_faces:?}");
+    for face in &chamfered_faces {
+        assert!(reopened_faces.iter().any(|f| vec(&f["point"]).dist(vec(&face["point"])) < 1e-6), "{face} is not in {reopened_faces:?}");
+    }
+
+    // Right of the bar is the other candidate's; on the front side below the edge, or on the bar's
+    // edge between the two, is no candidate's: the point lies on exactly one there, or none.
+    for (at, finds) in [(Vec3::new(35.0, 0.0, 10.0), true), (Vec3::new(5.0, 0.0, 5.0), false), (Vec3::new(20.0, 0.0, 10.0), false)] {
+        let mut off = saved.clone();
+        if let solidcraft_doc::FeatureKind::Chamfer { edges, .. } = &mut off.features[bevel].kind {
+            edges[0].0 = at;
+        }
+        let reopened = Session::opened_at(off, None, None);
+        let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
+        if finds {
+            assert!(result.error.is_none(), "{at:?}: {:?}", result.error);
+        } else {
+            assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{at:?}: {:?}", result.error);
+        }
+    }
+}
+
+/// With a bar 0.1 mm wide, the two edges between the front side and the top faces end within a
+/// pick's reach of one point between them: the point lies on both, and the name asks again.
+#[test]
+fn a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again() {
+    let mut s = Session::default();
+    let bevel = plate_split_by_a_bar(&mut s, 20.0, 20.1);
+    let mut saved = (*s.doc).clone();
+    saved.features[bevel].edge_names = vec!["F2:side:l1|F2:top#[F2:side:l4,F4:side:l1]".to_string()];
+    if let solidcraft_doc::FeatureKind::Chamfer { edges, .. } = &mut saved.features[bevel].kind {
+        edges[0].0 = Vec3::new(20.05, 0.0, 10.0);
+    }
+    let reopened = Session::opened_at(saved, None, None);
+    let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
+    assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
 }

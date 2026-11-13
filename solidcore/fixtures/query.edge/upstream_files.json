@@ -1,0 +1,6034 @@
+{
+ "cases": [
+  {
+   "name": "Mouse_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "Mouse_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "Mouse_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "Mouse_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "Mouse_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "Mouse_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "Mouse_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "Mouse_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "Mouse_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "Mouse_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "Mouse_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "Mouse_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "Mouse_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "Mouse_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "Mouse_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "Mouse_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "Mouse_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "Mouse_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "Mouse_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "Mouse_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "Mouse_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "Mouse_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "Endcap_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "Endcap_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "Endcap_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "Endcap_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "Endcap_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "Endcap_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "Endcap_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "Endcap_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "Endcap_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "Endcap_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "Endcap_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "Endcap_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "Endcap_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "Endcap_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "Endcap_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "Endcap_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "Endcap_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "Endcap_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "Endcap_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "Endcap_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "Endcap_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "Endcap_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "box_with_large_fillet_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "box_with_large_fillet_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "box_with_large_fillet_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "box_with_large_fillet_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_with_large_fillet_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "box_with_large_fillet_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "box_with_large_fillet_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "box_with_large_fillet_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "box_with_large_fillet_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "box_with_large_fillet_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_with_large_fillet_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "box_with_large_fillet_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "box_with_large_fillet_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "box_with_large_fillet_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "box_with_large_fillet_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "box_with_large_fillet_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_with_large_fillet_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "box_with_large_fillet_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "box_with_large_fillet_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "box_with_large_fillet_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "box_with_large_fillet_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "box_with_large_fillet_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "cone_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "cone_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "cone_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "cone_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "cone_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "cone_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "cone_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "cone_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "cone_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "cone_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "cone_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "cone_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "cone_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "cone_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "cone_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "cone_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "cone_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "cone_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "cone_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "disk_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "disk_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "disk_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "disk_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "disk_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "disk_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "disk_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "disk_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "disk_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "disk_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "disk_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "disk_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "disk_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "disk_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "disk_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "disk_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "disk_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "disk_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "disk_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "disk_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "disk_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "disk_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "ellips_ts2_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "ellips_ts2_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "ellips_ts2_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "ellips_ts2_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellips_ts2_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "ellips_ts2_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "ellips_ts2_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "ellips_ts2_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "ellips_ts2_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "ellips_ts2_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellips_ts2_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "ellips_ts2_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "ellips_ts2_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "ellips_ts2_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "ellips_ts2_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "ellips_ts2_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellips_ts2_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "ellips_ts2_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "ellips_ts2_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "ellips_ts2_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "ellips_ts2_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "ellips_ts2_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "plane_circ_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "plane_circ_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "plane_circ_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "plane_circ_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_circ_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "plane_circ_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "plane_circ_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "plane_circ_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "plane_circ_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "plane_circ_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_circ_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "plane_circ_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "plane_circ_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "plane_circ_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "plane_circ_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "plane_circ_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_circ_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "plane_circ_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "plane_circ_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "plane_circ_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "plane_circ_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "plane_circ_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "plane_square_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "plane_square_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "plane_square_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "plane_square_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_square_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "plane_square_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "plane_square_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "plane_square_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "plane_square_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "plane_square_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_square_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "plane_square_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "plane_square_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "plane_square_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "plane_square_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "plane_square_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_square_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "plane_square_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "plane_square_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "plane_square_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "plane_square_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "plane_square_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "sphere_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "sphere_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "sphere_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "sphere_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sphere_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "sphere_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "sphere_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "sphere_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "sphere_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "sphere_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sphere_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "sphere_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "sphere_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "sphere_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "sphere_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "sphere_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sphere_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "sphere_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "sphere_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "sphere_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "sphere_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "sphere_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "surf_extrude_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "surf_extrude_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "surf_extrude_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "surf_extrude_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "surf_extrude_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "surf_extrude_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "surf_extrude_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "surf_extrude_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "surf_extrude_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "surf_extrude_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "surf_extrude_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "surf_extrude_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "surf_extrude_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "surf_extrude_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "surf_extrude_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "surf_extrude_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "surf_extrude_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "surf_extrude_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "surf_extrude_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "surf_extrude_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "surf_extrude_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "surf_extrude_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "surf_rev_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "surf_rev_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "surf_rev_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "surf_rev_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "surf_rev_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "surf_rev_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "surf_rev_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "surf_rev_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "surf_rev_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "surf_rev_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "surf_rev_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "surf_rev_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "surf_rev_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "surf_rev_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "surf_rev_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "surf_rev_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "surf_rev_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "surf_rev_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "surf_rev_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "surf_rev_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "surf_rev_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "surf_rev_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "surf_sphere150_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "surf_sphere150_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "surf_sphere150_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "surf_sphere150_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "surf_sphere150_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "surf_sphere150_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "surf_sphere150_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "surf_sphere150_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "surf_sphere150_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "surf_sphere150_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "surf_sphere150_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "surf_sphere150_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "surf_sphere150_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "surf_sphere150_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "surf_sphere150_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "surf_sphere150_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "surf_sphere150_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "surf_sphere150_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "surf_sphere150_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "surf_sphere150_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "surf_sphere150_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "surf_sphere150_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "torus_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "torus_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "torus_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "torus_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "torus_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "torus_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "torus_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "torus_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "torus_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "torus_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "torus_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "torus_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "torus_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "torus_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "torus_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "torus_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "torus_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "torus_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "torus_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "toruswvy_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "toruswvy_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "toruswvy_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "toruswvy_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "toruswvy_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "toruswvy_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "toruswvy_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "toruswvy_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "toruswvy_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "toruswvy_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "toruswvy_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "toruswvy_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "toruswvy_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "toruswvy_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "toruswvy_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "toruswvy_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "toruswvy_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "toruswvy_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "toruswvy_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "toruswvy_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "toruswvy_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "toruswvy_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  },
+  {
+   "name": "vase_rev_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "vase_rev_tight0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "vase_rev_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "vase_rev_closest_on0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "vase_rev_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "vase_rev_bbox_tight_inside0",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "vase_rev_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "vase_rev_tight1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "vase_rev_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "vase_rev_closest_on1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "vase_rev_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 1
+   }
+  },
+  {
+   "name": "vase_rev_bbox_tight_inside1",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "edits": {
+     "edge": 1,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "vase_rev_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "vase_rev_tight2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "vase_rev_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.3,
+    "offset": [
+     0.01,
+     -0.02,
+     0.03
+    ]
+   }
+  },
+  {
+   "name": "vase_rev_closest_on2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.7,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "vase_rev_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "tight",
+    "edge": 2
+   }
+  },
+  {
+   "name": "vase_rev_bbox_tight_inside2",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "edits": {
+     "edge": 2,
+     "p0": [
+      -10000.0,
+      -10000.0,
+      -10000.0
+     ],
+     "p1": [
+      10000.0,
+      10000.0,
+      10000.0
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "vase_rev_radial",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 2,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "vase_rev_radial_self",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "radial",
+    "eu": 1,
+    "classify": 1,
+    "nparam": 0.25
+   }
+  },
+  {
+   "name": "vase_rev_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  },
+  {
+   "name": "vase_rev_radial_curve_rev",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "radial_curve",
+    "eu": 3,
+    "nt": 0.5,
+    "dir": [
+     1,
+     1,
+     0
+    ],
+    "len": 0.1,
+    "orient": 2,
+    "force": true
+   }
+  }
+ ]
+}

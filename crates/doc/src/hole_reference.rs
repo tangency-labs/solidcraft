@@ -3,7 +3,9 @@
 //! measured in the face's plane. The edges are found again by their persistent names, else by
 //! their stored points, so the hole follows them when the part changes.
 
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 
 use crate::{DocError, ModelBody, ModelState, Result};
 
@@ -101,7 +103,8 @@ pub fn reference_frame(st: &ModelState, at: Vec3, dir: Vec3, edges: &[(Vec3, Opt
     if !at.is_finite() || edges.iter().any(|(p, _)| !p.is_finite()) {
         return Err(DocError::Invalid("reference edges need finite points".into()));
     }
-    let b = body_at(st, at).ok_or_else(|| DocError::Invalid("no body at the hole for its reference edges".into()))?;
+    let points: Vec<Vec3> = edges.iter().map(|(p, _)| *p).collect();
+    let b = body_for(st, at, &points).ok_or_else(|| DocError::Invalid("no body at the hole for its reference edges".into()))?;
     let m = b.mesh();
     let size = b.body.size().max(1e-9);
     let mut found = Vec::with_capacity(edges.len());
@@ -146,7 +149,7 @@ pub fn on_reference_face(st: &ModelState, frame: &ReferenceFrame, p: Vec3) -> bo
 /// The persistent names of the edges at `edges`, on the body the hole at `at` is drilled into
 /// (empty where an edge has none).
 pub fn reference_edge_names(st: &ModelState, at: Vec3, edges: &[Vec3]) -> Vec<String> {
-    match body_at(st, at) {
+    match body_for(st, at, edges) {
         Some(b) => crate::naming::edge_names_at(b, edges),
         None => Vec::new(),
     }
@@ -160,14 +163,19 @@ pub fn cylinder_edge_names(st: &ModelState, base: &crate::PointExpr, references:
     reference_edge_names(st, Vec3::new(x, y, z), &edges)
 }
 
-/// The (non-mesh) body whose surface is nearest `p`.
-fn body_at(st: &ModelState, p: Vec3) -> Option<&ModelBody> {
-    st.bodies
-        .iter()
-        .filter(|b| !b.body.is_mesh())
-        .filter_map(|b| crate::appearance::nearest_face(b, p).map(|(d, _)| (d, b)))
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, b)| b)
+/// The (non-mesh) body whose surface is nearest `p`; of the bodies equally near (parts that touch
+/// at `p`), the one the `edges` run along, so a reference edge picked on one part is not looked
+/// for on the part beside it.
+fn body_for<'a>(st: &'a ModelState, p: Vec3, edges: &[Vec3]) -> Option<&'a ModelBody> {
+    let near: Vec<(f64, &ModelBody)> =
+        st.bodies.iter().filter(|b| !b.body.is_mesh()).filter_map(|b| crate::appearance::nearest_face(b, p).map(|(d, _)| (d, b))).collect();
+    let nearest = near.iter().map(|(d, _)| *d).min_by(f64::total_cmp)?;
+    let tied: Vec<&ModelBody> = near.iter().filter(|(d, b)| *d <= nearest + (b.body.size() * 1e-4).max(1e-6)).map(|(_, b)| *b).collect();
+    let has_edges = |b: &ModelBody| {
+        let reach = (b.body.size() * 1e-2).max(1e-3);
+        edges.iter().all(|q| matches!(b.body.nearest_edge(*q, reach), Ok(Some((_, d))) if d <= reach))
+    };
+    tied.iter().find(|b| has_edges(b)).or(tied.first()).copied()
 }
 
 /// How far `p` is from an edge's polyline.

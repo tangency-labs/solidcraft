@@ -16,7 +16,7 @@ The pictures live on the `pr-media-kernel-smlib` branch.
 - edges with intervals, and vertices;
 - tolerances per body, per edge and per vertex.
 
-Names follow STEP's B-rep vocabulary. Analytic curves and surfaces are unbounded; their bounds live in the edge interval and the face domain. A validator enforces one **canonical order** of faces, edges and vertices, which persistent names depend on. The history types moved beside it, to `solidcraft_geom::brep::history`. The contract is in docs/native-brep.md and tangency-labs/solidcore#342.
+Names follow STEP's B-rep vocabulary. Analytic curves and surfaces are unbounded; their bounds live in the edge interval and the face domain. A validator enforces one **canonical order** of faces, edges and vertices, which persistent names depend on. The history types moved beside it, to `solidcore_record::brep::history` (solidcore's record crate). The contract is in docs/native-brep.md and tangency-labs/solidcore#342.
 
 truck bodies round-trip through schema 4 exactly, and the model cache stores it. Every corpus design, sample and imported assembly reopens from the cache with bit-identical volumes, areas and face names:
 

@@ -9,8 +9,9 @@
 //! curvature in the line's direction times the surface normal, `κₙ n` with
 //! `κₙ = n · S_tt / |S_t|²` (the second fundamental form over the first, in that direction).
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::iso::IsoLine;
@@ -65,19 +66,8 @@ pub fn comb_edge_near(body: &Body, at: Vec3) -> Result<Option<(f64, usize)>> {
         let record = body.record();
         let mut coarse: Vec<(f64, usize, usize)> = Vec::new();
         for (index, edge) in record.edges.iter().enumerate() {
-            let seam = edge.uses.len() >= 2 && edge.uses.iter().all(|u| edge.uses.first().is_some_and(|f| f.face == u.face));
-            let Ok(curve) = CurveEval::new(edge.parameters()) else { continue };
-            let [t0, t1] = edge.interval;
-            if seam || curve.jet(0.5 * (t0 + t1)).is_none() {
-                continue;
-            }
-            let best = (0..=PICK_SAMPLES)
-                .filter_map(|k| curve.point(t0 + (t1 - t0) * k as f64 / PICK_SAMPLES as f64).map(|q| (q.dist(at), k)))
-                .filter(|(d, _)| d.is_finite())
-                .min_by(|a, b| a.0.total_cmp(&b.0));
-            if let Some((d, k)) = best {
-                coarse.push((d, index, k));
-            }
+            let Some((_, d, k)) = coarse_near(edge, at) else { continue };
+            coarse.push((d, index, k));
         }
         coarse.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut best: Option<(f64, usize)> = None;
@@ -91,6 +81,38 @@ pub fn comb_edge_near(body: &Body, at: Vec3) -> Result<Option<(f64, usize)>> {
         }
         Ok(best)
     })
+}
+
+/// The exact distance from `at` to edge `edge` of `body` (its index in the body's edge order):
+/// to the edge's own curve over its interval, ends included, not to a tessellation, as
+/// [`comb_edge_near`] measures it. `None` for an edge that is a periodic face's own seam or a
+/// pole, or that is not there.
+pub fn edge_distance(body: &Body, edge: usize, at: Vec3) -> Result<Option<f64>> {
+    body.require_brep("an edge distance")?;
+    if !at.is_finite() {
+        return Err(KernelError::Invalid("the point must be finite".into()));
+    }
+    crate::guard("edge distance", || {
+        let Some(edge) = body.record().edges.get(edge) else { return Ok(None) };
+        Ok(coarse_near(edge, at).and_then(|(curve, _, k)| nearest_on(&curve, edge.interval, k, at)))
+    })
+}
+
+/// Edge `edge`'s curve, and its nearest of [`PICK_SAMPLES`] + 1 even samples to `at` (how far, and
+/// which). `None` for a periodic face's own seam, a degenerate edge (a pole), or a curve that does
+/// not evaluate.
+fn coarse_near(edge: &solidcore_record::brep::Edge, at: Vec3) -> Option<(CurveEval, f64, usize)> {
+    let seam = edge.uses.len() >= 2 && edge.uses.iter().all(|u| edge.uses.first().is_some_and(|f| f.face == u.face));
+    let curve = CurveEval::new(edge.parameters()).ok()?;
+    let [t0, t1] = edge.interval;
+    if seam || curve.jet(0.5 * (t0 + t1)).is_none() {
+        return None;
+    }
+    let (d, k) = (0..=PICK_SAMPLES)
+        .filter_map(|k| curve.point(t0 + (t1 - t0) * k as f64 / PICK_SAMPLES as f64).map(|q| (q.dist(at), k)))
+        .filter(|(d, _)| d.is_finite())
+        .min_by(|a, b| a.0.total_cmp(&b.0))?;
+    Some((curve, d, k))
 }
 
 /// The distance from `at` to `curve` on `[t0, t1]`, by golden-section search on the sample steps

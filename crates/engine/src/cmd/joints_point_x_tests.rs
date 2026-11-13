@@ -2,7 +2,8 @@
 //! and x meet as they are, whichever way their parts are turned.
 
 use serde_json::json;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::tests::{occ, place, run};
 use crate::Session;

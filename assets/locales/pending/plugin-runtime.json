@@ -1,0 +1,82 @@
+{
+  "en": {
+    "cmd.model.mesh": "Read Body Mesh",
+    "cmd.plugin.inspect": "Inspect Plugin",
+    "cmd.plugin.run": "Run Plugin",
+    "ui.plugin_context_changed": "The design, editing context or plugin settings changed while the plugin ran. Nothing was applied.",
+    "ui.plugin_no_result": "Plugin execution ended without a result.",
+    "ui.plugin_run_consent": "Run external plugin entry “{entry}” from “{path}” with its declared command permissions?",
+    "ui.plugin_standalone": "Send plugin.run as a separate engine.execute request.",
+    "ui.plugin_start_failed": "Could not start plugin execution."
+  },
+  "ar": {
+    "cmd.model.mesh": "قراءة شبكة الجسم",
+    "cmd.plugin.inspect": "فحص الإضافة",
+    "cmd.plugin.run": "تشغيل الإضافة",
+    "ui.plugin_context_changed": "تغيّر التصميم أو سياق التحرير أو إعدادات الإضافة أثناء تشغيلها. لم تُطبّق أي تغييرات.",
+    "ui.plugin_no_result": "انتهى تشغيل الإضافة دون نتيجة.",
+    "ui.plugin_run_consent": "هل تريد تشغيل نقطة الدخول «{entry}» للإضافة الخارجية من «{path}» بأذونات الأوامر المعلنة؟",
+    "ui.plugin_standalone": "أرسل plugin.run في طلب engine.execute مستقل.",
+    "ui.plugin_start_failed": "تعذّر بدء تشغيل الإضافة."
+  },
+  "de": {
+    "cmd.model.mesh": "Körpernetz lesen",
+    "cmd.plugin.inspect": "Plugin prüfen",
+    "cmd.plugin.run": "Plugin ausführen",
+    "ui.plugin_context_changed": "Entwurf, Bearbeitungszustand oder Plugin-Einstellungen wurden während der Ausführung geändert. Es wurde nichts angewendet.",
+    "ui.plugin_no_result": "Die Plugin-Ausführung wurde ohne Ergebnis beendet.",
+    "ui.plugin_run_consent": "Den externen Plugin-Einstieg „{entry}“ aus „{path}“ mit den deklarierten Befehlsberechtigungen ausführen?",
+    "ui.plugin_standalone": "plugin.run als separate engine.execute-Anfrage senden.",
+    "ui.plugin_start_failed": "Die Plugin-Ausführung konnte nicht gestartet werden."
+  },
+  "he": {
+    "cmd.model.mesh": "קריאת רשת הגוף",
+    "cmd.plugin.inspect": "בדיקת תוסף",
+    "cmd.plugin.run": "הפעלת תוסף",
+    "ui.plugin_context_changed": "התכנון, הקשר העריכה או הגדרות התוסף השתנו בזמן הפעלתו. לא הוחלו שינויים.",
+    "ui.plugin_no_result": "הפעלת התוסף הסתיימה ללא תוצאה.",
+    "ui.plugin_run_consent": "האם להפעיל את נקודת הכניסה „{entry}” של התוסף החיצוני מתוך „{path}” עם הרשאות הפקודות שהוצהרו?",
+    "ui.plugin_standalone": "יש לשלוח את plugin.run בבקשת engine.execute נפרדת.",
+    "ui.plugin_start_failed": "לא ניתן היה להתחיל את הפעלת התוסף."
+  },
+  "ja": {
+    "cmd.model.mesh": "ボディのメッシュを取得",
+    "cmd.plugin.inspect": "プラグインを確認",
+    "cmd.plugin.run": "プラグインを実行",
+    "ui.plugin_context_changed": "プラグイン実行中に設計、編集状態、またはプラグイン設定が変更されたため、結果は適用されませんでした。",
+    "ui.plugin_no_result": "プラグインの処理が結果を返さずに終了しました。",
+    "ui.plugin_run_consent": "外部プラグイン「{path}」の「{entry}」を、宣言されたコマンド権限で実行しますか？",
+    "ui.plugin_standalone": "plugin.run は個別の engine.execute リクエストで送信してください。",
+    "ui.plugin_start_failed": "プラグインの処理を開始できませんでした。"
+  },
+  "ko": {
+    "cmd.model.mesh": "바디 메시 읽기",
+    "cmd.plugin.inspect": "플러그인 검사",
+    "cmd.plugin.run": "플러그인 실행",
+    "ui.plugin_context_changed": "플러그인 실행 중 설계, 편집 상태 또는 플러그인 설정이 변경되어 결과를 적용하지 않았습니다.",
+    "ui.plugin_no_result": "플러그인 실행이 결과를 반환하지 않고 종료되었습니다.",
+    "ui.plugin_run_consent": "선언된 명령 권한으로 “{path}”의 외부 플러그인 진입점 “{entry}”을 실행할까요?",
+    "ui.plugin_standalone": "plugin.run은 별도의 engine.execute 요청으로 보내세요.",
+    "ui.plugin_start_failed": "플러그인 실행을 시작할 수 없습니다."
+  },
+  "vi": {
+    "cmd.model.mesh": "Đọc lưới vật thể",
+    "cmd.plugin.inspect": "Kiểm tra plugin",
+    "cmd.plugin.run": "Chạy plugin",
+    "ui.plugin_context_changed": "Thiết kế, ngữ cảnh chỉnh sửa hoặc cài đặt plugin đã thay đổi trong khi plugin chạy. Không có thay đổi nào được áp dụng.",
+    "ui.plugin_no_result": "Quá trình chạy plugin đã kết thúc mà không có kết quả.",
+    "ui.plugin_run_consent": "Chạy điểm vào “{entry}” của plugin bên ngoài từ “{path}” với các quyền lệnh đã khai báo?",
+    "ui.plugin_standalone": "Gửi plugin.run trong một yêu cầu engine.execute riêng.",
+    "ui.plugin_start_failed": "Không thể bắt đầu chạy plugin."
+  },
+  "zh": {
+    "cmd.model.mesh": "读取实体网格",
+    "cmd.plugin.inspect": "检查插件",
+    "cmd.plugin.run": "运行插件",
+    "ui.plugin_context_changed": "插件运行期间设计、编辑状态或插件设置发生了变化，未应用任何结果。",
+    "ui.plugin_no_result": "插件执行结束，但未返回结果。",
+    "ui.plugin_run_consent": "是否以声明的命令权限运行“{path}”中的外部插件入口“{entry}”？",
+    "ui.plugin_standalone": "请通过单独的 engine.execute 请求发送 plugin.run。",
+    "ui.plugin_start_failed": "无法开始执行插件。"
+  }
+}

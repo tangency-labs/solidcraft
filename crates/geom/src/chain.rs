@@ -3,10 +3,12 @@
 //! a chain is lives in its type, so code that walks its edges never wraps an index by hand, and
 //! what only a closed chain has (an area, an inside) is only asked of a ring.
 
+use crate::prelude::*;
 use std::marker::PhantomData;
 use std::ops::Deref;
 
-use crate::{Aabb2, Vec2, Vec3};
+use crate::Aabb2;
+use solidcore_record::{Vec2, Vec3};
 
 /// Whether a chain's last item joins its first.
 pub trait Ends: sealed::Sealed {
@@ -142,7 +144,7 @@ impl Ring<Vec3> {
 }
 
 /// [`Ring::edges`] of items held elsewhere, for a type that keeps a closed ring in a field of its
-/// own ([`crate::Loop2::joints`]).
+/// own ([`solidcore_record::Loop2::joints`]).
 pub(crate) fn around<T>(items: &[T]) -> impl Iterator<Item = (&T, &T)> + Clone {
     items.iter().zip(items.iter().cycle().skip(1))
 }

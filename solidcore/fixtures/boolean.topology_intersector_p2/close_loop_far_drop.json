@@ -1,0 +1,132 @@
+{
+ "cases": [
+  {
+   "name": "close_loop_far_drop_quarter_arc_common_ends",
+   "upstream_ref": "source/SMLib/src/SmTopologyIntersector.cpp:6108-6354 CloseIntersectionLoop (single common edge, DropPoint with SM_SO_MINIMIZE): a straight chord and an exact rational quarter arc share both ends, so both vertex gaps are zero and the chord midpoint is 1.1716 from the arc; the pin still relates the edge pair",
+   "inputs": {
+    "brep_a": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [4, 0, 0, -1.7976931348623157e+308],
+       [0, 4, 0, -1.7976931348623157e+308]
+      ],
+      "p": 1,
+      "u": [0, 0, 1, 1]
+     },
+     "t0": 0,
+     "t1": 1
+    },
+    "brep_b": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [4, 0, 0, 1],
+       [2.8284271247461903, 2.8284271247461903, 0, 0.7071067811865476],
+       [0, 4, 0, 1]
+      ],
+      "p": 2,
+      "u": [0, 0, 0, 1, 1, 1]
+     },
+     "t0": 0,
+     "t1": 1
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.1,
+    "ops": [
+     {"op": "relate", "a": [0, 0, 0], "b": [1, 0, 0]},
+     {"op": "relate", "a": [0, 0, 1], "b": [1, 0, 1]},
+     {"op": "close_loop", "v": [0, 0, 0]}
+    ]
+   }
+  },
+  {
+   "name": "close_loop_far_drop_quarter_arc_shifted_ends",
+    "upstream_ref": "source/SMLib/src/SmTopologyIntersector.cpp:6108-6354 CloseIntersectionLoop: the same exact quarter arc moved 0.1 off the chord's plane, so both vertex gaps are 0.1 (2*max_dist = 0.2) while the chord midpoint is about 1.176 from the arc",
+   "inputs": {
+    "brep_a": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [4, 0, 0, -1.7976931348623157e+308],
+       [0, 4, 0, -1.7976931348623157e+308]
+      ],
+      "p": 1,
+      "u": [0, 0, 1, 1]
+     },
+     "t0": 0,
+     "t1": 1
+    },
+    "brep_b": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [4, 0, 0.1, 1],
+       [2.8284271247461903, 2.8284271247461903, 0.07071067811865476, 0.7071067811865476],
+       [0, 4, 0.1, 1]
+      ],
+      "p": 2,
+      "u": [0, 0, 0, 1, 1, 1]
+     },
+     "t0": 0,
+     "t1": 1
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.1,
+    "ops": [
+     {"op": "relate", "a": [0, 0, 0], "b": [1, 0, 0]},
+     {"op": "relate", "a": [0, 0, 1], "b": [1, 0, 1]},
+     {"op": "close_loop", "v": [0, 0, 0]}
+    ]
+   }
+  },
+  {
+    "name": "close_loop_far_drop_control_unmated_far_vertex",
+   "upstream_ref": "source/SMLib/src/SmTopologyIntersector.cpp:6108-6354 CloseIntersectionLoop: negative control on the same chord/quarter-arc pair with only the target vertex pair mated, so the sole-common-edge drop is skipped and no relationship is made",
+   "inputs": {
+    "brep_a": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [4, 0, 0, -1.7976931348623157e+308],
+       [0, 4, 0, -1.7976931348623157e+308]
+      ],
+      "p": 1,
+      "u": [0, 0, 1, 1]
+     },
+     "t0": 0,
+     "t1": 1
+    },
+    "brep_b": {
+     "kind": "wire",
+     "curve": {
+      "dim": 3,
+      "cpts": [
+       [4, 0, 0, 1],
+       [2.8284271247461903, 2.8284271247461903, 0, 0.7071067811865476],
+       [0, 4, 0, 1]
+      ],
+      "p": 2,
+      "u": [0, 0, 0, 1, 1, 1]
+     },
+     "t0": 0,
+     "t1": 1
+    },
+    "ctor": 0,
+    "approx": 1e-05,
+    "ang": 0.1,
+    "ops": [
+     {"op": "relate", "a": [0, 0, 0], "b": [1, 0, 0]},
+     {"op": "close_loop", "v": [0, 0, 0]}
+    ]
+   }
+  }
+ ]
+}

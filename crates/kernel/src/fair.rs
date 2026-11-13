@@ -43,9 +43,10 @@
 //! control point that does not change the geometry at all — is reported as an error and the
 //! geometry is left alone.
 
-use solidcraft_geom::brep as b;
+use solidcore_record::Vec3;
+use solidcore_record::brep as b;
+use solidcraft_geom::Grid;
 use solidcraft_geom::bspline::{HPoint, MAX_SPLINE_DEGREE, NurbsSurface, Side, SplineError, check_knots, local_basis};
-use solidcraft_geom::{Grid, Vec3};
 
 use crate::body::Body;
 use crate::history::Change;
@@ -919,7 +920,7 @@ pub fn fair_faces(body: &Body, faces: &[usize], opts: &FairOptions) -> Result<(B
     if changed.is_empty() {
         return Ok((body.clone(), report));
     }
-    let smlib = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| KernelError::Failed(format!("fair: SMLib: {e}")))?;
+    let smlib = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| KernelError::smlib("fair: SMLib", e))?;
     let (result, order) = crate::native::body_from_smlib_ordered(&smlib)?;
     // The topology is the body's own, so SMLib's order is the body's: each face kept or
     // modified, each edge kept. Where SMLib's order is not the record's the history is not known.
@@ -962,6 +963,7 @@ fn held_face(surface: &b::Surface, opts: &FairOptions) -> Result<Option<FairRepo
 mod tests {
     use super::*;
     use solidcraft_geom::brep::eval::CurveEval;
+    use solidcraft_geom::prelude::*;
 
     /// A clamped uniform knot vector over `[0, spans]` of degree `degree`: `spans + degree`
     /// control points.

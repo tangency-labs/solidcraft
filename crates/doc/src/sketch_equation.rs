@@ -5,9 +5,10 @@
 //! between the points, up to the most a spline takes. When the parameters change, the same
 //! number of points is placed again (`Document::apply_equation_values`), before every solve.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_sketch::{EquationCurve, MAX_COORD, MAX_EQUATION_TEXT, MAX_SPLINE_POINTS, Sketch, VariableUnit, fit_beziers_mode};
 
 use crate::expr::{self, Defaults, Kind, Value};

@@ -1,0 +1,1373 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/851",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/935",
+ "test": "crates/kernel/src/issue_851_tests.rs: fillet_the_knife_edge, chamfer_the_knife_edge",
+ "summary": "Fillets and chamfers failed on SolidCraft's earlier kernel where a curved wall runs out into a flat face in a knife edge (#851). The part is a 41 1/6 x 21 plate plus the corner a circle of radius 21 leaves, 10 tall: the arc wall (centre (62 1/6, -21)) meets the back face y = 0 tangentially at the knife edge x = 62 1/6. It is built three ways, as in the test (plate joined to the corner, corner joined to the plate and then cut, and one box less the cylinder), so the faces come in different orders. The knife edge is rounded and chamfered 0.5, 2 and 5; the removed volume is 10 times the area the ball or the chamfer takes off the cusp, in closed form (SolidCraft's removed_area and chamfered_area). SolidCraft checked 1e-3 relative on the whole volume through a mesh; these check the removed volume to 1e-4 mm^3. The arc-top-edge test (a numerical integral checked to 1 %) and the mirror and hostile-size tests are not ported. Every case opts in to `fillet_knife_edge_rounds` (WR-570, the SolidCraft fork's tangency-labs/smlib@b7ec55b): the pinned SMLib refuses the knife edge as a tangent edge (status 1007). The chamfers also opt in to `fillet_trim_inside_by_best_dot` (WR-611, tangency-labs/solidcore#1809): a small chamfer's chord meets the flat face steeply (81 degrees at d 0.5), and the pinned `TrimOriginalSurfaces` then trims nothing, leaving the part as it was with the chamfer face added.",
+ "cases": [
+  {
+   "name": "fillet_knife_edge_0_5_plate_first",
+   "note": "Fillet 0.5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
+   "fixes": [
+    "fillet_knife_edge_rounds"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "corner",
+     "a": "corner0",
+     "b": "disc"
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "plate",
+     "b": "corner"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "radius": 0.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 17.982354578797242,
+     "tol": 0.0001,
+     "formula": "10 * (quadrilateral tip - wall contact - wall centre - ball centre, less the wall's sector and the ball's), r = 0.5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_knife_edge_0_5_plate_first",
+   "note": "Chamfer 0.5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
+   "fixes": [
+    "fillet_knife_edge_rounds",
+    "fillet_trim_inside_by_best_dot"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "corner",
+     "a": "corner0",
+     "b": "disc"
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "plate",
+     "b": "corner"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "distance": 0.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 21.149818338909164,
+     "tol": 0.0001,
+     "formula": "10 * (triangle plane contact - tip - wall contact, less the wall's circular segment), r = 0.5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "fillet_knife_edge_2_plate_first",
+   "note": "Fillet 2 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
+   "fixes": [
+    "fillet_knife_edge_rounds"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "corner",
+     "a": "corner0",
+     "b": "disc"
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "plate",
+     "b": "corner"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 119.64881211635252,
+     "tol": 0.00011964881211635251,
+     "formula": "10 * (quadrilateral tip - wall contact - wall centre - ball centre, less the wall's sector and the ball's), r = 2, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_knife_edge_2_plate_first",
+   "note": "Chamfer 2 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
+   "fixes": [
+    "fillet_knife_edge_rounds",
+    "fillet_trim_inside_by_best_dot"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "corner",
+     "a": "corner0",
+     "b": "disc"
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "plate",
+     "b": "corner"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "distance": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 159.2364507429014,
+     "tol": 0.00015923645074290138,
+     "formula": "10 * (triangle plane contact - tip - wall contact, less the wall's circular segment), r = 2, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "fillet_knife_edge_5_plate_first",
+   "note": "Fillet 5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
+   "fixes": [
+    "fillet_knife_edge_rounds"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "corner",
+     "a": "corner0",
+     "b": "disc"
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "plate",
+     "b": "corner"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "radius": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 383.02931090966973,
+     "tol": 0.0003830293109096697,
+     "formula": "10 * (quadrilateral tip - wall contact - wall centre - ball centre, less the wall's sector and the ball's), r = 5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_knife_edge_5_plate_first",
+   "note": "Chamfer 5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
+   "fixes": [
+    "fillet_knife_edge_rounds",
+    "fillet_trim_inside_by_best_dot"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "corner",
+     "a": "corner0",
+     "b": "disc"
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "plate",
+     "b": "corner"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "distance": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 563.7097069656865,
+     "tol": 0.0005637097069656864,
+     "formula": "10 * (triangle plane contact - tip - wall contact, less the wall's circular segment), r = 5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "fillet_knife_edge_0_5_corner_first",
+   "note": "Fillet 0.5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
+   "fixes": [
+    "fillet_knife_edge_rounds"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "both",
+     "a": "corner0",
+     "b": "plate"
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "both",
+     "b": "disc"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "radius": 0.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 17.982354578797242,
+     "tol": 0.0001,
+     "formula": "10 * (quadrilateral tip - wall contact - wall centre - ball centre, less the wall's sector and the ball's), r = 0.5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_knife_edge_0_5_corner_first",
+   "note": "Chamfer 0.5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
+   "fixes": [
+    "fillet_knife_edge_rounds",
+    "fillet_trim_inside_by_best_dot"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "both",
+     "a": "corner0",
+     "b": "plate"
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "both",
+     "b": "disc"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "distance": 0.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 21.149818338909164,
+     "tol": 0.0001,
+     "formula": "10 * (triangle plane contact - tip - wall contact, less the wall's circular segment), r = 0.5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "fillet_knife_edge_2_corner_first",
+   "note": "Fillet 2 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
+   "fixes": [
+    "fillet_knife_edge_rounds"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "both",
+     "a": "corner0",
+     "b": "plate"
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "both",
+     "b": "disc"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 119.64881211635252,
+     "tol": 0.00011964881211635251,
+     "formula": "10 * (quadrilateral tip - wall contact - wall centre - ball centre, less the wall's sector and the ball's), r = 2, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_knife_edge_2_corner_first",
+   "note": "Chamfer 2 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
+   "fixes": [
+    "fillet_knife_edge_rounds",
+    "fillet_trim_inside_by_best_dot"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "both",
+     "a": "corner0",
+     "b": "plate"
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "both",
+     "b": "disc"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "distance": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 159.2364507429014,
+     "tol": 0.00015923645074290138,
+     "formula": "10 * (triangle plane contact - tip - wall contact, less the wall's circular segment), r = 2, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "fillet_knife_edge_5_corner_first",
+   "note": "Fillet 5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
+   "fixes": [
+    "fillet_knife_edge_rounds"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "both",
+     "a": "corner0",
+     "b": "plate"
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "both",
+     "b": "disc"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "radius": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 383.02931090966973,
+     "tol": 0.0003830293109096697,
+     "formula": "10 * (quadrilateral tip - wall contact - wall centre - ball centre, less the wall's sector and the ball's), r = 5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_knife_edge_5_corner_first",
+   "note": "Chamfer 5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
+   "fixes": [
+    "fillet_knife_edge_rounds",
+    "fillet_trim_inside_by_best_dot"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      41.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "corner0",
+     "origin": [
+      41.166666666666664,
+      -21.0,
+      0
+     ],
+     "size": [
+      21.0,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "both",
+     "a": "corner0",
+     "b": "plate"
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "both",
+     "b": "disc"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "distance": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 563.7097069656865,
+     "tol": 0.0005637097069656864,
+     "formula": "10 * (triangle plane contact - tip - wall contact, less the wall's circular segment), r = 5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "fillet_knife_edge_0_5_cut_from_a_box",
+   "note": "Fillet 0.5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
+   "fixes": [
+    "fillet_knife_edge_rounds"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      62.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "slab",
+     "b": "disc"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "radius": 0.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 17.982354578797242,
+     "tol": 0.0001,
+     "formula": "10 * (quadrilateral tip - wall contact - wall centre - ball centre, less the wall's sector and the ball's), r = 0.5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_knife_edge_0_5_cut_from_a_box",
+   "note": "Chamfer 0.5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
+   "fixes": [
+    "fillet_knife_edge_rounds",
+    "fillet_trim_inside_by_best_dot"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      62.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "slab",
+     "b": "disc"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "distance": 0.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 21.149818338909164,
+     "tol": 0.0001,
+     "formula": "10 * (triangle plane contact - tip - wall contact, less the wall's circular segment), r = 0.5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "fillet_knife_edge_2_cut_from_a_box",
+   "note": "Fillet 2 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
+   "fixes": [
+    "fillet_knife_edge_rounds"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      62.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "slab",
+     "b": "disc"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 119.64881211635252,
+     "tol": 0.00011964881211635251,
+     "formula": "10 * (quadrilateral tip - wall contact - wall centre - ball centre, less the wall's sector and the ball's), r = 2, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_knife_edge_2_cut_from_a_box",
+   "note": "Chamfer 2 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
+   "fixes": [
+    "fillet_knife_edge_rounds",
+    "fillet_trim_inside_by_best_dot"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      62.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "slab",
+     "b": "disc"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "distance": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 159.2364507429014,
+     "tol": 0.00015923645074290138,
+     "formula": "10 * (triangle plane contact - tip - wall contact, less the wall's circular segment), r = 2, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "fillet_knife_edge_5_cut_from_a_box",
+   "note": "Fillet 5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
+   "fixes": [
+    "fillet_knife_edge_rounds"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      62.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "slab",
+     "b": "disc"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "radius": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 383.02931090966973,
+     "tol": 0.0003830293109096697,
+     "formula": "10 * (quadrilateral tip - wall contact - wall centre - ball centre, less the wall's sector and the ball's), r = 5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  },
+  {
+   "name": "chamfer_knife_edge_5_cut_from_a_box",
+   "note": "Chamfer 5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
+   "fixes": [
+    "fillet_knife_edge_rounds",
+    "fillet_trim_inside_by_best_dot"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      -21.0,
+      0
+     ],
+     "size": [
+      62.166666666666664,
+      21.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      62.166666666666664,
+      -21.0,
+      0
+     ],
+     "radius": 21.0,
+     "height": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "part",
+     "a": "slab",
+     "b": "disc"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       62.166666666666664,
+       0,
+       5.0
+      ]
+     ],
+     "distance": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "part",
+     "value": 563.7097069656865,
+     "tol": 0.0005637097069656864,
+     "formula": "10 * (triangle plane contact - tip - wall contact, less the wall's circular segment), r = 5, R = 21 (SolidCraft's removed_area / chamfered_area)"
+    }
+   }
+  }
+ ]
+}

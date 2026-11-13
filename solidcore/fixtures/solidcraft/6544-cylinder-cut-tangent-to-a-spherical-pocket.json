@@ -1,0 +1,74 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/6544",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "A cylinder cut tangent to a spherical pocket failed on SolidCraft's truck kernel (#6544). A 20 x 20 x 14 block, a sphere of radius 8 at the middle of its top face cut away, then a cylinder of the same radius along x through the sphere's centre: the sphere's lower half lies inside the half cylinder and touches it along a circle. Closed form: the half cylinder's 20 mm inside the block.",
+ "cases": [
+  {
+   "name": "sphere_then_cylinder",
+   "note": "Sphere r 8 at (0, 0, 14) cut first, then the x cylinder r 8 through it.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -10,
+      -10,
+      0
+     ],
+     "size": [
+      20,
+      20,
+      14
+     ]
+    },
+    {
+     "op": "sphere",
+     "id": "ball",
+     "center": [
+      0,
+      0,
+      14
+     ],
+     "radius": 8
+    },
+    {
+     "op": "difference",
+     "id": "pocketed",
+     "a": "block",
+     "b": "ball"
+    },
+    {
+     "op": "cylinder",
+     "id": "bar",
+     "origin": [
+      -20,
+      0,
+      14
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 8,
+     "height": 40
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "pocketed",
+     "b": "bar"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 3589.3807017025324,
+     "tol": 0.0001,
+     "formula": "20*20*14 - pi*8^2*20/2 (the sphere's lower half lies inside the half cylinder)"
+    }
+   }
+  }
+ ]
+}

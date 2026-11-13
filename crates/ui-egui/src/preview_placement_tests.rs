@@ -8,9 +8,10 @@
 //! the preview draws.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::{FeatureKind, PlaneRef};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap_or_else(|e| panic!("{command} {params}: {e}"))
@@ -56,12 +57,12 @@ fn two_circle_cut_on_face(s: &mut Session, component: u64, occurrence: u64, face
     (commands, sketch)
 }
 
-/// The vertices the cut preview draws as the see-through red tool (`GpuScene::xray`: 28-byte
-/// records of position, normal and palette index), as their world bounds.
+/// The vertices the cut preview draws as the see-through red tool (`GpuScene::xray`: records of
+/// `TRI_SIZE` bytes, position first), as their world bounds.
 fn tool_bounds(xray: &[u8]) -> (Vec3, Vec3) {
-    assert!(!xray.is_empty() && xray.len().is_multiple_of(28), "the cut preview must draw its tool");
+    assert!(!xray.is_empty() && xray.len().is_multiple_of(crate::gpu::TRI_SIZE), "the cut preview must draw its tool");
     let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
-    for record in xray.as_chunks::<28>().0 {
+    for record in xray.as_chunks::<{ crate::gpu::TRI_SIZE }>().0 {
         for k in 0..3 {
             let v = f32::from_le_bytes(record[k * 4..k * 4 + 4].try_into().unwrap()) as f64;
             lo[k] = lo[k].min(v);
@@ -98,7 +99,7 @@ fn assert_tool_at(built: &crate::preview::Built, want: [f64; 3], buggy: [f64; 3]
 fn extrude_cut_preview_on_a_face_sketch_in_a_translated_component_sits_at_the_sketch() {
     let (mut s, component, occurrence) = ear(false);
     let (commands, sketch) = two_circle_cut_on_face(&mut s, component, occurrence, [30.0, 30.0, 10.0]);
-    let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark());
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark());
     let built = crate::preview::compute(&s, &commands, colors).unwrap();
     // Placed: the local top-face centre (20, 10, 10) plus [10, 20, 0]; the tool cuts 5 mm down.
     assert_tool_at(&built, [30.0, 30.0, 7.5], [20.0, 10.0, 7.5]);
@@ -114,7 +115,7 @@ fn extrude_cut_preview_on_a_face_sketch_in_a_translated_component_sits_at_the_sk
 fn extrude_cut_preview_on_a_face_sketch_in_a_mirrored_component_sits_at_the_sketch() {
     let (mut s, component, occurrence) = ear(true);
     let (commands, sketch) = two_circle_cut_on_face(&mut s, component, occurrence, [30.0, 30.0, 10.0]);
-    let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark());
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark());
     let built = crate::preview::compute(&s, &commands, colors).unwrap();
     assert_tool_at(&built, [30.0, 30.0, 7.5], [20.0, 10.0, 7.5]);
     let FeatureKind::Sketch { plane: PlaneRef::Face { .. }, .. } = s.doc.feature(sketch).unwrap().kind else { panic!("a sketch on a face") };

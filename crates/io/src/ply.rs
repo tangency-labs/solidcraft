@@ -5,7 +5,7 @@
 //! and property (normals, intensity, edges, …) is passed over. The file is untrusted: counts are
 //! checked against its size and capped.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::threemf::MeshObject;
 use crate::{IoError, Result};
@@ -536,9 +536,9 @@ mod tests {
             assert_eq!((n, colored), (3, true));
             assert_eq!(v[1], ([1.5, 0.0, 0.0], Some([10, 20, 255])));
             assert_eq!(v[2].0, [0.0, 2.5, -3.0]);
-            // Every second vertex.
-            let (v, _, _) = vertices(&binary(big), 2).unwrap();
-            assert_eq!(v.iter().map(|v| v.0[1]).collect::<Vec<_>>(), [0.0, 2.5]);
+            // A thinned file leaves its face out: it would lose a corner.
+            let thin = crate::ply_complex::read_ply_cloud(&binary(big), 2).unwrap();
+            assert_eq!((thin.positions.len(), thin.complex.triangle_count(), thin.cells_left_out), (2, 0, 1));
             let (mesh, warnings) = read_ply_mesh(&binary(big), "Tri").unwrap();
             assert!(warnings.is_empty());
             assert_eq!(mesh[0].triangles, [[0, 1, 2]]);
@@ -563,6 +563,9 @@ mod tests {
         let (v, n, colored) = vertices(points.as_bytes(), 2).unwrap();
         assert_eq!((v.len(), n, colored), (2, 2, false));
         assert_eq!(v[1], ([4.0, 5.0, 6.0], None));
+        // Points alone are thinned: every second one.
+        let (v, _, _) = vertices(points.as_bytes(), 1).unwrap();
+        assert_eq!(v, [([1.0, 2.0, 3.0], None)]);
         assert!(read_ply_mesh(points.as_bytes(), "x").is_err(), "a point cloud is not a mesh");
     }
 

@@ -1,0 +1,9 @@
+Updates: WR-93
+
+#### WR-93 (update, 2026-10-31). Opt-in reporting of out-of-tolerance loop gaps
+- **Status in the port:** opt-in fix, off by default. The default still matches the pinned C++ (`SmLoopuse::IsClosed3d` reports every over-tolerance loop closed); `Kernel::fixes.loop_use_reports_open_gaps` turns on the intended reporting.
+- **What changes:** with the flag on, `is_closed_3d` (`crates/solidcore/src/topology/loopuse.rs`) computes the over-tolerance value as `gap - xsect_tol_3d` instead of the pinned `xsect_tol_3d - gap` (`SmLoopuse.cpp:876`). A gap over its cross-section tolerance therefore counts as open and its edge use, actual gap (`(gap - tol) + tol`) and tolerance are returned (`SmLoopuse.cpp:900`-`903`). The selection policy is unchanged: `bCheckAllGaps == FALSE` stops at the first over-tolerance gap, `TRUE` keeps the largest tolerance exceedance and the first on a tie (strict `>`).
+- **Severity:** wrong result only. The pinned defect does not crash, read out of bounds, loop or return a nondeterministic value; the addendum records no crash, UB or hang claim.
+- **Evidence:** focused unit tests in `crates/solidcore/src/topology/loopuse.rs`: `is_closed_3d_reports_open_gaps_with_opt_in` (0.5 gap over the 2e-4 tolerance open on both scans, default closed; 1e-4 sub-tolerance gap, closed square and vertex loop controls) and `is_closed_3d_picks_first_or_largest_exceedance` (0.2 then 0.5 gaps, first-vs-largest, exceedance rather than absolute gap, tie keeps the first). Expected gaps are evaluated from the oriented edge-use curve endpoints.
+- **Default gate:** the pinned C++ never runs with the flag on, so no native comparison changes. The default difftest stays at its existing case and tolerance-limit counts; the new field is exercised by the Rust unit tests only.
+- **Issue tracking:** WR-93 only. No new GitHub issue was filed for this addendum, so there is no `Fixes #` reference.

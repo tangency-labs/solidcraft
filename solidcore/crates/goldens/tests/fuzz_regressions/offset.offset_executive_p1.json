@@ -1,0 +1,620 @@
+{
+  "cases": [
+    {
+      "name": "fuzz00400_config_original_edges_2p32",
+      "inputs": {
+        "approx_tol": -1e+300,
+        "create_solid": true,
+        "extend_convex": true,
+        "face_count": 1,
+        "inset": true,
+        "install_offset_brep": true,
+        "merge_results": true,
+        "offset_distance": -1.1612597773165074,
+        "offset_edges": 1,
+        "op": "config",
+        "operation": 1,
+        "original_edges": 4294967296,
+        "relations": [
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            4294967296,
+            1
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            0
+          ]
+        ],
+        "shell_face_sets": [
+          [
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0
+          ]
+        ],
+        "tangency_tol_radians": 0.1234567890123456
+      }
+    },
+    {
+      "name": "fuzz00813_extend_negative_tiny_distance",
+      "inputs": {
+        "actions": [
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "approx_tol": 0.00027877858524662696,
+        "offset_distance": -1e-300,
+        "op": "extend",
+        "samples": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0
+          ],
+          [
+            1.0,
+            1.0
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.07,
+            0.19
+          ],
+          [
+            0.45,
+            0.73
+          ],
+          [
+            0.2727047828985071,
+            0.17345048640583638
+          ]
+        ],
+        "surfaces": [
+          {
+            "domain": [
+              -1.0,
+              0.0,
+              1.0,
+              1.5
+            ],
+            "kind": "plane",
+            "origin": [
+              -0.002325332451855717,
+              0.00017582470362827174,
+              -0.0005052240469316221
+            ],
+            "scale": [
+              0.01,
+              0.0075
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "control_points": [
+              [
+                -591.4732452981473,
+                -605.4120081391,
+                44.6050020564062,
+                1.031366867020496
+              ],
+              [
+                -712.3558632580545,
+                -108.06689355227006,
+                53.72116997363374,
+                1.2421529472931545
+              ],
+              [
+                -599.3061061141045,
+                431.59576512698095,
+                45.195704637766745,
+                1.0450252246618281
+              ],
+              [
+                419.1471369367322,
+                -576.8592617575779,
+                103.92163238512286,
+                0.9827250228145001
+              ],
+              [
+                474.21119071147643,
+                -96.72860008515484,
+                187.06319171766455,
+                1.1118272371288316
+              ],
+              [
+                391.3380082742345,
+                378.9378110023852,
+                211.7172788568536,
+                0.9175242276974633
+              ]
+            ],
+            "kind": "bspline",
+            "u_count": 2,
+            "u_degree": 1,
+            "u_knots": [
+              -4.0,
+              -4.0,
+              -2.0,
+              -2.0
+            ],
+            "v_count": 3,
+            "v_degree": 2,
+            "v_knots": [
+              1.0,
+              1.0,
+              1.0,
+              2.5,
+              2.5,
+              2.5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "fuzz00948_config_original_edges_2p32",
+      "inputs": {
+        "approx_tol": 1e-06,
+        "create_solid": false,
+        "extend_convex": false,
+        "face_count": 0,
+        "inset": false,
+        "install_offset_brep": false,
+        "merge_results": false,
+        "offset_distance": 1.0,
+        "offset_edges": 0,
+        "op": "config",
+        "operation": 0,
+        "original_edges": 4294967296,
+        "relations": [],
+        "shell_face_sets": [
+          [],
+          []
+        ]
+      }
+    },
+    {
+      "name": "fuzz01353_config_offset_edges_2p32",
+      "inputs": {
+        "approx_tol": 1e-06,
+        "create_solid": false,
+        "extend_convex": false,
+        "face_count": 3,
+        "inset": false,
+        "install_offset_brep": false,
+        "merge_results": false,
+        "offset_distance": 1.0,
+        "offset_edges": 4294967296,
+        "op": "config",
+        "operation": 0,
+        "original_edges": 2,
+        "relations": [],
+        "shell_face_sets": []
+      }
+    },
+    {
+      "name": "fuzz01539_config_original_edges_i64max",
+      "inputs": {
+        "approx_tol": 0.0004377760836439375,
+        "create_solid": false,
+        "extend_convex": true,
+        "face_count": 1,
+        "inset": true,
+        "install_offset_brep": true,
+        "merge_results": false,
+        "offset_distance": 3.3738980151428457,
+        "offset_edges": 1,
+        "op": "config",
+        "operation": 0,
+        "original_edges": 9223372036854775807,
+        "relations": [
+          [
+            0,
+            1
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            1,
+            4294967296
+          ]
+        ],
+        "shell_face_sets": [
+          [
+            0,
+            0
+          ]
+        ],
+        "tangency_tol_radians": -1e-300
+      }
+    },
+    {
+      "name": "fuzz01633_config_original_edges_2p31",
+      "inputs": {
+        "approx_tol": 1e-06,
+        "create_solid": false,
+        "extend_convex": true,
+        "face_count": 3,
+        "inset": true,
+        "install_offset_brep": true,
+        "merge_results": false,
+        "offset_distance": 1.0,
+        "offset_edges": 3,
+        "op": "config",
+        "operation": 1,
+        "original_edges": 2147483648,
+        "relations": [],
+        "shell_face_sets": []
+      }
+    },
+    {
+      "name": "fuzz01660_config_face_count_2p32",
+      "inputs": {
+        "approx_tol": 1e-06,
+        "create_solid": false,
+        "extend_convex": true,
+        "face_count": 4294967296,
+        "inset": false,
+        "install_offset_brep": false,
+        "merge_results": false,
+        "offset_distance": 1.0,
+        "offset_edges": 0,
+        "op": "config",
+        "operation": 0,
+        "original_edges": 0,
+        "relations": [],
+        "shell_face_sets": []
+      }
+    },
+    {
+      "name": "fuzz01846_config_offset_edges_2p31",
+      "inputs": {
+        "approx_tol": 1e-06,
+        "create_solid": true,
+        "extend_convex": false,
+        "face_count": 3,
+        "inset": false,
+        "install_offset_brep": false,
+        "merge_results": false,
+        "offset_distance": -1.0,
+        "offset_edges": 2147483648,
+        "op": "config",
+        "operation": 4,
+        "original_edges": 2,
+        "relations": [],
+        "shell_face_sets": []
+      }
+    },
+    {
+      "name": "fuzz00331_extend_huge_control_point",
+      "inputs": {
+        "actions": [
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "approx_tol": 0.00045297270890073857,
+        "offset_distance": -0.0,
+        "op": "extend",
+        "samples": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0
+          ],
+          [
+            1.0,
+            1.0
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.07,
+            0.19
+          ],
+          [
+            0.45,
+            0.73
+          ],
+          [
+            0.9999345439116322,
+            0.22095708020752403
+          ]
+        ],
+        "surfaces": [
+          {
+            "control_points": [
+              [
+                -381678.803959021,
+                877847.293398795,
+                108547.62627842999,
+                1.0730045162166115
+              ],
+              [
+                -313073.32592422795,
+                1160124.9886470218,
+                89036.55646494016,
+                0.8801355724739663
+              ],
+              [
+                -435982.47389056586,
+                2228410.876704932,
+                123991.3302728216,
+                1.2256671280234221
+              ],
+              [
+                115620.60335948046,
+                655567.5577576851,
+                93582.73241113672,
+                0.8013090151882857
+              ],
+              [
+                115012.14789294044,
+                1050663.6780845916,
+                117999.38014043725,
+                0.7970921123481991
+              ],
+              [
+                136044.71724870792,
+                1714230.471678727,
+                169042.55774790657,
+                0.9428584113264983
+              ],
+              [
+                -1e+300,
+                710933.1950255275,
+                142219.8026505313,
+                0.868983175920268
+              ],
+              [
+                719165.4652437865,
+                1471305.5441050201,
+                252445.66356127168,
+                1.1162145113822661
+              ],
+              [
+                493080.4097987049,
+                1391423.4530644685,
+                220915.7533451893,
+                0.7653085907136226
+              ]
+            ],
+            "kind": "bspline",
+            "u_count": 3,
+            "u_degree": 2,
+            "u_knots": [
+              -3.0,
+              -3.0,
+              -3.0,
+              -1.0,
+              -1.0,
+              -1.0
+            ],
+            "v_count": 3,
+            "v_degree": 2,
+            "v_knots": [
+              -1.0,
+              -1.0,
+              -1.0,
+              0.5,
+              0.5,
+              0.5
+            ]
+          },
+          {
+            "control_points": [
+              [
+                0.006558988562828846,
+                0.004049502058158537,
+                -0.00456676270953831,
+                1.0
+              ],
+              [
+                0.006558988562828846,
+                0.009049502058158538,
+                -0.00456676270953831,
+                1.0
+              ],
+              [
+                0.006558988562828846,
+                0.014049502058158537,
+                -0.00456676270953831,
+                1.0
+              ],
+              [
+                0.011558988562828845,
+                0.004049502058158537,
+                -0.00441051270953831,
+                1.0
+              ],
+              [
+                0.011558988562828845,
+                0.009049502058158538,
+                -0.00409801270953831,
+                1.0
+              ],
+              [
+                0.011558988562828845,
+                0.014049502058158537,
+                -0.0037855127095383105,
+                1.0
+              ],
+              [
+                0.016558988562828846,
+                0.004049502058158537,
+                -0.003941762709538311,
+                1.0
+              ],
+              [
+                0.016558988562828846,
+                0.009049502058158538,
+                -0.00331676270953831,
+                1.0
+              ],
+              [
+                0.016558988562828846,
+                0.014049502058158537,
+                -0.0026917627095383104,
+                1.0
+              ]
+            ],
+            "kind": "bspline",
+            "u_count": 3,
+            "u_degree": 2,
+            "u_knots": [
+              2.0,
+              2.0,
+              2.0,
+              4.0,
+              4.0,
+              4.0
+            ],
+            "v_count": 3,
+            "v_degree": 2,
+            "v_knots": [
+              -3.0,
+              -3.0,
+              -3.0,
+              -1.5,
+              -1.5,
+              -1.5
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

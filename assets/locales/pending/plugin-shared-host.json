@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "cmd.plugin.list": "سرد الإضافات"
+  },
+  "de": {
+    "cmd.plugin.list": "Plugins auflisten"
+  },
+  "en": {
+    "cmd.plugin.list": "List Plugins"
+  },
+  "he": {
+    "cmd.plugin.list": "רשימת תוספים"
+  },
+  "ja": {
+    "cmd.plugin.list": "プラグイン一覧"
+  },
+  "ko": {
+    "cmd.plugin.list": "플러그인 목록"
+  },
+  "vi": {
+    "cmd.plugin.list": "Liệt kê plugin"
+  },
+  "zh": {
+    "cmd.plugin.list": "列出插件"
+  }
+}

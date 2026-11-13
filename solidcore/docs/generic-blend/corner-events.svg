@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="560" height="480" viewBox="0 0 560 480">
+  <title>Corner events</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L560 0 L560 480 L0 480 Z" fill="#ffffff"/>
+    <path d="M20 60 L130 60 L130 150 L20 150 Z" fill="#f0f0f0"/>
+    <path d="M300 60 L410 60 L410 150 L300 150 Z" fill="#f0f0f0"/>
+    <path d="M410 150 L410 180 C426.569 180 440 166.569 440 150 Z" fill="#dce9f5"/>
+    <path d="M112.5 368 C126.078 377.237 143.922 377.237 157.5 368 C158.723 351.612 149.799 336.144 135 329 C120.201 336.144 111.277 351.612 112.5 368 Z" fill="#dce9f5"/>
+    <path d="M401 393 L429 393 C432.2 368.2 443.733 348.233 463.6 333.1 L449.6 308.9 C426.533 318.5 403.467 318.5 380.4 308.9 L366.4 333.1 C386.267 348.233 397.8 368.2 401 393 Z" fill="#dce9f5"/>
+    <path d="M275 20 L275 470 M10 235 L550 235" fill="none" stroke="#cccccc" stroke-width="0.8" stroke-miterlimit="10"/>
+    <path d="M50 150 L50 180 M80 150 L80 180 M110 150 L110 180 M130 80 L160 80 M130 110 L160 110 M330 150 L330 180 M360 150 L360 180 M390 150 L390 180 M410 80 L440 80 M410 110 L440 110" fill="none" stroke="#999999" stroke-width="0.7" stroke-miterlimit="10"/>
+    <path d="M415 345 L415 455 M415 345 L319.7 290 M415 345 L510.3 290 M135 355 L135 440 M135 355 L61.4 312.5 M135 355 L208.6 312.5" fill="none" stroke="#999999" stroke-width="0.8" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <path d="M20 180 L160 180 L160 60 M20 150 L130 150 L130 60" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M300 180 L410 180 M440 150 L440 60 M300 150 L410 150 L410 60" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M112.5 368 L112.5 443 M112.5 368 L47.5 330.5 M135 329 L70 291.5 M135 329 L200 291.5 M157.5 368 L222.5 330.5 M157.5 368 L157.5 443" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M401 393 L401 455 M429 393 L429 455 M380.4 308.9 L326.7 277.9 M366.4 333.1 L312.7 302.1 M463.6 333.1 L517.3 302.1 M449.6 308.9 L503.3 277.9 M401 393 L429 393 M463.6 333.1 L449.6 308.9 M380.4 308.9 L366.4 333.1" fill="none" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M130 150 L160 180" fill="none" stroke="#1f6fb2" stroke-width="2.2" stroke-miterlimit="10"/>
+    <path d="M410 180 C426.569 180 440 166.569 440 150" fill="none" stroke="#1f6fb2" stroke-width="2.2" stroke-miterlimit="10"/>
+    <path d="M112.5 368 C126.078 377.237 143.922 377.237 157.5 368 C158.723 351.612 149.799 336.144 135 329 C120.201 336.144 111.277 351.612 112.5 368 Z" fill="none" stroke="#1f6fb2" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path d="M429 393 C432.2 368.2 443.733 348.233 463.6 333.1 M449.6 308.9 C426.533 318.5 403.467 318.5 380.4 308.9 M366.4 333.1 C386.267 348.233 397.8 368.2 401 393" fill="none" stroke="#1f6fb2" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path d="M133.5 150 C133.5 148.067 131.933 146.5 130 146.5 C128.067 146.5 126.5 148.067 126.5 150 C126.5 151.933 128.067 153.5 130 153.5 C131.933 153.5 133.5 151.933 133.5 150 Z M413.5 150 C413.5 148.067 411.933 146.5 410 146.5 C408.067 146.5 406.5 148.067 406.5 150 C406.5 151.933 408.067 153.5 410 153.5 C411.933 153.5 413.5 151.933 413.5 150 Z M418 345 C418 343.343 416.657 342 415 342 C413.343 342 412 343.343 412 345 C412 346.657 413.343 348 415 348 C416.657 348 418 346.657 418 345 Z" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 12 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Turn, Mitre (default): a crease</tspan></text>
+    <text transform="matrix(1 0 0 1 290 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Turn, Swept (option): G1</tspan></text>
+    <text transform="matrix(1 0 0 1 12 262)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Ball: three equal rounds</tspan></text>
+    <text transform="matrix(1 0 0 1 290 262)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Setback: unequal radii, mixed, G2</tspan></text>
+    <text transform="matrix(1 0 0 1 50 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#777777"><tspan x="0" y="0">boss (top)</tspan></text>
+    <text transform="matrix(1 0 0 1 330 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#777777"><tspan x="0" y="0">boss (top)</tspan></text>
+    <text transform="matrix(1 0 0 1 168 186)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">crease on the</tspan></text>
+    <text transform="matrix(1 0 0 1 168 200)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">bisector, G0</tspan></text>
+    <text transform="matrix(1 0 0 1 448 186)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">torus about</tspan></text>
+    <text transform="matrix(1 0 0 1 448 200)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">the side edge</tspan></text>
+    <text transform="matrix(1 0 0 1 20 218)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">dot: the sharp side edge, seen end-on</tspan></text>
+    <text transform="matrix(1 0 0 1 168 400)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">sphere patch,</tspan></text>
+    <text transform="matrix(1 0 0 1 168 414)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">one rational patch</tspan></text>
+    <text transform="matrix(1 0 0 1 436 420)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">setback s</tspan></text>
+    <text transform="matrix(1 0 0 1 436 434)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">from the vertex</tspan></text>
+    <text transform="matrix(1 0 0 1 290 474)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">accent: spring curves; fill certified convex</tspan></text>
+  </g>
+</svg>

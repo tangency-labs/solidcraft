@@ -85,8 +85,16 @@ the groove runs out through, a counterbore wider than the thread are free; a sho
 whose corners reach past the root, a blind hole's bottom are not.
 
 - At a free end the groove runs out a pitch past the end, into the air.
-- At a closed end it stops with its section clear of the end: its centre as far inside as the
-  section reaches that way, so it never cuts into the shoulder.
+- At a shoulder that starts at the end of an external thread's face and stays beyond the plane of
+  that end, a thread running the whole face goes on through the plane and is trimmed there: the
+  root reaches the shoulder at every angle of the last turn, so a nut bottoms out on it, and
+  nothing past the plane is cut. A fillet or chamfer at the base stays whole: the groove ends where
+  the cylinder does. With no runout, each slice along the axis loses the same, so the groove takes
+  exactly length / P turns.
+- At any other closed end (a shoulder rising back along the face, a blind hole's bottom, a
+  taper's far end, a length stopping within half a pitch of the end) it stops with its section
+  clear of the end: its centre as far inside as the section reaches that way, so it stays out of
+  the shoulder at that end.
 - Inside the face it stops square. For a symmetric section a square stop inside material removes
   exactly length / P turns (what the last section leaves uncut ahead of the stop, it cuts behind
   it in mirror image).

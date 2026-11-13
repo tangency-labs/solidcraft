@@ -30,6 +30,39 @@ const MAX_HELD: usize = 50_000_000;
 /// evaluated again on every open (#8541).
 const MAX_TEXT: usize = 1 << 24;
 
+/// Whether two tap markings are the same to the bit: then they write the same record. (`==` takes
+/// 0.0 and -0.0 for the same number, whose records differ.) Every field is named, so a new one
+/// cannot be left out.
+fn same_marking(a: &ThreadInfo, b: &ThreadInfo) -> bool {
+    let numbers = |t: &ThreadInfo| {
+        let ThreadInfo {
+            feature: _,
+            body: _,
+            designation: _,
+            major_diameter,
+            radius,
+            pitch,
+            internal: _,
+            axis_point,
+            axis,
+            start,
+            end,
+            form: _,
+            hand: _,
+            starts: _,
+        } = t;
+        [*major_diameter, *radius, *pitch, axis_point.x, axis_point.y, axis_point.z, axis.x, axis.y, axis.z, *start, *end]
+    };
+    a.feature == b.feature
+        && a.body == b.body
+        && a.designation == b.designation
+        && a.internal == b.internal
+        && a.form == b.form
+        && a.hand == b.hand
+        && a.starts == b.starts
+        && numbers(a).iter().zip(numbers(b).iter()).all(|(x, y)| x.to_bits() == y.to_bits())
+}
+
 fn hex(v: u64) -> String {
     format!("{v:016x}")
 }
@@ -120,6 +153,14 @@ struct Writer {
     /// share them (writing them with every state made a sheet-metal design's model too large to keep).
     sheets: Vec<Json>,
     sheet_index: HashMap<String, usize>,
+    /// Tap markings (cosmetic threads) by their record, as the sheets: every state lists the
+    /// markings of all the features before it, so writing them with each state grew with the
+    /// square of the features (400 marked cylinders: 34 of a 37 MB manifest, past its limit).
+    threads: Vec<Json>,
+    thread_index: HashMap<String, usize>,
+    /// The state written last and the places of its markings: a state mostly keeps the markings
+    /// of the one before it, which are found again without writing them as text.
+    last_threads: Option<(Arc<ModelState>, Vec<usize>)>,
     states: Vec<Json>,
     state_index: HashMap<usize, usize>,
     /// Each kernel body's place in `bodies`, by its record.
@@ -193,6 +234,17 @@ impl Writer {
         if let Some(look) = &b.imported {
             let faces: Vec<Json> = look.faces.iter().map(|(name, (color, opacity))| json!([name, color, opacity])).collect();
             r["imported"] = json!({"color": look.color, "opacity": look.opacity, "faces": faces});
+            if look.name.is_some() || !look.face_names.is_empty() {
+                r["imported"]["name"] = json!(look.name);
+                r["imported"]["face_names"] = json!(look.face_names);
+            }
+        }
+        // The kernel body's own encoding keeps no colour names: the file's names for its paint.
+        if let Some(paint) = b.body.paint() {
+            let faces: Vec<Json> = paint.faces.iter().filter_map(|f| Some(json!([f.face, f.name.as_ref()?]))).collect();
+            if paint.name.is_some() || !faces.is_empty() {
+                r["paint_names"] = json!({"body": paint.name, "faces": faces});
+            }
         }
         r["body"] = json!(self.body(&b.body));
         self.model_bodies.push(r);
@@ -258,6 +310,32 @@ impl Writer {
         Some(self.sheets.len() - 1)
     }
 
+    /// The places of `st`'s markings among the written ones. A marking at the same place in the
+    /// state written last, the same to the bit, is that one (no text built); any other is keyed by
+    /// its text, as a sheet is.
+    fn threads(&mut self, st: &Arc<ModelState>) -> Option<Vec<usize>> {
+        let mut out = Vec::with_capacity(st.threads.len());
+        for (i, t) in st.threads.iter().enumerate() {
+            let before = self.last_threads.as_ref().and_then(|(s, at)| Some((s.threads.get(i)?, *at.get(i)?)));
+            if let Some((_, at)) = before.filter(|(b, _)| same_marking(b, t)) {
+                out.push(at);
+                continue;
+            }
+            let key = serde_json::to_string(t).ok()?;
+            let at = match self.thread_index.get(&key) {
+                Some(at) => *at,
+                None => {
+                    self.threads.push(serde_json::to_value(t).ok()?);
+                    self.thread_index.insert(key, self.threads.len() - 1);
+                    self.threads.len() - 1
+                }
+            };
+            out.push(at);
+        }
+        self.last_threads = Some((st.clone(), out.clone()));
+        Some(out)
+    }
+
     fn state(&mut self, st: &Arc<ModelState>) -> Option<usize> {
         let id = Arc::as_ptr(st) as usize;
         if let Some(i) = self.state_index.get(&id) {
@@ -266,11 +344,12 @@ impl Writer {
         let bodies = st.bodies.iter().map(|b| self.model_body(b)).collect::<Option<Vec<_>>>()?;
         let sketches = st.sketches.iter().map(|s| self.sketch(s)).collect::<Option<Vec<_>>>()?;
         let sheets = st.sheets.iter().map(|s| self.sheet(s)).collect::<Option<Vec<_>>>()?;
+        let threads = self.threads(st)?;
         let r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "sheets": sheets, "construct": serde_json::to_value(&st.construct).ok()?,
-            "threads": serde_json::to_value(&st.threads).ok()?,
+            "threads": runs(&threads),
             "sketch_key_set": self.sketch_key_set(&st.sketch_keys),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
             "tapered": serde_json::to_value(&st.tapered).ok()?,
@@ -306,7 +385,8 @@ impl Model {
             // The check mode the results were evaluated under: they are another mode's results.
             let records = json!({
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
-                "sheets": w.sheets, "validation": self.validation().id(), "rounds": w.rounds, "sketch_key_sets": w.sketch_key_sets,
+                "sheets": w.sheets, "threads": w.threads, "validation": self.validation().id(), "rounds": w.rounds,
+                "sketch_key_sets": w.sketch_key_sets,
             });
             Ok(SavedModel { records, bodies: w.bodies })
         })
@@ -340,12 +420,14 @@ impl SavedModel {
         let mut sketches = Vec::new();
         for s in list("sketches")? {
             let sketch: solidcraft_sketch::Sketch = serde_json::from_value(parse(s.get("sketch"))?).map_err(|_| bad("saved model: sketch"))?;
+            let plane: Plane = serde_json::from_value(parse(s.get("plane"))?).map_err(|_| bad("saved model: sketch"))?;
             sketches.push(Arc::new(SolvedSketch {
                 feature: s.get("feature").and_then(Json::as_u64).ok_or_else(|| bad("saved model: sketch"))?,
                 name: text(s.get("name"))?,
-                plane: serde_json::from_value(parse(s.get("plane"))?).map_err(|_| bad("saved model: sketch"))?,
+                plane,
                 report: serde_json::from_value(parse(s.get("report"))?).map_err(|_| bad("saved model: sketch"))?,
                 profiles: find_profiles(&sketch),
+                profiles_3d: solidcraft_sketch::find_planar_3d_profiles(&sketch, plane),
                 ends: solidcraft_sketch::loose_ends(&sketch),
                 sketch,
             }));
@@ -376,17 +458,43 @@ impl SavedModel {
             b.bytes = b.body.retained_bytes();
             if let Some(look) = r.get("imported") {
                 let faces: Vec<(String, [f32; 3], f32)> = serde_json::from_value(parse(look.get("faces"))?).map_err(|_| bad("saved model: look"))?;
+                let colour_name = |v: Option<&Json>| -> Result<Option<String>> {
+                    let name: Option<String> = serde_json::from_value(v.cloned().unwrap_or(Json::Null)).map_err(|_| bad("saved model: look"))?;
+                    Ok(name.as_deref().and_then(solidcraft_kernel::colour_name))
+                };
+                let face_names: BTreeMap<String, String> =
+                    serde_json::from_value(look.get("face_names").cloned().unwrap_or_else(|| json!({}))).map_err(|_| bad("saved model: look"))?;
                 b.imported = Some(Arc::new(crate::appearance::ImportedLook {
                     color: serde_json::from_value(parse(look.get("color"))?).map_err(|_| bad("saved model: look"))?,
                     opacity: serde_json::from_value(parse(look.get("opacity"))?).map_err(|_| bad("saved model: look"))?,
                     faces: faces.into_iter().map(|(name, color, opacity)| (name, (color, opacity))).collect(),
+                    name: colour_name(look.get("name"))?,
+                    face_names: face_names.into_iter().filter_map(|(face, name)| Some((face, solidcraft_kernel::colour_name(&name)?))).collect(),
                 }));
+            }
+            if let Some(names) = r.get("paint_names")
+                && let Some(paint) = b.body.paint()
+            {
+                let body: Option<String> =
+                    serde_json::from_value(names.get("body").cloned().unwrap_or(Json::Null)).map_err(|_| bad("saved model: paint"))?;
+                let faces: Vec<(usize, String)> =
+                    serde_json::from_value(names.get("faces").cloned().unwrap_or_else(|| json!([]))).map_err(|_| bad("saved model: paint"))?;
+                let mut paint = paint.clone();
+                paint.name = body.as_deref().and_then(solidcraft_kernel::colour_name);
+                for f in &mut paint.faces {
+                    f.name = faces.iter().rfind(|(face, _)| *face == f.face).and_then(|(_, name)| solidcraft_kernel::colour_name(name));
+                }
+                b.body = b.body.clone().with_paint(Some(paint));
             }
             model_bodies.push(b);
         }
         let mut sheets = Vec::new();
         for s in list("sheets")? {
             sheets.push(serde_json::from_value::<crate::sheet::SheetBody>(s.clone()).map_err(|_| bad("saved model: sheet"))?);
+        }
+        let mut threads = Vec::new();
+        for t in list("threads")? {
+            threads.push(serde_json::from_value::<ThreadInfo>(t.clone()).map_err(|_| bad("saved model: tap marking"))?);
         }
         // The sketch-key sets, each the changes from an earlier one (`base`): a short record can
         // stand for a large set, so what they hold counts towards MAX_HELD as they are built.
@@ -413,6 +521,12 @@ impl SavedModel {
             }
             key_sets.push(keys);
         }
+        // Running totals of what each marking costs to clone (its items and text), by place.
+        let mut thread_weight = vec![0usize];
+        for t in &threads {
+            let w = 1usize.saturating_add((t.body.len().saturating_add(t.designation.len())) / 64);
+            thread_weight.push(thread_weight.last().copied().unwrap_or(0).saturating_add(w));
+        }
         let records = list("states")?;
         // What every state holds, counted from its runs and its sketch-key set before any is
         // built (a hostile file cannot make the states clone more than MAX_HELD items).
@@ -421,6 +535,14 @@ impl SavedModel {
                 for run in s.get(key).and_then(Json::as_array).ok_or_else(|| bad("saved model: state"))? {
                     held = held.saturating_add(run.get(1).and_then(Json::as_u64).and_then(|n| usize::try_from(n).ok()).unwrap_or(usize::MAX));
                 }
+            }
+            // A marking is cloned deeply into every state that lists it, so each counts by its
+            // text, not as one item: a run of a large marking repeated cannot exhaust memory.
+            for run in s.get("threads").and_then(Json::as_array).ok_or_else(|| bad("saved model: state"))? {
+                let first = index(run.get(0), threads.len())?;
+                let count = run.get(1).and_then(Json::as_u64).and_then(|n| usize::try_from(n).ok()).ok_or_else(|| bad("saved model: run"))?;
+                let end = first.checked_add(count).filter(|end| *end <= threads.len()).ok_or_else(|| bad("saved model: run"))?;
+                held = held.saturating_add(thread_weight[end].saturating_sub(thread_weight[first]));
             }
             held = held.saturating_add(s.get("sheets").and_then(Json::as_array).map_or(0, Vec::len));
             held = held.saturating_add(key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).map_or(0, BTreeMap::len));
@@ -465,7 +587,7 @@ impl SavedModel {
                     .map(|i| index(Some(i), sheets.len()).and_then(|i| sheets.get(i).cloned().ok_or_else(|| bad("saved model: sheet"))))
                     .collect::<Result<Vec<_>>>()?,
                 construct: serde_json::from_value(field("construct")?).map_err(invalid)?,
-                threads: serde_json::from_value(field("threads")?).map_err(invalid)?,
+                threads: ids("threads", threads.len())?.into_iter().filter_map(|i| threads.get(i).cloned()).collect(),
                 sketch_keys,
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
@@ -613,10 +735,11 @@ impl SavedModel {
         let mut kept_bodies = vec![false; model_bodies.len()];
         let (mut names_used, mut sketches_used) = (vec![false; names.len()], vec![false; sketches.len()]);
         let mut stored = std::collections::HashSet::new();
-        // The sheet bodies, each written once and named by place in the states: all kept.
+        // The sheet bodies and tap markings, each written once and named by place in the states: all kept.
         let sheets = list("sheets").cloned().unwrap_or_default();
+        let threads = list("threads").cloned().unwrap_or_default();
         let key_sets = list("sketch_key_sets").cloned().unwrap_or_default();
-        let mut used = bytes(sheets.as_slice()).iter().chain(bytes(key_sets.as_slice()).iter()).fold(0usize, |t, b| t.saturating_add(*b));
+        let mut used = [&sheets, &threads, &key_sets].iter().flat_map(|l| bytes(l.as_slice())).fold(0usize, |t, b| t.saturating_add(b));
         for s in std::iter::once(last).chain(order) {
             let (mut adds, mut new_names, mut new_sketches) = (HashMap::new(), std::collections::HashSet::new(), std::collections::HashSet::new());
             let mut records = *state_bytes.get(s)?;
@@ -722,7 +845,8 @@ impl SavedModel {
         }
         let mut records = json!({
             "features": out_features, "states": out_states, "model_bodies": out_bodies, "names": kept_of(names.as_slice(), &names_used),
-            "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets, "rounds": out_rounds, "sketch_key_sets": key_sets,
+            "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets, "threads": threads, "rounds": out_rounds,
+            "sketch_key_sets": key_sets,
         });
         // The check mode the results were evaluated under, as the model records it (a model
         // that records none stays without one: adopting it is refused either way).
@@ -760,7 +884,7 @@ impl Model {
             return Err(bad("saved model: features"));
         }
         let (vals, param_errors) = evaluation_values(doc);
-        let step_digests = StepDigests::of(doc, &StepDigests::default());
+        let import_digests = ImportDigests::of(doc, &ImportDigests::default());
         let marker = doc.marker.unwrap_or(usize::MAX);
         // As `evaluate` digests the context under the mode, so the next evaluation reuses these.
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation);
@@ -769,23 +893,44 @@ impl Model {
         let mut exact = true;
         let mut prev = 0;
         let mut results = Vec::with_capacity(features.len());
+        let mut construction = HashMap::new();
+        let mut prepared_states = std::collections::HashSet::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
             let saved = unhex(r.get("fingerprint").unwrap_or(&Json::Null))?;
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
             // out, checks the fingerprints after it, and evaluates again from one that differs.
-            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &step_digests, Some(&before)) } else { saved };
+            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
             let ms = r.get("ms").and_then(Json::as_f64).filter(|ms| ms.is_finite()).ok_or_else(|| bad("saved model: time"))?;
             // A file without room for every state keeps some features without one (#3220).
-            let state =
-                r.get("state").map(|s| states.get(index(Some(s), states.len())?).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
+            let state = r.get("state").map(|s| index(Some(s), states.len())).transpose()?;
+            if let Some(at) = state
+                && prepared_states.insert(at)
+            {
+                let original = matches!(
+                    &f.kind,
+                    FeatureKind::Box { operation: Operation::NewBody, .. } | FeatureKind::Extrude { operation: Operation::NewBody, .. }
+                );
+                let current = states.get_mut(at).ok_or_else(|| bad("saved model: state"))?;
+                // Each state is prepared before its first shared clone. Record and NameCell
+                // identity prove this is still the original geometry and its exact names.
+                for body in &mut Arc::make_mut(current).bodies {
+                    let key = (std::ptr::from_ref(body.body.record()).addr(), body.names.id());
+                    if original && body.feature == f.id && before.body(&body.name).is_none() {
+                        construction.insert(key, f.id);
+                    }
+                    body.names.cached_construction = construction.get(&key).copied();
+                }
+            }
+            let state = state.map(|at| states.get(at).cloned().ok_or_else(|| bad("saved model: state"))).transpose()?;
             let result = FeatureResult {
                 id: f.id,
                 name: f.name.clone(),
                 error: None,
+                internal: false,
                 warning: r.get("warning").map(|w| text(Some(w))).transpose()?,
                 import_report: r
                     .get("import_report")
@@ -805,9 +950,12 @@ impl Model {
             }
             results.push(result);
         }
-        let mut model = Model { results, param_errors, step_digests, context: ctx, frame_bodies, validation, ..Model::default() };
+        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
-        if unkept > 0 {
+        // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
+        // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
+        let posed = doc.features.iter().zip(&model.results).any(|(f, r)| !r.skipped && pose_only(f));
+        if unkept > 0 || posed {
             // The features whose state the file did not keep, each evaluated again from the state
             // before it: nothing else in the model is missing then.
             model.evaluate(doc);
@@ -823,8 +971,16 @@ impl Model {
         let mut before = Arc::new(ModelState::default());
         if let Ok(mut cache) = model.cache.lock() {
             for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
-                let local = fingerprint(doc, 0, f, &vals, false, &model.step_digests) ^ placement_digest(doc, f, Some(&before));
-                cache.put(
+                // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
+                // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
+                if pose_only(f) {
+                    before = r.state.clone();
+                    continue;
+                }
+                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
+                    ^ placement_digest(doc, f, Some(&before))
+                    ^ construct_digest(doc, &vals, f, Some(&before));
+                cache.states.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {
                         error: None,
@@ -832,9 +988,10 @@ impl Model {
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
                         ms: r.ms,
-                        bytes: r.state.retained_bytes(),
                         state: r.state.clone(),
                     },
+                    r.state.retained_bytes(),
+                    r.ms,
                 );
                 before = r.state.clone();
             }

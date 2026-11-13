@@ -1,0 +1,7 @@
+{
+  "unit": "nlib.crv_adv_p2",
+  "cases": [
+    {"name": "fuzz01817_curve_knots_not_non_decreasing", "origin": "fuzz-out/n2000/nlib.crv_adv_p2/fuzz01817.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/funcs_adv.rs:333)", "cpp": "harness: invalid argument: curve: knots not non-decreasing", "rust": "ok", "inputs": {"crv": {"cpts": [[-21.2, -1.17, 0.0, 1.0], [-12.5, -9.02, 0.0, 0.707], [-6.16, -9.23, 0.0, 1.0], [3.83, -4.04, 0.0, 0.707], [1.9, 5.86, 0.0, 1.0], [-1.14, 12.3, 0.0, 0.707], [-13.2, 13.9, 0.0, 1.0], [-17.5, 7.36, 0.0, 0.707], [-21.2, -1.17, 0.0, 1.0]], "p": 2, "u": [2.47, 2.47, 2.47, -1e-300, 3.02, 3.56, 3.56, 4.1, 4.1, 4.64, 4.64, 4.64]}, "op": "sum_diff", "other": {"cpts": [[3.8, 9.12, -4.71, 1.0]], "p": 9223372036854775807, "u": [4.64]}}},
+    {"name": "fuzz01859_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nlib.crv_adv_p2/fuzz01859.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/crv_adv/p2.rs:382)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"crv": {"smc": {"$upstream_file": "closedCurve.smc"}}, "der": 9223372036854775807, "op": "remove_knots_deriv", "tol": 1e-300, "whr": 3}}
+  ]
+}

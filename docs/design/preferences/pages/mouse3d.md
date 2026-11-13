@@ -30,7 +30,7 @@ A table with the columns "Axis", "Live input", "Speed" and a "Reset axes" button
 | Row | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
 | Push X, Push Y, Push Z, Tilt X, Tilt Y, Tilt Z | Per row: a live bar with a dead-zone mark, an "Invert" checkbox, a speed readout ("1.00x"; Tilt Z shows 0.80x as a sample) | `Prefs.space_mouse_reverse[6]`, `Prefs.space_mouse_axis_speed[6]`, `Prefs.space_mouse_axis_source[6]` (`space_mouse::SAME_AXES`) | no inversion, 1.0, same axes | none | none | The live bars read the device; the dead zone is the device's calibration. `space_mouse_axis_source` (which physical axis feeds which row) has no control on the board. |
-| Reset axes | Button | resets the three arrays | n/a | none | none | |
+| Reset axis assignment | Button | resets `space_mouse_axis_source` to `SAME_AXES` only | n/a | none | none | Enabled only when the 3D mouse is on and an assignment differs. Leaves inversion and gains unchanged. The separate confirmed Restore defaults action keeps its broader scope. |
 
 ## Buttons
 
@@ -50,3 +50,4 @@ A table with the columns "Axis", "Live input", "Speed" and a "Reset axes" button
 
 * `space_mouse_offer_never` and `space_mouse_offered` (the "offer to use the 3D mouse" memory) have no control.
 * The live bars and the dead zone are new drawing, not a setting.
+* The board omits the shipped per-row motion/source dropdowns. Keep them and their swap semantics; Reset axis assignment restores source assignments only.

@@ -8,12 +8,13 @@
 //! by joints to something fixed go to `joint_drag`; grounded parts and the active component's
 //! own bodies are left to the selection box.
 
+use solidcraft_engine::geom::prelude::*;
 use std::sync::Arc;
 
 use egui::Pos2;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{Document, apply_point, mat_inverse};
-use solidcraft_engine::geom::Vec3;
 
 use crate::SolveApp;
 use crate::viewport::{Hit, Proj};

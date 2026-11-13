@@ -2,6 +2,7 @@
 //! over-constrained (dragging, dimensioning, pinning the centre, making them square).
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 

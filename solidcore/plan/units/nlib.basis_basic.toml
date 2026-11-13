@@ -1,0 +1,12 @@
+id = "nlib.basis_basic"
+upstream = ["source/SMLib/src/NL_BasisBasic.cpp"]
+rust_module = "nurbs::basis_basic"
+depends_on = ["nlib.knots"]
+soft_depends_on = ["nlib.geom", "nlib.math"]
+est_lines = 786
+layer = 2
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nlib.basis_basic-a1"
+claimed_at = "2026-10-12T19:59:25Z"
+notes = "8 fns; green: 2605 difftest cases (1105 fixture + 1500 generated), 0 deferred, bit-identical (max_rel_err 0); 201,105-case run and --fuzz 30000 also clean (issue #182). See plan/findings.md"

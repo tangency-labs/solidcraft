@@ -1,0 +1,7 @@
+{
+  "unit": "nlib.srf_tool_p3",
+  "cases": [
+    {"name": "fuzz00619_ffi_rejected_control_point_too_large", "origin": "fuzz-out/n2000/nlib.srf_tool_p3/fuzz00619.json (timeout: cpp: no result after 20 s)", "issue": "HANG-42", "cpp": "harness: ffi rejected: control point too large for knot removal", "rust": "ok", "inputs": {"dir": 3, "op": "remove_all", "sur": {"net": [[[-3.2e-08, -0.257, -178.0, 0.0331], [-1.6e-08, -0.129, -88.9, 1e+300], [0.0, -7e-08, -4.6e-08, 0.0916]], [[-8200.0, 182.0, -2.6e-07, 1.04], [-4100.0, 91.0, -1.96, 1.02], [-1.84, -9.9e-07, -3.91, 1.0]], [[-6670.0, 2.91, 8.29, 1.0], [-3300.0, 1.56, 45.4, 0.535], [74.3, 0.211, 1.0, 0.069]]], "p": 2, "q": 1, "u": [4.68], "v": [1.0]}, "tol": 0.0829}},
+    {"name": "fuzz01916_ffi_rejected_bad_index_count_4294967296", "origin": "fuzz-out/n2000/nlib.srf_tool_p3/fuzz01916.json (crash: rust: killed by signal 6 (memory allocation of 68719476744 bytes failed))", "cpp": "harness: ffi rejected: bad index/count 4294967296", "rust": "ok", "inputs": {"dir": 2, "op": "remove_all", "sur": {"net": [[[5.7, 0.0, -9.67, 1.9], [6750.0, -10900.0, -4.35, 1.21], [1.54, 2.45, -5660.0, 1.0]], [[0.0429, 0.0, 0.133, 0.0224], [3.85, 3.75, 6.29, 0.695], [7.2, 0.0, -6.57, 1.38]]], "p": 4294967296, "q": 1, "u": [5.65], "v": [2.68]}, "tol": 1000.0}}
+  ]
+}

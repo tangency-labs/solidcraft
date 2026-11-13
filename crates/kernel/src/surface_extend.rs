@@ -29,10 +29,12 @@
 //! an edge that is not a whole side of its surface's box (a trimmed edge, whose extension is no
 //! curve SMLib holds exactly).
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::{self, eval::CurveEval};
+use solidcore_record::Vec3;
+use solidcore_record::brep::{self};
+use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_smlib::trim::Continuation;
 
 use crate::body::Body;
@@ -387,15 +389,15 @@ fn back_to_bounds(body: &Body, faces: &[usize]) -> Result<Body> {
     Ok(back)
 }
 
-fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib extend: {what}: {e}"))
+fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+    KernelError::smlib(format!("SMLib extend: {what}"), e)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{measure, patch_region};
-    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
     fn rel(a: f64, b: f64) -> f64 {

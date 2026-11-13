@@ -1,0 +1,163 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -60.0,
+                  3.5,
+                  95.0
+                ],
+                [
+                  -60.0,
+                  0.0,
+                  95.0
+                ]
+              ],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              -60.0,
+              1.75,
+              95.0
+            ]
+          ],
+          "tolerance": 7.690142649624356
+        },
+        "kind": "round",
+        "sizes": [
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "1488-fillet-slab-end-after-nudged-loft-join",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "slab 120x3.5x95 with a 48 x 4.5 window, a pleated loft band joined flush into it, then R1 on the slab end edge at x=-60, 34 mm away from the join. The fillet edge is a plain straight convex edge between two large planar faces; the join must not leave slivers that make it fail. One closed valid solid is the right answer (the volume of the pleat band has no simple closed form).",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#1488",
+      "tangency-labs/solidcraft#1517"
+    ],
+    "what": "an R1 fillet on the end edge of a 3.5 mm slab after a pleated loft was joined flush with its inner face (the join needs a tool retry; later fillets must still work)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 63,
+      "faces": 23,
+      "vertices": 42
+    }
+  },
+  "records": "1488-fillet-slab-end-after-nudged-loft-join.bodies.json.gz",
+  "result": [
+    {
+      "body": "Wall",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 26453.10430375101,
+      "body_count": 1,
+      "edges": 63,
+      "faces": 23,
+      "vertices": 42,
+      "volume_mm3": 41598.19774828457
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1488",
+    "tangency-labs/solidcraft#1517"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an R1 fillet on the end edge of a 3.5 mm slab after a pleated loft was joined flush with its inner face (the join needs a tool retry; later fillets must still work)",
+  "why_not": []
+}

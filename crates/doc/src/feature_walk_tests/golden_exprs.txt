@@ -1,3 +1,12 @@
+newer_file_feature
+frame_end_cap
+  inputs:
+    Angle = cap1.angle (Angle)
+    Offset = cap1.offset (Length)
+    Thickness = cap.thickness (Length)
+    Inset Ratio = cap.ratio (Unitless)
+    Corner Chamfer = cap.chamfer (Length)
+  expressions: cap1.angle, cap1.offset, cap.thickness, cap.ratio, cap.chamfer
 body_transfer
 sketch
   inputs:
@@ -268,6 +277,14 @@ coil_profile
     Pitch = coil_profile.pitch (Length)
     Revolutions = coil_profile.turns (Unitless)
   expressions: coil_profile.pitch, coil_profile.turns, coil_profile.x, coil_profile.y, coil_profile.z
+cell_grid
+  inputs:
+    Sides = cell_grid.sides (Unitless)
+    Cell size = cell_grid.size (Length)
+    Web = cell_grid.web (Length)
+    Angle = cell_grid.angle (Angle)
+    Depth = cell_grid.depth (Length)
+  expressions: cell_grid.sides, cell_grid.size, cell_grid.web, cell_grid.angle, cell_grid.depth, cell_grid.x, cell_grid.y, cell_grid.z
 sheet_base
 sheet_contour
   inputs:

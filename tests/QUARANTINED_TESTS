@@ -1,0 +1,10 @@
+# Flaky tests: they still run, and every run reports whether they failed or passed, but a failure
+# never fails CI (`cargo xtask known-failing`), so one cannot reset the merge queue. One a line:
+# `<test> <issue> <date added> [why]`. `<test>` is nextest's `<binary id>::<test name>`, as in
+# KNOWN_FAILING_TESTS; the issue is `#N` and is required; the date is YYYY-MM-DD. Sorted. An entry
+# older than 14 days fails `cargo xtask lists`: fix the test and delete the line, or decide what
+# else to do with it. See "Quarantining a flaky test" in CONTRIBUTING.md.
+solidcraft-engine::cmd::features::patterns_tests::pattern_of_512_hole_cuts_finishes_in_reasonable_time #14587 2026-11-11 times 512 holes against 128 and fails past 13x on loaded runners; the pattern is superlinear
+solidcraft-ui-egui::render_workspace::tests::native_preparation_disconnected_retirement_holds_unavailable_owner_across_document_reset #15077 2026-11-11 admitted bytes read 0 instead of the held credit on loaded runners (left 0, right 267473)
+solidcraft-ui-egui::scenarios::universal_panel_host_shared_actions #15845 2026-11-13 same shared panel host flake as the shell test; failed #15813's groups and passes on rerun
+solidcraft-ui-egui::shell::tests::universal_host_scenarios_drive_real_shared_actions_and_leave_the_fixture_disabled #15845 2026-11-13 fails now and then at shell_tests.rs:1090; passes on rerun of the same commit

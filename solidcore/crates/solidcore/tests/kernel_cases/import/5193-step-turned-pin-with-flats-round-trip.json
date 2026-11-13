@@ -1,0 +1,108 @@
+{
+  "area": "import",
+  "bodies": {},
+  "calls": [],
+  "case": "5193-step-turned-pin-with-flats-round-trip",
+  "expected": {
+    "bbox": {
+      "max": [
+        4.0,
+        4.0,
+        6.0
+      ],
+      "min": [
+        -4.0,
+        -4.0,
+        -24.0
+      ]
+    },
+    "body_count": 1,
+    "method": "the re-imported body is graded. Every section square to Z is a disc of the revolve profile's radius (4, chamfered 0.6 at both ends), less the end bore (r 1.6 from a 118-ish point at x 13..13.9, r 1.9 at the mouth), less the grooves r 3.3..4 (z -2..-6, -18..-18.8), less for z -13..0 the two circular segments beyond |x| = 3.3; the stud z 0..6 is r 2 with 0.25 and 0.4 chamfers. V = Int A(z) dz (python quadrature) = 998.79936 + 74.08360. Graded to 1e-4 relative, below truck's 7.5e-4 change; bbox x, y -4..4, z -24..6",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#5193"
+    ],
+    "tolerance": {
+      "rel": 0.0001
+    },
+    "volume_mm3": 1072.88296,
+    "what": "a turned pin (revolves with two grooves, a stepped bore with a drill point from one end, a stud with chamfered root and tip on the other) with two milled flats, exported to STEP and read back: truck's STEP lost two faces of the flats' neighbours and grew 0.075% (synthetic: the report's own pin, re-dimensioned)"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 71,
+      "faces": 33,
+      "vertices": 45
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 896.5814670672167,
+      "body_count": 1,
+      "edges": 67,
+      "faces": 31,
+      "vertices": 43,
+      "volume_mm3": 1072.8829810945106
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#5193"
+  ],
+  "traced_ops": [
+    "revolve",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a turned pin (revolves with two grooves, a stepped bore with a drill point from one end, a stud with chamfered root and tip on the other) with two milled flats, exported to STEP and read back: truck's STEP lost two faces of the flats' neighbours and grew 0.075% (synthetic: the report's own pin, re-dimensioned)",
+  "why_not": [
+    "body \"Pin\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

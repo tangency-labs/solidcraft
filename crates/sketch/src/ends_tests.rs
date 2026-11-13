@@ -1,6 +1,6 @@
 //! Open and untied ends of profile curves.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use crate::{ConstraintKind, EndTouch, Sketch, find_profiles, loose_ends};
 

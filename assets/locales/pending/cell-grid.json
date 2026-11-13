@@ -1,0 +1,10 @@
+{
+  "ar": { "cmd.solid_cell_grid": "شبكة الخلايا" },
+  "de": { "cmd.solid_cell_grid": "Zellenraster" },
+  "en": { "cmd.solid_cell_grid": "Cell Grid" },
+  "he": { "cmd.solid_cell_grid": "רשת תאים" },
+  "ja": { "cmd.solid_cell_grid": "セルグリッド" },
+  "ko": { "cmd.solid_cell_grid": "셀 그리드" },
+  "vi": { "cmd.solid_cell_grid": "Lưới ô" },
+  "zh": { "cmd.solid_cell_grid": "单元网格" }
+}

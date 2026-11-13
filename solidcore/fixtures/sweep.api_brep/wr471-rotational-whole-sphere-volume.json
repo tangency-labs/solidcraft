@@ -1,0 +1,70 @@
+{
+  "cases": [
+    {
+      "name": "wr471_rot_half_circle_whole_sphere_off_3e-7",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:1254 (SmApiCreateRotationalSweep); the WR-471 whole-sphere test input: a half circle r 5 centred 3e-07 off the axis, turned 360, one revolved sphere face; observe_geometry adds both sides' volume at accuracy 1e-6 (both integrate) and 1e-8 (both SM_ERR, a shared limitation: plan/findings/mass.integrator--whole-revolved-sphere-volume-fails--addendum-2026-11-01-shared-at-1e-8.md)",
+      "inputs": {
+        "op": "rotational",
+        "observe_geometry": true,
+        "curves": [
+          {
+            "kind": "arc",
+            "center": [
+              3e-07,
+              0.0,
+              0.0
+            ],
+            "radius": 5.0,
+            "start_deg": -90.0,
+            "end_deg": 90.0
+          }
+        ],
+        "base": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "angle_deg": 360.0,
+        "cap": false
+      }
+    },
+    {
+      "name": "wr471_rot_half_circle_whole_sphere_off_0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:1254 (SmApiCreateRotationalSweep); the WR-471 whole-sphere test input: a half circle r 5 centred 0 off the axis, turned 360, one revolved sphere face; observe_geometry adds both sides' volume at accuracy 1e-6 (both integrate) and 1e-8 (both SM_ERR, a shared limitation: plan/findings/mass.integrator--whole-revolved-sphere-volume-fails--addendum-2026-11-01-shared-at-1e-8.md)",
+      "inputs": {
+        "op": "rotational",
+        "observe_geometry": true,
+        "curves": [
+          {
+            "kind": "arc",
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "radius": 5.0,
+            "start_deg": -90.0,
+            "end_deg": 90.0
+          }
+        ],
+        "base": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "angle_deg": 360.0,
+        "cap": false
+      }
+    }
+  ]
+}

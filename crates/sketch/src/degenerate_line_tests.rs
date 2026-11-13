@@ -7,7 +7,8 @@
 //! are ~1. Dragging an endpoint of `l1` must keep the sketch solved: the cursor may not leave the
 //! constraint manifold, and the rank analysis may not hide `l1`'s coupling below its tolerance.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::{Analysis, ConstraintKind, Hold, Sketch, move_point_towards, solve_with};
 

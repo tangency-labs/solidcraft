@@ -1,0 +1,11057 @@
+{
+ "description": "Gap functions whose minimum falls on the first, a middle or the last sample, on domains that are not 0..1 (1e-3..1e3, offset starts, negative), with off-grid minima, sub-intervals, curve/curve and plane/point cases; compares the sample values and extreme indices.",
+ "upstream_ref": "source/SMLib/src/SmGapFunction.cpp",
+ "cases": [
+  {
+   "name": "min_first_d0_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid_d0_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d0_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_last_d0_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d0_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_first_d0_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid_d0_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d0_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.25,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_last_d0_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d0_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.75,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_first_d0_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid_d0_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.6000000000000001,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d0_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.2,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_last_d0_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d0_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.8,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_first_d0_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid_d0_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d0_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.125,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_last_d0_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d0_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.875,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_first_d0_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid_d0_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.5263157894736842,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d0_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.05263157894736842,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_last_d0_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d0_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.9473684210526315,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_first_d1_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.001,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid_d1_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d1_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_last_d1_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1000.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d1_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_first_d1_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.001,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid_d1_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d1_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       250.00075,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_last_d1_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1000.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d1_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       750.00025,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_first_d1_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.001,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid_d1_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       600.0003999999999,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d1_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       200.0008,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_last_d1_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1000.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d1_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       800.0002,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_first_d1_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.001,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid_d1_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d1_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       125.00087500000001,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_last_d1_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1000.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d1_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       875.000125,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_first_d1_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.001,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid_d1_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       526.3162631578947,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d1_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       52.63252631578947,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_last_d1_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1000.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d1_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       947.3684736842105,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_first_d2_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid_d2_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d2_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_last_d2_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d2_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_first_d2_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid_d2_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d2_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -2.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_last_d2_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d2_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_first_d2_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid_d2_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d2_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -3.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_last_d2_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d2_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       3.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_first_d2_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid_d2_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d2_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -3.75,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_last_d2_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d2_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       3.75,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_first_d2_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid_d2_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.2631578947368416,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d2_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -4.473684210526316,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_last_d2_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d2_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       4.473684210526315,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_first_d3_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid_d3_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.25,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d3_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.25,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_last_d3_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d3_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.25,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_first_d3_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid_d3_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.25,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d3_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.125,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_last_d3_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d3_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.375,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_first_d3_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid_d3_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.3,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d3_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.1,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_last_d3_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d3_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.4,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_first_d3_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid_d3_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.25,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d3_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0625,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_last_d3_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d3_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.4375,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_first_d3_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid_d3_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.2631578947368425,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d3_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.026315789473684,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_last_d3_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d3_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          7,
+          7.5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        7,
+        7.5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.473684210526316,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_first_d4_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid_d4_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       4.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d4_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       4.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_last_d4_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d4_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       4.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_first_d4_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid_d4_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       4.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d4_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       3.25,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_last_d4_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d4_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       5.75,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_first_d4_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid_d4_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       5.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d4_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       3.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_last_d4_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d4_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_first_d4_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid_d4_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       4.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d4_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.625,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_last_d4_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d4_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6.375,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_first_d4_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid_d4_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       4.631578947368421,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d4_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.263157894736842,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_last_d4_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       7.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d4_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6.7368421052631575,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_first_d5_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       100.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid_d5_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       550.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d5_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       550.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_last_d5_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1000.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d5_n3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       550.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 3
+    }
+   }
+  },
+  {
+   "name": "min_first_d5_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       100.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid_d5_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       550.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d5_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       325.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_last_d5_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1000.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d5_n5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       775.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 5
+    }
+   }
+  },
+  {
+   "name": "min_first_d5_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       100.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid_d5_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       640.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d5_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       280.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_last_d5_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1000.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d5_n6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       820.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 6
+    }
+   }
+  },
+  {
+   "name": "min_first_d5_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       100.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid_d5_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       550.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d5_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       212.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_last_d5_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1000.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d5_n9",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       887.5,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 9
+    }
+   }
+  },
+  {
+   "name": "min_first_d5_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       100.0,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid_d5_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       573.6842105263158,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_mid1_d5_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       147.3684210526316,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_last_d5_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       1000.0000000000001,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_prelast_d5_n20",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          100,
+          1000
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        100,
+        1000
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       952.6315789473684,
+       0.5,
+       0
+      ]
+     },
+     "cnt_u": 20
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_d0_0.1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.1,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d0_0.1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.1,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d0_0.1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.1,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d0_0.37",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.37,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d0_0.37",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.37,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d0_0.37",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.37,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d0_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.5,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d0_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.5,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d0_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.5,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d0_0.93",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.93,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d0_0.93",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.93,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d0_0.93",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          1
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        1
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.93,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d1_0.1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       100.00090000000002,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d1_0.1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       100.00090000000002,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d1_0.1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       100.00090000000002,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d1_0.37",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       370.00063,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d1_0.37",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       370.00063,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d1_0.37",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       370.00063,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d1_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d1_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d1_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d1_0.93",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       930.00007,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d1_0.93",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       930.00007,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d1_0.93",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       930.00007,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d2_0.1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -4.0,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d2_0.1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -4.0,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d2_0.1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -4.0,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d2_0.37",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -1.2999999999999998,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d2_0.37",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -1.2999999999999998,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d2_0.37",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -1.2999999999999998,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d2_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d2_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d2_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       0.0,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_d2_0.93",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       4.300000000000001,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "min_offgrid_stop_d2_0.93",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       4.300000000000001,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "stop": true,
+    "mode": 1
+   }
+  },
+  {
+   "name": "min_offgrid_set_d2_0.93",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          -5,
+          5
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        -5,
+        5
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       4.300000000000001,
+       0.2,
+       0
+      ]
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "subivl_0.25_0.75_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        250.00075,
+        750.00025
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       250.00075,
+       1.0,
+       0
+      ]
+     },
+     "cnt_u": 8
+    }
+   }
+  },
+  {
+   "name": "subivl_0.25_0.75_1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        250.00075,
+        750.00025
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       1.0,
+       0
+      ]
+     },
+     "cnt_u": 8
+    }
+   }
+  },
+  {
+   "name": "subivl_0.25_0.75_2",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        250.00075,
+        750.00025
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       750.00025,
+       1.0,
+       0
+      ]
+     },
+     "cnt_u": 8
+    }
+   }
+  },
+  {
+   "name": "subivl_0.0_0.5_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        500.0005
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       250.00075,
+       1.0,
+       0
+      ]
+     },
+     "cnt_u": 8
+    }
+   }
+  },
+  {
+   "name": "subivl_0.0_0.5_1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        500.0005
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       1.0,
+       0
+      ]
+     },
+     "cnt_u": 8
+    }
+   }
+  },
+  {
+   "name": "subivl_0.0_0.5_2",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0.001,
+        500.0005
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       750.00025,
+       1.0,
+       0
+      ]
+     },
+     "cnt_u": 8
+    }
+   }
+  },
+  {
+   "name": "subivl_0.5_1.0_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        500.0005,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       250.00075,
+       1.0,
+       0
+      ]
+     },
+     "cnt_u": 8
+    }
+   }
+  },
+  {
+   "name": "subivl_0.5_1.0_1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        500.0005,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       500.0005,
+       1.0,
+       0
+      ]
+     },
+     "cnt_u": 8
+    }
+   }
+  },
+  {
+   "name": "subivl_0.5_1.0_2",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0.001,
+          1000.0
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        500.0005,
+        1000.0
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       750.00025,
+       1.0,
+       0
+      ]
+     },
+     "cnt_u": 8
+    }
+   }
+  },
+  {
+   "name": "crv_crv_tilt_n4_0.0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         1,
+         0
+        ],
+        "v": [
+         1,
+         0.1,
+         0
+        ],
+        "domain": [
+         0,
+         5
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 4
+    }
+   }
+  },
+  {
+   "name": "crv_crv_cross_n4_0.0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          10
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        10
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         -1.0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 4
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "crv_crv_tilt_n4_0.3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         1,
+         0
+        ],
+        "v": [
+         1,
+         0.4,
+         0
+        ],
+        "domain": [
+         0,
+         5
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 4
+    }
+   }
+  },
+  {
+   "name": "crv_crv_cross_n4_0.3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          10
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        10
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0.19999999999999996,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 4
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "crv_crv_tilt_n4_0.6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         1,
+         0
+        ],
+        "v": [
+         1,
+         0.7,
+         0
+        ],
+        "domain": [
+         0,
+         5
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 4
+    }
+   }
+  },
+  {
+   "name": "crv_crv_cross_n4_0.6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          10
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        10
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         1.4,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 4
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "crv_crv_tilt_n4_1.0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         1,
+         0
+        ],
+        "v": [
+         1,
+         1.1,
+         0
+        ],
+        "domain": [
+         0,
+         5
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 4
+    }
+   }
+  },
+  {
+   "name": "crv_crv_cross_n4_1.0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          10
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        10
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         3.0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 4
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "crv_crv_tilt_n7_0.0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         1,
+         0
+        ],
+        "v": [
+         1,
+         0.1,
+         0
+        ],
+        "domain": [
+         0,
+         5
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "crv_crv_cross_n7_0.0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          10
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        10
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         -1.0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "crv_crv_tilt_n7_0.3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         1,
+         0
+        ],
+        "v": [
+         1,
+         0.4,
+         0
+        ],
+        "domain": [
+         0,
+         5
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "crv_crv_cross_n7_0.3",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          10
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        10
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0.19999999999999996,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "crv_crv_tilt_n7_0.6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         1,
+         0
+        ],
+        "v": [
+         1,
+         0.7,
+         0
+        ],
+        "domain": [
+         0,
+         5
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "crv_crv_cross_n7_0.6",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          10
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        10
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         1.4,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "crv_crv_tilt_n7_1.0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          2,
+          7
+         ],
+         "scale": 2.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        2,
+        7
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         1,
+         0
+        ],
+        "v": [
+         1,
+         1.1,
+         0
+        ],
+        "domain": [
+         0,
+         5
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 7
+    }
+   }
+  },
+  {
+   "name": "crv_crv_cross_n7_1.0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 0.001,
+     "this": {
+      "curve": {
+       "curve": {
+        "line": {
+         "p": [
+          0,
+          0,
+          0
+         ],
+         "v": [
+          1,
+          0,
+          0
+         ],
+         "domain": [
+          0,
+          10
+         ],
+         "scale": 1.0,
+         "inside_out": false
+        }
+       },
+       "ivl": [
+        0,
+        10
+       ]
+      }
+     },
+     "other": {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         3.0,
+         0
+        ],
+        "v": [
+         1,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         10
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     "cnt_u": 7
+    },
+    "mode": 1
+   }
+  },
+  {
+   "name": "srf_pt_plane_3x3_0_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -2,
+       -1,
+       0.4
+      ]
+     },
+     "cnt_u": 3,
+     "cnt_v": 3
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_3x3_0.5_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       1.0,
+       0.4
+      ]
+     },
+     "cnt_u": 3,
+     "cnt_v": 3
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_3x3_1_1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6,
+       3,
+       0.4
+      ]
+     },
+     "cnt_u": 3,
+     "cnt_v": 3
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_3x3_1_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6,
+       -1,
+       0.4
+      ]
+     },
+     "cnt_u": 3,
+     "cnt_v": 3
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_3x3_0_1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -2,
+       3,
+       0.4
+      ]
+     },
+     "cnt_u": 3,
+     "cnt_v": 3
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_3x3_0.5_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       -1,
+       0.4
+      ]
+     },
+     "cnt_u": 3,
+     "cnt_v": 3
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_3x3_0_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -2,
+       1.0,
+       0.4
+      ]
+     },
+     "cnt_u": 3,
+     "cnt_v": 3
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_3x3_1_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6,
+       1.0,
+       0.4
+      ]
+     },
+     "cnt_u": 3,
+     "cnt_v": 3
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_4x5_0_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -2,
+       -1,
+       0.4
+      ]
+     },
+     "cnt_u": 4,
+     "cnt_v": 5
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_4x5_0.5_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       1.0,
+       0.4
+      ]
+     },
+     "cnt_u": 4,
+     "cnt_v": 5
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_4x5_1_1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6,
+       3,
+       0.4
+      ]
+     },
+     "cnt_u": 4,
+     "cnt_v": 5
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_4x5_1_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6,
+       -1,
+       0.4
+      ]
+     },
+     "cnt_u": 4,
+     "cnt_v": 5
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_4x5_0_1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -2,
+       3,
+       0.4
+      ]
+     },
+     "cnt_u": 4,
+     "cnt_v": 5
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_4x5_0.5_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       -1,
+       0.4
+      ]
+     },
+     "cnt_u": 4,
+     "cnt_v": 5
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_4x5_0_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -2,
+       1.0,
+       0.4
+      ]
+     },
+     "cnt_u": 4,
+     "cnt_v": 5
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_4x5_1_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6,
+       1.0,
+       0.4
+      ]
+     },
+     "cnt_u": 4,
+     "cnt_v": 5
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_5x4_0_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -2,
+       -1,
+       0.4
+      ]
+     },
+     "cnt_u": 5,
+     "cnt_v": 4
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_5x4_0.5_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       1.0,
+       0.4
+      ]
+     },
+     "cnt_u": 5,
+     "cnt_v": 4
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_5x4_1_1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6,
+       3,
+       0.4
+      ]
+     },
+     "cnt_u": 5,
+     "cnt_v": 4
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_5x4_1_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6,
+       -1,
+       0.4
+      ]
+     },
+     "cnt_u": 5,
+     "cnt_v": 4
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_5x4_0_1",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -2,
+       3,
+       0.4
+      ]
+     },
+     "cnt_u": 5,
+     "cnt_v": 4
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_5x4_0.5_0",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       2.0,
+       -1,
+       0.4
+      ]
+     },
+     "cnt_u": 5,
+     "cnt_v": 4
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_5x4_0_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       -2,
+       1.0,
+       0.4
+      ]
+     },
+     "cnt_u": 5,
+     "cnt_v": 4
+    }
+   }
+  },
+  {
+   "name": "srf_pt_plane_5x4_1_0.5",
+   "inputs": {
+    "op": "gf",
+    "gf": {
+     "tol": 2e-05,
+     "this": {
+      "surface": {
+       "surface": {
+        "plane": {
+         "o": [
+          0,
+          0,
+          0
+         ],
+         "x": [
+          1,
+          0,
+          0
+         ],
+         "y": [
+          0,
+          1,
+          0
+         ],
+         "dom": [
+          -2,
+          -1,
+          6,
+          3
+         ]
+        }
+       },
+       "dom": [
+        -2,
+        -1,
+        6,
+        3
+       ]
+      }
+     },
+     "other": {
+      "point": [
+       6,
+       1.0,
+       0.4
+      ]
+     },
+     "cnt_u": 5,
+     "cnt_v": 4
+    }
+   }
+  }
+ ]
+}

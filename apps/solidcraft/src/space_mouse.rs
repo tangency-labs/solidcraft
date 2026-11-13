@@ -1914,6 +1914,7 @@ mod tests {
 
     fn wheel() -> egui::Event {
         egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Line,
             delta: egui::vec2(0.0, -1.0),
             modifiers: Default::default(),
@@ -2591,11 +2592,15 @@ mod tests {
             let reader = Running::start(driver, fake.clone());
             reader.reads("spacenavd");
             // Still not readable, over two waits: the daemon read goes on, one connection, a few probes.
+            let slept = std::time::Instant::now();
             std::thread::sleep(Duration::from_millis(700));
+            let waited = slept.elapsed();
             assert_eq!(reader.key().as_deref(), Some("spacenavd"), "{driver:?}");
             assert_eq!(fake.world().connects, 1, "{driver:?}: the daemon read was not restarted for a device that still cannot be read");
             let opens = fake.world().opens;
-            assert!(opens <= 4, "{driver:?}: {opens} tries in 700 ms with a 300 ms wait");
+            // A loaded machine can sleep far past 700 ms: bound the tries by the time that really passed.
+            let allowed = 4 + (waited.as_millis().saturating_sub(700) / 300) as u32;
+            assert!(opens <= allowed, "{driver:?}: {opens} tries in {waited:?} with a 300 ms wait");
             // The permission is fixed.
             fake.world().openable = true;
             reader.reads(&Source::Hid(Some(IDS)).key());

@@ -1,0 +1,466 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b50"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 2.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                3.0,
+                87.0,
+                0.0
+              ],
+              "start": [
+                2.3535533905932766,
+                90.1415926535898,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -0.14159265358979312,
+                87.64644660940672,
+                0.0
+              ],
+              "start": [
+                3.0,
+                87.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -17.141592653589793,
+                87.64644660940672,
+                0.0
+              ],
+              "start": [
+                -0.14159265358979312,
+                87.64644660940672,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -17.141592653589793,
+                2.3535533905932766,
+                0.0
+              ],
+              "start": [
+                -17.141592653589793,
+                87.64644660940672,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -0.14159265358979312,
+                2.3535533905932766,
+                0.0
+              ],
+              "start": [
+                -17.141592653589793,
+                2.3535533905932766,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                3.0,
+                3.0,
+                0.0
+              ],
+              "start": [
+                -0.14159265358979312,
+                2.3535533905932766,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                2.3535533905932717,
+                -0.14159265358979356,
+                0.0
+              ],
+              "start": [
+                3.0,
+                3.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                2.3535533905932717,
+                -17.141592653589793,
+                0.0
+              ],
+              "start": [
+                2.3535533905932717,
+                -0.14159265358979312,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                117.64644660940672,
+                -17.141592653589793,
+                0.0
+              ],
+              "start": [
+                2.3535533905932717,
+                -17.141592653589793,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                117.64644660940672,
+                -0.14159265358979312,
+                0.0
+              ],
+              "start": [
+                117.64644660940672,
+                -17.141592653589793,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                117.0,
+                3.0,
+                0.0
+              ],
+              "start": [
+                117.64644660940672,
+                -0.14159265358979312,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                120.1415926535898,
+                2.3535533905932597,
+                0.0
+              ],
+              "start": [
+                117.0,
+                3.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                137.14159265358978,
+                2.3535533905932597,
+                0.0
+              ],
+              "start": [
+                120.1415926535898,
+                2.3535533905932597,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                137.14159265358978,
+                87.64644660940674,
+                0.0
+              ],
+              "start": [
+                137.14159265358978,
+                2.3535533905932597,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                120.1415926535898,
+                87.64644660940674,
+                0.0
+              ],
+              "start": [
+                137.14159265358978,
+                87.64644660940674,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                117.0,
+                87.0,
+                0.0
+              ],
+              "start": [
+                120.1415926535898,
+                87.64644660940674,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                117.64644660940672,
+                90.1415926535898,
+                0.0
+              ],
+              "start": [
+                117.0,
+                87.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                117.64644660940672,
+                107.1415926535898,
+                0.0
+              ],
+              "start": [
+                117.64644660940672,
+                90.1415926535898,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                2.3535533905932766,
+                107.1415926535898,
+                0.0
+              ],
+              "start": [
+                117.64644660940672,
+                107.1415926535898,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                2.3535533905932766,
+                90.1415926535898,
+                0.0
+              ],
+              "start": [
+                2.3535533905932766,
+                107.1415926535898,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "723-unfold-a-tray-with-torn-corners",
+  "expected": {
+    "bbox": {
+      "max": [
+        137.14159265358978,
+        107.1415926535898,
+        2
+      ],
+      "min": [
+        -17.141592653589793,
+        -17.141592653589793,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "a flange of angle th, outer leg length Hf (height, from the virtual sharp along the flange) bends with allowance BA = th(R+Kt) and bend deduction BD = 2(R+t)tan(th/2) - BA; unfolded it lies in the base's plane and reaches Hf - BD beyond the base's edge. T = 2, R = 1, K = 0.5. BD(90) = 2*3 - pi = 2.8584, so the flat reaches 20 - BD = 17.1416 past each edge of the base: bbox x from -17.1416 to 137.1416, y from -17.1416 to 107.1416, z 0..2 (the base keeps its place); the corner relief changes the outline only inside the corners",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#723",
+      "tangency-labs/solidcraft#809",
+      "tangency-labs/solidcraft#1797",
+      "tangency-labs/solidcraft#1799"
+    ],
+    "what": "a 120 x 90 tray with four 20 mm 90 degree flanges and corner relief shape tear, unfolded"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 60,
+      "faces": 22,
+      "vertices": 40
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b50"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 36421.88358717607,
+      "body_count": 1,
+      "edges": 60,
+      "faces": 22,
+      "vertices": 40,
+      "volume_mm3": 35296.22183475415
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#723",
+    "tangency-labs/solidcraft#809",
+    "tangency-labs/solidcraft#1797",
+    "tangency-labs/solidcraft#1799"
+  ],
+  "traced_ops": [
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "extrude",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "boolean2d",
+    "boolean2d",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d"
+  ],
+  "ungraded": [],
+  "what": "a 120 x 90 tray with four 20 mm 90 degree flanges and corner relief shape tear, unfolded",
+  "why_not": []
+}

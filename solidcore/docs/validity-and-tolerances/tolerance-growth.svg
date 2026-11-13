@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="800" height="420" viewBox="0 0 800 420">
+  <title>tolerance-growth</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L800 0 L800 420 L0 420 Z" fill="#ffffff"/>
+    <path d="M204 30 L596 30 C598.209 30 600 31.791 600 34 L600 70 C600 72.209 598.209 74 596 74 L204 74 C201.791 74 200 72.209 200 70 L200 34 C200 31.791 201.791 30 204 30 Z" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 214 58)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">A gap g between an entity and what it bounds</tspan></text>
+    <path d="M254 110 L546 110 C548.209 110 550 111.791 550 114 L550 150 C550 152.209 548.209 154 546 154 L254 154 C251.791 154 250 152.209 250 150 L250 114 C250 111.791 251.791 110 254 110 Z" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 264 138)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">Did this kernel build the result?</tspan></text>
+    <path d="M34 200 L346 200 C348.209 200 350 201.791 350 204 L350 240 C350 242.209 348.209 244 346 244 L34 244 C31.791 244 30 242.209 30 240 L30 204 C30 201.791 31.791 200 34 200 Z" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 44 228)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">Is g enclosed: a bound, not a sample?</tspan></text>
+    <path d="M454 200 L766 200 C768.209 200 770 201.791 770 204 L770 240 C770 242.209 768.209 244 766 244 L454 244 C451.791 244 450 242.209 450 240 L450 204 C450 201.791 451.791 200 454 200 Z" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 464 228)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">Is g ≤ ε1 + ε2 + δ, each one proved?</tspan></text>
+    <path d="M24 300 L196 300 C198.209 300 200 301.791 200 304 L200 356 C200 358.209 198.209 360 196 360 L24 360 C21.791 360 20 358.209 20 356 L20 304 C20 301.791 21.791 300 24 300 Z" fill="#dce9f5" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 30 324)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Grow τ to cover g;</tspan></text>
+    <text transform="matrix(1 0 0 1 30 340)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">record the old τ and g.</tspan></text>
+    <path d="M219 300 L386 300 C388.209 300 390 301.791 390 304 L390 356 C390 358.209 388.209 360 386 360 L219 360 C216.791 360 215 358.209 215 356 L215 304 C215 301.791 216.791 300 219 300 Z" fill="#f0f0f0" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 225 324)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Enclose g first; the healer</tspan></text>
+    <text transform="matrix(1 0 0 1 225 340)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">samples it today (open).</tspan></text>
+    <path d="M414 300 L581 300 C583.209 300 585 301.791 585 304 L585 356 C585 358.209 583.209 360 581 360 L414 360 C411.791 360 410 358.209 410 356 L410 304 C410 301.791 411.791 300 414 300 Z" fill="#dce9f5" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 420 324)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Set τ to that bound,</tspan></text>
+    <text transform="matrix(1 0 0 1 420 340)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">kept with its certificate.</tspan></text>
+    <path d="M604 300 L776 300 C778.209 300 780 301.791 780 304 L780 356 C780 358.209 778.209 360 776 360 L604 360 C601.791 360 600 358.209 600 356 L600 304 C600 301.791 601.791 300 604 300 Z" fill="#f0f0f0" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 610 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">A wrong construction:</tspan></text>
+    <text transform="matrix(1 0 0 1 610 333)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">refuse, or recompute C</tspan></text>
+    <text transform="matrix(1 0 0 1 610 348)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">on S1 ∩ S2.</tspan></text>
+    <g>
+      <g>
+        <path d="M400.5 74 L400.5 106 L399.5 106 L399.5 74 Z" fill="#000000"/>
+        <path d="M400 108 L398 104 L402 104 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M330.15 154.477 L192.058 197.877 L191.758 196.923 L329.85 153.523 Z" fill="#000000"/>
+        <path d="M190 198 L193.216 194.893 L194.416 198.709 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M470.15 153.523 L608.242 196.923 L607.942 197.877 L469.85 154.477 Z" fill="#000000"/>
+        <path d="M610 198 L605.584 198.709 L606.784 194.893 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M110.5 244 L110.5 296 L109.5 296 L109.5 244 Z" fill="#000000"/>
+        <path d="M110 298 L108 294 L112 294 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M300.5 244 L300.5 296 L299.5 296 L299.5 244 Z" fill="#000000"/>
+        <path d="M300 298 L298 294 L302 294 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M497.5 244 L497.5 296 L496.5 296 L496.5 244 Z" fill="#000000"/>
+        <path d="M497 298 L495 294 L499 294 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M690.5 244 L690.5 296 L689.5 296 L689.5 244 Z" fill="#000000"/>
+        <path d="M690 298 L688 294 L692 294 Z" fill="#000000"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 110 172)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">no: imported data</tspan></text>
+    <text transform="matrix(1 0 0 1 560 172)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">yes: a construction</tspan></text>
+    <text transform="matrix(1 0 0 1 118 276)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">yes</tspan></text>
+    <text transform="matrix(1 0 0 1 308 276)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">no</tspan></text>
+    <text transform="matrix(1 0 0 1 505 276)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">yes</tspan></text>
+    <text transform="matrix(1 0 0 1 698 276)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">no</tspan></text>
+    <text transform="matrix(1 0 0 1 20 396)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">In every branch τ grows only while its tube stays clear of every entity it does not bound.</tspan></text>
+  </g>
+</svg>

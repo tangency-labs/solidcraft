@@ -3,8 +3,9 @@
 
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcore_record::{Plane, Vec3};
 use solidcraft_engine::doc::{FeatureKind, PlaneRef};
-use solidcraft_engine::geom::{Plane, Vec3};
+use solidcraft_engine::geom::prelude::*;
 
 fn sketch_from(yaw: f64, pitch: f64, name: &str) -> (Harness, Vec3, Plane) {
     let mut h = Harness::new();

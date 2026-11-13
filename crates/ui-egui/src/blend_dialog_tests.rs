@@ -5,8 +5,8 @@ use crate::dialogs::Kind;
 use crate::dialogs_surface::Surf;
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{FeatureKind, kernel::Continuity};
-use solidcraft_engine::geom::Vec3;
 
 fn ok(h: &mut Harness) {
     h.frames(2);

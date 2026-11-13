@@ -1,5 +1,7 @@
 use crate::Session;
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 fn run(s: &mut Session, cmd: &str, params: Value) -> Value {
     s.execute(cmd, &params).unwrap()
@@ -86,6 +88,252 @@ fn body_reassignment_offsets_preserve_world_properties() {
     run(&mut s, "component.move_bodies", json!({"bodies": [body], "component": c["component"]}));
     let r = run(&mut s, "component.properties", json!({"component": c["component"]}));
     close(&r["total"]["center_of_mass"][0], 5.0);
+}
+
+fn panel_blank(s: &mut Session, width: f64, height: f64) {
+    run(s, "sheet.manage_rules", json!({"name": "Panel 0.8", "thickness": "0.8", "active": true}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [width, height]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"sketch": "Blank", "body_name": "Panel"}));
+}
+
+fn perforated_panel(s: &mut Session) {
+    panel_blank(s, 20.0, 10.0);
+    run(s, "sheet.perforate", json!({"diameter": "2", "pitch": "10", "margin": "1", "pattern": "square"}));
+    run(s, "material.assign", json!({"bodies": ["Panel"], "material": "Steel"}));
+}
+
+/// Two radius-1 holes centred at (2, 2) and (12, 2), through a 20 x 10 x 0.8 blank.
+fn perforated_panel_expected() -> (f64, f64, [f64; 3]) {
+    let removed = 2.0 * std::f64::consts::PI * 0.8;
+    let volume = 160.0 - removed;
+    let area = 448.0 - 0.8 * std::f64::consts::PI;
+    (volume, area, [(160.0 * 10.0 - removed * 7.0) / volume, (160.0 * 5.0 - removed * 2.0) / volume, 0.4])
+}
+
+#[test]
+fn perforated_sheet_properties_include_holes_and_their_off_centre_volume_moment() {
+    let mut s = Session::default();
+    perforated_panel(&mut s);
+    let (volume, area, center) = perforated_panel_expected();
+    let density = s.doc.density("Panel");
+    let doc = s.doc.clone();
+    let undo = s.undo.len();
+    for command in ["component.properties", "inspect.measure"] {
+        let result = run(&mut s, command, json!({}));
+        close(&result["total"]["volume_mm3"], volume);
+        close(&result["total"]["mass_g"], volume * density / 1000.0);
+        close(&result["total"]["area_mm2"], area);
+        for (axis, expected) in center.iter().enumerate() {
+            close(&result["bodies"][0]["center_of_mass"][axis], *expected);
+        }
+    }
+    let inspected = run(&mut s, "document.inspect", json!({"measure": true}));
+    close(&inspected["bodies"][0]["volume_mm3"], volume);
+    close(&inspected["bodies"][0]["area_mm2"], area);
+    for key in ["faces", "edges", "vertices"] {
+        assert_eq!(inspected["bodies"][0][key], inspected["bodies"][0]["kernel"][key], "document.inspect retains kernel {key}");
+    }
+    assert!(inspected["bodies"][0].get("sheet_metal").is_none());
+    let picked = run(&mut s, "inspect.measure", json!({"items": [{"type": "body", "name": "Panel"}]}));
+    close(&picked["items"][0]["volume_mm3"], volume);
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
+    assert_eq!(s.undo.len(), undo, "measuring must not add an undo step");
+}
+
+#[test]
+fn perforated_sheet_instances_keep_physical_properties_in_nested_world_placements() {
+    let mut s = Session::default();
+    let parent = run(&mut s, "component.create", json!({"name": "Subassembly", "grounded": false}));
+    let child = run(&mut s, "component.create", json!({"name": "Sheet", "grounded": false}));
+    perforated_panel(&mut s);
+    let sheet_density = s.doc.density("Panel");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let copy = run(&mut s, "occurrence.copy", json!({"component": parent["component"], "translate": [40, 0, 0]}));
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": parent["occurrence"], "translate": [20, 0, 10], "axis": [0, 0, 1], "angle": "90 deg", "capture": false}),
+    );
+    box_in(&mut s, "Ballast");
+    let ballast_body = s.model.state().bodies.last().unwrap().name.clone();
+    run(&mut s, "material.assign", json!({"bodies": [ballast_body], "material": "Aluminum"}));
+    let ballast_mass = s.doc.density(&ballast_body);
+    let (volume, area, center) = perforated_panel_expected();
+    let sheet_mass = volume * sheet_density / 1000.0;
+    let first = [20.0 - center[1], center[0], 10.0 + center[2]];
+    let second = [40.0 + center[0], center[1], center[2]];
+    let doc = s.doc.clone();
+    let moves = s.pending_moves.clone();
+    let undo = s.undo.len();
+    for (parent_occurrence, expected) in [(&parent["occurrence"], first), (&copy["occurrence"], second)] {
+        let properties =
+            run(&mut s, "occurrence.properties", json!({"occurrence": child["occurrence"], "path": [parent_occurrence, child["occurrence"]]}));
+        close(&properties["total"]["volume_mm3"], volume);
+        close(&properties["total"]["mass_g"], sheet_mass);
+        close(&properties["total"]["area_mm2"], area);
+        for (axis, coordinate) in expected.iter().enumerate() {
+            close(&properties["total"]["center_of_mass"][axis], *coordinate);
+        }
+    }
+    let properties = run(&mut s, "component.properties", json!({"component": "root"}));
+    let mass = 2.0 * sheet_mass + ballast_mass;
+    close(&properties["total"]["volume_mm3"], 2.0 * volume + 1000.0);
+    close(&properties["total"]["mass_g"], mass);
+    for axis in 0..3 {
+        close(&properties["total"]["center_of_mass"][axis], (sheet_mass * (first[axis] + second[axis]) + ballast_mass * 5.0) / mass);
+    }
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    close(&measured["total"]["volume_mm3"], 2.0 * volume + 1000.0);
+    close(&measured["total"]["mass_g"], mass);
+    assert_eq!(measured["bodies"].as_array().unwrap().iter().filter(|b| b["sheet_metal"] == true).count(), 2);
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
+    assert_eq!(s.pending_moves, moves);
+    assert_eq!(s.undo.len(), undo);
+}
+
+#[test]
+fn perforated_sheet_centroid_follows_a_folded_panel_and_unfolds() {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let mut s = Session::default();
+    panel_blank(&mut s, 30.0, 10.0);
+    run(
+        &mut s,
+        "sheet.fold",
+        json!({"points": [[10, 0, 0], [10, 10, 0]], "angle": "90 deg", "radius": "0.8", "position": "centerline", "fixed": [2, 5, 0]}),
+    );
+    let before = run(&mut s, "component.properties", json!({"component": "root"}));
+    run(&mut s, "sheet.perforate", json!({"diameter": "2", "pitch": "10", "margin": "0", "pattern": "square"}));
+    let sheet = &s.model.state().sheets[0];
+    let holes = sheet.perforation_holes(&sheet.perforations[0]).unwrap();
+    assert_eq!(holes.len(), 2);
+    // Fold boundaries carry kernel roundoff; keep the analytic centres and the
+    // same sub-micrometre tolerance used by the property checks below.
+    for (hole, expected) in holes.iter().zip([Vec2::new(1.0, 1.0), Vec2::new(21.0, 1.0)]) {
+        assert!(hole.dist(expected) < 1e-6, "{hole:?} != {expected:?}");
+    }
+    // The right panel turns up by 90 degrees about a y-parallel bend axis at
+    // z = radius + thickness. Its mid-plane is radius + thickness/2 from that axis.
+    let allowance = FRAC_PI_2 * (0.8 + 0.44 * 0.8);
+    let bend_start = 10.0 - allowance / 2.0;
+    let right_hole = [bend_start + 1.2, 1.0, 1.6 + 21.0 - bend_start - allowance];
+    let old_volume = before["total"]["volume_mm3"].as_f64().unwrap();
+    let hole_volume = PI * 0.8;
+    let volume = old_volume - 2.0 * hole_volume;
+    let result = run(&mut s, "component.properties", json!({"component": "root"}));
+    close(&result["total"]["volume_mm3"], volume);
+    for (axis, left) in [1.0, 1.0, 0.4].iter().enumerate() {
+        let old = before["total"]["center_of_mass"][axis].as_f64().unwrap();
+        close(&result["total"]["center_of_mass"][axis], old + hole_volume * (2.0 * old - left - right_hole[axis]) / volume);
+    }
+    run(&mut s, "sheet.unfold", json!({}));
+    let result = run(&mut s, "component.properties", json!({"component": "root"}));
+    let volume = 240.0 - 2.0 * hole_volume;
+    close(&result["total"]["volume_mm3"], volume);
+    for (axis, expected) in [(240.0 * 15.0 - 2.0 * hole_volume * 11.0) / volume, (240.0 * 5.0 - 2.0 * hole_volume) / volume, 0.4].iter().enumerate() {
+        close(&result["total"]["center_of_mass"][axis], *expected);
+    }
+}
+
+#[test]
+fn perforated_sheet_correction_rejects_invalid_metadata_without_partial_changes() {
+    let mut s = Session::default();
+    perforated_panel(&mut s);
+    let state = s.model.state();
+    let measured = solidcraft_kernel::measure(&state.bodies[0].body).unwrap();
+    for pitch in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut sheet = state.sheets[0].clone();
+        sheet.perforations[0].pitch = pitch;
+        let mut actual = measured.clone();
+        assert!(sheet.correct_perforation_properties(&mut actual, &solidcraft_doc::IDENTITY).is_err());
+        assert_eq!(actual.volume, measured.volume);
+        assert_eq!(actual.area, measured.area);
+        assert_eq!(actual.centroid, measured.centroid);
+    }
+    let mut scaled = solidcraft_doc::IDENTITY;
+    scaled[0][0] = 2.0;
+    let mut sheared = solidcraft_doc::IDENTITY;
+    sheared[0][1] = 0.5;
+    for placement in [scaled, sheared] {
+        let mut actual = measured.clone();
+        assert!(state.sheets[0].correct_perforation_properties(&mut actual, &placement).is_err());
+        assert_eq!((actual.volume, actual.area, actual.centroid), (measured.volume, measured.area, measured.centroid));
+    }
+}
+
+#[test]
+fn perforated_sheet_body_transfer_preserves_world_mass_and_centroid() {
+    let mut s = Session::default();
+    perforated_panel(&mut s);
+    let moved = run(&mut s, "component.create", json!({"name": "MovedSheet", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": moved["occurrence"], "translate": [100, 0, 0]}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Panel"], "component": moved["component"]}));
+    let (volume, _, center) = perforated_panel_expected();
+    let mass = volume * s.doc.density("Panel") / 1000.0;
+    for command in ["component.properties", "inspect.measure"] {
+        let result = run(&mut s, command, json!({"component": "root"}));
+        close(&result["total"]["volume_mm3"], volume);
+        close(&result["total"]["mass_g"], mass);
+        for (axis, expected) in center.iter().enumerate() {
+            close(&result["bodies"][0]["center_of_mass"][axis], *expected);
+        }
+    }
+}
+
+#[test]
+fn perforated_sheet_inertia_removes_analytic_hole_cylinders_and_turns_with_the_sheet() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Sheet", "grounded": false}));
+    perforated_panel(&mut s);
+    let (volume, _, center) = perforated_panel_expected();
+    let old_center = [10.0, 5.0, 0.4];
+    let mut expected = [[0.0; 3]; 3];
+    let dimensions: [f64; 3] = [20.0, 10.0, 0.8];
+    for i in 0..3 {
+        expected[i][i] = 160.0 * (dimensions[(i + 1) % 3].powi(2) + dimensions[(i + 2) % 3].powi(2)) / 12.0;
+    }
+    let hole_volume = std::f64::consts::PI * 0.8;
+    let own = [hole_volume * (3.0 + 0.64) / 12.0, hole_volume * (3.0 + 0.64) / 12.0, hole_volume / 2.0];
+    for hole in [[2.0, 2.0, 0.4], [12.0, 2.0, 0.4]] {
+        let d = [0, 1, 2].map(|i| hole[i] - old_center[i]);
+        let d2: f64 = d.iter().map(|v| v * v).sum();
+        for i in 0..3 {
+            for j in 0..3 {
+                expected[i][j] -= if i == j { own[i] + hole_volume * d2 } else { 0.0 } - hole_volume * d[i] * d[j];
+            }
+        }
+    }
+    let d = [0, 1, 2].map(|i| center[i] - old_center[i]);
+    let d2: f64 = d.iter().map(|v| v * v).sum();
+    for i in 0..3 {
+        for j in 0..3 {
+            expected[i][j] = (expected[i][j] - volume * (if i == j { d2 } else { 0.0 } - d[i] * d[j])) * s.doc.density("Panel") / 1000.0;
+        }
+    }
+    let first = run(&mut s, "component.properties", json!({}));
+    tensor_close(&first["total"]["inertia_g_mm2"], expected, 1e-9);
+    let verify_assembly = |s: &mut Session, tensor: [[f64; 3]; 3], center: [f64; 3]| {
+        let assembly = run(s, "assembly.mass_properties", json!({}));
+        let occurrence = assembly["occurrences"].as_array().unwrap().iter().find(|o| o["occurrence"] == c["occurrence"]).unwrap();
+        let mass = &occurrence["mass"];
+        assert!((mass["mass_kg"].as_f64().unwrap() - volume * s.doc.density("Panel") * 1e-6).abs() < 1e-12);
+        for (axis, coordinate) in center.iter().enumerate() {
+            close(&mass["center_of_mass_mm"][axis], *coordinate);
+        }
+        tensor_close(&mass["inertia_world_kg_mm2"], tensor.map(|row| row.map(|value| value / 1000.0)), 1e-9);
+    };
+    verify_assembly(&mut s, expected, center);
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": c["occurrence"], "translate": [100, 40, 10], "axis": [0, 0, 1], "angle": "90 deg", "capture": false}),
+    );
+    let turned = run(&mut s, "component.properties", json!({}));
+    let rotation = [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]];
+    let rotated = solidcraft_geom::inertia::transformed(&expected, &rotation);
+    tensor_close(&turned["total"]["inertia_g_mm2"], rotated, 1e-9);
+    verify_assembly(&mut s, rotated, [100.0 - center[1], 40.0 + center[0], 10.0 + center[2]]);
 }
 
 #[test]
@@ -456,7 +704,7 @@ fn repeated_placements_reuse_one_measurement_of_their_body() {
 /// the meshes it is taken from) also when the placement turns it off the axes.
 #[test]
 fn a_placed_body_measures_as_its_placed_copy() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 30}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 5}));

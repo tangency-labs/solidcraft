@@ -10,28 +10,52 @@ use solidcraft_doc::metadata::{self, BOM_TYPE, MAX_KEYS, Owner};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
+use crate::schema::metadata::{MetadataParams, MetadataRemoveParams, MetadataRemoveResult, MetadataResult, MetadataSetParams, MetadataSetResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+const READ_CONTRACT: TypedContract<MetadataParams> = TypedContract::new();
+const SET_CONTRACT: TypedContract<MetadataSetParams> = TypedContract::new();
+const REMOVE_CONTRACT: TypedContract<MetadataRemoveParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("document.metadata", "Design Properties", read).icon("settings").noundo().doc_only().params(
-        "→ metadata: the design's metadata object as saved (other tools' keys too); properties: each of SolidCraft's design \
-         properties (project, part number, revision…), its text or null (absent, or not text)",
-    ),
-    CommandSpec::new("document.metadata.set", "Change Design Properties", set).icon("settings").doc_only().params(
-        "key and value, or values: {key: value, …} (all or nothing, one undo step). SolidCraft's keys, the ones document.metadata's \
-         properties lists, take text (\"\" or null removes); another tool's data goes under its reverse-DNS key such as \
-         com.example.tool (an object; null removes) → metadata, changed: [keys]",
-    ),
-    CommandSpec::new("document.metadata.remove", "Remove Design Property", remove)
+    CommandSpec::new("document.metadata", "Design Properties", crate::checked!("document.metadata", read))
+        .icon("settings")
+        .noundo()
+        .doc_only()
+        .contract(&READ_CONTRACT)
+        .output(output_schema_for::<MetadataResult>)
+        .params(
+            "→ metadata: the design's metadata object as saved (other tools' keys too); properties: each of SolidCraft's design \
+             properties (project, part number, revision…), its text or null (absent, or not text)",
+        ),
+    CommandSpec::new("document.metadata.set", "Change Design Properties", crate::checked!("document.metadata.set", set))
+        .icon("settings")
+        .doc_only()
+        .contract(&SET_CONTRACT)
+        .output(output_schema_for::<MetadataSetResult>)
+        .params(
+            "key and value, or values: {key: value, …} (all or nothing, one undo step). SolidCraft's keys, the ones document.metadata's \
+             properties lists, take text (\"\" or null removes); another tool's data goes under its reverse-DNS key such as \
+             com.example.tool (an object; null removes) → metadata, changed: [keys]",
+        ),
+    CommandSpec::new("document.metadata.remove", "Remove Design Property", crate::checked!("document.metadata.remove", remove))
         .icon("delete")
         .doc_only()
+        .contract(&REMOVE_CONTRACT)
+        .output(output_schema_for::<MetadataRemoveResult>)
         .params("key, or keys: [keys] (any key, also one another tool wrote) → metadata, removed: [keys that were there]"),
 ];
+
+/// A reply built from its schema's type, so the two can't drift apart.
+fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
+}
 
 fn read(s: &mut Session, _: &Value) -> Result<Value> {
     let m = &s.doc.metadata;
     let properties: Map<String, Value> = metadata::keys(Owner::Design).map(|k| (k.name.to_string(), json!(m.text(k.name)))).collect();
-    Ok(json!({"metadata": m, "properties": properties}))
+    reply("document.metadata", MetadataResult { metadata: m.0.clone(), properties })
 }
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -60,7 +84,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
     if next != s.doc.metadata {
         s.doc_mut().metadata = next;
     }
-    Ok(json!({"metadata": s.doc.metadata, "changed": changed}))
+    reply(cmd, MetadataSetResult { metadata: s.doc.metadata.0.clone(), changed, param_warnings: Vec::new() })
 }
 
 fn remove(s: &mut Session, p: &Value) -> Result<Value> {
@@ -84,7 +108,8 @@ fn remove(s: &mut Session, p: &Value) -> Result<Value> {
             m.remove(k);
         }
     }
-    Ok(json!({"metadata": s.doc.metadata, "removed": removed}))
+    let removed = removed.into_iter().map(str::to_string).collect();
+    reply(cmd, MetadataRemoveResult { metadata: s.doc.metadata.0.clone(), removed, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

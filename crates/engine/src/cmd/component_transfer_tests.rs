@@ -4,6 +4,136 @@ fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap()
 }
 
+fn transferred_profile(revolve: bool) -> (Session, u64, u64, solidcraft_kernel::Body) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":if revolve { "XZ" } else { "XY" },"name":"Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[20,0],"p1":[30,5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    if revolve {
+        run(&mut s, "solid.revolve", json!({"axis":"y","angle":"360 deg","body_name":"Part"}));
+    } else {
+        run(&mut s, "solid.extrude", json!({"distance":10,"body_name":"Part"}));
+    }
+    let original = s.world_state().unwrap().body("Part").unwrap().body.clone();
+    let created = run(&mut s, "component.from_bodies", json!({"bodies":["Part"]}));
+    let component = created["components"][0]["component"].as_u64().unwrap();
+    let occurrence = s.doc.occurrences.iter().find(|o| o.component == component).unwrap().id;
+    run(&mut s, "component.move_sketches", json!({"sketches":["Profile"],"component":component}));
+    run(&mut s, "occurrence.ground", json!({"occurrence":occurrence,"grounded":false}));
+    (s, component, occurrence, original)
+}
+
+fn check_captured_profile_transfer(revolve: bool) {
+    let (mut s, _, occurrence, original) = transferred_profile(revolve);
+    let before = s.doc.to_json();
+    let matrix = solidcraft_doc::rigid(Vec3::new(40.0, 0.0, 0.0), Vec3::ZERO, Vec3::X, std::f64::consts::FRAC_PI_4);
+    let expected = solidcraft_kernel::transform_matrix(&original, matrix).unwrap();
+    let expected_bounds = expected.exact_bounds().unwrap();
+    let assert_pose = |s: &Session| {
+        let state = s.world_state().unwrap();
+        let body = &state.body("Part").unwrap().body;
+        let bounds = body.exact_bounds().unwrap();
+        assert!(bounds.min.dist(expected_bounds.min) < 0.002, "minimum: {bounds:?}, expected {expected_bounds:?}");
+        assert!(bounds.max.dist(expected_bounds.max) < 0.002, "maximum: {bounds:?}, expected {expected_bounds:?}");
+        let measured = solidcraft_kernel::measure(body).unwrap();
+        let expected_measure = solidcraft_kernel::measure(&expected).unwrap();
+        assert!((measured.volume - expected_measure.volume).abs() < 1e-5);
+        assert!(measured.centroid.dist(expected_measure.centroid) < 1e-5);
+    };
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[40,0,0],"axis":[1,0,0],"angle":"45 deg","capture":false}));
+    assert_pose(&s);
+    let undo = s.undo.len();
+    run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(s.undo.len(), undo + 1);
+    assert!(s.pending_moves.is_empty());
+    assert_pose(&s);
+    let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
+    reopened.refresh();
+    assert_pose(&reopened);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_pose(&s);
+}
+
+#[test]
+fn capture_transferred_extrusion_with_its_source_sketch_moves_once() {
+    check_captured_profile_transfer(false);
+}
+
+#[test]
+fn capture_transferred_revolve_with_its_source_sketch_moves_once() {
+    check_captured_profile_transfer(true);
+}
+
+#[test]
+fn transferred_profile_frame_follows_transfer_edits_suppression_and_rollback() {
+    let (mut s, component, occurrence, _) = transferred_profile(false);
+    let creator = s.model.state().body("Part").unwrap().feature;
+    let transfer = s.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::BodyTransfer { .. })).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[40,0,0]}));
+    let assert_x = |s: &Session, local: f64, owner: u64| {
+        let source = s.model.result(creator).unwrap().state.body("Part").unwrap().body.exact_bounds().unwrap();
+        assert!((source.min.x - local).abs() < 1e-6, "source frame: {source:?}");
+        let state = s.world_state().unwrap();
+        let body = state.body("Part").unwrap();
+        assert_eq!(body.component, owner);
+        assert!((body.body.exact_bounds().unwrap().min.x - 60.0).abs() < 1e-6);
+    };
+    assert_x(&s, 20.0, component);
+    s.doc_mut().feature_mut(transfer).unwrap().suppressed = true;
+    s.refresh();
+    assert_x(&s, 60.0, 0);
+    s.doc_mut().feature_mut(transfer).unwrap().suppressed = false;
+    s.refresh();
+    assert_x(&s, 20.0, component);
+    let boundary = s.doc.feature_index(transfer);
+    s.doc_mut().marker = boundary;
+    s.refresh();
+    assert_x(&s, 60.0, 0);
+    s.doc_mut().marker = None;
+    s.refresh();
+    assert_x(&s, 20.0, component);
+    if let FeatureKind::BodyTransfer { transform, .. } = &mut s.doc_mut().feature_mut(transfer).unwrap().kind {
+        *transform = solidcraft_doc::rigid(Vec3::new(-7.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    }
+    s.refresh();
+    assert_x(&s, 27.0, component);
+    let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
+    reopened.refresh();
+    assert_x(&reopened, 27.0, component);
+}
+
+#[test]
+fn capturing_one_transferred_profile_instance_keeps_its_peer_in_place() {
+    let (mut s, _, occurrence, _) = transferred_profile(false);
+    run(&mut s, "occurrence.copy", json!({"occurrence":occurrence,"translate":[100,0,0]}));
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[40,0,0],"capture":false}));
+    run(&mut s, "component.capture_position", json!({}));
+    let state = s.world_state().unwrap();
+    let mut xs: Vec<f64> = state.bodies.iter().map(|body| body.body.exact_bounds().unwrap().min.x).collect();
+    xs.sort_by(f64::total_cmp);
+    assert_eq!(xs.len(), 2);
+    assert!((xs[0] - 60.0).abs() < 1e-6 && (xs[1] - 120.0).abs() < 1e-6, "{xs:?}");
+}
+
+#[test]
+fn a_profile_without_a_body_transfer_keeps_its_live_component_frame() {
+    let mut s = Session::default();
+    let created = run(&mut s, "component.create", json!({"name":"Source","grounded":false}));
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Profile","distance":5,"body_name":"Part"}));
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[40,0,0]}));
+    let state = s.world_state().unwrap();
+    let body = state.body("Part").unwrap();
+    assert_eq!(body.component, 0);
+    assert!((body.body.exact_bounds().unwrap().min.x - 40.0).abs() < 1e-6);
+}
+
 #[test]
 fn recorded_assignment_preserves_sample_joined_material_and_timeline() {
     let mut s = Session::default();
@@ -492,4 +622,60 @@ fn reparent_items_keeps_hidden_placements_hidden() {
     assert_eq!(s.visibility.hidden_occurrences, vec![vec![dest_occurrence, outer_occurrence, inner]]);
     assert_eq!(s.doc.occurrences.iter().find(|o| o.id == outer_occurrence).map(|o| o.parent), Some(dest));
     let _ = part;
+}
+
+/// Three loose sketches and an empty part, the sketch with id 2 and another one named "2".
+/// Returns the session, the part, the sketch named "2" and the sketch numbered 2.
+fn sketch_named_like_an_id() -> (Session, u64, u64, u64) {
+    let mut s = Session::default();
+    for name in ["A", "B", "C"] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": name}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    let sketches: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    assert!(sketches.contains(&2), "a sketch has id 2: {sketches:?}");
+    let named = *sketches.iter().find(|id| **id != 2).unwrap();
+    run(&mut s, "timeline.rename", json!({"feature": named, "name": "2"}));
+    let part = run(&mut s, "component.create", json!({"name": "Part", "activate": false}))["component"].as_u64().unwrap();
+    (s, part, named, 2)
+}
+
+/// A feature named "2" is the one `"2"` names, not the feature whose id is 2, as in the
+/// timeline commands (#9748); the number 2 still names the feature with that id.
+#[test]
+fn component_commands_take_a_name_that_looks_like_an_id_as_the_name() {
+    let moved_by = |command: &str, key: Value| {
+        let (mut s, part, named, numbered) = sketch_named_like_an_id();
+        run(&mut s, command, json!({"features": [key], "component": part}));
+        let component = |id: u64| s.doc.feature(id).map(|f| f.component);
+        (component(named) == Some(part), component(numbered) == Some(part))
+    };
+    for command in ["component.move_features", "browser.reparent"] {
+        assert_eq!(moved_by(command, json!("2")), (true, false), "{command}: the name \"2\"");
+        assert_eq!(moved_by(command, json!(2)), (false, true), "{command}: the id 2");
+    }
+}
+
+/// `component.move_sketches.to_parts` with `"2"` looks at the sketch named "2": it is on no
+/// face, so it stays, and the reply names it.
+#[test]
+fn sketches_to_parts_takes_a_name_that_looks_like_an_id_as_the_name() {
+    let (mut s, _, named, _) = sketch_named_like_an_id();
+    let r = run(&mut s, "component.move_sketches.to_parts", json!({"sketches": ["2"]}));
+    assert_eq!(r["moved"], 0, "{r}");
+    let kept: Vec<u64> = r["kept"].as_array().unwrap().iter().filter_map(|k| k["sketch"].as_u64()).collect();
+    assert_eq!(kept, [named], "{r}");
+}
+
+/// `component.move_sketches` with `"2"` moves the sketch named "2", and with the number 2 the
+/// sketch with that id, as the other component commands (#9748).
+#[test]
+fn move_sketches_takes_a_name_that_looks_like_an_id_as_the_name() {
+    for (key, moves_named) in [(json!("2"), true), (json!(2), false)] {
+        let (mut s, part, named, numbered) = sketch_named_like_an_id();
+        run(&mut s, "component.move_sketches", json!({"sketches": [key], "component": part}));
+        let component = |id: u64| s.doc.feature(id).map(|f| f.component);
+        assert_eq!((component(named) == Some(part), component(numbered) == Some(part)), (moves_named, !moves_named), "{key}");
+    }
 }

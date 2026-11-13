@@ -1,0 +1,5551 @@
+{
+ "cases": [
+  {
+   "name": "closedCurve_bvec",
+   "upstream_ref": "tests/prog_test (upstream curve fixture closedCurve.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b0": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "t": [
+     0.0,
+     0.875,
+     1.75,
+     2.625,
+     3.5,
+     4.375,
+     5.25,
+     6.125,
+     7.0
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_bvec_oblique",
+   "upstream_ref": "tests/prog_test (upstream curve fixture closedCurve.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "b0": [
+     0.3,
+     -0.2,
+     0.9
+    ],
+    "t": [
+     0.0,
+     1.75,
+     3.5,
+     5.25,
+     7.0
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_skin_derivs_1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 1
+   }
+  },
+  {
+   "name": "closedCurve_skin_derivs_2",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 2
+   }
+  },
+  {
+   "name": "closedCurve_skin_derivs_3",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 3
+   }
+  },
+  {
+   "name": "closedCurve_skin_derivs_4",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 4
+   }
+  },
+  {
+   "name": "closedCurve_cross_deriv",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "cross_deriv",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "ns": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "ne": [
+     0.0,
+     0.6,
+     0.8
+    ],
+    "bs": [
+     1.0,
+     2.0,
+     0.5
+    ],
+    "be": [
+     -1.0,
+     1.5,
+     0.25
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_sweep_tangent",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "dscale": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "rma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "drma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_sweep_tangent_scaled",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     1.0,
+     0.5,
+     2.0
+    ],
+    "scale": [
+     2.0,
+     0.5,
+     1.5
+    ],
+    "dscale": [
+     0.1,
+     -0.2,
+     0.3
+    ],
+    "rma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "drma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_rot_samples_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture closedCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      -0.1
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "closedCurve_rot_next_only_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture closedCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "closedCurve_rot_samples_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture closedCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "u": 2.59,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      2.4899999999999998
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      2.79
+     ]
+    }
+   }
+  },
+  {
+   "name": "closedCurve_rot_next_only_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture closedCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "u": 2.59,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      2.79
+     ]
+    }
+   }
+  },
+  {
+   "name": "closedCurve_rot_samples_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture closedCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "u": 7,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      6.9
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      7.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "closedCurve_rot_next_only_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture closedCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "u": 7,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      7.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "closedCurve_rot_no_neighbours",
+   "upstream_ref": "tests/prog_test (upstream curve fixture closedCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": null
+    }
+   }
+  },
+  {
+   "name": "closedCurve_rot_self",
+   "upstream_ref": "tests/prog_test (upstream curve fixture closedCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "u": 3.5,
+    "zsrc": {
+     "zcur": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_approx_0.1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 0.1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "closedCurve_approx_1.0",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 1.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "closedCurve_approx_10.0",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 10.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "closedCurve_approx_inplace",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 1.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim1_bvec",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim1.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b0": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "t": [
+     0.0,
+     2.415689871723045,
+     4.83137974344609,
+     7.247069615169135,
+     9.66275948689218,
+     12.078449358615224,
+     14.49413923033827,
+     16.909829102061313,
+     19.32551897378436
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_bvec_oblique",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim1.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b0": [
+     0.3,
+     -0.2,
+     0.9
+    ],
+    "t": [
+     0.0,
+     4.83137974344609,
+     9.66275948689218,
+     14.49413923033827,
+     19.32551897378436
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_skin_derivs_1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 1
+   }
+  },
+  {
+   "name": "crvTrim1_skin_derivs_2",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 2
+   }
+  },
+  {
+   "name": "crvTrim1_skin_derivs_3",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 3
+   }
+  },
+  {
+   "name": "crvTrim1_skin_derivs_4",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 4
+   }
+  },
+  {
+   "name": "crvTrim1_cross_deriv",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "cross_deriv",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "ns": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "ne": [
+     0.0,
+     0.6,
+     0.8
+    ],
+    "bs": [
+     1.0,
+     2.0,
+     0.5
+    ],
+    "be": [
+     -1.0,
+     1.5,
+     0.25
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_sweep_tangent",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "dscale": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "rma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "drma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_sweep_tangent_scaled",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     1.0,
+     0.5,
+     2.0
+    ],
+    "scale": [
+     2.0,
+     0.5,
+     1.5
+    ],
+    "dscale": [
+     0.1,
+     -0.2,
+     0.3
+    ],
+    "rma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "drma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_rot_samples_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim1.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      -0.1
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_rot_next_only_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim1.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_rot_samples_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim1.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "u": 7.150442020300213,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      7.050442020300213
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      7.350442020300213
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_rot_next_only_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim1.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "u": 7.150442020300213,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      7.350442020300213
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_rot_samples_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim1.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "u": 19.32551897378436,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      19.225518973784357
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      19.525518973784358
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_rot_next_only_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim1.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "u": 19.32551897378436,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      19.525518973784358
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_rot_no_neighbours",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim1.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": null
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_rot_self",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim1.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "u": 9.66275948689218,
+    "zsrc": {
+     "zcur": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_approx_0.1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 0.1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvTrim1_approx_1.0",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 1.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvTrim1_approx_10.0",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 10.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvTrim1_approx_inplace",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 1.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim2_bvec",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim2.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b0": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "t": [
+     0.0,
+     0.25,
+     0.5,
+     0.75,
+     1.0,
+     1.25,
+     1.5,
+     1.75,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_bvec_oblique",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim2.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "b0": [
+     0.3,
+     -0.2,
+     0.9
+    ],
+    "t": [
+     0.0,
+     0.5,
+     1.0,
+     1.5,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_skin_derivs_1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 1
+   }
+  },
+  {
+   "name": "crvTrim2_skin_derivs_2",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 2
+   }
+  },
+  {
+   "name": "crvTrim2_skin_derivs_3",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 3
+   }
+  },
+  {
+   "name": "crvTrim2_skin_derivs_4",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 4
+   }
+  },
+  {
+   "name": "crvTrim2_cross_deriv",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "cross_deriv",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "ns": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "ne": [
+     0.0,
+     0.6,
+     0.8
+    ],
+    "bs": [
+     1.0,
+     2.0,
+     0.5
+    ],
+    "be": [
+     -1.0,
+     1.5,
+     0.25
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_sweep_tangent",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "dscale": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "rma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "drma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_sweep_tangent_scaled",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     1.0,
+     0.5,
+     2.0
+    ],
+    "scale": [
+     2.0,
+     0.5,
+     1.5
+    ],
+    "dscale": [
+     0.1,
+     -0.2,
+     0.3
+    ],
+    "rma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "drma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_rot_samples_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim2.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      -0.1
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_rot_next_only_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim2.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_rot_samples_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim2.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "u": 0.74,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      0.64
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.94
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_rot_next_only_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim2.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "u": 0.74,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.94
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_rot_samples_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim2.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "u": 2,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      1.9
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      2.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_rot_next_only_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim2.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "u": 2,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      2.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_rot_no_neighbours",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim2.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": null
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_rot_self",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvTrim2.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "u": 1.0,
+    "zsrc": {
+     "zcur": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_approx_0.1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 0.1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvTrim2_approx_1.0",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 1.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvTrim2_approx_10.0",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 10.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvTrim2_approx_inplace",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 1.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvToOffset_bvec",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvToOffset.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b0": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "t": [
+     -47.0,
+     -41.125,
+     -35.25,
+     -29.375,
+     -23.5,
+     -17.625,
+     -11.75,
+     -5.875,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_bvec_oblique",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvToOffset.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "b0": [
+     0.3,
+     -0.2,
+     0.9
+    ],
+    "t": [
+     -47.0,
+     -35.25,
+     -23.5,
+     -11.75,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_skin_derivs_1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 1
+   }
+  },
+  {
+   "name": "crvToOffset_skin_derivs_2",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 2
+   }
+  },
+  {
+   "name": "crvToOffset_skin_derivs_3",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 3
+   }
+  },
+  {
+   "name": "crvToOffset_skin_derivs_4",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 4
+   }
+  },
+  {
+   "name": "crvToOffset_cross_deriv",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "cross_deriv",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "ns": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "ne": [
+     0.0,
+     0.6,
+     0.8
+    ],
+    "bs": [
+     1.0,
+     2.0,
+     0.5
+    ],
+    "be": [
+     -1.0,
+     1.5,
+     0.25
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_sweep_tangent",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "dscale": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "rma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "drma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_sweep_tangent_scaled",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     1.0,
+     0.5,
+     2.0
+    ],
+    "scale": [
+     2.0,
+     0.5,
+     1.5
+    ],
+    "dscale": [
+     0.1,
+     -0.2,
+     0.3
+    ],
+    "rma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "drma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_rot_samples_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvToOffset.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "u": -47,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      -47.1
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      -46.8
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_rot_next_only_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvToOffset.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "u": -47,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      -46.8
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_rot_samples_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvToOffset.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "u": -29.61,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      -29.71
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      -29.41
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_rot_next_only_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvToOffset.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "u": -29.61,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      -29.41
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_rot_samples_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvToOffset.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      -0.1
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_rot_next_only_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvToOffset.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_rot_no_neighbours",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvToOffset.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "u": -47,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": null
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_rot_self",
+   "upstream_ref": "tests/prog_test (upstream curve fixture crvToOffset.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "u": -23.5,
+    "zsrc": {
+     "zcur": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_approx_0.1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 0.1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvToOffset_approx_1.0",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 1.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvToOffset_approx_10.0",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 10.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvToOffset_approx_inplace",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 1.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "curve0_bvec",
+   "upstream_ref": "tests/prog_test (upstream curve fixture curve0.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "b0": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "t": [
+     0.0,
+     24.885494051987628,
+     49.770988103975256,
+     74.65648215596289,
+     99.54197620795051,
+     124.42747025993813,
+     149.31296431192578,
+     174.1984583639134,
+     199.08395241590102
+    ]
+   }
+  },
+  {
+   "name": "curve0_bvec_oblique",
+   "upstream_ref": "tests/prog_test (upstream curve fixture curve0.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "b0": [
+     0.3,
+     -0.2,
+     0.9
+    ],
+    "t": [
+     0.0,
+     49.770988103975256,
+     99.54197620795051,
+     149.31296431192578,
+     199.08395241590102
+    ]
+   }
+  },
+  {
+   "name": "curve0_skin_derivs_1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 1
+   }
+  },
+  {
+   "name": "curve0_skin_derivs_2",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 2
+   }
+  },
+  {
+   "name": "curve0_skin_derivs_3",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 3
+   }
+  },
+  {
+   "name": "curve0_skin_derivs_4",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 4
+   }
+  },
+  {
+   "name": "curve0_cross_deriv",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "cross_deriv",
+    "cur": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "ns": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "ne": [
+     0.0,
+     0.6,
+     0.8
+    ],
+    "bs": [
+     1.0,
+     2.0,
+     0.5
+    ],
+    "be": [
+     -1.0,
+     1.5,
+     0.25
+    ]
+   }
+  },
+  {
+   "name": "curve0_sweep_tangent",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "dscale": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "rma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "drma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "curve0_sweep_tangent_scaled",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     1.0,
+     0.5,
+     2.0
+    ],
+    "scale": [
+     2.0,
+     0.5,
+     1.5
+    ],
+    "dscale": [
+     0.1,
+     -0.2,
+     0.3
+    ],
+    "rma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "drma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "curve0_rot_samples_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture curve0.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      -0.1
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "curve0_rot_next_only_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture curve0.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "curve0_rot_samples_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture curve0.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "u": 73.66106239388338,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      73.56106239388339
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      73.86106239388339
+     ]
+    }
+   }
+  },
+  {
+   "name": "curve0_rot_next_only_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture curve0.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "u": 73.66106239388338,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      73.86106239388339
+     ]
+    }
+   }
+  },
+  {
+   "name": "curve0_rot_samples_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture curve0.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "u": 199.08395241590102,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      198.98395241590103
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      199.283952415901
+     ]
+    }
+   }
+  },
+  {
+   "name": "curve0_rot_next_only_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture curve0.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "u": 199.08395241590102,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      199.283952415901
+     ]
+    }
+   }
+  },
+  {
+   "name": "curve0_rot_no_neighbours",
+   "upstream_ref": "tests/prog_test (upstream curve fixture curve0.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": null
+    }
+   }
+  },
+  {
+   "name": "curve0_rot_self",
+   "upstream_ref": "tests/prog_test (upstream curve fixture curve0.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "u": 99.54197620795051,
+    "zsrc": {
+     "zcur": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_bvec",
+   "upstream_ref": "tests/prog_test (upstream curve fixture DropCurveCurve.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b0": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "t": [
+     0.0,
+     10.572265220247612,
+     21.144530440495224,
+     31.716795660742836,
+     42.28906088099045,
+     52.86132610123806,
+     63.43359132148567,
+     74.00585654173328,
+     84.5781217619809
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_bvec_oblique",
+   "upstream_ref": "tests/prog_test (upstream curve fixture DropCurveCurve.smc)",
+   "inputs": {
+    "op": "bvec",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "b0": [
+     0.3,
+     -0.2,
+     0.9
+    ],
+    "t": [
+     0.0,
+     21.144530440495224,
+     42.28906088099045,
+     63.43359132148567,
+     84.5781217619809
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_skin_derivs_1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_skin_derivs_2",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 2
+   }
+  },
+  {
+   "name": "DropCurveCurve_skin_derivs_3",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 3
+   }
+  },
+  {
+   "name": "DropCurveCurve_skin_derivs_4",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "skin_derivs",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "v": [
+     0.5,
+     -1.0,
+     2.0
+    ],
+    "bndy": 4
+   }
+  },
+  {
+   "name": "DropCurveCurve_cross_deriv",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "cross_deriv",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "ns": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "ne": [
+     0.0,
+     0.6,
+     0.8
+    ],
+    "bs": [
+     1.0,
+     2.0,
+     0.5
+    ],
+    "be": [
+     -1.0,
+     1.5,
+     0.25
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_sweep_tangent",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "dscale": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "rma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "drma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_sweep_tangent_scaled",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateExtrude: sweep cross tangents)",
+   "inputs": {
+    "op": "sweep_tangent",
+    "dtraj": [
+     1.0,
+     0.5,
+     2.0
+    ],
+    "scale": [
+     2.0,
+     0.5,
+     1.5
+    ],
+    "dscale": [
+     0.1,
+     -0.2,
+     0.3
+    ],
+    "rma": [
+     [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "drma": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_rot_samples_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture DropCurveCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      -0.1
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_rot_next_only_0",
+   "upstream_ref": "tests/prog_test (upstream curve fixture DropCurveCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      0.2
+     ]
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_rot_samples_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture DropCurveCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "u": 31.29390505193293,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      31.19390505193293
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      31.49390505193293
+     ]
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_rot_next_only_1",
+   "upstream_ref": "tests/prog_test (upstream curve fixture DropCurveCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "u": 31.29390505193293,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      31.49390505193293
+     ]
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_rot_samples_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture DropCurveCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "u": 84.5781217619809,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": [
+      [
+       0.0,
+       0.1,
+       0.995
+      ],
+      84.4781217619809
+     ],
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      84.7781217619809
+     ]
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_rot_next_only_2",
+   "upstream_ref": "tests/prog_test (upstream curve fixture DropCurveCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "u": 84.5781217619809,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": [
+      [
+       0.1,
+       0.0,
+       0.995
+      ],
+      84.7781217619809
+     ]
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_rot_no_neighbours",
+   "upstream_ref": "tests/prog_test (upstream curve fixture DropCurveCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "u": 0,
+    "zsrc": {
+     "z": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "prev": null,
+     "next": null
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_rot_self",
+   "upstream_ref": "tests/prog_test (upstream curve fixture DropCurveCurve.smc)",
+   "inputs": {
+    "op": "rot",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "u": 42.28906088099045,
+    "zsrc": {
+     "zcur": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_approx_0.1",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 0.1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveCurve_approx_1.0",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 1.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveCurve_approx_10.0",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 10.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveCurve_approx_inplace",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "ds": [
+     1.0,
+     0.5,
+     0.25
+    ],
+    "de": [
+     -0.5,
+     1.0,
+     0.75
+    ],
+    "eps": 1.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "curve0_approx_rational",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinSurface, TestSmCreateSkinFromFaces: skin boundary derivatives on upstream curves)",
+   "inputs": {
+    "op": "approx",
+    "cur": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "ds": [
+     1,
+     0,
+     0
+    ],
+    "de": [
+     0,
+     1,
+     0
+    ],
+    "eps": 1.0,
+    "inplace": false
+   }
+  },
+  {
+   "name": "coons_bilinear",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinPrimitive: Coons patches of boundary curves)",
+   "inputs": {
+    "op": "coons",
+    "curves": [
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        3.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        3.0,
+        1.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        3.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        3.0,
+        1.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "coons_quadratic_edges",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinPrimitive: Coons patches of boundary curves)",
+   "inputs": {
+    "op": "coons",
+    "curves": [
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        -0.5,
+        0.2,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        3.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        3.5,
+        0.8,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        3.0,
+        1.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -0.4,
+        1.5,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        3.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       1.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        3.0,
+        1.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "coons_rational_edge",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinPrimitive: Coons patches of boundary curves)",
+   "inputs": {
+    "op": "coons",
+    "curves": [
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+       ],
+       [
+        4.0,
+        0.0,
+        0.0,
+        2.0
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        3.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        3.0,
+        1.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        3.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        3.0,
+        1.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "coons_collapsed_corner",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinPrimitive: Coons patches of boundary curves)",
+   "inputs": {
+    "op": "coons",
+    "curves": [
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        3.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        3.0,
+        1.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        3.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        3.0,
+        1.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "coons_domains",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateSkinPrimitive: Coons patches of boundary curves)",
+   "inputs": {
+    "op": "coons",
+    "curves": [
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       1.0,
+       1.0,
+       4.0,
+       4.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        3.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        3.0,
+        1.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       2.0,
+       2.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        3.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       -1.0,
+       -1.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "cpts": [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        3.0,
+        1.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       5.0,
+       5.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "merge_identical",
+   "upstream_ref": "NL_SrfAdv.cpp N_MergeKnotVectors (edge cases)",
+   "inputs": {
+    "op": "merge",
+    "p": 2,
+    "r": [
+     0,
+     0,
+     0,
+     0.5,
+     1,
+     1,
+     1
+    ],
+    "s": [
+     0,
+     0,
+     0,
+     0.5,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "merge_disjoint",
+   "upstream_ref": "NL_SrfAdv.cpp N_MergeKnotVectors (edge cases)",
+   "inputs": {
+    "op": "merge",
+    "p": 2,
+    "r": [
+     0,
+     0,
+     0,
+     0.25,
+     0.75,
+     1,
+     1,
+     1
+    ],
+    "s": [
+     0,
+     0,
+     0,
+     0.5,
+     0.5,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "merge_mult",
+   "upstream_ref": "NL_SrfAdv.cpp N_MergeKnotVectors (edge cases)",
+   "inputs": {
+    "op": "merge",
+    "p": 3,
+    "r": [
+     0,
+     0,
+     0,
+     0,
+     0.5,
+     0.5,
+     0.5,
+     1,
+     1,
+     1,
+     1
+    ],
+    "s": [
+     0,
+     0,
+     0,
+     0,
+     0.5,
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "merge_within_tol",
+   "upstream_ref": "NL_SrfAdv.cpp N_MergeKnotVectors (edge cases)",
+   "inputs": {
+    "op": "merge",
+    "p": 2,
+    "r": [
+     0,
+     0,
+     0,
+     0.5,
+     1,
+     1,
+     1
+    ],
+    "s": [
+     0,
+     0,
+     0,
+     0.50000000000001,
+     0.50000000000001,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "merge_bezier",
+   "upstream_ref": "NL_SrfAdv.cpp N_MergeKnotVectors (edge cases)",
+   "inputs": {
+    "op": "merge",
+    "p": 2,
+    "r": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "s": [
+     0,
+     0,
+     0,
+     0.3,
+     0.6,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "merge_end_mismatch",
+   "upstream_ref": "NL_SrfAdv.cpp N_MergeKnotVectors (edge cases)",
+   "inputs": {
+    "op": "merge",
+    "p": 2,
+    "r": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "s": [
+     0,
+     0,
+     0,
+     2,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "merge_high_degree_sanity",
+   "upstream_ref": "NL_SrfAdv.cpp N_MergeKnotVectors (edge cases)",
+   "inputs": {
+    "op": "merge",
+    "p": 6,
+    "r": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "s": [
+     0,
+     0,
+     0,
+     0.5,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "adjust_weight_equal",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustWeightScale (edge cases)",
+   "inputs": {
+    "op": "adjust_weight",
+    "pw": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "qw": [
+     1,
+     0,
+     0,
+     1
+    ],
+    "rw": [
+     1,
+     2,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "adjust_weight_unequal",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustWeightScale (edge cases)",
+   "inputs": {
+    "op": "adjust_weight",
+    "pw": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "qw": [
+     2,
+     0.5,
+     0,
+     2
+    ],
+    "rw": [
+     1.5,
+     3,
+     0.5,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "adjust_weight_parallel",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustWeightScale (edge cases)",
+   "inputs": {
+    "op": "adjust_weight",
+    "pw": [
+     0,
+     0,
+     0,
+     1
+    ],
+    "qw": [
+     1,
+     0,
+     0,
+     1
+    ],
+    "rw": [
+     3,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "adjust_weight_nonrational",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustWeightScale (edge cases)",
+   "inputs": {
+    "op": "adjust_weight",
+    "pw": [
+     0,
+     0,
+     0,
+     -1.7976931348623157e+308
+    ],
+    "qw": [
+     1,
+     1,
+     0,
+     -1.7976931348623157e+308
+    ],
+    "rw": [
+     2,
+     0,
+     1,
+     -1.7976931348623157e+308
+    ]
+   }
+  },
+  {
+   "name": "adjust_deriv_11",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 1,
+    "usg": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "adjust_deriv_12",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 1,
+    "usg": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "adjust_deriv_13",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 1,
+    "usg": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "adjust_deriv_14",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 1,
+    "usg": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "adjust_deriv_21",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 2,
+    "usg": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "adjust_deriv_22",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 2,
+    "usg": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "adjust_deriv_23",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 2,
+    "usg": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "adjust_deriv_24",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 2,
+    "usg": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "adjust_deriv_31",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 3,
+    "usg": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "adjust_deriv_32",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 3,
+    "usg": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "adjust_deriv_33",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 3,
+    "usg": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "adjust_deriv_34",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 3,
+    "usg": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "adjust_deriv_41",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 4,
+    "usg": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "adjust_deriv_42",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 4,
+    "usg": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "adjust_deriv_43",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 4,
+    "usg": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "adjust_deriv_44",
+   "upstream_ref": "NL_SrfAdv.cpp N_AdjustDerivSrf (all boundary pairs)",
+   "inputs": {
+    "op": "adjust_deriv",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        0,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "cst": 4,
+    "usg": 4,
+    "inplace": true
+   }
+  }
+ ]
+}

@@ -1,0 +1,478 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/1510",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/1897",
+ "test": "crates/kernel/src/issue_1510_tests.rs: a_split_in_the_plane_of_a_face_keeps_all_of_the_body",
+ "summary": "Split Body by a plane that a face of the body lies in: the ceiling of a groove that runs into a through hole. On truck the split first failed ('boolean Intersect: the operation failed: no result'); with the boolean's retry it then nudged each part's box off the plane on its own, so in the issue's part the cut faces ended at z = 1.5019 and 1.4981 and the slab between them was lost. Split Body takes each part as the body intersected with a box on one side of the plane, so that box's face coincides with the groove's ceiling. Geometry is the PR test's: a 40 x 20 x 2.5 plate, a through hole of radius 2.5 at (20, 10), and a groove 1.5 deep from the bottom, from the hole's centre out through the edge, 4 mm wide and 5 mm wide (as wide as the hole); the plane is z = 1.5. For each width: the plate alone (control), the part above and the part below. Volumes are closed form; the tolerance is 0.01 mm^3, since a cut face off the plane by 1.5e-5 mm moves either part's volume by more (each part meets the plane over 690 to 780 mm^2).",
+ "cases": [
+  {
+   "name": "plate_groove_4",
+   "note": "Control: the plate with the hole and a groove 4 mm wide, not split.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      20,
+      2.5
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      20,
+      10,
+      -1
+     ],
+     "radius": 2.5,
+     "height": 5
+    },
+    {
+     "op": "difference",
+     "id": "slab",
+     "a": "slab",
+     "b": "drill"
+    },
+    {
+     "op": "box",
+     "id": "groove",
+     "origin": [
+      20,
+      8.0,
+      -1
+     ],
+     "size": [
+      21,
+      4,
+      2.5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "slab",
+     "b": "groove"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1844.1060074564248,
+     "tol": 0.01,
+     "formula": "2.5*(40*20 - pi*2.5^2) - 1.5*G, G = 4*20 - (2*sqrt(2.5^2 - 2^2) + 2.5^2*asin(2/2.5)), the groove less its part in the hole (tol: the split parts' 0.01 mm^3)"
+    }
+   }
+  },
+  {
+   "name": "above_groove_4",
+   "note": "The part above z = 1.5: the body intersected with a box whose bottom face lies in the groove's ceiling.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      20,
+      2.5
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      20,
+      10,
+      -1
+     ],
+     "radius": 2.5,
+     "height": 5
+    },
+    {
+     "op": "difference",
+     "id": "slab",
+     "a": "slab",
+     "b": "drill"
+    },
+    {
+     "op": "box",
+     "id": "groove",
+     "origin": [
+      20,
+      8.0,
+      -1
+     ],
+     "size": [
+      21,
+      4,
+      2.5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "slab",
+     "b": "groove"
+    },
+    {
+     "op": "box",
+     "id": "half",
+     "origin": [
+      -1,
+      -1,
+      1.5
+     ],
+     "size": [
+      42,
+      22,
+      2
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "body",
+     "b": "half"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 780.3650459150638,
+     "tol": 0.01,
+     "formula": "1*(40*20 - pi*2.5^2) (tol: the part meets the plane over 780.37 mm^2, so a cut face 1.5e-5 mm off it moves the volume by more)"
+    }
+   }
+  },
+  {
+   "name": "below_groove_4",
+   "note": "The part below z = 1.5: the body intersected with a box whose top face lies in the groove's ceiling.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      20,
+      2.5
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      20,
+      10,
+      -1
+     ],
+     "radius": 2.5,
+     "height": 5
+    },
+    {
+     "op": "difference",
+     "id": "slab",
+     "a": "slab",
+     "b": "drill"
+    },
+    {
+     "op": "box",
+     "id": "groove",
+     "origin": [
+      20,
+      8.0,
+      -1
+     ],
+     "size": [
+      21,
+      4,
+      2.5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "slab",
+     "b": "groove"
+    },
+    {
+     "op": "box",
+     "id": "half",
+     "origin": [
+      -1,
+      -1,
+      -1
+     ],
+     "size": [
+      42,
+      22,
+      2.5
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "body",
+     "b": "half"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1063.7409615413608,
+     "tol": 0.01,
+     "formula": "1.5*(40*20 - pi*2.5^2 - G), G = 4*20 - (2*sqrt(2.5^2 - 2^2) + 2.5^2*asin(2/2.5)) (tol: the part meets the plane over 709.16 mm^2, so a cut face 1.5e-5 mm off it moves the volume by more)"
+    }
+   }
+  },
+  {
+   "name": "plate_groove_5",
+   "note": "Control: the plate with the hole and a groove 5 mm wide (as wide as the hole, its sides tangent to it), not split.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      20,
+      2.5
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      20,
+      10,
+      -1
+     ],
+     "radius": 2.5,
+     "height": 5
+    },
+    {
+     "op": "difference",
+     "id": "slab",
+     "a": "slab",
+     "b": "drill"
+    },
+    {
+     "op": "box",
+     "id": "groove",
+     "origin": [
+      20,
+      7.5,
+      -1
+     ],
+     "size": [
+      21,
+      5,
+      2.5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "slab",
+     "b": "groove"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1815.6388303513618,
+     "tol": 0.01,
+     "formula": "2.5*(40*20 - pi*2.5^2) - 1.5*G, G = 5*20 - (2.5*sqrt(2.5^2 - 2.5^2) + 2.5^2*asin(2.5/2.5)), the groove less its part in the hole (tol: the split parts' 0.01 mm^3)"
+    }
+   }
+  },
+  {
+   "name": "above_groove_5",
+   "note": "The part above z = 1.5: the body intersected with a box whose bottom face lies in the groove's ceiling.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      20,
+      2.5
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      20,
+      10,
+      -1
+     ],
+     "radius": 2.5,
+     "height": 5
+    },
+    {
+     "op": "difference",
+     "id": "slab",
+     "a": "slab",
+     "b": "drill"
+    },
+    {
+     "op": "box",
+     "id": "groove",
+     "origin": [
+      20,
+      7.5,
+      -1
+     ],
+     "size": [
+      21,
+      5,
+      2.5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "slab",
+     "b": "groove"
+    },
+    {
+     "op": "box",
+     "id": "half",
+     "origin": [
+      -1,
+      -1,
+      1.5
+     ],
+     "size": [
+      42,
+      22,
+      2
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "body",
+     "b": "half"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 780.3650459150638,
+     "tol": 0.01,
+     "formula": "1*(40*20 - pi*2.5^2) (tol: the part meets the plane over 780.37 mm^2, so a cut face 1.5e-5 mm off it moves the volume by more)"
+    }
+   }
+  },
+  {
+   "name": "below_groove_5",
+   "note": "The part below z = 1.5: the body intersected with a box whose top face lies in the groove's ceiling.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      20,
+      2.5
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "drill",
+     "origin": [
+      20,
+      10,
+      -1
+     ],
+     "radius": 2.5,
+     "height": 5
+    },
+    {
+     "op": "difference",
+     "id": "slab",
+     "a": "slab",
+     "b": "drill"
+    },
+    {
+     "op": "box",
+     "id": "groove",
+     "origin": [
+      20,
+      7.5,
+      -1
+     ],
+     "size": [
+      21,
+      5,
+      2.5
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "body",
+     "a": "slab",
+     "b": "groove"
+    },
+    {
+     "op": "box",
+     "id": "half",
+     "origin": [
+      -1,
+      -1,
+      -1
+     ],
+     "size": [
+      42,
+      22,
+      2.5
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "body",
+     "b": "half"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1035.2737844362978,
+     "tol": 0.01,
+     "formula": "1.5*(40*20 - pi*2.5^2 - G), G = 5*20 - (2.5*sqrt(2.5^2 - 2.5^2) + 2.5^2*asin(2.5/2.5)) (tol: the part meets the plane over 690.18 mm^2, so a cut face 1.5e-5 mm off it moves the volume by more)"
+    }
+   }
+  }
+ ]
+}

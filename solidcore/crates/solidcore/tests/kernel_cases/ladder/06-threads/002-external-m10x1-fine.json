@@ -1,0 +1,166 @@
+{
+  "area": "ladder/06-threads",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b17"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b18"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b17",
+        "b18"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "002-external-m10x1-fine",
+  "expected": {
+    "body_count": 1,
+    "method": "ISO 68-1 basic profile (60 deg, root flat P/4 at d - 5H/4 ... minor d1 = d - 1.0825 P, crest flat P/8): a helical groove of fixed section is a screw motion, so averaged over the turn every meridian half-plane holds the same section and V = 2 pi int int r m(r) dr dz over the stock's section, m the material fraction per pitch; the groove runs out past free ends. Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool); P = 1, L = 30",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.005
+    },
+    "volume_mm3": 2081.901104148,
+    "what": "a modelled fine M10x1 thread over a d10 x 30 cylinder"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 1581.5205133736267,
+      "body_count": 1,
+      "edges": 372,
+      "faces": 126,
+      "vertices": 248,
+      "volume_mm3": 2081.900137123529
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 525,
+      "faces": 217,
+      "vertices": 310
+    }
+  },
+  "records": "002-external-m10x1-fine.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b19"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1581.5205133736267,
+      "body_count": 1,
+      "edges": 372,
+      "faces": 126,
+      "vertices": 248,
+      "volume_mm3": 2081.900137123529
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a modelled fine M10x1 thread over a d10 x 30 cylinder",
+  "why_not": []
+}

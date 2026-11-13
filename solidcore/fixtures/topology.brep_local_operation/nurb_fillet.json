@@ -1,0 +1,148 @@
+{
+  "cases": [
+    {
+      "name": "nurb_fillet_face0_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "replaced": [
+          {
+            "face": 0,
+            "offset": 0,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "nurb_fillet_face1_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "replaced": [
+          {
+            "face": 1,
+            "offset": 0,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "nurb_fillet_face2_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "replaced": [
+          {
+            "face": 2,
+            "offset": 0,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "nurb_fillet_face3_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "replaced": [
+          {
+            "face": 3,
+            "offset": 0,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "nurb_fillet_face4_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "replaced": [
+          {
+            "face": 4,
+            "offset": 0,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "nurb_fillet_face5_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "replaced": [
+          {
+            "face": 5,
+            "offset": 0,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "nurb_fillet_face6_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "replaced": [
+          {
+            "face": 6,
+            "offset": 0,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "nurb_fillet_face7_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "replaced": [
+          {
+            "face": 7,
+            "offset": 0,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

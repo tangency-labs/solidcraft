@@ -3,9 +3,10 @@ use super::Column;
 use crate::{DocError, Document, FeatureKind, ModelState, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
-pub(crate) fn shell_plane_family(planes: impl IntoIterator<Item = Option<solidcraft_geom::Plane>>) -> bool {
+pub(crate) fn shell_plane_family(planes: impl IntoIterator<Item = Option<solidcore_record::Plane>>) -> bool {
     let mut planes = planes.into_iter();
     let Some(Some(first)) = planes.next() else { return false };
     first.origin.is_finite() && first.x.is_finite() && first.y.is_finite() && planes.all(|plane| plane == Some(first))
@@ -299,7 +300,34 @@ impl Document {
                 matches!(source, Some(solidcraft_kernel::FaceSource::Imported { item: current_item, face: current_face, payload_sha256: Some(digest), producer: Some(producer) }) if current_item == item && current_face == face && digest == payload_sha256 && *producer == target.origin_feature).then_some(index)
             }).collect();
             if indices.is_empty() {
-                return Err(DocError::Unknown("immutable import face certificate no longer exists".into()));
+                // A linked design's face is named after its name in that design (`link:…`, see
+                // lineage::link_role): Update Links brings in a new file, whose digest no
+                // certificate matches, but a face it left as it was keeps that name. Find it by
+                // the name, as joints on linked faces do (#3330); a face numbered by its place
+                // (`face:<k>`) is not followed, since another face may take that place.
+                let linked = crate::persistent_name::split_feature(&target.name)
+                    .is_some_and(|(id, role)| id == target.origin_feature && role.starts_with("link:"));
+                let names = crate::naming::face_names(body);
+                let named: Vec<usize> = if linked {
+                    names
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, name)| {
+                            crate::naming::strip_piece(name) == target.name
+                                && matches!(
+                                    body.body.face_sources().and_then(|sources| sources.get(*index)),
+                                    Some(Some(solidcraft_kernel::FaceSource::Imported { producer: Some(producer), .. })) if *producer == target.origin_feature
+                                )
+                        })
+                        .map(|(index, _)| index)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                if named.is_empty() {
+                    return Err(DocError::Unknown("immutable import face certificate no longer exists".into()));
+                }
+                return Ok(self.without_copies(body, named));
             }
             return Ok(self.without_copies(body, indices));
         }
@@ -325,24 +353,25 @@ impl Document {
         }
         // Caps and box faces must share an oriented plane. This rejects generic cap-role
         // collisions while permitting the coplanar pieces of a split supported face.
-        let mesh = body.mesh();
         let mut plane: Option<(Vec3, Vec3)> = None;
-        for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
-            if indices.binary_search(&(*face as usize)).is_err() {
-                continue;
-            }
-            let Some([a, b, c]) = mesh.tri(triangle) else { continue };
-            let Some(normal) = (b - a).cross(c - a).normalized() else { continue };
-            if let Some((point, base)) = plane {
-                let magnitude = [point.x, point.y, point.z, a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z]
+        for &index in &indices {
+            let Some(pf) = body.body.planar_face(index).or_else(|| body.body.face_plane(index)) else {
+                return Err(DocError::Invalid("configured face has no valid surface".into()));
+            };
+            let Some(normal) = pf.normal().normalized() else {
+                return Err(DocError::Invalid("configured face has no valid surface".into()));
+            };
+            let point = pf.origin;
+            if let Some((first_point, base)) = plane {
+                let magnitude = [first_point.x, first_point.y, first_point.z, point.x, point.y, point.z]
                     .iter()
                     .fold(body.body.size(), |scale, value| scale.max(value.abs()));
                 let tolerance = (magnitude * f64::EPSILON * 128.0).max(1e-7);
-                if normal.dot(base) < 1.0 - 1e-6 || [a, b, c].iter().any(|vertex| (*vertex - point).dot(base).abs() > tolerance) {
+                if normal.dot(base) < 1.0 - 1e-6 || (point - first_point).dot(base).abs() > tolerance {
                     return Err(DocError::Invalid("face lineage names more than one oriented surface".into()));
                 }
             } else {
-                plane = Some((a, normal));
+                plane = Some((point, normal));
             }
         }
         if plane.is_none() {

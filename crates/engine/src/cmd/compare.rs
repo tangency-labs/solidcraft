@@ -5,15 +5,27 @@
 //! well as any; each place's volume, centre and box are then measured exactly, on the pieces of
 //! the two cuts a − b and b − a that lie there, as `inspect.measure` measures a body.
 
-use serde_json::{Value, json};
+use serde_json::Value;
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
 use solidcraft_geom::compare::{self, CompareOptions, Side};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::bad;
+use crate::schema::compare::{
+    Bounds, CompareParams, CompareSide, Comparison, Deviation, Deviations, Difference, MeasuredBy, Region, Resolution, Sampling, SideTotal,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.compare", "Compare Bodies", compare_bodies).icon("compare").params(
+const CONTRACT: TypedContract<CompareParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.compare", "Compare Bodies", crate::checked!("inspect.compare", compare_bodies))
+    .icon("compare")
+    .contract(&CONTRACT)
+    .output(output_schema_for::<Comparison>)
+    .params(
     "a, b: body names (default: the two selected bodies, or the design's only two), in world placement; tolerance?: mm (0.001 to 10, default 0.01): \
      surfaces closer than this agree; spacing?: mm (default 0.5): the largest piece of a face sampled as one point, coarser for a body that would need \
      more than max_points? (default 8 million, up to 50 million) samples; max_regions? (default 50); color?: true | {only_in_a?, only_in_b?: \"#rrggbb\"} \
@@ -30,10 +42,10 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.compare", "Com
 const ONLY_IN_A: [u8; 3] = [0xe0, 0x31, 0x31];
 const ONLY_IN_B: [u8; 3] = [0x2f, 0x9e, 0x44];
 
-fn side_name(s: Side) -> &'static str {
+fn side_of(s: Side) -> CompareSide {
     match s {
-        Side::OnlyInA => "only_in_a",
-        Side::OnlyInB => "only_in_b",
+        Side::OnlyInA => CompareSide::OnlyInA,
+        Side::OnlyInB => CompareSide::OnlyInB,
     }
 }
 
@@ -103,21 +115,21 @@ fn v3(v: &Value) -> Option<Vec3> {
 }
 
 /// b − a of the two bodies' measures.
-fn difference(ma: &Value, mb: &Value) -> Value {
+fn difference(ma: &Value, mb: &Value) -> Difference {
     let f = |m: &Value, k: &str| m.get(k).and_then(Value::as_f64);
     let sub = |x: Option<f64>, y: Option<f64>| x.zip(y).map(|(x, y)| y - x);
     let (va, vb) = (f(ma, "volume_mm3"), f(mb, "volume_mm3"));
     let com = v3(&ma["center_of_mass"]).zip(v3(&mb["center_of_mass"])).map(|(a, b)| b - a);
-    let corner = |k: &str| v3(&ma["bbox"][k]).zip(v3(&mb["bbox"][k])).map(|(a, b)| b - a);
-    json!({
-        "volume_mm3": sub(va, vb),
-        "volume_percent": va.zip(vb).filter(|(a, _)| a.abs() > 0.0).map(|(a, b)| 100.0 * (b - a) / a),
-        "area_mm2": sub(f(ma, "area_mm2"), f(mb, "area_mm2")),
-        "center_of_mass": com,
-        "center_of_mass_distance_mm": com.map(Vec3::len),
-        "bbox_min": corner("min"),
-        "bbox_max": corner("max"),
-    })
+    let corner = |k: &str| v3(&ma["bbox"][k]).zip(v3(&mb["bbox"][k])).map(|(a, b)| (b - a).into());
+    Difference {
+        volume_mm3: sub(va, vb),
+        volume_percent: va.zip(vb).filter(|(a, _)| a.abs() > 0.0).map(|(a, b)| 100.0 * (b - a) / a),
+        area_mm2: sub(f(ma, "area_mm2"), f(mb, "area_mm2")),
+        center_of_mass: com.map(Into::into),
+        center_of_mass_distance_mm: com.map(Vec3::len),
+        bbox_min: corner("min"),
+        bbox_max: corner("max"),
+    }
 }
 
 /// The volume a closed mesh encloses (divergence theorem, about its box's centre).
@@ -243,8 +255,8 @@ fn exact_regions(
     (measured, notes)
 }
 
-fn deviation_json(d: &compare::Deviation) -> Value {
-    json!({"max_mm": d.max, "mean_mm": d.mean, "at": d.at, "area_beyond_mm2": d.beyond_area, "area_mm2": d.area, "points": d.points})
+fn deviation(d: &compare::Deviation) -> Deviation {
+    Deviation { max_mm: d.max, mean_mm: d.mean, at: d.at.into(), area_beyond_mm2: d.beyond_area, area_mm2: d.area, points: d.points }
 }
 
 fn compare_bodies(s: &mut Session, p: &Value) -> Result<Value> {
@@ -306,30 +318,36 @@ fn compare_bodies(s: &mut Session, p: &Value) -> Result<Value> {
         exact_notes.iter().find(mine).or_else(|| exact_notes.last()).cloned().unwrap_or_else(|| "the exact cut gave no piece here".to_string())
     };
     let axis = |k: usize| ["X", "Y", "Z"].get(k).copied().unwrap_or("?");
-    let regions: Vec<Value> = order
+    let regions: Vec<Region> = order
         .iter()
         .enumerate()
         .filter_map(|(i, &k)| c.regions.get(k).map(|r| (i, k, r)))
         .map(|(i, k, r)| {
             let m = measured(k);
-            json!({
-                "index": i + 1,
-                "side": side_name(r.side),
-                "material_of": if r.side == Side::OnlyInA { &na } else { &nb },
-                "volume_mm3": m.map(|m| m.volume),
-                "measured_by": if m.is_some() { "boolean" } else { "not measured" },
-                "not_measured": if m.is_some() { Value::Null } else { json!(reason(k)) },
-                "area_mm2": r.area_a + r.area_b,
-                "area_a_mm2": r.area_a,
-                "area_b_mm2": r.area_b,
-                "max_deviation_mm": r.max_deviation,
-                "at": r.at,
-                "center": m.map(|m| m.center),
-                "bbox": m.map(|m| json!({"min": m.bbox.min, "max": m.bbox.max})).unwrap_or_else(|| json!({"min": r.bbox.min, "max": r.bbox.max})),
-                "faces_a": r.faces_a.iter().map(|x| x.0).collect::<Vec<u32>>(),
-                "faces_b": r.faces_b.iter().map(|x| x.0).collect::<Vec<u32>>(),
-                "resolution": {"along": axis(r.lines.axis), "line_spacing_mm": r.lines.spacing, "lines": r.lines.count, "skipped_lines": r.lines.skipped},
-            })
+            let bbox = m.map_or(r.bbox, |m| m.bbox);
+            Region {
+                index: i + 1,
+                side: side_of(r.side),
+                material_of: if r.side == Side::OnlyInA { na.clone() } else { nb.clone() },
+                volume_mm3: m.map(|m| m.volume),
+                measured_by: if m.is_some() { MeasuredBy::Boolean } else { MeasuredBy::NotMeasured },
+                not_measured: if m.is_some() { None } else { Some(reason(k)) },
+                area_mm2: r.area_a + r.area_b,
+                area_a_mm2: r.area_a,
+                area_b_mm2: r.area_b,
+                max_deviation_mm: r.max_deviation,
+                at: r.at.into(),
+                center: m.map(|m| m.center.into()),
+                bbox: Bounds { min: bbox.min.into(), max: bbox.max.into() },
+                faces_a: r.faces_a.iter().map(|x| x.0).collect(),
+                faces_b: r.faces_b.iter().map(|x| x.0).collect(),
+                resolution: Resolution {
+                    along: axis(r.lines.axis).to_string(),
+                    line_spacing_mm: r.lines.spacing,
+                    lines: r.lines.count,
+                    skipped_lines: r.lines.skipped,
+                },
+            }
         })
         .collect();
     // A side's total, or none when one of its regions is not measured.
@@ -359,25 +377,28 @@ fn compare_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     if !warnings.is_empty() {
         verdict += &format!(" ({} warning{})", warnings.len(), if warnings.len() == 1 { "" } else { "s" });
     }
-    let mut out = json!({
-        "a": measure_a,
-        "b": measure_b,
-        "difference": difference(&measure_a, &measure_b),
-        "tolerance_mm": tolerance,
-        "deviation": {"a_to_b": deviation_json(&c.a_to_b), "b_to_a": deviation_json(&c.b_to_a), "max_mm": worst},
-        "identical": identical,
-        "verdict": verdict,
-        "regions": regions,
-        "only_in_a": {"regions": ca, "volume_mm3": va},
-        "only_in_b": {"regions": cb, "volume_mm3": vb},
-        "unlisted_regions": c.unlisted,
-        "warnings": warnings,
-        "sampling": {"spacing_mm": c.spacing, "chord_mm": chord, "triangles_a": mesh_a.triangles.len(), "triangles_b": mesh_b.triangles.len()},
-    });
-    if let Some(colors) = colors {
-        out["colored_faces"] = json!(color_regions(s, &c, [&na, &nb], colors)?);
-    }
-    Ok(out)
+    let colored_faces = match colors {
+        Some(colors) => Some(color_regions(s, &c, [&na, &nb], colors)?),
+        None => None,
+    };
+    let out = Comparison {
+        difference: difference(&measure_a, &measure_b),
+        a: measure_a.as_object().cloned().unwrap_or_default(),
+        b: measure_b.as_object().cloned().unwrap_or_default(),
+        tolerance_mm: tolerance,
+        deviation: Deviations { a_to_b: deviation(&c.a_to_b), b_to_a: deviation(&c.b_to_a), max_mm: worst },
+        identical,
+        verdict,
+        regions,
+        only_in_a: SideTotal { regions: ca, volume_mm3: va },
+        only_in_b: SideTotal { regions: cb, volume_mm3: vb },
+        unlisted_regions: c.unlisted,
+        warnings,
+        sampling: Sampling { spacing_mm: c.spacing, chord_mm: chord, triangles_a: mesh_a.triangles.len(), triangles_b: mesh_b.triangles.len() },
+        colored_faces,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(out).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// A face is coloured for a region when at least this share of it deviates there.

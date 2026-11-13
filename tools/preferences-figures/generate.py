@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile docs/design/preferences/figures/*.svg into ui_kit/preferences_figure_data.rs.
+"""Compile docs/design/preferences/figures/*.svg into crates/ui-kit/src/preferences_figure_data.rs.
 
 Each figure becomes a list of drawing operations (rectangles, circles, flattened polygons, text) in
 the figure's own coordinates, with colours as roles (`Ink`) instead of hex values. A role is the
@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 FIGS = os.path.join(ROOT, 'docs/design/preferences/figures')
-OUT = os.path.join(ROOT, 'crates/ui-egui/src/ui_kit/preferences_figure_data.rs')
+OUT = os.path.join(ROOT, 'crates/ui-kit/src/preferences_figure_data.rs')
 
 # Skipped: the Orientation figures already exist in ui_kit and stay as they are.
 SKIP = {'orientation-z-up', 'orientation-y-up', 'style-shaded-edges'}
@@ -370,13 +370,7 @@ class Walker:
                 stops = [(num(st.get('offset')), parse_color(st.get('stop-color')), num(st.get('stop-opacity'), 1.0)) for st in g]
                 for pts, closed in flatten_path(c.get('d'), mc):
                     (x0, y0), (x1, y1) = pts[0], pts[-1]
-                    n = 10
-                    for k in range(n):
-                        a0, a1 = k / n, (k + 1) / n
-                        am = (a0 + a1) / 2
-                        al = stops[0][2] + (stops[-1][2] - stops[0][2]) * am
-                        seg = [(x0 + (x1 - x0) * a0, y0 + (y1 - y0) * a0), (x0 + (x1 - x0) * a1, y0 + (y1 - y0) * a1)]
-                        self.ops.append(('poly', seg, False, None, 1.0, stops[0][1], al, sw, None, rc))
+                    self.ops.append(('gline', x0, y0, x1, y1, stops[0][1], stops[0][2], stops[-1][2], sw))
             elif t == 'path':
                 for pts, closed in flatten_path(c.get('d'), mc):
                     if len(pts) >= 2:
@@ -522,6 +516,10 @@ def emit(name, ops_l, ops_d, slotsets=None):
             out.append('Op::Poly { pts: &[%s], closed: %s, fill: %s, grad: %s, line: %s }' % (
                 pts_s, 'true' if closed else 'false', fill_s, grad,
                 line(s, sd, so, sw, dash, rc, ss if s and slotsets is not None else None)))
+        elif k == 'gline':
+            _, x0, y0, x1, y1, col, a0, a1, sw = a
+            out.append('Op::Gradient { pts: [[%s, %s], [%s, %s]], w: %s, ink: Ink::%s, a: [%s, %s] }' % (
+                f32(x0), f32(y0), f32(x1), f32(y1), f32(sw), ink_of(col[0], b[5][0]), f32(a0), f32(a1)))
         elif k == 'glow':
             _, x, y, rx, ry, al = a
             out.append('Op::Glow { c: [%s, %s, %s, %s], a: %s }' % (f32(x), f32(y), f32(rx), f32(ry), f32(al)))
@@ -578,6 +576,9 @@ def main():
     parts.append('\n'.join(slot_table) + '\n')
     parts.append('use egui::{Painter, Rect};\nuse super::preferences_figure_ops::paint;\n')
     for n in names:
+        if n == 'mouse-mapping':
+            parts.append('/// The mouse figure, with its own slightly heavier lettering.\npub(crate) fn paint_mouse_mapping(p: &Painter, rect: Rect) {\n    super::preferences_figure_ops::paint_mouse(p, rect);\n}\n')
+            continue
         parts.append('/// The `%s` figure of `docs/design/preferences/figures`.\npub(crate) fn %s(p: &Painter, rect: Rect) {\n    paint(p, rect, &%s, None, None);\n}\n' % (n, fn_name(n), const_name(n)))
     parts.append('/// Every figure painter by file name, for the gallery and the tests.\npub(crate) const FIGURES: &[(&str, [f32; 2], fn(&Painter, Rect))] = &[\n%s];\n' % ''.join('    ("%s", %s.size, %s),\n' % (n, const_name(n), fn_name(n)) for n in names))
     open(OUT, 'w', encoding='utf8', newline='\n').write('\n'.join(parts))

@@ -2,7 +2,8 @@
 //! face and edge origin checked against the geometry of the operands (in tests only: the history
 //! itself is recorded, never sampled), and the exact origins asserted where the outcome is known.
 
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::boolean_record::tests::{self, Reach, changes, to_edge, to_face};
@@ -456,7 +457,11 @@ fn mirrored_copy_keeps_every_face_and_edge() {
 /// The block with a face painted: an authored boundary, so the cuts leave the faces they split
 /// across their slabs in pieces (none of them joined on their common supports).
 fn painted_cube() -> Body {
-    cube().with_paint(Some(crate::Paint { opacity: 1., faces: vec![crate::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }] }))
+    cube().with_paint(Some(crate::Paint {
+        opacity: 1.,
+        faces: vec![crate::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1., name: None }],
+        name: None,
+    }))
 }
 
 /// The block `b` with box cuts of each common shape: a notch through the back, a pocket, a
@@ -523,7 +528,6 @@ fn chamfer_after_box_cuts() {
 
 /// Shell, offset faces and draft straight through `crate::offset_backend`: refusals, and their
 /// histories checked against the geometry and their numbers against the analytic ones.
-#[cfg(feature = "smlib")]
 mod smlib {
     use super::*;
     use crate::offset_backend;

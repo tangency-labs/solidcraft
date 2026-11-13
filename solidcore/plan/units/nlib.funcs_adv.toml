@@ -1,0 +1,12 @@
+id = "nlib.funcs_adv"
+upstream = ["source/SMLib/src/NL_FuncsAdv.cpp"]
+rust_module = "nurbs::funcs_adv"
+depends_on = ["nlib.bezier", "nlib.crv_basic", "nlib.funcs_basic", "nlib.knots", "nlib.math"]
+soft_depends_on = ["nlib.basis_basic", "nlib.crv_tool_p1"]
+est_lines = 1676
+layer = 6
+tests = ["SM_API_test:TestSmCreateSkinSurface", "SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCreateSkinFromFaces", "SM_API_test:TestSmCreateSkinPrimitive", "prog_test:my_test_parallel_projection", "prog_test:my_test_tsurf_projection"]
+status = "green"
+claimed_by = "swarm-nlib.funcs_adv-a1"
+claimed_at = "2026-10-12T21:07:22Z"
+notes = "5 fns (N_CrvFuncRefine, N_CrvFuncDeriv, N_CrvFuncMultiplyCrvFunc, N_CrvFuncMultiplyCrv, N_CrvFuncMultiplyCrv4d); difftest green: 2080 cases (80 fixture incl. 6 upstream .smc curves + 2000 generated), 0 deferred, bit-exact; no UNPORTED(nlib.funcs_adv) stubs existed to wire"

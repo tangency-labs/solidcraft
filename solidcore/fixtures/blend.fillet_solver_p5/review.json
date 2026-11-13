@@ -1,0 +1,5086 @@
+{
+  "cases": [
+    {
+      "name": "review_huge_tiny_pair_100_100",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_100_101",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_100_102",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_100_103",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_100_104",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_100_109",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_101_100",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_101_101",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_101_102",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_101_103",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_101_104",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_101_109",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_102_100",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_102_101",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_102_102",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_102_103",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_102_104",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_102_109",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_103_100",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_103_101",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_103_102",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_103_103",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_103_104",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_103_109",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_104_100",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_104_101",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_104_102",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_104_103",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_104_104",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_104_109",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_109_100",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_109_101",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_109_102",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_109_103",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_109_104",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_huge_tiny_pair_109_109",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_0_zero",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_0_inverted",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_0_huge",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_0_tiny",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_0_narrow",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_0_offset",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 101
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 104
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 109
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_1_zero",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 1,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_1_inverted",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 1,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_1_huge",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 1,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_1_tiny",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 1,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_1_narrow",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 1,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_1_offset",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 1,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 101
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 104
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 109
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_2_zero",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 2,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_2_inverted",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 2,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_2_huge",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 2,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_2_tiny",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 2,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_2_narrow",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 2,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_2_offset",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 2,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 101
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 104
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 109
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_3_zero",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 3,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_3_inverted",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 3,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_3_huge",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 3,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_3_tiny",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 3,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_3_narrow",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 3,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_3_offset",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 3,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 101
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 104
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 109
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_4_zero",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 4,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_4_inverted",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 4,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_4_huge",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 4,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_4_tiny",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 4,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_4_narrow",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 4,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_4_offset",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 4,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 101
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 104
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 109
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_5_zero",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 5,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_5_inverted",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 5,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_5_huge",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 5,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_5_tiny",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 5,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_5_narrow",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 5,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_5_offset",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 5,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 101
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 104
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 109
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_6_zero",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 6,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_6_inverted",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 6,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": -1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": -1,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_6_huge",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 6,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 101
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 104
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 109
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 100
+            },
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": -1e+300,
+              "max": 1e+300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_6_tiny",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 6,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 101
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 104
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 109
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 100
+            },
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1e-300,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_6_narrow",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 6,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 101
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 104
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 109
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 100
+            },
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1,
+              "max": 1.000000000001,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_multi_6_offset",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 0,
+        "kind": 6,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 101
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 104
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 109
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 100
+            },
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 1000000000000000.0,
+              "max": 1000000000000001.0,
+              "class": 103
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_classify_1_0",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_classify_2_0",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 2,
+        "kind": 0,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_classify_1_3",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 1,
+        "kind": 3,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_classify_2_3",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 2,
+        "kind": 3,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_classify_1_6",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 1,
+        "kind": 6,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "review_classify_2_6",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:7161-7295",
+      "inputs": {
+        "op": 2,
+        "kind": 6,
+        "corner": 0,
+        "adjusted": [
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1,
+          0,
+          1
+        ],
+        "rails": [
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ],
+          [
+            {
+              "min": 0,
+              "max": 1,
+              "class": 102
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

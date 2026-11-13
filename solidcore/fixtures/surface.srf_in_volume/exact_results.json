@@ -1,0 +1,202 @@
+{
+  "cases": [
+    {
+      "name": "exact_identity_in",
+      "upstream_ref": "SmSrfInVolume.cpp:284; SmVolume.cpp:2811; SmTransform.cpp:1070 (identity, rational net, non-unit knot domains)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "bspline", "bss": {"srf": {"p": 1, "q": 1, "net": [[[1, 2, 3, 1], [0, 4, 2, 2]], [[6, -2, 4, 2], [3, 6, 9, 3]]], "u": [-2, -2, 3, 3], "v": [4, 4, 6, 6]}}},
+          "volume": [{"kind": 1, "t": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]}]
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_identity_param",
+      "upstream_ref": "SmSrfInVolume.cpp:284; SmVolume.cpp:2879; SmTransform.cpp:1070 (parameter-space identity)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "bspline", "bss": {"srf": {"p": 1, "q": 1, "net": [[[1, 2, 3, 1], [0, 4, 2, 2]], [[6, -2, 4, 2], [3, 6, 9, 3]]], "u": [-2, -2, 3, 3], "v": [4, 4, 6, 6]}}},
+          "volume": [{"kind": 1, "t": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]}],
+          "in_param": true
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_rigid_in",
+      "upstream_ref": "SmTransform.cpp:1098-1103 (quarter-turn and weighted translation)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "bspline", "bss": {"srf": {"p": 1, "q": 1, "net": [[[1, 2, 3, 1], [0, 4, 2, 2]], [[6, -2, 4, 2], [3, 6, 9, 3]]], "u": [-2, -2, 3, 3], "v": [4, 4, 6, 6]}}},
+          "volume": [{"kind": 1, "t": [[2, -3, 5], [0, 1, 0], [-1, 0, 0], [0, 0, 1]]}]
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_rigid_param",
+      "upstream_ref": "SmTransform.cpp:1098-1103 (parameter-space quarter-turn and weighted translation)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "bspline", "bss": {"srf": {"p": 1, "q": 1, "net": [[[1, 2, 3, 1], [0, 4, 2, 2]], [[6, -2, 4, 2], [3, 6, 9, 3]]], "u": [-2, -2, 3, 3], "v": [4, 4, 6, 6]}}},
+          "volume": [{"kind": 1, "t": [[2, -3, 5], [0, 1, 0], [-1, 0, 0], [0, 0, 1]]}],
+          "in_param": true
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_chain_in",
+      "upstream_ref": "SmVolume.cpp:2822-2837 (three noncommuting maps, preserved rational weights and knots)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "bspline", "bss": {"srf": {"p": 1, "q": 1, "net": [[[1, 2, 3, 1], [0, 4, 2, 2]], [[6, -2, 4, 2], [3, 6, 9, 3]]], "u": [-2, -2, 3, 3], "v": [4, 4, 6, 6]}}},
+          "volume": [
+            {"kind": 1, "t": [[2, -3, 5], [0, 1, 0], [-1, 0, 0], [0, 0, 1]]},
+            {"kind": 1, "t": [[-4, 1, 2], [1, 0, 0], [0, 0, 1], [0, -1, 0]]},
+            {"kind": 1, "t": [[1, 2, -1], [1, 0, 0], [0, 1, 0], [0, 0, 1]]}
+          ]
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_chain_param",
+      "upstream_ref": "SmVolume.cpp:2888-2911 (parameter-space first map and subsequent in-space maps)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "bspline", "bss": {"srf": {"p": 1, "q": 1, "net": [[[1, 2, 3, 1], [0, 4, 2, 2]], [[6, -2, 4, 2], [3, 6, 9, 3]]], "u": [-2, -2, 3, 3], "v": [4, 4, 6, 6]}}},
+          "volume": [
+            {"kind": 1, "t": [[2, -3, 5], [0, 1, 0], [-1, 0, 0], [0, 0, 1]]},
+            {"kind": 1, "t": [[-4, 1, 2], [1, 0, 0], [0, 0, 1], [0, -1, 0]]},
+            {"kind": 1, "t": [[1, 2, -1], [1, 0, 0], [0, 1, 0], [0, 0, 1]]}
+          ],
+          "in_param": true
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_plane_in",
+      "upstream_ref": "SmTransform.cpp:1098-1103 (virtual copy retains SmPlane and its lazy NURB)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "plane", "o": [1, 2, 3], "n": [0, 0, 1]},
+          "volume": [{"kind": 1, "t": [[2, -3, 5], [0, 1, 0], [-1, 0, 0], [0, 0, 1]]}]
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_plane_param",
+      "upstream_ref": "SmTransform.cpp:1098-1103 (parameter-space derived plane)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "plane", "o": [1, 2, 3], "n": [0, 0, 1]},
+          "volume": [{"kind": 1, "t": [[2, -3, 5], [0, 1, 0], [-1, 0, 0], [0, 0, 1]]}],
+          "in_param": true
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_null_scale_in",
+      "upstream_ref": "SmTransform.cpp:1093 (non-unit axes return success with null output)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "plane", "o": [1, 2, 3], "n": [0, 0, 1]},
+          "volume": [{"kind": 1, "t": [[2, -3, 5], [2, 0, 0], [0, 2, 0], [0, 0, 2]]}]
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_null_scale_param",
+      "upstream_ref": "SmTransform.cpp:1093 (parameter-space non-unit axes)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "plane", "o": [1, 2, 3], "n": [0, 0, 1]},
+          "volume": [{"kind": 1, "t": [[2, -3, 5], [2, 0, 0], [0, 2, 0], [0, 0, 2]]}],
+          "in_param": true
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_null_reflection_in",
+      "upstream_ref": "SmTransform.cpp:1093 (left-handed orthonormal map cannot load an axis placement)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "plane", "o": [1, 2, 3], "n": [0, 0, 1]},
+          "volume": [{"kind": 1, "t": [[0, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1]]}]
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_null_reflection_param",
+      "upstream_ref": "SmTransform.cpp:1093 (parameter-space left-handed map)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "plane", "o": [1, 2, 3], "n": [0, 0, 1]},
+          "volume": [{"kind": 1, "t": [[0, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1]]}],
+          "in_param": true
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_null_later_scale_in",
+      "upstream_ref": "SmVolume.cpp:2828-2834 (discard an intermediate exact result when a later map returns null)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "plane", "o": [1, 2, 3], "n": [0, 0, 1]},
+          "volume": [
+            {"kind": 1, "t": [[2, -3, 5], [0, 1, 0], [-1, 0, 0], [0, 0, 1]]},
+            {"kind": 1, "t": [[0, 0, 0], [2, 0, 0], [0, 2, 0], [0, 0, 2]]}
+          ]
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_null_later_scale_param",
+      "upstream_ref": "SmVolume.cpp:2903-2907 (parameter-space chain discards an intermediate result)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "plane", "o": [1, 2, 3], "n": [0, 0, 1]},
+          "volume": [
+            {"kind": 1, "t": [[2, -3, 5], [0, 1, 0], [-1, 0, 0], [0, 0, 1]]},
+            {"kind": 1, "t": [[0, 0, 0], [2, 0, 0], [0, 2, 0], [0, 0, 2]]}
+          ],
+          "in_param": true
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_null_shear_in",
+      "upstream_ref": "SmTransform.cpp:1093 (determinant one alone does not imply a unit orthonormal placement)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "plane", "o": [1, 2, 3], "n": [0, 0, 1]},
+          "volume": [{"kind": 1, "t": [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 0, 1]]}]
+        },
+        "op": "exact"
+      }
+    },
+    {
+      "name": "exact_null_shear_param",
+      "upstream_ref": "SmTransform.cpp:1093 (parameter-space determinant-one shear)",
+      "inputs": {
+        "siv": {
+          "surface": {"kind": "plane", "o": [1, 2, 3], "n": [0, 0, 1]},
+          "volume": [{"kind": 1, "t": [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 0, 1]]}],
+          "in_param": true
+        },
+        "op": "exact"
+      }
+    }
+  ]
+}

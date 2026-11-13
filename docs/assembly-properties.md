@@ -40,6 +40,16 @@ null center of mass and bounding box. A failed body measurement returns an error
 presenting an incomplete assembly total. These commands leave geometry, pending placements
 and undo history unchanged.
 
+Sheet-metal perforation fields contribute their physical holes to volume, mass, surface area
+and center of mass even though they do not cut the B-rep. Hole centers follow the panels when
+folded or unfolded and follow each occurrence's placement. Measure and component/occurrence
+Properties use the same correction. Bounding boxes and B-rep topology still describe the
+uncut body. A failed perforation calculation returns an error rather than an uncorrected total.
+The inertia tensor also removes each analytic hole cylinder, including its offset from the
+sheet's center of mass.
+Measuring a perforated sheet after scaling or shearing its metadata is not supported and
+returns an error. Rigid and mirrored placements preserve the analytic hole dimensions.
+
 ## Moment of inertia
 
 Each closed body's entry has `inertia_g_mm2`: its inertia tensor about its own center of mass,

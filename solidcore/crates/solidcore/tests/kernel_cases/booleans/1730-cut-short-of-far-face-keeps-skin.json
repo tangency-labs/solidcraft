@@ -1,0 +1,151 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "1730-cut-short-of-far-face-keeps-skin",
+  "expected": {
+    "body_count": 1,
+    "method": "wall 200 x 3.75 x 95 = 71250. The profile (x -24..24, y -0.5..3.5) extruded 91 from z=-1 covers z 0..90 of the wall and y 0..3.5 of its 3.75: removes 48*3.5*90 = 15120. V = 56130",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1730"
+    ],
+    "volume_mm3": 56130.0,
+    "what": "an extrude cut whose profile stops 0.25 mm short of a wall's far face must leave that skin (it was grown through)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16
+    }
+  },
+  "records": "1730-cut-short-of-far-face-keeps-skin.bodies.json.gz",
+  "result": [
+    {
+      "body": "Wall",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 40842.5,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 56130.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1730"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "an extrude cut whose profile stops 0.25 mm short of a wall's far face must leave that skin (it was grown through)",
+  "why_not": []
+}

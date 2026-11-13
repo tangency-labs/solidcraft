@@ -1,6 +1,9 @@
 use serde_json::{Value, json};
 
-use super::{AngleReadoutParams, CameraReply, NormalToParams, StandardViewParams, TabStep, TabStepParams};
+use super::{
+    AmbientOcclusionParams, AmbientOcclusionResult, AngleReadoutParams, CameraReply, GraphicsPresetParams, GraphicsPresetResult, HistoryLayoutParams,
+    HistoryLayoutResult, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NormalToParams, StandardViewParams, TabStep, TabStepParams,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::types::CameraParam;
@@ -9,8 +12,17 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AngleReadoutParams>(), &["enabled"]);
+    assert_keys(input_schema_for::<super::OriginAxesAcrossViewParams>(), &["enabled"]);
     assert_keys(input_schema_for::<StandardViewParams>(), &["camera"]);
     assert_keys(input_schema_for::<NormalToParams>(), &["camera"]);
+    assert_keys(input_schema_for::<LayoutParams>(), &["mode"]);
+    assert_keys(input_schema_for::<HistoryLayoutParams>(), &["collapsed", "dock", "width"]);
+    assert_keys(input_schema_for::<GraphicsPresetParams>(), &["preset"]);
+    assert_keys(input_schema_for::<AmbientOcclusionParams>(), &["enabled"]);
+    assert_keys(
+        input_schema_for::<NavigateParams>(),
+        &["action", "anchor", "camera", "degrees", "delta", "direction", "factor", "fit", "free_orbit", "motion", "pivot", "viewport"],
+    );
 }
 
 const STANDARD_VIEWS: [&str; 7] = ["view.front", "view.back", "view.left", "view.right", "view.top", "view.bottom", "view.isometric"];
@@ -235,6 +247,9 @@ fn strict_keeps_todays_errors() {
         ("view.angle_readout", json!({"enabled": 1})),
         ("view.angle_readout", json!({"enabled": "true"})),
         ("view.angle_readout", json!({"enabled": null})),
+        ("view.origin_axes_across_view", json!({"enabled": 1})),
+        ("view.origin_axes_across_view", json!({"enabled": "true"})),
+        ("view.origin_axes_across_view", json!({"enabled": null})),
     ]);
 }
 
@@ -248,6 +263,20 @@ fn angle_readout_replies_match_the_output_schema() {
         assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
         assert_eq!(r.get("param_warnings"), None, "{r}");
         assert_eq!(r["enabled"], Value::Bool(enabled));
+    }
+    assert!(!conforms(schema, schema, &json!({"enabled": "yes"})));
+    assert!(!conforms(schema, schema, &json!({})));
+}
+
+#[test]
+fn origin_axes_across_view_replies_match_the_output_schema() {
+    let schema = output_schema_for::<super::OriginAxesAcrossViewResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for enabled in [true, false] {
+        let reply = s.execute("view.origin_axes_across_view", &json!({"enabled": enabled})).unwrap();
+        assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+        assert_eq!(reply, json!({"enabled": enabled}));
     }
     assert!(!conforms(schema, schema, &json!({"enabled": "yes"})));
     assert!(!conforms(schema, schema, &json!({})));
@@ -270,4 +299,366 @@ fn next_and_previous_tab_echo_their_step_without_editing_the_design() {
         assert!(s.execute(id, &json!({"step": 2})).is_err(), "{id} takes no parameters (strict check)");
     }
     assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo), "nothing in the design changes");
+}
+
+#[test]
+fn navigator_checks_and_echoes_its_settings_and_refuses_a_missing_body() {
+    assert_keys(input_schema_for::<super::NavigatorParams>(), &["arrows", "body", "home", "style", "texture"]);
+    let schema = output_schema_for::<super::NavigatorParams>();
+    let root = schema.as_value();
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let body = s.world_state().unwrap().bodies[0].name.clone();
+    let before = (s.revision, s.doc.to_json(), s.undo.len());
+    for (params, echo) in [
+        (json!({}), json!({})),
+        (Value::Null, json!({})),
+        (
+            json!({"style": "custom", "body": body, "texture": "modeled", "arrows": true, "home": false}),
+            json!({"style": "custom", "body": body, "texture": "modeled", "arrows": true, "home": false}),
+        ),
+        (json!({"body": null}), json!({"body": null})),
+    ] {
+        let reply = s.execute("view.navigator", &params).unwrap();
+        assert_eq!(reply, echo, "{params}");
+        assert!(conforms(root, root, &reply), "{reply} does not match {root}");
+    }
+    assert_eq!((s.revision, s.doc.to_json(), s.undo.len()), before, "the navigator is never part of the design");
+    for bad in
+        [json!({"style": "sphere"}), json!({"body": "No such body"}), json!({"body": 3}), json!({"texture": "glossy"}), json!({"arrows": "yes"})]
+    {
+        assert!(s.execute("view.navigator", &bad).is_err(), "{bad}");
+    }
+    let spec = crate::find_command("view.navigator").unwrap();
+    assert!(!spec.undoable && spec.contract.is_some() && spec.output.is_some());
+}
+
+const LAYOUT_COMMANDS: [&str; 5] = ["view.layout", "view.history_layout", "view.graphics_preset", "view.ambient_occlusion", "view.navigate"];
+
+/// A camera for `view.navigate`.
+fn nav_camera() -> Value {
+    camera(json!({"target": [0, 0, 0], "yaw": 0.0, "pitch": 0.0, "distance": 100, "fov": 0.0}))
+}
+
+/// A `view.navigate` call: the camera and `extra`'s keys.
+fn nav(extra: Value) -> Value {
+    let mut p = json!({"camera": nav_camera()});
+    if let (Some(o), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+        o.extend(extra.clone());
+    }
+    p
+}
+
+/// Each command publishes its input and output schemas with a contract, is display only, and its
+/// required keys are the ones its handler refuses a call without.
+#[test]
+fn the_commands_publish_contracts_and_schemas() {
+    let mut s = Session::default();
+    for id in LAYOUT_COMMANDS {
+        let spec = crate::find_command(id).unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some() && !spec.undoable, "{id}");
+        let d = s.execute("engine.describe", &json!({"command": id})).unwrap();
+        assert_eq!(d["input"]["additionalProperties"], false, "{id}");
+        assert_eq!(d["output"]["type"], "object", "{id}");
+    }
+    let mut required = |id: &str| {
+        let d = s.execute("engine.describe", &json!({"command": id})).unwrap();
+        d["input"]["required"].clone()
+    };
+    assert_eq!(required("view.layout"), json!(["mode"]));
+    assert_eq!(required("view.graphics_preset"), json!(["preset"]));
+    assert_eq!(required("view.ambient_occlusion"), json!(["enabled"]));
+    assert_eq!(required("view.navigate"), json!(["camera"]));
+    assert_eq!(required("view.history_layout"), Value::Null);
+    let d = Session::default().execute("engine.describe", &json!({"command": "view.history_layout"})).unwrap();
+    assert_eq!(d["input"]["properties"]["width"]["minimum"], 1.0);
+    assert_eq!(d["input"]["properties"]["width"]["maximum"], 1000000.0);
+    let d = Session::default().execute("engine.describe", &json!({"command": "view.navigate"})).unwrap();
+    assert_eq!(d["input"]["properties"]["degrees"]["exclusiveMinimum"], 0.0);
+    assert_eq!(d["input"]["properties"]["degrees"]["maximum"], 180.0);
+    assert_eq!(d["input"]["properties"]["factor"]["minimum"], 0.05);
+    assert_eq!(d["input"]["properties"]["pivot"]["anyOf"][0]["items"]["exclusiveMaximum"], 1e9);
+    let d = Session::default().execute("engine.describe", &json!({"command": "view.history_layout"})).unwrap();
+    let dock = serde_json::to_string(&d["input"]).unwrap();
+    for name in ["bottom", "left", "under_browser", "browser"] {
+        assert!(dock.contains(&format!("\"{name}\"")), "dock {name}: {dock}");
+    }
+}
+
+/// The replies are the JSON the handlers returned before the types: exactly these values.
+#[test]
+fn replies_are_todays_json() {
+    let mut s = Session::default();
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    assert_eq!(run("view.layout", json!({"mode": "compact"})), json!({"mode": "compact"}));
+    assert_eq!(run("view.layout", json!({"mode": "floating"})), json!({"mode": "floating"}));
+    assert_eq!(run("view.history_layout", json!({})), json!({}));
+    assert_eq!(
+        run("view.history_layout", json!({"width": 320, "dock": "under_browser", "collapsed": false})),
+        json!({"width": 320.0, "dock": "under_browser", "collapsed": false})
+    );
+    assert_eq!(run("view.history_layout", json!({"dock": "browser"})), json!({"dock": "browser"}));
+    assert_eq!(
+        run("view.graphics_preset", json!({"preset": "quality"})),
+        json!({"preset": "quality", "enabled": true, "display_quality": "fine", "supersampling": 2.0, "supersampling_adaptive": true})
+    );
+    assert_eq!(
+        run("view.graphics_preset", json!({"preset": "performance"})),
+        json!({"preset": "performance", "enabled": false, "display_quality": "normal", "supersampling": 1.0, "supersampling_adaptive": true})
+    );
+    assert_eq!(run("view.ambient_occlusion", json!({"enabled": false})), json!({"enabled": false}));
+    let cam: solidcraft_viewport::Camera = serde_json::from_value(nav_camera()).unwrap();
+    let turned = run("view.navigate", json!({"camera": nav_camera(), "action": "fit"}));
+    assert_eq!(turned, json!({"camera": cam, "fit": true}));
+    let moved = run("view.navigate", json!({"camera": nav_camera(), "motion": "zoom", "factor": 2}));
+    assert_eq!(moved["fit"], false);
+    assert_eq!(moved["continuous"], true);
+    assert_eq!(moved.as_object().map(|o| o.len()), Some(3));
+}
+
+/// Real replies of each command, in Warn, match their output schema; a misspelt key's warning
+/// still matches.
+#[test]
+fn replies_match_the_output_schemas() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    let calls: Vec<(&str, Value, schemars::Schema)> = vec![
+        ("view.layout", json!({"mode": "compact"}), output_schema_for::<LayoutResult>()),
+        ("view.layout", json!({"mode": "floating"}), output_schema_for::<LayoutResult>()),
+        ("view.history_layout", json!({}), output_schema_for::<HistoryLayoutResult>()),
+        ("view.history_layout", json!({"width": 250.5, "dock": "left", "collapsed": true}), output_schema_for::<HistoryLayoutResult>()),
+        ("view.graphics_preset", json!({"preset": "quality"}), output_schema_for::<GraphicsPresetResult>()),
+        ("view.graphics_preset", json!({"preset": "performance"}), output_schema_for::<GraphicsPresetResult>()),
+        ("view.ambient_occlusion", json!({"enabled": true}), output_schema_for::<AmbientOcclusionResult>()),
+        ("view.navigate", nav(json!({"direction": [1, 1, 1]})), output_schema_for::<NavigateResult>()),
+        ("view.navigate", nav(json!({"action": "left", "degrees": 15})), output_schema_for::<NavigateResult>()),
+        ("view.navigate", nav(json!({"action": "home"})), output_schema_for::<NavigateResult>()),
+        ("view.navigate", nav(json!({"action": "clockwise", "fit": true})), output_schema_for::<NavigateResult>()),
+        ("view.navigate", nav(json!({"motion": "pan", "delta": [10, -5], "viewport": [800, 600]})), output_schema_for::<NavigateResult>()),
+        (
+            "view.navigate",
+            nav(json!({"motion": "orbit", "delta": [10, -5], "pivot": [1, 2, 3], "viewport": [800, 600]})),
+            output_schema_for::<NavigateResult>(),
+        ),
+        ("view.navigate", nav(json!({"motion": "orbit", "delta": [10, -5], "free_orbit": true})), output_schema_for::<NavigateResult>()),
+        ("view.navigate", nav(json!({"motion": "zoom", "factor": 0.5, "anchor": [1, 2, 3]})), output_schema_for::<NavigateResult>()),
+    ];
+    for (id, p, schema) in calls {
+        let reply = run(id, p.clone());
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, &reply), "{id} {p}: {reply} doesn't match {schema}");
+        assert!(reply.get("param_warnings").is_none(), "{id} {p}: {reply}");
+        let again = run(id, {
+            let mut q = p.clone();
+            q["zoomm"] = json!(1);
+            q
+        });
+        assert!(again["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{id}: {again}");
+        assert!(conforms(schema, schema, &again), "{id}: {again} doesn't match {schema}");
+    }
+}
+
+/// Strict refuses with the handler's own message whatever the handler refuses.
+#[test]
+fn view_layout_commands_keep_todays_errors() {
+    let mut cases: Vec<(&str, Value)> = vec![
+        ("view.layout", json!({})),
+        ("view.layout", json!({"mode": "grid"})),
+        ("view.layout", json!({"mode": 1})),
+        ("view.layout", json!({"mode": null})),
+        ("view.history_layout", json!({"width": 0})),
+        ("view.history_layout", json!({"width": 1000001})),
+        ("view.history_layout", json!({"width": "300"})),
+        ("view.history_layout", json!({"width": null})),
+        ("view.history_layout", json!({"dock": "top"})),
+        ("view.history_layout", json!({"dock": 3})),
+        ("view.history_layout", json!({"collapsed": "yes"})),
+        ("view.history_layout", json!({"collapsed": null})),
+        ("view.graphics_preset", json!({})),
+        ("view.graphics_preset", json!({"preset": "fast"})),
+        ("view.graphics_preset", json!({"preset": true})),
+        ("view.graphics_preset", json!({"preset": null})),
+        ("view.ambient_occlusion", json!({})),
+        ("view.ambient_occlusion", json!({"enabled": 1})),
+        ("view.ambient_occlusion", json!({"enabled": "true"})),
+        ("view.ambient_occlusion", json!({"enabled": null})),
+        ("view.navigate", json!({})),
+        ("view.navigate", json!({"camera": null, "action": "fit"})),
+        ("view.navigate", json!({"camera": 5, "action": "fit"})),
+        ("view.navigate", json!({"action": "fit"})),
+    ];
+    for c in [
+        camera(json!({"yaw": 2e6})),
+        camera(json!({"roll": -2e6})),
+        camera(json!({"pitch": 2.0})),
+        camera(json!({"distance": 0})),
+        camera(json!({"fov": 4})),
+    ] {
+        cases.push(("view.navigate", json!({"camera": c, "action": "fit"})));
+    }
+    for extra in [
+        json!({"action": "fit", "fit": 1}),
+        json!({"action": "fit", "fit": null}),
+        json!({"direction": [0, 0, 0]}),
+        json!({"direction": [3, 0, 0]}),
+        json!({"direction": "front"}),
+        json!({"direction": null}),
+        json!({"action": "spin"}),
+        json!({"action": 4}),
+        json!({"action": null}),
+        json!({"action": "left", "degrees": 0}),
+        json!({"action": "left", "degrees": 181}),
+        json!({"action": "left", "degrees": "90"}),
+        json!({"motion": "slide"}),
+        json!({"motion": null}),
+        json!({"motion": "zoom", "fit": true, "factor": 2}),
+        json!({"motion": "zoom", "factor": 0.01}),
+        json!({"motion": "zoom", "factor": 21}),
+        json!({"motion": "zoom", "factor": 2, "anchor": [1, 2]}),
+        json!({"motion": "zoom", "factor": 2, "anchor": null}),
+        json!({"motion": "pan", "delta": [20000, 0], "viewport": [800, 600]}),
+        json!({"motion": "pan", "delta": [1], "viewport": [800, 600]}),
+        json!({"motion": "pan", "viewport": [800, 600]}),
+        json!({"motion": "pan", "delta": [1, 1], "viewport": [0, 600]}),
+        json!({"motion": "pan", "delta": [1, 1], "viewport": [800, 2000000]}),
+        json!({"motion": "pan", "delta": [1, 1]}),
+        json!({"motion": "orbit", "delta": [1, 1], "free_orbit": "yes"}),
+        json!({"motion": "orbit", "delta": [1, 1], "pivot": [1, 2]}),
+        json!({"motion": "orbit", "delta": [1, 1], "pivot": null}),
+    ] {
+        cases.push(("view.navigate", nav(extra)));
+    }
+    assert_strict_keeps_todays_errors(&cases);
+}
+
+/// A value of a key is accepted by the type exactly when the handler accepts it (the other keys
+/// being fine): the schemas never say yes where today's reader says no, or the other way round.
+#[test]
+fn the_types_read_each_key_as_its_handler_does() {
+    let accepts = |id: &str, p: &Value| Session::default().execute(id, p).is_ok();
+    let check = |id: &str, base: Value, key: &str, values: Vec<Value>| {
+        for v in values {
+            let mut p = base.clone();
+            p[key] = v.clone();
+            let ok = accepts(id, &p);
+            let typed = match id {
+                "view.layout" => serde_json::from_value::<LayoutParams>(p.clone()).is_ok(),
+                "view.history_layout" => serde_json::from_value::<HistoryLayoutParams>(p.clone()).is_ok(),
+                "view.graphics_preset" => serde_json::from_value::<GraphicsPresetParams>(p.clone()).is_ok(),
+                "view.ambient_occlusion" => serde_json::from_value::<AmbientOcclusionParams>(p.clone()).is_ok(),
+                _ => serde_json::from_value::<NavigateParams>(p.clone()).is_ok(),
+            };
+            assert_eq!(typed, ok, "{id} {p}");
+        }
+    };
+    let junk = || vec![json!(null), json!(true), json!(0), json!(1.5), json!("x"), json!([]), json!({})];
+    let with = |mut v: Vec<Value>| {
+        v.extend(junk());
+        v
+    };
+    check("view.layout", json!({}), "mode", with(vec![json!("floating"), json!("compact"), json!("Compact")]));
+    check("view.history_layout", json!({}), "width", with(vec![json!(1), json!(1e6), json!(0.5), json!(1000001), json!(-4), json!(300)]));
+    check(
+        "view.history_layout",
+        json!({}),
+        "dock",
+        with(vec![json!("bottom"), json!("left"), json!("under_browser"), json!("browser"), json!("Left")]),
+    );
+    check("view.history_layout", json!({}), "collapsed", with(vec![json!(true), json!(false)]));
+    check("view.graphics_preset", json!({}), "preset", with(vec![json!("quality"), json!("performance"), json!("Quality")]));
+    check("view.ambient_occlusion", json!({}), "enabled", with(vec![json!(true), json!(false)]));
+    let base = json!({"camera": nav_camera(), "action": "fit"});
+    let all_actions: Vec<Value> =
+        ["left", "right", "up", "down", "clockwise", "counterclockwise", "home", "fit", "spin"].iter().map(|a| json!(a)).collect();
+    check("view.navigate", json!({"camera": nav_camera()}), "action", with(all_actions));
+    check("view.navigate", base.clone(), "fit", with(vec![json!(true), json!(false)]));
+    check(
+        "view.navigate",
+        base.clone(),
+        "direction",
+        with(vec![
+            json!([1, 0, 0]),
+            json!([0, 0, 1]),
+            json!([2, 0, 0]),
+            json!([2.1, 0, 0]),
+            json!([0, 0, 0]),
+            json!({"x": 0, "y": 1, "z": 0}),
+            json!([1, 2]),
+            json!([1e10, 0, 0]),
+        ]),
+    );
+    check(
+        "view.navigate",
+        json!({"camera": nav_camera(), "action": "left"}),
+        "degrees",
+        with(vec![json!(1), json!(180), json!(90), json!(90.0), json!(0), json!(-1), json!(181), json!(0.001)]),
+    );
+    let all_keys = json!({"camera": nav_camera(), "delta": [1, 1], "viewport": [800, 600], "factor": 2});
+    check("view.navigate", all_keys, "motion", with(vec![json!("zoom"), json!("pan"), json!("orbit")]));
+    let pan = json!({"camera": nav_camera(), "motion": "pan", "viewport": [800, 600]});
+    check(
+        "view.navigate",
+        pan.clone(),
+        "delta",
+        with(vec![json!([1, 2]), json!({"x": 1, "y": 2}), json!([10000, -10000]), json!([10001, 0]), json!([1, 2, 3]), json!([1e10, 0])]),
+    );
+    let pan = json!({"camera": nav_camera(), "motion": "pan", "delta": [1, 1]});
+    check(
+        "view.navigate",
+        pan,
+        "viewport",
+        with(vec![json!([1, 1]), json!([1e6, 1e6]), json!([0.5, 5]), json!([5, 1000001]), json!({"x": 3, "y": 4}), json!([3])]),
+    );
+    let zoom = json!({"camera": nav_camera(), "motion": "zoom", "factor": 2});
+    check("view.navigate", zoom.clone(), "anchor", with(vec![json!([1, 2, 3]), json!({"x": 1, "y": 2, "z": 3}), json!([1, 2]), json!([1e10, 0, 0])]));
+    check(
+        "view.navigate",
+        json!({"camera": nav_camera(), "motion": "zoom"}),
+        "factor",
+        with(vec![json!(0.05), json!(20), json!(0.04), json!(20.5), json!(1)]),
+    );
+    let orbit = json!({"camera": nav_camera(), "motion": "orbit", "delta": [1, 1], "viewport": [800, 600]});
+    check("view.navigate", orbit.clone(), "pivot", with(vec![json!([1, 2, 3]), json!([1, 2]), json!({"x": 1, "y": 2, "z": 3})]));
+    check("view.navigate", orbit, "free_orbit", with(vec![json!(true), json!(false)]));
+    let camera_values = vec![
+        nav_camera(),
+        camera(json!({"yaw": 1e6})),
+        camera(json!({"yaw": 1.1e6})),
+        camera(json!({"roll": 1.1e6})),
+        camera(json!({"pitch": std::f64::consts::FRAC_PI_2})),
+        camera(json!({"pitch": 1.58})),
+        camera(json!({"pitch": -1.58})),
+        camera(json!({"distance": 0})),
+        camera(json!({"fov": 3.2})),
+        camera(json!({"up": "y"})),
+        camera(json!({"up": "w"})),
+    ];
+    check("view.navigate", json!({"action": "fit"}), "camera", with(camera_values));
+}
+
+/// A key of another form than the one the handler takes is not used, so the contract does not
+/// read it either: such a call replies as it does with the check off, in warn and in strict.
+#[test]
+fn navigate_reads_only_the_keys_of_its_form() {
+    for p in [
+        // A motion wins over an action and a direction.
+        json!({"camera": nav_camera(), "motion": "zoom", "factor": 2, "action": "bogus", "direction": "up"}),
+        // Each motion reads its own keys: a pan has no factor, a zoom no delta.
+        json!({"camera": nav_camera(), "motion": "pan", "delta": [3, 4], "viewport": [800, 600], "factor": 99}),
+        json!({"camera": nav_camera(), "motion": "zoom", "factor": 2, "delta": "far", "viewport": 0, "pivot": "here"}),
+        // An orbit reads the viewport only about a pivot.
+        json!({"camera": nav_camera(), "motion": "orbit", "delta": [3, 4], "viewport": 0}),
+        // A direction has no degrees or action.
+        json!({"camera": nav_camera(), "direction": [0, 0, 1], "degrees": 500, "action": "bogus"}),
+    ] {
+        let off = Session::default().execute("view.navigate", &p).unwrap();
+        for check in [ParamCheck::Warn, ParamCheck::Strict] {
+            let checked = Session { param_check: check, ..Session::default() }.execute("view.navigate", &p).unwrap();
+            assert_eq!(checked, off, "{check:?} {p}");
+        }
+    }
+    // The keys of the form taken are still checked.
+    let p = json!({"camera": nav_camera(), "motion": "pan", "delta": [3, 4], "viewport": [0, 600]});
+    let strict = Session { param_check: ParamCheck::Strict, ..Session::default() }.execute("view.navigate", &p);
+    assert!(strict.unwrap_err().to_string().contains("viewport dimensions must be in 1..1000000"));
 }

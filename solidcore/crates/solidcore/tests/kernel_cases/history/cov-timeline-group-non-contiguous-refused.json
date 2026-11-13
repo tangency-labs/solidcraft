@@ -1,0 +1,49 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-timeline-group-non-contiguous-refused",
+  "expected": {
+    "method": "a folder holds one contiguous run of features: Block and Notch have Round and the sketch between them",
+    "outcome": "refused",
+    "refusal": "timeline folder `Split` must contain one contiguous run of features",
+    "source": "invariants",
+    "sources": [],
+    "what": "timeline.group of two features with others between them"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 7 (timeline.group): invalid parameters for `timeline.group`: timeline folder `Split` must contain one contiguous run of features",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 7 (timeline.group): invalid parameters for `timeline.group`: timeline folder `Split` must contain one contiguous run of features",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "timeline.group of two features with others between them",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 7 (timeline.group): invalid parameters for `timeline.group`: timeline folder `Split` must contain one contiguous run of features"
+  ]
+}

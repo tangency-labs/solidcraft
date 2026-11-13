@@ -3,11 +3,13 @@
 
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::viewport::{Hit, Proj, pick_for_tool as pick, sketch_point_at};
+use solidcraft_ui_text::tr;
 
 const DRAW_SCOPES: &[Scope] = &[Scope::SketchDraw, Scope::SketchDrag];
 
@@ -163,28 +165,24 @@ impl Tool {
 
 pub fn hint(id: &str) -> String {
     match id {
-        "sketch.line" => "Line: click points; right-click or Esc to finish".into(),
-        "sketch.rectangle.two_point" => "Rectangle: click two opposite corners".into(),
-        "sketch.rectangle.center" => "Center rectangle: click the centre, then a corner".into(),
-        "sketch.rectangle.rounded" => "Rounded rectangle: click two opposite corners (Tab to the radius box to type the corner radius)".into(),
-        "sketch.rectangle.three_point" => "3-point rectangle: click two points of one edge, then the width".into(),
-        "sketch.circle.center" => "Circle: click the centre, then a point on the circle".into(),
-        "sketch.arc.three_point" => "Arc: click start, end, then a point on the arc".into(),
-        "sketch.arc3d" => "3D Arc: click start, end, then a point on the arc (points may leave the sketch plane)".into(),
-        "sketch.line3d" => "3D Line: click world points; right-click or Esc to finish (points may leave the sketch plane)".into(),
-        "sketch.spline3d" => "3D Spline: click fit points in 3D; right-click or Esc to finish".into(),
-        "sketch.point3d" => "3D Point: click where a 3D point goes".into(),
-        "sketch.arc.center_point" => "Arc: click centre and start, go round either way and click the end, or type a signed sweep".into(),
-        "sketch.dimension" => {
-            "Dimension: pick one or two entities and type the value (or click to place it first); click a dimension to edit it; Enter applies".into()
-        }
-        "sketch.constraint.horizontal_vertical" => {
-            "Horizontal/Vertical: pick a line, two points, or a point and a line; hold Shift to pick a line midpoint".into()
-        }
-        "sketch.slot.center_to_center" | "sketch.slot.overall" => "Slot: click both ends, then the width".into(),
-        "sketch.constraint.midpoint" => "MidPoint: pick a point and a line, or two lines to centre the second on the first".into(),
-        _ if id.starts_with("sketch.constraint.") => "Constraint: pick the sketch entities".into(),
-        _ => crate::sketch_tools::hint(id).unwrap_or_else(|| "Click in the sketch".into()),
+        "sketch.line" => tr("sketch.hint.line").into(),
+        "sketch.rectangle.two_point" => tr("sketch.hint.rectangle.two_point").into(),
+        "sketch.rectangle.center" => tr("sketch.hint.rectangle.center").into(),
+        "sketch.rectangle.rounded" => tr("sketch.hint.rectangle.rounded").into(),
+        "sketch.rectangle.three_point" => tr("sketch.hint.rectangle.three_point").into(),
+        "sketch.circle.center" => tr("sketch.hint.circle.center").into(),
+        "sketch.arc.three_point" => tr("sketch.hint.arc.three_point").into(),
+        "sketch.arc3d" => tr("sketch.hint.arc3d").into(),
+        "sketch.line3d" => tr("sketch.hint.line3d").into(),
+        "sketch.spline3d" => tr("sketch.hint.spline3d").into(),
+        "sketch.point3d" => tr("sketch.hint.point3d").into(),
+        "sketch.arc.center_point" => tr("sketch.hint.arc.center_point").into(),
+        "sketch.dimension" => tr("sketch.hint.dimension").into(),
+        "sketch.constraint.horizontal_vertical" => tr("sketch.hint.constraint.horizontal_vertical").into(),
+        "sketch.slot.center_to_center" | "sketch.slot.overall" => tr("sketch.hint.slot").into(),
+        "sketch.constraint.midpoint" => tr("sketch.hint.constraint.midpoint").into(),
+        _ if id.starts_with("sketch.constraint.") => tr("sketch.hint.constraint.generic").into(),
+        _ => crate::sketch_tools::hint(id).unwrap_or_else(|| tr("sketch.hint.fallback").into()),
     }
 }
 
@@ -342,13 +340,10 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             }
         }
         Kind::Pick(n) => {
-            let hits = pick(app, proj, pos);
-            // Symmetry's third pick may be an origin axis lying along the sketch's own x or y
-            // (#1075); the command names those `x` / `y`.
-            let axis_ok = tool.cmd == "sketch.constraint.symmetry" && tool.picks.len() == 2;
+            let hits = curve_operands(tool.cmd, pick(app, proj, pos));
             let entity = hits.iter().find_map(|h| match h {
                 Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
-                Hit::Axis { name } if axis_ok => sketch_axis_of(app, name).map(str::to_string),
+                Hit::Axis { name } => axis_pick(app, &tool, name),
                 _ => None,
             });
             // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
@@ -410,6 +405,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                         Hit::SketchCurve { sketch, id, straight, .. } if Some(*sketch) == app.session.active_sketch => {
                             Some((id.clone(), true, *straight))
                         }
+                        Hit::Axis { name } => sketch_axis_of(app, name).map(|a| (a.to_string(), true, true)),
                         _ => None,
                     })
                 })
@@ -420,6 +416,13 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     hits.iter().find_map(|h| match h {
                         Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
                         Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
+                        // An origin axis is projected too; it has no length of its own, so it
+                        // waits for the entity measured to it (a line's distance to the axis).
+                        // Only while the dimension takes another pick: once it has two, a click
+                        // on an axis places the dimension as a click on empty space does.
+                        Hit::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") && tool.picks.len() < 2 => {
+                            Some((json!({"axis": name}).to_string(), false, false))
+                        }
                         _ => None,
                     })
                 });
@@ -676,10 +679,11 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
             let width = crate::sketch_dims::locked_value(app, t, "Width").unwrap_or_else(|| (2.0 * dir.cross(p[2].0 - p[0].0).abs()).max(1e-3));
             json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "width": width})
         }
-        // A midpoint or on-curve snap goes as itself, so the point is held there (#4691); a
-        // snap to an existing point goes as its place, where `connect` joins them.
+        // A midpoint, on-curve, crossing or body-vertex snap goes as itself, so the point is held
+        // there (#4691, #15387); a snap to an existing point goes as its place, where `connect`
+        // joins them.
         "sketch.point" => match &p[0].1 {
-            Some(id) if ["mid:", "on:", "vertex:"].iter().any(|k| id.starts_with(k)) => json!({"point": id}),
+            Some(id) if ["mid:", "on:", "vertex:", "x:"].iter().any(|k| id.starts_with(k)) => json!({"point": id}),
             _ => json!({"point": xy(&p[0])}),
         },
         _ => return Err(format!("drawing {} is not supported", t.cmd)),
@@ -733,7 +737,7 @@ pub(crate) fn constraint_preselection(
         (unique.len() == ids.len()).then_some(ids)
     };
     match (command, selection) {
-        ("sketch.constraint.fix", _) => selected_ids(false, 1).map(|ids| json!({"entities":ids})),
+        ("sketch.constraint.fix", _) => fix_preselection(selection).map(|ids| json!({"entities":ids})),
         ("sketch.constraint.polygon", _) => selected_ids(true, 3).map(|ids| json!({"lines":ids})),
         // Three or more curves: all of them equal, in pick order (#4985). Two keep the `a, b` form.
         ("sketch.constraint.equal", _) if selection.len() >= 3 => selected_ids(true, 3).map(|ids| json!({"curves":ids})),
@@ -773,6 +777,30 @@ pub(crate) fn constraint_preselection(
     }
 }
 
+/// The sketch points and curves Fix takes from a selection (#11663). A box drawn over a sketch
+/// also takes its dimensions and constraint icons; those cannot be fixed and are passed over, so
+/// the geometry boxed with them is still fixed at once. Anything else selected (a body, a
+/// midpoint, a curve of another sketch) leaves the choice to the pick tool. As many entities as the command takes.
+fn fix_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<&str>> {
+    use solidcraft_engine::Sel::{SketchConstraint, SketchCurve, SketchPoint};
+    const MAX_ENTITIES: usize = 10_000;
+    let mut ids = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for s in selection {
+        let id = match s {
+            SketchCurve { id, sketch: None } | SketchPoint { id } => id.as_str(),
+            // A curve of another sketch: its id alone would name a curve of this one (#3726).
+            SketchCurve { .. } => return None,
+            SketchConstraint { .. } => continue,
+            _ => return None,
+        };
+        if seen.insert(id) {
+            ids.push(id);
+        }
+    }
+    (1..=MAX_ENTITIES).contains(&ids.len()).then_some(ids)
+}
+
 pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<Value>> {
     use solidcraft_engine::Sel;
     // The projection command processes at most 1000 references; never consume a subset.
@@ -794,6 +822,7 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
                 Sel::Face { body, point, .. } => json!({"body":body,"face":[point.x,point.y,point.z]}),
                 Sel::Axis { name } => json!({"axis":name}),
                 Sel::Plane { name } => json!({"plane":name}),
+                Sel::ConstructionPoint { name } => json!({"point":name}),
                 _ => return None,
             })
         })
@@ -803,7 +832,7 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
 /// `x` or `y` when the origin axis `name` is the active sketch's own x or y axis: along it, and
 /// through the sketch's origin.
 pub(crate) fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let dir = match name {
         "X" => Vec3::X,
         "Y" => Vec3::Y,
@@ -848,6 +877,86 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
     (a != b).then(|| json!({"a": a, "b": b, "line": line}))
 }
 
+/// An origin axis as a pick of `tool`, or None when the tool does not take it. Symmetry's third
+/// pick may be an axis along the sketch's own x or y (#1075), which the command names `x` / `y`;
+/// either pick of Coincident, Collinear and Tangent (#15461) may be any origin axis: the sketch's
+/// own `x` / `y`, otherwise its reference, which the command projects.
+fn axis_pick(app: &SolveApp, tool: &Tool, name: &str) -> Option<String> {
+    match tool.cmd {
+        // Symmetry takes no axis reference, so the axis isn't taken when a curve or point of the
+        // sketch has its `x` / `y` as id: the command would read that entity instead.
+        "sketch.constraint.symmetry" if tool.picks.len() == 2 => own_axis(app, name).map(str::to_string),
+        cmd if cmd == "sketch.constraint.coincident" || takes_axis_curve(cmd) => axis_operand(app, name).map(|v| match v {
+            Value::String(id) => id,
+            other => other.to_string(),
+        }),
+        _ => None,
+    }
+}
+
+/// The curve-pair constraints whose `a` / `b` may be an origin axis: a line on it, a curve
+/// touching it (#15461).
+pub(crate) fn takes_axis_curve(command: &str) -> bool {
+    matches!(command, "sketch.constraint.tangent" | "sketch.constraint.collinear")
+}
+
+/// Origin axis `name` as a constraint operand: the sketch's own `x` / `y`, unless a curve or point
+/// of the sketch is called that; then the axis reference, which can't be mistaken for it.
+pub(crate) fn axis_operand(app: &SolveApp, name: &str) -> Option<Value> {
+    own_axis(app, name).map(|id| json!(id)).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name})))
+}
+
+/// The sketch's own `x` / `y` that origin axis `name` lies along, unless a curve or point of the
+/// active sketch has that id.
+fn own_axis(app: &SolveApp, name: &str) -> Option<&'static str> {
+    sketch_axis_of(app, name).filter(|id| {
+        let Ok(st) = app.session.world_state() else { return true };
+        !app.session
+            .active_sketch
+            .and_then(|s| st.sketch(s))
+            .is_some_and(|ss| ss.sketch.curve_index(id).is_some() || ss.sketch.point_index(id).is_some())
+    })
+}
+
+/// An origin axis picked in the browser while a pick tool that takes it runs: the same as
+/// clicking it in the view. False when there is no such tool.
+pub(crate) fn pick_axis_from_browser(app: &mut SolveApp, name: &str) -> bool {
+    let Some(mut tool) = app.tool.take() else { return false };
+    // A dimension measures the axis's projection against the other pick, as a click in the view does.
+    if matches!(tool.kind, Kind::Dimension) && matches!(name, "X" | "Y" | "Z") && tool.picks.len() < 2 {
+        let id = json!({"axis": name}).to_string();
+        // A value already typed into the open dimension is kept: the axis joins only before
+        // anything is typed, as a second pick in the view does.
+        if !tool.picks.contains(&id) && crate::dim_view::live() != Some(true) {
+            tool.picks.push(id);
+            if tool.picks.len() == 2 {
+                match crate::dim_view::begin_live(app, tool.picks.clone(), None) {
+                    Ok(true) => {}
+                    Ok(false) => crate::dim_view::cancel(),
+                    Err(error) => app.set_status(error, true),
+                }
+            }
+        }
+        app.tool = Some(tool);
+        return true;
+    }
+    let picked = match tool.kind {
+        Kind::Pick(n) => axis_pick(app, &tool, name).map(|id| (n, id)),
+        _ => None,
+    };
+    let Some((n, id)) = picked else {
+        app.tool = Some(tool);
+        return false;
+    };
+    tool.picks.push(id);
+    if tool.picks.len() >= n {
+        run_pick(app, &tool);
+        tool.picks.clear();
+    }
+    app.tool = Some(tool);
+    true
+}
+
 fn run_pick(app: &mut SolveApp, t: &Tool) {
     // An entity id, or a model edge's or vertex's reference.
     let k: Vec<Value> = t.picks.iter().map(|pick| serde_json::from_str(pick).ok().filter(Value::is_object).unwrap_or_else(|| json!(pick))).collect();
@@ -870,6 +979,20 @@ fn run_pick(app: &mut SolveApp, t: &Tool) {
         _ => json!({"a": k[0], "b": k[1]}),
     };
     let _ = app.run(t.cmd, params);
+}
+
+/// Parallel, Perpendicular, Equal and Collinear constrain two curves, and their commands take no
+/// point. So a click on a curve's end point picks the curve under it, not the point, and a body's
+/// edge is taken rather than its vertex (#12092). Tangent also takes a curve's end point: that
+/// end then lies on the other curve. A body's vertex ends no sketch curve, so Tangent takes the
+/// edge there too.
+fn curve_operands(cmd: &str, hits: Vec<Hit>) -> Vec<Hit> {
+    let points = match cmd {
+        "sketch.constraint.collinear" | "sketch.constraint.equal" | "sketch.constraint.parallel" | "sketch.constraint.perpendicular" => false,
+        "sketch.constraint.tangent" => true,
+        _ => return hits,
+    };
+    hits.into_iter().filter(|h| !matches!(h, Hit::Vertex { .. }) && (points || !matches!(h, Hit::SketchPoint { .. }))).collect()
 }
 
 /// Take back a pending spline point before undo or Backspace reaches the sketch.
@@ -912,7 +1035,7 @@ pub fn finish(app: &mut SolveApp) {
 /// Rubber-band preview of the shape being drawn.
 pub(crate) fn paint_preview_curve(
     mut sketch: solidcraft_engine::sketch::Sketch,
-    plane: &solidcraft_engine::geom::Plane,
+    plane: &solidcore_record::Plane,
     painter: &egui::Painter,
     proj: &Proj,
     stroke: Stroke,
@@ -931,7 +1054,7 @@ pub(crate) fn paint_preview_curve(
     crate::scenario::publish_count("tool_preview_curves", sketch.curves.len() as f64);
 }
 
-pub(crate) fn paint_sketch_path(points: &[solidcraft_engine::geom::Vec3], mode: u8, painter: &egui::Painter, proj: &Proj, stroke: Stroke) {
+pub(crate) fn paint_sketch_path(points: &[solidcore_record::Vec3], mode: u8, painter: &egui::Painter, proj: &Proj, stroke: Stroke) {
     if mode == 0 {
         let screen: Vec<_> = points.iter().filter_map(|point| proj.to_screen(*point)).collect();
         if screen.len() >= 2 {
@@ -950,7 +1073,7 @@ pub(crate) fn paint_sketch_path(points: &[solidcraft_engine::geom::Vec3], mode: 
 pub(crate) fn paint_curve(
     sketch: &solidcraft_engine::sketch::Sketch,
     index: usize,
-    plane: &solidcraft_engine::geom::Plane,
+    plane: &solidcore_record::Plane,
     painter: &egui::Painter,
     proj: &Proj,
     stroke: Stroke,
@@ -1037,6 +1160,10 @@ pub(crate) fn preview_curve(
             sk.add_arc(c1, c1 - n, c1 + n, [None; 3], None).ok()?;
             sk.add_line(c1 + n, c0 + n, None, None, None).ok()?;
             sk.add_arc(c0, c0 + n, c0 - n, [None; 3], None).ok()?;
+            // The construction line between the arc centres the slot's middle sits on (#7908).
+            let axis = sk.add_line(c0, c1, None, None, None).ok()?;
+            sk.curves.get_mut(axis)?.construction = true;
+            sk.add_point((c0 + c1) * 0.5, None).ok()?;
         }
         ("sketch.slot.arc_center" | "sketch.slot.arc_three_point", [a, b, c]) => {
             let (centre, start, end, radius, width) = if t.cmd == "sketch.slot.arc_center" {
@@ -1067,6 +1194,12 @@ pub(crate) fn preview_curve(
             sk.add_arc(at(t0, radius), at(t0, radius - half), at(t0, radius + half), [None; 3], None).ok()?;
             let guide = sk.add_arc(centre, at(t0, radius), at(t1, radius), [None; 3], None).ok()?;
             sk.curves.get_mut(guide)?.construction = true;
+            // The middle, halfway along the centre arc, and its construction chords (#7908).
+            let mid = at(t0 + sweep * 0.5, radius);
+            for end in [at(t0, radius), at(t1, radius)] {
+                let chord = sk.add_line(mid, end, None, None, None).ok()?;
+                sk.curves.get_mut(chord)?.construction = true;
+            }
         }
         ("sketch.ellipse", [c, m]) => {
             let u = (*m - *c).normalized()?;
@@ -1107,6 +1240,7 @@ pub(crate) fn preview_curve(
                     degree: if t.cmd == "sketch.spline.control_point_5" { 5 } else { 3 },
                     periodic,
                     nurbs: None,
+                    handles: Vec::new(),
                 },
                 None,
             )
@@ -1159,6 +1293,14 @@ pub(crate) fn polygon_outline(t: &Tool, hover: Vec2, sides: f64) -> Option<Vec<V
     Some(corners)
 }
 
+/// The pointer ring is left out where it would touch a dimension's value being placed: drawn
+/// after the value, it would sit on the number (#14231). Its largest radius and half its stroke
+/// count, so a ring centred just outside the value is left out too.
+pub(crate) fn pointer_ring_shown(t: &Tool, at: Pos2) -> bool {
+    const REACH: f32 = 6.0 + 1.5 / 2.0;
+    !(t.kind == Kind::Dimension && crate::dim_view::draft_text().is_some_and(|r| r.expand(REACH).contains(at)))
+}
+
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     if crate::sketch3d::preview(app, t, painter, proj) {
         return;
@@ -1171,23 +1313,28 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     // Drawn straight onto the view: its side's colours (#4146).
-    let tk = crate::theme::Tokens::view();
+    let tk = solidcraft_theme::Tokens::view();
     let stroke = Stroke::new(1.5, tk.sketch_accent);
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
     {
-        painter.circle_stroke(sp, if snap.is_some() { 6.0 } else { 3.0 }, stroke);
+        if pointer_ring_shown(t, sp) {
+            painter.circle_stroke(sp, if snap.is_some() { 6.0 } else { 3.0 }, stroke);
+        }
         if snap.as_deref() == Some("Midpoint") && t.kind == Kind::HorizontalVertical {
             painter.circle_stroke(sp, 8.0, Stroke::new(2.0, tk.accent));
         }
-        let readout = painter.text(
-            crate::tool_cursor::readout_at(painter, proj.rect, sp),
-            egui::Align2::LEFT_TOP,
-            format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_small),
-            tk.text_dim,
-        );
-        crate::scenario::publish_rect("viewport:readout", readout);
+        // The design's coordinates: not while a value is typed and the sketch is drawn at it.
+        if crate::dim_view::preview_world(app).is_none() {
+            let readout = painter.text(
+                crate::tool_cursor::readout_at(painter, proj.rect, sp),
+                egui::Align2::LEFT_TOP,
+                crate::sketch_cursor_readout::text(app, *hp),
+                egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small),
+                tk.text_dim,
+            );
+            crate::scenario::publish_rect("viewport:readout", readout);
+        }
     }
     if matches!(t.kind, Kind::HorizontalVertical | Kind::Dimension) {
         for target in &t.point_picks {
@@ -1242,7 +1389,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
                     m + g,
                     egui::Align2::CENTER_CENTER,
                     if horizontal { "H" } else { "V" },
-                    egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
+                    egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro),
                     tk.sketch_accent,
                 );
             }

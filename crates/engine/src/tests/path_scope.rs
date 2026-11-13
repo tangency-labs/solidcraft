@@ -29,7 +29,7 @@ fn file_commands_stay_inside_the_agents_folders() {
             ("file.save_as", json!({"path": at(&out, "x.solidcraft")})),
             ("file.save", json!({"path": at(&root, "../out/x.solidcraft")})),
             ("file.export", json!({"path": at(&out, "x.stl")})),
-            ("file.export_view_dxf", json!({"path": at(&out, "x.dxf"),"camera":render::Camera::default()})),
+            ("file.export_view_dxf", json!({"path": at(&out, "x.dxf"),"camera":solidcraft_viewport::Camera::default()})),
             ("file.export", json!({"path": at(&out, "x.json"), "format": "json"})),
             ("file.save_as", json!({"path": at(&out, "x.json"), "format": "json", "preview": true})),
             ("parameters.export", json!({"path": at(&out, "x.csv")})),

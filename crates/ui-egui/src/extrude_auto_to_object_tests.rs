@@ -1,8 +1,8 @@
 //! Extrude's automatic To Object: with profiles picked, a pick off their plane is the object to
 //! extrude to, and the extent turns to To Object without the Extent Type choice.
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
 
 use crate::dialogs::{Dialog, Kind, apply_commands, face_sel};
 use crate::scenario::Harness;

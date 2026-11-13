@@ -1,29 +1,34 @@
 //! A drawing of the visible bodies and shown sketches from a supplied viewport camera. No
-//! screen pixels, grid, selection highlights or tessellation diagonals are exported.
+//! screen pixels, grid, selection highlights or tessellation diagonals are exported. The lines
+//! come from [`crate::mesh_lines`]; this command chooses the bodies and writes the DXF.
 
-#[path = "view_dxf_meshes.rs"]
-mod meshes;
-#[path = "view_dxf_progress.rs"]
-mod progress;
-#[path = "view_dxf_projection.rs"]
-mod projection;
+#[path = "view_dxf_arcs.rs"]
+mod arcs;
 #[path = "view_dxf_sketch.rs"]
 pub(super) mod sketch;
 
-use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use std::collections::BTreeMap;
+
+use serde_json::Value;
+use solidcore_record::Vec2;
 use solidcraft_io::{DxfEntity, DxfLayer, DxfLinetype, DxfShape};
-use solidcraft_render::Camera;
+use solidcraft_viewport::Camera;
 
 use super::CommandSpec;
+use crate::mesh_lines::{self, Stage, View};
 use crate::params::{bad, str_};
+use crate::schema::silhouette::{DxfOutput, DxfProjection, DxfUnits, ExportViewDxfParams, ViewDxfResult, ViewDxfStats};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const CMD: &str = "file.export_view_dxf";
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Current View as DXF", export)
+const CONTRACT: TypedContract<ExportViewDxfParams> = TypedContract::new();
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Current View as DXF", crate::checked!("file.export_view_dxf", export))
     .icon("export")
     .noundo()
-    .params("camera: Camera (current view); hidden?: omit|dashed (default omit); tolerance?: 0.0001..1 mm (curve chord tolerance, default 0.01); path?: .dxf file (else returns dxf text). Visible placed bodies and shown sketches' profile curves (no construction geometry, points, dimensions or constraints); 2D LINE/LWPOLYLINE entities on VISIBLE/HIDDEN layers (sketch curves on SKETCH), mm; finished sketches are hidden behind bodies, the active sketch is drawn on top; perspective projected onto the camera target plane; no viewport crop or overlays.")];
+    .contract(&CONTRACT)
+    .output(output_schema_for::<ViewDxfResult>)
+    .params("camera: Camera (current view); hidden?: omit|dashed (default omit); tolerance?: 0.0001..1 mm (curve chord tolerance, default 0.01); curves?: lines|arcs (lines, default, writes the short lines the view is built from; arcs writes visible circles and arcs as CIRCLE and ARC); zero?: target|origin (where the drawing's 0,0 is: the camera target, default, or the model origin as seen from the camera); path?: .dxf file (else returns dxf text). Visible placed bodies and shown sketches' profile curves (no construction geometry, points, dimensions or constraints); 2D LINE/LWPOLYLINE entities on VISIBLE/HIDDEN layers (sketch curves on SKETCH), mm; finished sketches are hidden behind bodies, the active sketch is drawn on top; perspective projected onto the camera target plane; no viewport crop or overlays.")];
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cam: Camera =
@@ -45,6 +50,18 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if !sketch::exportable(s) {
         return Err(bad(CMD, "no visible bodies or sketches to export"));
     }
+    let at_origin = match p.get("zero") {
+        None => false,
+        Some(Value::String(v)) if v == "target" => false,
+        Some(Value::String(v)) if v == "origin" => true,
+        _ => return Err(bad(CMD, "zero must be target or origin")),
+    };
+    let as_arcs = match p.get("curves") {
+        None => false,
+        Some(Value::String(v)) if v == "lines" => false,
+        Some(Value::String(v)) if v == "arcs" => true,
+        _ => return Err(bad(CMD, "curves must be lines or arcs")),
+    };
     let tolerance = match p.get("tolerance") {
         None => 0.01,
         Some(v) => v.as_f64().filter(|t| (0.0001..=1.0).contains(t)).ok_or_else(|| bad(CMD, "tolerance must be 0.0001..1 mm"))?,
@@ -57,14 +74,29 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
     }
     let started = web_time::Instant::now();
-    progress::Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
-    let meshes = meshes::prepare(s, tolerance)?;
+    Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
+    let meshes = mesh_lines::prepare(s, CMD, tolerance, |b| s.body_visible(&b.name))?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
-    let drawing = projection::drawing(&meshes, &sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?, &cam).map_err(|e| bad(CMD, e))?;
-    let writing = progress::Stage::new("dxf_write", 1);
+    let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?;
+    let view = View::from_camera(&cam);
+    let mut drawing = mesh_lines::drawing(&meshes, &sketch, &view).map_err(|e| bad(CMD, e))?;
+    if at_origin {
+        // The drawing is centred on the camera target; move it so the model origin is 0,0.
+        let zero = view.world_origin().map_err(|e| bad(CMD, e))?;
+        for l in &mut drawing.lines {
+            l.a -= zero;
+            l.b -= zero;
+        }
+        for path in &mut drawing.sketch {
+            for pt in &mut path.points {
+                *pt -= zero;
+            }
+        }
+    }
+    let writing = Stage::new("dxf_write", 1);
     writing.check().map_err(|e| bad(CMD, e))?;
-    let mut visible = 0;
-    let mut hidden = 0;
+    let mut visible = 0usize;
+    let mut hidden = 0usize;
     let mut entities = Vec::new();
     for line in drawing.lines {
         if line.hidden && !dashed {
@@ -79,7 +111,10 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         };
         entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Line(line.a, line.b) });
     }
-    let mut entities = projection::connect(entities);
+    let mut entities = connect(entities);
+    if as_arcs {
+        entities = arcs::recognise(entities, tolerance);
+    }
     let sketch = sketch_entities(drawing.sketch, dashed, &mut entities);
     let mut layers = vec![DxfLayer::new("VISIBLE", 7)];
     if dashed {
@@ -90,23 +125,42 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let text = solidcraft_io::write_dxf_drawing(&layers, &entities)?;
     writing.check().map_err(|e| bad(CMD, e))?;
-    let mut result = json!({"visible":visible,"hidden":hidden,"sketch":sketch,"units":"mm","tolerance":tolerance,"projection":if cam.fov > 0.0 {"perspective"} else {"orthographic"}});
-    result["stats"] = json!({"bodies":meshes.placements.len(),"shared_meshes":meshes.meshes.len(),"triangles":meshes.triangles,
-        "mesh_bytes":meshes.bytes,"worker_limit":meshes::WORKERS,"segments":drawing.segments,"occlusion_work":drawing.work,
-        "prepare_ms":prepare_ms,"projection_ms":drawing.projection_ms,"occlusion_ms":drawing.occlusion_ms});
-    if let Some(path) = path {
+    let stats = ViewDxfStats {
+        bodies: meshes.placements.len(),
+        shared_meshes: meshes.meshes.len(),
+        triangles: meshes.triangle_count(),
+        mesh_bytes: meshes.bytes,
+        worker_limit: mesh_lines::WORKERS,
+        segments: drawing.segments,
+        occlusion_work: drawing.work,
+        prepare_ms,
+        projection_ms: drawing.projection_ms,
+        occlusion_ms: drawing.occlusion_ms,
+    };
+    let output = if let Some(path) = path {
         solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
         solidcraft_io::write_atomic(std::path::Path::new(path), text.as_bytes(), false).map_err(|e| crate::EngineError::Other(e.to_string()))?;
-        result["path"] = json!(path);
+        DxfOutput::File { path: path.to_string() }
     } else {
-        result["dxf"] = json!(text);
-    }
-    Ok(result)
+        DxfOutput::Text { dxf: text }
+    };
+    let reply = ViewDxfResult {
+        visible,
+        hidden,
+        sketch,
+        units: DxfUnits::Millimetres,
+        tolerance,
+        projection: if cam.fov > 0.0 { DxfProjection::Perspective } else { DxfProjection::Orthographic },
+        stats,
+        output,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(CMD, e.to_string()))
 }
 
 /// Sketch runs as entities: visible ones on SKETCH, hidden ones dashed on HIDDEN or omitted.
 /// Returns the number of SKETCH entities.
-fn sketch_entities(paths: Vec<projection::Path>, dashed: bool, entities: &mut Vec<DxfEntity>) -> usize {
+fn sketch_entities(paths: Vec<mesh_lines::Path>, dashed: bool, entities: &mut Vec<DxfEntity>) -> usize {
     let mut count = 0;
     for path in paths.into_iter().filter(|p| dashed || !p.hidden) {
         let layer = if path.hidden { "HIDDEN" } else { "SKETCH" };
@@ -118,6 +172,51 @@ fn sketch_entities(paths: Vec<projection::Path>, dashed: bool, entities: &mut Ve
         entities.push(DxfEntity { layer: layer.into(), shape });
     }
     count
+}
+
+/// Keep the hidden curves connected: restarting a dash on every short chord would make a
+/// small circular hole look solid. Degree-two joins continue; junctions end the polyline.
+fn connect(entities: Vec<DxfEntity>) -> Vec<DxfEntity> {
+    let mut result = Vec::new();
+    let mut lines = Vec::new();
+    for entity in entities {
+        match entity {
+            DxfEntity { layer, shape: DxfShape::Line(a, b) } if layer == "HIDDEN" => lines.push((a, b)),
+            e => result.push(e),
+        }
+    }
+    let extent = lines.iter().flat_map(|(a, b)| [a, b]).fold(1.0_f64, |s, p| s.max(p.x.abs()).max(p.y.abs()));
+    let eps = extent * 1e-8;
+    let key = |p: Vec2| [(p.x / eps).round() as i64, (p.y / eps).round() as i64];
+    let mut nodes: BTreeMap<[i64; 2], Vec<usize>> = BTreeMap::new();
+    for (i, (a, b)) in lines.iter().enumerate() {
+        nodes.entry(key(*a)).or_default().push(i);
+        nodes.entry(key(*b)).or_default().push(i);
+    }
+    let mut used = vec![false; lines.len()];
+    for (i, (a, b)) in lines.iter().enumerate() {
+        if used.get(i).copied().unwrap_or(true) {
+            continue;
+        }
+        if let Some(v) = used.get_mut(i) {
+            *v = true;
+        }
+        let mut points = vec![*a, *b];
+        for _ in 0..2 {
+            while let Some(end) = points.last().copied() {
+                let Some(neighbours) = nodes.get(&key(end)).filter(|n| n.len() == 2) else { break };
+                let Some(next) = neighbours.iter().copied().find(|i| used.get(*i) == Some(&false)) else { break };
+                let Some((a, b)) = lines.get(next) else { break };
+                if let Some(v) = used.get_mut(next) {
+                    *v = true;
+                }
+                points.push(if key(*a) == key(end) { *b } else { *a });
+            }
+            points.reverse();
+        }
+        result.push(DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points } });
+    }
+    result
 }
 
 #[cfg(test)]

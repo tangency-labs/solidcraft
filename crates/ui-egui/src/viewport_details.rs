@@ -10,7 +10,7 @@ use solidcraft_engine::{
 };
 
 fn tr(id: &str) -> String {
-    crate::i18n::tr(id).to_owned()
+    solidcraft_ui_text::tr(id).to_owned()
 }
 fn field(id: &str, label: &str, value: DetailValue) -> DetailSetting {
     DetailSetting { id: id.into(), label: tr(label), value, enabled: true }
@@ -41,7 +41,7 @@ fn record_id(row: &ContinuityDetail) -> String {
     json!([row.body, row.edge]).to_string()
 }
 fn record_label(row: &ContinuityDetail) -> String {
-    crate::i18n::format("ui.details_seam", &[("body", &row.body), ("edge", &row.edge.to_string())])
+    solidcraft_ui_text::format("ui.details_seam", &[("body", &row.body), ("edge", &row.edge.to_string())])
 }
 fn selected<'a>(app: &SolveApp, rows: &'a [ContinuityDetail]) -> Option<&'a ContinuityDetail> {
     app.viewport_status.selected_record.as_ref().and_then(|id| rows.iter().find(|row| record_id(row) == *id)).or_else(|| rows.first())
@@ -132,7 +132,7 @@ fn continuity_description(app: &SolveApp, details: &mut Details) {
     if !row.current {
         details.caption = Some(tr("ui.details_continuity_stale"));
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     for (label, colour, count) in [
         ("ui.details_smooth", t.continuity[0], rows.iter().filter(|s| s.verdict == V::Smooth).count()),
         ("ui.details_jump", t.continuity[1], rows.iter().filter(|s| s.verdict == V::CurvatureJump).count()),
@@ -243,7 +243,7 @@ pub(crate) fn dispatch(app: &mut SolveApp, ctx: &egui::Context, owner: &str, eve
                 return;
             }
             let mut camera = app.cam;
-            camera.fit(&bounds);
+            camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
             let params = json!({"camera":{"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"fov":camera.fov,"roll":camera.roll}});
             if let Err(error) = app.run("view.apply", params) {
                 app.set_status(error, true);
@@ -286,7 +286,7 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
         descriptions.push(("analysis:legend", legacy_description(app)));
     }
     if (!app.preferences.viewport_analysis_status || !app.preferences.viewport_status_details) && !app.session.continuity.is_empty() {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         // Best to worst: the curvature-continuous orders share a colour, then a gap between faces.
         let mut classes: Vec<Option<solidcraft_engine::kernel::Continuity>> =
             solidcraft_engine::kernel::Continuity::ALL.into_iter().rev().map(Some).collect();
@@ -305,9 +305,18 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
         descriptions.push(("continuity_legend", Details { key, ..Default::default() }));
     }
     let mut free = crate::shell::workspace_content(app, viewport);
+    if let Some(frame) = app.universal_panel_frame() {
+        let gap = solidcraft_theme::Tokens::get().space_8;
+        for section in &frame.layout.sections {
+            let bounds = crate::panel_runtime::egui_rect(section.outer);
+            if section.zone == solidcraft_engine::panels::Zone::Left && bounds.intersects(free) {
+                free.min.x = (bounds.right() + gap).clamp(free.left(), free.right());
+            }
+        }
+    }
     for (id, description) in descriptions {
         if let Some(rect) = legacy_legend(app, ui, free, id, &description) {
-            free.max.y = (rect.top() - crate::theme::Tokens::get().space_8).max(free.top());
+            free.max.y = (rect.top() - solidcraft_theme::Tokens::get().space_8).max(free.top());
         }
     }
 }
@@ -316,10 +325,10 @@ fn legacy_legend(_app: &SolveApp, ui: &mut egui::Ui, free: egui::Rect, id: &str,
     if description.key.is_empty() {
         return None;
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let container = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::ViewportStatus);
     let result = container
-        .area(egui::Id::new(id))
+        .area(egui::Id::unique(id))
         .order(egui::Order::Background)
         .movable(false)
         .pivot(egui::Align2::LEFT_BOTTOM)

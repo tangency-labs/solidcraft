@@ -1,0 +1,102 @@
+{
+ "cases": [
+  {
+   "name": "cov_isect_line_line_tiny_direction_param_overflow",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp:1272 N_IsectLineLine alpha/m1 NL_NUM_ERR (coverage: nurbs/geom.rs:411)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1e-150,
+      0,
+      0
+     ],
+     "bounded": false
+    },
+    "l2": {
+     "p": [
+      1e+160,
+      -1,
+      0
+     ],
+     "v": [
+      0,
+      1,
+      0
+     ],
+     "bounded": false
+    }
+   }
+  },
+  {
+   "name": "cov_isect_line_line_tiny_second_direction",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp:1272 N_IsectLineLine beta/m2 NL_NUM_ERR (coverage: nurbs/geom.rs:411)",
+   "inputs": {
+    "op": "isect_line_line",
+    "l1": {
+     "p": [
+      0,
+      -1e+160,
+      0
+     ],
+     "v": [
+      0,
+      1,
+      0
+     ],
+     "bounded": false
+    },
+    "l2": {
+     "p": [
+      3,
+      0,
+      0
+     ],
+     "v": [
+      1e-150,
+      0,
+      0
+     ],
+     "bounded": true
+    }
+   }
+  },
+  {
+   "name": "cov_isect_line_plane_far_plane_overflow",
+   "upstream_ref": "source/SMLib/src/NL_Geom.cpp:1592 N_IsectLinePlane num/den NL_NUM_ERR (coverage: nurbs/geom.rs:469)",
+   "inputs": {
+    "op": "isect_line_plane",
+    "l": {
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1,
+      0,
+      0
+     ],
+     "bounded": false
+    },
+    "plane": {
+     "p": [
+      0,
+      1e+305,
+      0
+     ],
+     "n": [
+      1e-08,
+      1,
+      0
+     ]
+    }
+   }
+  }
+ ]
+}

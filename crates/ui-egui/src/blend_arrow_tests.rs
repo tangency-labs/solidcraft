@@ -6,8 +6,9 @@ use crate::canvas::{anchor, blend_grow_dir};
 use crate::dialogs::Kind;
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 /// A 40 x 30 x 20 block with a 20 x 30 x 10 step on its left half: the edge along y at x 20,
 /// z 20 is inside (concave); the block's right top edge (x 40, z 20) and the step's top right

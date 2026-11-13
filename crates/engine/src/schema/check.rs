@@ -331,7 +331,13 @@ pub fn run_checked(s: &mut Session, p: &Value, id: &str, contract: &dyn Contract
     }
     match result {
         Ok(Value::Object(mut o)) if level == ParamCheck::Warn && !issues.is_empty() => {
-            o.insert("param_warnings".into(), json!(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>()));
+            // A command that runs another checked command keeps that one's warnings too.
+            let mut warnings = match o.remove("param_warnings") {
+                Some(Value::Array(inner)) => inner,
+                _ => Vec::new(),
+            };
+            warnings.extend(issues.iter().map(|i| json!(i.message)));
+            o.insert("param_warnings".into(), Value::Array(warnings));
             Ok(Value::Object(o))
         }
         other => other,

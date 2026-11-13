@@ -10,9 +10,10 @@
 //! box's side, where the outer loop's polygon closes. Every iso line of a closed surface is
 //! therefore one line across the box, cut where it crosses the loops.
 
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep;
+use solidcore_record::Vec3;
+use solidcore_record::brep;
 use solidcraft_geom::brep::eval::SurfaceEval;
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::point_path::{MAX_CURVE_POINTS, curve_path};
@@ -129,13 +130,13 @@ impl<'a> FaceTrims<'a> {
                 let (mut x, mut y) = (ta, tb);
                 for _ in 0..80 {
                     let m = 0.5 * (x + y);
-                    match c.eval(m).map(across) {
+                    match solidcore_ops::pcurve::eval(c, m).map(across) {
                         Some(k) if (k < 0.0) == (ka < 0.0) => x = m,
                         Some(_) => y = m,
                         None => break,
                     }
                 }
-                if let Some(t) = c.eval(0.5 * (x + y)).map(along).filter(|t| *t > lo && *t < hi) {
+                if let Some(t) = solidcore_ops::pcurve::eval(c, 0.5 * (x + y)).map(along).filter(|t| *t > lo && *t < hi) {
                     cuts.push(t);
                 }
             }
@@ -260,7 +261,7 @@ fn pcurve_samples(c: &brep::Curve2) -> Vec<(f64, [f64; 2])> {
     (0..=n)
         .filter_map(|i| {
             let t = a + (b - a) * i as f64 / n as f64;
-            c.eval(t).map(|q| (t, q))
+            solidcore_ops::pcurve::eval(c, t).map(|q| (t, q))
         })
         .collect()
 }
@@ -280,7 +281,7 @@ fn crosses_right(q: [f64; 2], l: &[[f64; 2]]) -> bool {
 /// The iso curve of `surface` at `fixed` (the other parameter) as a record curve on `[a, b]` of
 /// its own parameter: the surface's own line or circle, or its B-spline row.
 fn iso_record(surface: &brep::Surface, along_u: bool, fixed: f64, (a, b): (f64, f64)) -> Result<(brep::Curve, [f64; 2])> {
-    use solidcraft_geom::brep::{Curve, Frame, Surface};
+    use solidcore_record::brep::{Curve, Frame, Surface};
     let v = |q: [f64; 3]| Vec3::new(q[0], q[1], q[2]);
     let d = |q: Vec3| [q.x, q.y, q.z];
     let line = |p: Vec3, q: Vec3| (Curve::Line { start: d(p), end: d(q) }, [0.0, 1.0]);
@@ -346,6 +347,7 @@ fn iso_record(surface: &brep::Surface, along_u: bool, fixed: f64, (a, b): (f64, 
         }
         // A label: the face's (u, v) are its NURBS form's, whose rows are its iso curves.
         Surface::BallPatch { .. } => return Err(KernelError::Invalid("an iso curve of a ball patch's label (take its NURBS form's)".into())),
+        Surface::Blend { .. } => return Err(KernelError::Invalid("an iso curve of a blend's label (take its NURBS form's)".into())),
     })
 }
 

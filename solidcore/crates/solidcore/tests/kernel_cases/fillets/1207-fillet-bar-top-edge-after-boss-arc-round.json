@@ -1,0 +1,178 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  16.093476939431238,
+                  -14.999999999999838,
+                  10.0
+                ],
+                [
+                  100.0,
+                  -15.0,
+                  10.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  13.228756555322963,
+                  -14.999999999999998,
+                  11.999999999999995
+                ],
+                [
+                  16.093476939431238,
+                  -14.999999999999838,
+                  10.0
+                ]
+              ],
+              "index": 8
+            }
+          ],
+          "points": [
+            [
+              58.04673846971562,
+              -14.999999999999918,
+              10.0
+            ],
+            [
+              14.289895674083551,
+              -15.0,
+              10.475339878390873
+            ]
+          ],
+          "tolerance": 6.347528024625401
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "1207-fillet-bar-top-edge-after-boss-arc-round",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "bar and boss as 1207-fillet-bar-top-edge-and-boss-arc-together; the base arc rounded r2 first (V0 + 28.9190), running out over the front face where its section is a curve on that face tangent to the bar's top edge; then that edge rounded r2, the tangent chain on: the edge and the section curve it runs into. How the round runs on along the curve has no closed form: one valid closed body",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#1207"
+    ],
+    "what": "after the boss's partial base arc is rounded r2, the bar's top edge that runs into the round rounded r2"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 25,
+      "faces": 11,
+      "vertices": 16
+    }
+  },
+  "records": "1207-fillet-bar-top-edge-after-boss-arc-round.bodies.json.gz",
+  "result": [
+    {
+      "body": "Arm",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 11547.283591433596,
+      "body_count": 1,
+      "edges": 25,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 49712.428167992635
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1207"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "after the boss's partial base arc is rounded r2, the bar's top edge that runs into the round rounded r2",
+  "why_not": []
+}

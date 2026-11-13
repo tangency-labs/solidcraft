@@ -3,7 +3,9 @@
 //! the box centres, a few items per leaf) and only read afterwards. [`MeshIndex`] holds one over
 //! a mesh's triangles and one over its edge segments, for picking.
 
-use crate::{Aabb3, Mesh, Vec3};
+use crate::prelude::*;
+use crate::{Aabb3, Mesh};
+use solidcore_record::Vec3;
 
 /// Most items in a leaf.
 const LEAF: usize = 4;

@@ -1,5 +1,5 @@
 use super::*;
-use crate::surface::OpaqueSurface;
+use solidcraft_viewport::surface::OpaqueSurface;
 
 fn point(position: Vec3) -> PunctualLight {
     PunctualLight::new(position, Vec3::new(1.0, 0.5, 0.25), 2.0, 100.0, 0.001, None).unwrap()

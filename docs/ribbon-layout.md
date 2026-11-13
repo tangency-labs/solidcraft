@@ -21,7 +21,7 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 | SURFACE | EDIT | **`surface.trim`**, **`surface.untrim`**, **`surface.extend`**, **`surface.stitch`**, `surface.unstitch`, `surface.reverse_normal`, `surface.fair`, `surface.fillet`, `surface.match` |
 | SURFACE | CONVERT | **`surface.thicken`**, **`mesh.convert`** |
 | ASSEMBLE | COMPONENTS | **`component.create`**, **`component.from_bodies`**, **`component.insert_design`**, **`parts.library`** |
-| ASSEMBLE | JOINTS | **`joint.create`**, **`joint.as_built`**, **`joint.origin`**, **`joint.rigid_group`**, `joint.limits`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam`, `joint.reach` |
+| ASSEMBLE | JOINTS | **`joint.create`**, **`joint.as_built`**, **`joint.origin`**, **`joint.rigid_group`**, `assembly.constraint.create`, `joint.limits`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam`, `joint.reach` |
 | ASSEMBLE | POSITION | **`occurrence.ground`**, **`component.capture_position`**, **`component.revert_position`** |
 | ASSEMBLE | MOTION | **`joint.drive`**, **`joint.motion_link`**, **`motion.study`**, **`motion.trace`**, `explode.create` |
 | ASSEMBLE | CONTACT | **`contact.enable_sets`**, **`contact.check`**, `contact.enable_all`, `contact.disable_all`, `contact.create`, `contact.edit`, `contact.list` |
@@ -92,7 +92,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SKETCH / PATTERN | SKETCH / PATTERN | `sketch.mirror`, `sketch.pattern.circular`, `sketch.pattern.rectangular` |
 | SOLID / ASSEMBLE | ASSEMBLE / COMPONENTS | `component.create`, `component.insert_design` |
 | SOLID / ASSEMBLE | ASSEMBLE / CONTACT | `contact.enable_sets`, `contact.enable_all`, `contact.disable_all`, `contact.create` |
-| SOLID / ASSEMBLE | ASSEMBLE / JOINTS | `joint.create`, `joint.as_built`, `joint.rigid_group`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam` |
+| SOLID / ASSEMBLE | ASSEMBLE / JOINTS | `joint.create`, `joint.as_built`, `joint.rigid_group`, `assembly.constraint.create`, `joint.gear`, `joint.rack_pinion`, `joint.screw`, `joint.cam` |
 | SOLID / ASSEMBLE | ASSEMBLE / MOTION | `joint.drive`, `joint.motion_link`, `explode.create`, `motion.study`, `motion.trace` |
 | SOLID / CONFIGURE | MANAGE / CONFIGURATIONS | `config.configure`, `config.table` |
 | SOLID / CONSTRUCT | MODEL / CONSTRUCT | `construct.plane.offset`, `construct.plane.at_angle`, `construct.axis.through_cylinder`, `construct.axis.normal_to_face`, `construct.axis.two_planes`, `construct.axis.two_points`, `construct.axis.edge`, `construct.point.vertex`, `construct.point.two_edges`, `construct.point.three_planes`, `construct.point.center`, `construct.point.edge_plane`, `construct.point.along_path`, `construct.plane.midplane`, `construct.plane.two_edges`, `construct.plane.three_points`, `construct.plane.tangent`, `construct.plane.along_path`, `construct.plane.perpendicular` |
@@ -151,6 +151,10 @@ Tab labels use normal word casing. Selected standard tabs use their soft accent;
 Sketch's Finish group reserves space at the far right even when other groups collapse. Its unfilled Finish Sketch button uses the existing `finish` icon. The chevron-free Exit row still opens the existing command list, preserving Finish with Auto-Constrain and saved pin customizations.
 
 Additional handles: `ribbon:workspace`, `ribbon:search`, and `ribbon:section:<TAB>:<SECTION>`. Existing workspace, tab, panel, collapsed, family and command handles remain available. Layout evidence also publishes rectangles for these handles, `button:<command id>`, and the open `ribbon:search_popup`.
+
+## Folded ribbon
+
+`ribbon_tabs_only` (Preferences › Layout, off by default; `view.ribbon_tabs_only` switches it) keeps only the 30 px tab row, plus its 1 px line, from the view: `toolbar::reserved_height` gives the shell that height, in both layouts. The workspace column shows its name and arrow on one line. A tab's click opens the whole ribbon of that tab over the view in a Chrome area at the same place and size it has when not folded; nothing below it moves. It closes when a command starts (`SolveApp::start`), when the pointer leaves it (an open section list, a menu or a dragged button keep it open), on Escape, or when the open tab is clicked again. Render keeps its stage bar whole. Rectangles: `ribbon:folded` while folded, `ribbon:open` while open; the handles inside are the usual ones.
 
 ## Workspace and section lists
 

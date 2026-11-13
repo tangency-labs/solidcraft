@@ -1,0 +1,2605 @@
+{
+ "cases": [
+  {
+   "name": "Surface_net_constants_all_z0.0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "zone_tol": 0.0,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "Surface_net_constants_all_z1e-06",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "Surface_net_constants_all_z0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "zone_tol": 0.001,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "Surface_net_constants_all_z1.0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "zone_tol": 1.0,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "Surface_net_constants_angles_only",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     false,
+     false,
+     true,
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "Surface_net_constants_ch_only",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     false,
+     false,
+     true
+    ]
+   }
+  },
+  {
+   "name": "Surface_net_constants_surface_full",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "surface_domain": [
+     0.0323000000097693,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_net_constants_surface_sub",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "surface_domain": [
+     0.22584000000781546,
+     0.23571933850177107,
+     0.7096900000029307,
+     0.5803158469121861
+    ]
+   }
+  },
+  {
+   "name": "Surface_surf_constants_full",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "domain": [
+     0.0323000000097693,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "Surface_surf_constants_line",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "domain": [
+     0.0323000000097693,
+     0.3505848413052427,
+     1.0,
+     0.3505848413052427
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "Surface_surf_constants_point",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "domain": [
+     0.0323000000097693,
+     0.0634210842965636,
+     0.0323000000097693,
+     0.0634210842965636
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "Surface_surf_constants_v_only",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "domain": [
+     0.0323000000097693,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "want": [
+     false,
+     true,
+     false,
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "Surface_copy",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "copy",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_decompose",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "decompose",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "Surface_split_u_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.5161500000048846,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_split_v_mid",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.3505848413052427,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_split_u_end",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.0323000000097693,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_split_v_end",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.6377485983139218,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_split_u_out",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 2.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_split_uv",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.5161500000048846,
+    "dir": 3
+   }
+  },
+  {
+   "name": "Surface_degenerate_tol1e-10",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 1e-10
+   }
+  },
+  {
+   "name": "Surface_degenerate_tol1.0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "Surface_degenerate_tol1000.0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 1000.0
+   }
+  },
+  {
+   "name": "Surface_degenerate_tol1000000.0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 1000000.0
+   }
+  },
+  {
+   "name": "offset_nurb_net_constants_all_z0.0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "zone_tol": 0.0,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_net_constants_all_z1e-06",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_net_constants_all_z0.001",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "zone_tol": 0.001,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_net_constants_all_z1.0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "zone_tol": 1.0,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_net_constants_angles_only",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     false,
+     false,
+     true,
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_net_constants_ch_only",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     false,
+     false,
+     true
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_net_constants_surface_full",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "surface_domain": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_net_constants_surface_sub",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "surface_domain": [
+     -4.380239945688765,
+     3.0,
+     -1.642589979633287,
+     9.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_surf_constants_full",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "domain": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_surf_constants_line",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "domain": [
+     -5.475299932110956,
+     5.0,
+     0.0,
+     5.0
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_surf_constants_point",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "domain": [
+     -5.475299932110956,
+     0.0,
+     -5.475299932110956,
+     0.0
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_surf_constants_v_only",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "domain": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "want": [
+     false,
+     true,
+     false,
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_copy",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "copy",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_decompose",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "decompose",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_split_u_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -2.737649966055478,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_split_v_mid",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 5.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_split_u_end",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -5.475299932110956,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_split_v_end",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 10.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_split_u_out",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_split_uv",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -2.737649966055478,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_degenerate_tol1e-10",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 1e-10
+   }
+  },
+  {
+   "name": "offset_nurb_degenerate_tol1.0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "offset_nurb_degenerate_tol1000.0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 1000.0
+   }
+  },
+  {
+   "name": "offset_nurb_degenerate_tol1000000.0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (my_test_fillet_regression, offset_nurb.sms)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 1000000.0
+   }
+  },
+  {
+   "name": "DropCurveSurface_net_constants_all_z0.0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "zone_tol": 0.0,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_net_constants_all_z1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_net_constants_all_z0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "zone_tol": 0.001,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_net_constants_all_z1.0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "zone_tol": 1.0,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_net_constants_angles_only",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     false,
+     false,
+     true,
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_net_constants_ch_only",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     false,
+     false,
+     true
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_net_constants_surface_full",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "surface_domain": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_net_constants_surface_sub",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "surface_domain": [
+     0.2,
+     0.3,
+     0.7,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_surf_constants_full",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "domain": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_surf_constants_line",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "domain": [
+     0.0,
+     0.5,
+     1.0,
+     0.5
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_surf_constants_point",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "domain": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_surf_constants_v_only",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "domain": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "want": [
+     false,
+     true,
+     false,
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_copy",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "copy",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_decompose",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "decompose",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_u_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0.5,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_v_mid",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0.5,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_u_end",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_v_end",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_u_out",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 2.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "split",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0.5,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_degenerate_tol1e-10",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 1e-10
+   }
+  },
+  {
+   "name": "DropCurveSurface_degenerate_tol1.0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "DropCurveSurface_degenerate_tol1000.0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 1000.0
+   }
+  },
+  {
+   "name": "DropCurveSurface_degenerate_tol1000000.0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (drop-curve test surface)",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 1000000.0
+   }
+  },
+  {
+   "name": "rectangle_4x3_net",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRectangle",
+   "inputs": {
+    "op": "net_constants",
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        3.0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        4.0,
+        0,
+        0,
+        1
+       ],
+       [
+        4.0,
+        3.0,
+        0,
+        1
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "rectangle_4x3_surf",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRectangle",
+   "inputs": {
+    "op": "surf_constants",
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        3.0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        4.0,
+        0,
+        0,
+        1
+       ],
+       [
+        4.0,
+        3.0,
+        0,
+        1
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "rectangle_4x3_decompose",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRectangle",
+   "inputs": {
+    "op": "decompose",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        3.0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        4.0,
+        0,
+        0,
+        1
+       ],
+       [
+        4.0,
+        3.0,
+        0,
+        1
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "rectangle_4x3_split",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRectangle",
+   "inputs": {
+    "op": "split",
+    "t": 0.5,
+    "dir": 1,
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        3.0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        4.0,
+        0,
+        0,
+        1
+       ],
+       [
+        4.0,
+        3.0,
+        0,
+        1
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "rectangle_4x3_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRectangle",
+   "inputs": {
+    "op": "degenerate",
+    "tol": 1e-10,
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        3.0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        4.0,
+        0,
+        0,
+        1
+       ],
+       [
+        4.0,
+        3.0,
+        0,
+        1
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "polygon_box_net",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRegularPolygon",
+   "inputs": {
+    "op": "net_constants",
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        2.0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        2.0,
+        0,
+        0,
+        1
+       ],
+       [
+        2.0,
+        2.0,
+        0,
+        1
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "polygon_box_surf",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRegularPolygon",
+   "inputs": {
+    "op": "surf_constants",
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ],
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        2.0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        2.0,
+        0,
+        0,
+        1
+       ],
+       [
+        2.0,
+        2.0,
+        0,
+        1
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "polygon_box_decompose",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRegularPolygon",
+   "inputs": {
+    "op": "decompose",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        2.0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        2.0,
+        0,
+        0,
+        1
+       ],
+       [
+        2.0,
+        2.0,
+        0,
+        1
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "polygon_box_split",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRegularPolygon",
+   "inputs": {
+    "op": "split",
+    "t": 0.5,
+    "dir": 1,
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        2.0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        2.0,
+        0,
+        0,
+        1
+       ],
+       [
+        2.0,
+        2.0,
+        0,
+        1
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "polygon_box_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRegularPolygon",
+   "inputs": {
+    "op": "degenerate",
+    "tol": 1e-10,
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        2.0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        2.0,
+        0,
+        0,
+        1
+       ],
+       [
+        2.0,
+        2.0,
+        0,
+        1
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "edge_point_surface_net",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "net": [
+      [
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ],
+      [
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ],
+      [
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ]
+     ],
+     "p": 2,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "edge_point_surface_surf",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "net": [
+      [
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ],
+      [
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ],
+      [
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ]
+     ],
+     "p": 2,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "edge_point_surface_degenerate",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "degenerate",
+    "sur": {
+     "net": [
+      [
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ],
+      [
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ],
+      [
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ],
+       [
+        1,
+        2,
+        3,
+        1
+       ]
+      ]
+     ],
+     "p": 2,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_pole_net_11111",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        1,
+        1
+       ],
+       [
+        0,
+        0,
+        1,
+        1
+       ],
+       [
+        0,
+        0,
+        1,
+        1
+       ]
+      ],
+      [
+       [
+        1,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        1,
+        0,
+        1
+       ],
+       [
+        -1,
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        2,
+        0,
+        -1,
+        1
+       ],
+       [
+        0,
+        2,
+        -1,
+        1
+       ],
+       [
+        -2,
+        0,
+        -1,
+        1
+       ]
+      ]
+     ],
+     "p": 2,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "edge_pole_net_11000",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        1,
+        1
+       ],
+       [
+        0,
+        0,
+        1,
+        1
+       ],
+       [
+        0,
+        0,
+        1,
+        1
+       ]
+      ],
+      [
+       [
+        1,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        1,
+        0,
+        1
+       ],
+       [
+        -1,
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        2,
+        0,
+        -1,
+        1
+       ],
+       [
+        0,
+        2,
+        -1,
+        1
+       ],
+       [
+        -2,
+        0,
+        -1,
+        1
+       ]
+      ]
+     ],
+     "p": 2,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "edge_pole_net_00111",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "net_constants",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        1,
+        1
+       ],
+       [
+        0,
+        0,
+        1,
+        1
+       ],
+       [
+        0,
+        0,
+        1,
+        1
+       ]
+      ],
+      [
+       [
+        1,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        1,
+        0,
+        1
+       ],
+       [
+        -1,
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        2,
+        0,
+        -1,
+        1
+       ],
+       [
+        0,
+        2,
+        -1,
+        1
+       ],
+       [
+        -2,
+        0,
+        -1,
+        1
+       ]
+      ]
+     ],
+     "p": 2,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "zone_tol": 1e-06,
+    "want": [
+     false,
+     false,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "edge_pole_surf",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "surf_constants",
+    "sur": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        1,
+        1
+       ],
+       [
+        0,
+        0,
+        1,
+        1
+       ],
+       [
+        0,
+        0,
+        1,
+        1
+       ]
+      ],
+      [
+       [
+        1,
+        0,
+        0,
+        1
+       ],
+       [
+        0,
+        1,
+        0,
+        1
+       ],
+       [
+        -1,
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       [
+        2,
+        0,
+        -1,
+        1
+       ],
+       [
+        0,
+        2,
+        -1,
+        1
+       ],
+       [
+        -2,
+        0,
+        -1,
+        1
+       ]
+      ]
+     ],
+     "p": 2,
+     "q": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "want": [
+     true,
+     true,
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  {
+   "name": "alloc_0_0_0_0_0_0",
+   "upstream_ref": "sm_AllocateNurbSurface",
+   "inputs": {
+    "op": "allocate",
+    "dims": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "alloc_1_1_1_1_3_3",
+   "upstream_ref": "sm_AllocateNurbSurface",
+   "inputs": {
+    "op": "allocate",
+    "dims": [
+     1,
+     1,
+     1,
+     1,
+     3,
+     3
+    ]
+   }
+  },
+  {
+   "name": "alloc_4_2_3_1_8_4",
+   "upstream_ref": "sm_AllocateNurbSurface",
+   "inputs": {
+    "op": "allocate",
+    "dims": [
+     4,
+     2,
+     3,
+     1,
+     8,
+     4
+    ]
+   }
+  }
+ ]
+}

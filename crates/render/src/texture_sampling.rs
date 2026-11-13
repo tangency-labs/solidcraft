@@ -37,6 +37,11 @@ pub struct TextureView<'a> {
     height: usize,
 }
 impl<'a> TextureView<'a> {
+    /// Borrow the admitted linear RGBA storage without a copy or another scan.
+    pub fn rgba(&self) -> &'a [f32] {
+        self.rgba
+    }
+
     pub fn new(rgba: &'a [f32], dimensions: [u32; 2]) -> Result<Self, SamplingError> {
         let [width, height] = dimensions;
         if width == 0 || height == 0 || width > MAX_TEXTURE_EDGE || height > MAX_TEXTURE_EDGE {
@@ -52,6 +57,21 @@ impl<'a> TextureView<'a> {
             return Err(SamplingError::Values);
         }
         Ok(Self { rgba, width, height })
+    }
+
+    /// Shape-only borrow of private immutable storage whose builder already
+    /// validated every sample incrementally. Never use on unvalidated external
+    /// pixels: this avoids an image-wide scan on every future mapped ray.
+    #[cfg(feature = "raytrace-cpu")]
+    pub(crate) fn from_admitted(rgba: &'a [f32], dimensions: [u32; 2]) -> Result<Self, SamplingError> {
+        let [width, height] = dimensions;
+        if width == 0 || height == 0 || width > MAX_TEXTURE_EDGE || height > MAX_TEXTURE_EDGE {
+            return Err(SamplingError::Dimensions);
+        }
+        if rgba.len() != width as usize * height as usize * 4 {
+            return Err(SamplingError::Length);
+        }
+        Ok(Self { rgba, width: width as usize, height: height as usize })
     }
 
     /// Bilinear level-zero RGB for an explicitly opaque consumer. Alpha is validated

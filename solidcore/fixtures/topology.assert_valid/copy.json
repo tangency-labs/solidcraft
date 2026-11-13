@@ -1,0 +1,792 @@
+{
+ "cases": [
+  {
+   "name": "copy_box_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_box_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_box_offset_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -3,
+      1.5,
+      2
+     ],
+     "size": [
+      0.5,
+      4,
+      1
+     ]
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_box_offset_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -3,
+      1.5,
+      2
+     ],
+     "size": [
+      0.5,
+      4,
+      1
+     ]
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_network_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_network_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_vertices_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_vertices_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_points_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0.5,
+       0,
+       0,
+       1e-06
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       0,
+       0,
+       1e-06
+      ]
+     ]
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_points_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0.5,
+       0,
+       0,
+       1e-06
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       0,
+       0,
+       1e-06
+      ]
+     ]
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_sphere_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_sphere_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_cylinder_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_cylinder_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_cone_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius_base": 1,
+     "radius_top": 0,
+     "height": 2
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_cone_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius_base": 1,
+     "radius_top": 0,
+     "height": 2
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_frustum_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_frustum_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_torus_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_torus_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Solids_box_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Solids_box_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Solids_cylinder_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Solids_cylinder_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Solids_extrusion_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/extrusion.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Solids_extrusion_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/extrusion.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Solids_fillet_cut_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/fillet_cut.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Solids_fillet_cut_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/fillet_cut.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Solids_l_shape_with_boss_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Solids_l_shape_with_boss_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_sphere_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_sphere_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_cone_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_cone_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_disk_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_disk_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_plane_square_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_plane_square_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_plane_circ_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_plane_circ_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_ellips_ts2_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_ellips_ts2_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Mouse_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Mouse_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Endcap_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_Endcap_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_box_with_large_fillet_capi0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "level": 0,
+    "capi": true,
+    "copy": true
+   }
+  },
+  {
+   "name": "copy_file_box_with_large_fillet_capi2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "level": 2,
+    "capi": true,
+    "copy": true
+   }
+  }
+ ]
+}

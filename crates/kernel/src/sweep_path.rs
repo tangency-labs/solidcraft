@@ -4,7 +4,8 @@
 //! SMLib's controlled sweeps skin through ([`crate::smlib_sweeps`]). A solid along points is
 //! SMLib's sweep along the lines between them ([`sweep_path_with`]).
 
-use solidcraft_geom::{Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::numbered::NumberedLoop;
@@ -237,7 +238,7 @@ pub(crate) fn crossing_check(plane: &Plane, tangents: &[Vec3]) -> Result<()> {
 }
 
 /// Stations shaped by sweep options: each maps a world vector at the first station to its image
-/// at its own (twisted and scaled about the profile's normal through the first station, then
+/// at its own (twisted and scaled about the path's start tangent through the first station, then
 /// turned by the orientation's frames), optionally stretched across a corner (mitre). Twist and
 /// scale grow with the length run along `pts`.
 pub(crate) fn controlled_stations(
@@ -258,9 +259,10 @@ pub(crate) fn controlled_stations(
         SweepOrientation::Direction(d) => frames_toward(tangents, d)?,
     };
     let f0 = *f.first().ok_or_else(bad)?;
-    // Twist and scale act about the profile's normal, pointing the way the path leaves it.
-    let n = plane.normal().normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
-    let axis = if n.dot(t0) < 0.0 { n * -1.0 } else { n };
+    // Twist and scale act about the path where it leaves the profile (its start tangent): the
+    // same axis whatever plane the profile was drawn on (solidcraft#12337). Where the profile is
+    // square to the path this is its normal, pointing the way the path leaves it.
+    let axis = t0.normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
     if ctl.orientation == SweepOrientation::Parallel {
         crossing_check(plane, tangents)?;
     }
@@ -440,9 +442,10 @@ pub(crate) fn smlib_sweep_points(plane: &Plane, region: &Region2, path: &crate::
 
 #[cfg(test)]
 mod tests {
+    use solidcraft_geom::prelude::*;
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 
     use super::{SweepControl, SweepOrientation, sweep_path, sweep_path_with};
 
@@ -590,6 +593,31 @@ mod tests {
         assert!(end.iter().any(|a| (a - (FRAC_PI_4 + twist)).abs() < 0.2f64.to_radians()), "{end:?}");
         // One wall per side and two caps, as an untwisted sweep.
         assert_eq!(b.faces(0.01).unwrap().len(), 6);
+    }
+
+    /// The twist turns the profile about the path, whichever plane it was drawn on
+    /// (solidcraft#12337): a line along Y swept 40 along X with a quarter turn is the same
+    /// helicoid strip drawn on the XY plane (the path's plane) as on the YZ plane (square to the
+    /// path): its far end stands along Z, and its area is the strip's,
+    /// 40 ∫₀²⁰ √(1 + (kr)²) dr with k = (π/2)/40, which is 875.9.
+    #[test]
+    fn twist_turns_about_the_path_whatever_the_profiles_plane() {
+        let ctl = SweepControl { twist: FRAC_PI_2, ..SweepControl::default() };
+        let path = [crate::PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(40.0, 0.0, 0.0) }];
+        let k = FRAC_PI_2 / 40.0;
+        let strip = |r: f64| 0.5 * r * (1.0 + (k * r).powi(2)).sqrt() + (k * r).asinh() / (2.0 * k);
+        let area = 40.0 * strip(20.0);
+        for (plane, line) in [
+            (Plane::XY, solidcore_record::Seg2::Line { a: Vec2::ZERO, b: Vec2::new(0.0, 20.0) }),
+            (Plane::YZ, solidcore_record::Seg2::Line { a: Vec2::ZERO, b: Vec2::new(20.0, 0.0) }),
+        ] {
+            let sheet = crate::sweep_sheet_with(&plane, &[vec![line]], &path, &ctl).unwrap_or_else(|e| panic!("{plane:?}: {e}"));
+            let mesh = sheet.mesh(&crate::MeshTolerance::chord(0.002)).unwrap();
+            let (zmax, ymax) = mesh.positions.iter().fold((0.0f64, 0.0f64), |(z, y), p| (z.max(p.z), y.max(p.y)));
+            assert!((zmax - 20.0).abs() < 0.05 && (ymax - 20.0).abs() < 0.05, "{plane:?}: y to {ymax}, z to {zmax}");
+            let a = crate::measure(&sheet).unwrap().area;
+            assert!((a - area).abs() < 0.01 * area, "{plane:?}: area {a} vs {area}");
+        }
     }
 
     /// Parallel keeps the profile as drawn along a curved path: the volume is its area times

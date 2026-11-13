@@ -1,7 +1,8 @@
 # Native B-rep, schema 4
 
-This is SolidCraft's geometry data model in `solidcraft_geom::brep`. It has no
-modelling-backend dependency. It is the body encoding of a design's model cache
+This is SolidCraft's geometry data model in `solidcore_record::brep` (solidcore's
+record crate: geometry as data, no maths). It has no modelling-backend dependency;
+its geometric checks and evaluation are the kernel's (`solidcraft_geom::brep`). It is the body encoding of a design's model cache
 ([the container format](design-container.md#model-cache)); it is not a STEP
 replacement for external interchange. The container reader, binary codec and
 kernel adapters are separate layers. The truck adapter writes it exactly: a body
@@ -140,6 +141,7 @@ Natural normals are ∂S/∂u × ∂S/∂v.
 | `sphere` {frame, radius} | origin + r (cos v (cos u x + sin u y) + sin v z) | longitude, periodic | latitude, [−π/2, π/2] |
 | `torus` {frame, major_radius, minor_radius} | origin + (R + r cos v)(cos u x + sin u y) + r sin v z | longitude, periodic | meridian angle, periodic |
 | `ball_patch` {center, radius} | its `nurbs`: a label with no (u, v) of its own | its form's | its form's |
+| `blend` {definition} | its `nurbs`: a round by its definition, with no (u, v) of its own | its form's | its form's |
 | `spline` {u_knots, v_knots, points} | tensor-product B-spline, `points[i][j]` with i along u | u knot domain | v knot domain |
 | `rational_spline` {u_knots, v_knots, homogeneous} | the same, homogeneous coefficients | u knot domain | v knot domain |
 | `placed_revolution` {profile, origin, axis, matrix, forward} | M · R(angle) · profile(s): the profile revolved about origin and unit axis by the right-hand rule, then mapped by the column-major affine matrix M | `forward`: s, the profile's parameter; else the angle | `forward`: the angle, [0, 2π); else s |
@@ -168,6 +170,18 @@ its definition, and SMLib takes it only when every point of the net is on the
 sphere. The sphere is kept because its offsets are exact and collapse at its
 centre. A STEP writer, with no entity for it, writes the net as the face's
 B-spline surface, pcurves included.
+
+A `blend` face always carries `nurbs`, its net: the certified B-spline of a
+round whose definition the record keeps (`solidcore_record::brep::blend`): a
+procedural blend's definition (supports, ball, section, leader and seeds, its
+bound and the map from the net's parameters to the definition's), or a round of
+an exact class's whose net has no analytic label of its own (a surface of
+revolution, or the rational classes' B-spline), with that net's kind. The net is
+stored once, as the face's form; a support that is itself a blend keeps its own
+net in the definition. The kernel builds the face on its net, makes the
+definition from the record and certifies the net against it again before the
+face is an operand, refusing a net it does not certify. The flat arrays carry
+the net alone. A STEP writer writes the net as the face's B-spline surface.
 
 ### Parameter ranges
 
@@ -201,13 +215,15 @@ are SMLib's, the edge's parameter SMLib's or an affine image of it). SMLib keeps
 an analytic face's trims on its internal rational B-spline, whose angle
 parameter is not the record's angle, and a circle's or ellipse's on its NURBS
 parameter, not its angle; neither is an exact B-spline in the record's
-parameters. The rest come from `brep::pcurve::pcurves`, which computes them from
+parameters. The rest come from `solidcore_ops::pcurve::pcurves` (the kernel's `solidcore::eval::pcurve`), which computes them from
 a face's surface record and each use's curve record and interval, for every
 backend (a use's `given` pcurve is taken as it is). It is exact in closed form
 for lines, polylines and whole splines on planes, circles about the axis of a
 cylinder, cone, sphere or torus (v fixed, u the circle's angle plus a constant)
 and lines along a cylinder's or cone's ruling (u fixed, v linear), each checked
-by lifting it; everything else is a cubic B-spline fitted within the tolerance.
+by lifting it. On a spline face, a straight (u, v) line is taken where it lifts
+onto the edge within the tolerance. Anything else, and an exact one that misses,
+is refused (`Failed`, "no exact pcurve"): nothing is fitted.
 
 ## Validation and trust
 
@@ -260,7 +276,7 @@ and one fixture per defect, without a kernel.
 ## History
 
 The runtime history types (`FaceOrigin`, `Change`, `FaceProv`, `Side`,
-`EdgeOrigin`, `EdgeProv`, `History`) live in `solidcraft_geom::brep::history`, so
+`EdgeOrigin`, `EdgeProv`, `History`) live in `solidcore_record::brep::history`, so
 a backend can report history without the kernel crate. Indices are canonical face
 and edge indices; operands are numbered by each operation. An operation returns
 history beside the B-rep. A backend that cannot report it returns none and never
@@ -316,7 +332,7 @@ It writes every curve and surface as truck holds it: lines, B-spline and NURBS
 coefficients, the three points of a plane, a revolution's profile, axis, matrix
 and orientation, and an intersection's two surfaces, leader and tolerance. An
 edge's interval is its truck curve's parameter range. Pcurves come from
-`brep::pcurve` on the records just written; a face's domain is the
+`solidcore_ops::pcurve` on the records just written; a face's domain is the
 box around its pcurves' control points, clamped to the surface's natural domain
 and at most one turn in a periodic direction. Every tolerance is the body's face
 tolerance, 10⁻⁶ of its size and at least 10⁻⁵ mm, how far later operations take

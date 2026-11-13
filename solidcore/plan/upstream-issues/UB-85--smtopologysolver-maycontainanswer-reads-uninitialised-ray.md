@@ -1,0 +1,11 @@
+#### UB-85. `SmTopologySolver::MayContainAnswer` reads uninitialised ray/box results
+- **Severity:** Crash / undefined behaviour
+- **Area:** Spatial structures and small geometry
+- **Location:** `SmTopologySolver.cpp:2909`, `SmTopologySolver::MayContainAnswer` (def. `:2716`), `SM_SO_RAYFIRE` branch.
+- **What happens:** The status of `SmExtent3d::IntersectLine` is ignored. When it fails (`SM_ERR_INVALID_INPUT` for a ray vector shorter than `SM_EFF_ZERO` or an undefined box), `lNumFound`, `dTEnter` and `dTExit` are read uninitialised and decide whether the branch is culled.
+- **Trigger:** A ray-fire topology solve whose option vector is (near) zero.
+- **How found:** read during porting (`intersect.topology_solver_p1`).
+- **Confirmed:** no (the difftest guard keeps a ray vector shorter than `1e-6` from `MayContainAnswer`; zero and tiny option vectors elsewhere are defined upstream and are difftested by `fixtures/intersect.topology_solver_p1/zero_vectors.json`).
+- **Severity:** crash/UB (uninitialised read).
+- **Rust port:** Returns `InvalidInput`.
+- **Fuzz sweep trigger (2026-10-20):** a ray-fire topology solve with ray radius `1e300` (`topology.shell` `fuzz-out/n2000/topology.shell/fuzz00814.json`, `/ray/radius = 1e+300`): the C++ returned normally, the Rust port refuses (`may_contain_answer`: ray/box intersection failed). Confirmed: no.

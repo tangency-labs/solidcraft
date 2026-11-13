@@ -1,0 +1,6054 @@
+{
+  "cases": [
+    {
+      "name": "box_mutation1_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation1_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation1_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation1_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation1_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 1,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation2_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation2_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation2_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation2_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation2_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 2,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation3_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation3_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation3_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation3_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation3_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 3,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation4_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation4_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation4_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation4_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation4_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 4,
+        "value": 2
+      }
+    },
+    {
+      "name": "box_mutation5_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation5_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation5_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation5_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation5_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 5,
+        "value": 2
+      }
+    },
+    {
+      "name": "box_mutation6_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation6_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation6_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation6_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation6_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 6,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation7_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation7_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation7_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation7_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation7_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 7,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation8_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation8_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation8_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation8_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation8_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 8,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation9_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation9_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation9_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation9_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation9_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 9,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation10_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation10_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation10_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "box_mutation10_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "box_mutation10_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 10,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "network_mutation1_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation1_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation1_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation1_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation1_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 1,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "network_mutation2_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation2_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation2_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation2_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation2_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 2,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "network_mutation3_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation3_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation3_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation3_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation3_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 3,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "network_mutation4_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation4_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation4_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation4_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation4_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 4,
+        "value": 2
+      }
+    },
+    {
+      "name": "network_mutation5_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation5_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation5_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation5_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation5_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 5,
+        "value": 2
+      }
+    },
+    {
+      "name": "network_mutation6_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation6_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation6_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation6_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation6_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 6,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "network_mutation7_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation7_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation7_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation7_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation7_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 7,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "network_mutation8_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation8_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation8_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation8_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation8_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 8,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "network_mutation9_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation9_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation9_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation9_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation9_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 9,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "network_mutation10_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation10_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation10_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "network_mutation10_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "network_mutation10_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 10,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "points_mutation1_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation1_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation1_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation1_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation1_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 1,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "points_mutation2_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation2_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation2_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation2_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation2_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 2,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "points_mutation3_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation3_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation3_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation3_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation3_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 3,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "points_mutation4_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation4_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation4_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation4_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation4_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 4,
+        "value": 2
+      }
+    },
+    {
+      "name": "points_mutation5_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation5_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation5_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation5_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation5_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 5,
+        "value": 2
+      }
+    },
+    {
+      "name": "points_mutation6_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation6_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation6_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation6_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation6_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 6,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "points_mutation7_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation7_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation7_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation7_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation7_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 7,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "points_mutation8_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation8_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation8_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation8_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation8_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 8,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "points_mutation9_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation9_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation9_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation9_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation9_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 9,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "points_mutation10_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation10_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation10_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "points_mutation10_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "points_mutation10_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 10,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "sphere_mutation1_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation1_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation1_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation1_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation1_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 1,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "sphere_mutation2_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation2_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation2_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation2_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation2_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 2,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "sphere_mutation3_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation3_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation3_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation3_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation3_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 3,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "sphere_mutation4_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation4_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation4_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation4_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation4_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 4,
+        "value": 2
+      }
+    },
+    {
+      "name": "sphere_mutation5_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation5_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation5_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation5_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation5_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 5,
+        "value": 2
+      }
+    },
+    {
+      "name": "sphere_mutation6_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation6_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation6_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation6_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation6_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 6,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "sphere_mutation7_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation7_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation7_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation7_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation7_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 7,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "sphere_mutation8_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation8_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation8_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation8_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation8_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 8,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "sphere_mutation9_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation9_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation9_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation9_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation9_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 9,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "sphere_mutation10_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation10_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation10_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "sphere_mutation10_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "sphere_mutation10_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 10,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "cylinder_mutation1_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation1_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation1_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation1_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation1_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 1,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "cylinder_mutation2_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation2_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation2_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation2_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation2_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 2,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "cylinder_mutation3_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation3_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation3_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation3_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation3_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 3,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "cylinder_mutation4_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation4_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation4_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation4_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation4_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 4,
+        "value": 2
+      }
+    },
+    {
+      "name": "cylinder_mutation5_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation5_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation5_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation5_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation5_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 5,
+        "value": 2
+      }
+    },
+    {
+      "name": "cylinder_mutation6_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation6_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation6_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation6_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation6_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 6,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "cylinder_mutation7_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation7_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation7_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation7_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation7_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 7,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "cylinder_mutation8_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation8_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation8_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation8_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation8_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 8,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "cylinder_mutation9_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation9_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation9_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation9_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation9_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 9,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "cylinder_mutation10_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation10_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation10_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "cylinder_mutation10_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "cylinder_mutation10_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 10,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation1_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation1_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation1_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation1_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 1,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation1_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 1,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation2_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation2_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation2_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation2_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 2,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation2_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 2,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation3_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation3_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation3_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation3_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 3,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation3_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 3,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation4_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation4_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation4_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation4_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 4,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation4_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 4,
+        "value": 2
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation5_v2_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation5_v2_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 2,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation5_v1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation5_v1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 5,
+        "value": 1,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation5_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 5,
+        "value": 2
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation6_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation6_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation6_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation6_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 6,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation6_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 6,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation7_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation7_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation7_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation7_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 7,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation7_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 7,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation8_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation8_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation8_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation8_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 8,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation8_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 8,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation9_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation9_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation9_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation9_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 9,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation9_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 9,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation10_v0.1_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation10_v0.1_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 0.1,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation10_v1e-12_i0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation10_v1e-12_i3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "mutation": 10,
+        "value": 1e-12,
+        "index": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_mutation10_capi",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true,
+        "mutation": 10,
+        "value": 0.1
+      }
+    }
+  ]
+}

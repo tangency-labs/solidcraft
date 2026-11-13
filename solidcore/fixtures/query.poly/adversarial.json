@@ -1,0 +1,8316 @@
+{
+ "cases": [
+  {
+   "name": "adv_bowtie_normal",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_bowtie_open_normal",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 0,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_bowtie_given_normal",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ],
+       "normal": [
+        0,
+        0,
+        1
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       false,
+       true
+      ],
+      [
+       0,
+       true,
+       true
+      ],
+      [
+       0,
+       false,
+       false
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_collinear_quad_normal",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       3,
+       0,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_collinear_quad_given",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       3,
+       0,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ],
+       "normal": [
+        0,
+        0,
+        2
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       false,
+       true
+      ],
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_collinear_tri",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       0,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_two_edge",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_one_edge",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_one_edge_given",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0
+         ]
+        }
+       ],
+       "normal": [
+        0,
+        1,
+        0
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_hole_normal",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       3,
+       3,
+       0,
+       1e-05
+      ],
+      [
+       3,
+       7,
+       0,
+       1e-05
+      ],
+      [
+       7,
+       7,
+       0,
+       1e-05
+      ],
+      [
+       7,
+       3,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        },
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          4,
+          5,
+          6,
+          7
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_hole_contains",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       3,
+       3,
+       0,
+       1e-05
+      ],
+      [
+       3,
+       7,
+       0,
+       1e-05
+      ],
+      [
+       7,
+       7,
+       0,
+       1e-05
+      ],
+      [
+       7,
+       3,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        },
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          4,
+          5,
+          6,
+          7
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "contains",
+     "queries": [
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        0,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        11,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        5,
+        5,
+        1
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        3.000001,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        10.00005,
+        5,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 0.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 1e-05,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 1,
+       "point": [
+        1e-300,
+        1e-300,
+        0
+       ],
+       "tol": 0.001,
+       "work_in_3d": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_vertical_contains",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       2,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       4,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       4,
+       4,
+       1e-05
+      ],
+      [
+       2,
+       0,
+       4,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "contains",
+     "queries": [
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_vertical_given_normal_contains",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       2,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       4,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       4,
+       4,
+       1e-05
+      ],
+      [
+       2,
+       0,
+       4,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ],
+       "normal": [
+        3,
+        0,
+        0
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "contains",
+     "queries": [
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_vertical_given_unit_normal_contains",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       2,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       4,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       4,
+       4,
+       1e-05
+      ],
+      [
+       2,
+       0,
+       4,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ],
+       "normal": [
+        1,
+        0,
+        0
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "contains",
+     "queries": [
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_vertical_wrong_normal_contains",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       2,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       4,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       4,
+       4,
+       1e-05
+      ],
+      [
+       2,
+       0,
+       4,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ],
+       "normal": [
+        0,
+        0,
+        1
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "contains",
+     "queries": [
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        5,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        4,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2.5,
+        1,
+        1
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0,
+        2,
+        2
+       ],
+       "tol": 1e-06,
+       "work_in_3d": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_tilted_contains_huge",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1.0000000000000001e+145
+      ],
+      [
+       1e+150,
+       0,
+       1e+150,
+       1e-05
+      ],
+      [
+       1e+150,
+       1e+150,
+       1e+150,
+       1e-05
+      ],
+      [
+       0,
+       1e+150,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1.0000000000000001e+145,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "contains",
+     "queries": [
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5e+149,
+        5e+149,
+        5e+149
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2e+150,
+        5e+149,
+        2e+150
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5e+149,
+        5e+149,
+        6e+149
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0.0,
+        5e+149,
+        0.0
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5e+149,
+        5e+149,
+        5e+149
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2e+150,
+        5e+149,
+        2e+150
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5e+149,
+        5e+149,
+        6e+149
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0.0,
+        5e+149,
+        0.0
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5e+149,
+        5e+149,
+        5e+149
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2e+150,
+        5e+149,
+        2e+150
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5e+149,
+        5e+149,
+        6e+149
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0.0,
+        5e+149,
+        0.0
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5e+149,
+        5e+149,
+        5e+149
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2e+150,
+        5e+149,
+        2e+150
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5e+149,
+        5e+149,
+        6e+149
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0.0,
+        5e+149,
+        0.0
+       ],
+       "tol": 9.999999999999999e+143,
+       "work_in_3d": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_tilted_normal_huge",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1.0000000000000001e+145
+      ],
+      [
+       1e+150,
+       0,
+       1e+150,
+       1e-05
+      ],
+      [
+       1e+150,
+       1e+150,
+       1e+150,
+       1e-05
+      ],
+      [
+       0,
+       1e+150,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1.0000000000000001e+145,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_tilted_sphere_huge",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1.0000000000000001e+145
+      ],
+      [
+       1e+150,
+       0,
+       1e+150,
+       1e-05
+      ],
+      [
+       1e+150,
+       1e+150,
+       1e+150,
+       1e-05
+      ],
+      [
+       0,
+       1e+150,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1.0000000000000001e+145,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "sphere",
+     "calls": [
+      [
+       0,
+       false
+      ],
+      [
+       0,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_tilted_contains_tiny",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-160
+      ],
+      [
+       1e-150,
+       0,
+       1e-150,
+       1e-05
+      ],
+      [
+       1e-150,
+       1e-150,
+       1e-150,
+       1e-05
+      ],
+      [
+       0,
+       1e-150,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-160,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "contains",
+     "queries": [
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5e-151,
+        5e-151,
+        5e-151
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2e-150,
+        5e-151,
+        2e-150
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5e-151,
+        5e-151,
+        5.9999999999999996e-151
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0.0,
+        5e-151,
+        0.0
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5e-151,
+        5e-151,
+        5e-151
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2e-150,
+        5e-151,
+        2e-150
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5e-151,
+        5e-151,
+        5.9999999999999996e-151
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0.0,
+        5e-151,
+        0.0
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5e-151,
+        5e-151,
+        5e-151
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2e-150,
+        5e-151,
+        2e-150
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5e-151,
+        5e-151,
+        5.9999999999999996e-151
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0.0,
+        5e-151,
+        0.0
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5e-151,
+        5e-151,
+        5e-151
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2e-150,
+        5e-151,
+        2e-150
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5e-151,
+        5e-151,
+        5.9999999999999996e-151
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0.0,
+        5e-151,
+        0.0
+       ],
+       "tol": 9.999999999999999e-157,
+       "work_in_3d": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_tilted_normal_tiny",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-160
+      ],
+      [
+       1e-150,
+       0,
+       1e-150,
+       1e-05
+      ],
+      [
+       1e-150,
+       1e-150,
+       1e-150,
+       1e-05
+      ],
+      [
+       0,
+       1e-150,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-160,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_tilted_sphere_tiny",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-160
+      ],
+      [
+       1e-150,
+       0,
+       1e-150,
+       1e-05
+      ],
+      [
+       1e-150,
+       1e-150,
+       1e-150,
+       1e-05
+      ],
+      [
+       0,
+       1e-150,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-160,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "sphere",
+     "calls": [
+      [
+       0,
+       false
+      ],
+      [
+       0,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_tilted_contains_big",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1000.0000000000001
+      ],
+      [
+       100000000.0,
+       0,
+       100000000.0,
+       1e-05
+      ],
+      [
+       100000000.0,
+       100000000.0,
+       100000000.0,
+       1e-05
+      ],
+      [
+       0,
+       100000000.0,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1000.0000000000001,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "contains",
+     "queries": [
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        50000000.0,
+        50000000.0,
+        50000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        200000000.0,
+        50000000.0,
+        200000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        50000000.0,
+        50000000.0,
+        60000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0.0,
+        50000000.0,
+        0.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        50000000.0,
+        50000000.0,
+        50000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        200000000.0,
+        50000000.0,
+        200000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        50000000.0,
+        50000000.0,
+        60000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        0.0,
+        50000000.0,
+        0.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        50000000.0,
+        50000000.0,
+        50000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        200000000.0,
+        50000000.0,
+        200000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        50000000.0,
+        50000000.0,
+        60000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0.0,
+        50000000.0,
+        0.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        50000000.0,
+        50000000.0,
+        50000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        200000000.0,
+        50000000.0,
+        200000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        50000000.0,
+        50000000.0,
+        60000000.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        0.0,
+        50000000.0,
+        0.0
+       ],
+       "tol": 100.0,
+       "work_in_3d": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_tilted_normal_big",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1000.0000000000001
+      ],
+      [
+       100000000.0,
+       0,
+       100000000.0,
+       1e-05
+      ],
+      [
+       100000000.0,
+       100000000.0,
+       100000000.0,
+       1e-05
+      ],
+      [
+       0,
+       100000000.0,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1000.0000000000001,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_tilted_sphere_big",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1000.0000000000001
+      ],
+      [
+       100000000.0,
+       0,
+       100000000.0,
+       1e-05
+      ],
+      [
+       100000000.0,
+       100000000.0,
+       100000000.0,
+       1e-05
+      ],
+      [
+       0,
+       100000000.0,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1000.0000000000001,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "sphere",
+     "calls": [
+      [
+       0,
+       false
+      ],
+      [
+       0,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_nonplanar_update_tol",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       3e-05,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       0,
+       -1,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      },
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          1,
+          0,
+          4
+         ]
+        }
+       ]
+      }
+     ],
+     "radials": [
+      [
+       0,
+       4
+      ]
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ],
+      [
+       1,
+       true,
+       true
+      ],
+      [
+       0,
+       false,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_nonplanar_too_big",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0.003,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       0,
+       -1,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      },
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          1,
+          0,
+          4
+         ]
+        }
+       ]
+      }
+     ],
+     "radials": [
+      [
+       0,
+       4
+      ]
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_nonplanar_equal_tol",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       1e-05,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       0,
+       -1,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      },
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          1,
+          0,
+          4
+         ]
+        }
+       ]
+      }
+     ],
+     "radials": [
+      [
+       0,
+       4
+      ]
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_zero_x",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_zero_y",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_zero_xy",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_zero_all",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_neg",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      -1,
+      2,
+      3
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_neg_all",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      -1,
+      -1,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_tiny_x",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      1e-200,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_huge_x",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      1e+200,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_huge_all",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      1e+300,
+      1e+300,
+      1e+300
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_near_identity",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      1.0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_undef",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      1.23456e-61,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_x2000",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      2000,
+      2000,
+      2000
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_neg_zero",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "vertex_normals": [
+      [
+       0,
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      [
+       1,
+       [
+        1e-300,
+        0,
+        0
+       ]
+      ],
+      [
+       2,
+       [
+        0,
+        0,
+        0
+       ]
+      ],
+      [
+       3,
+       [
+        -3,
+        4,
+        0
+       ]
+      ]
+     ],
+     "aux": [
+      [
+       0,
+       0,
+       1,
+       0.1,
+       0.2
+      ],
+      [
+       0,
+       1e-320,
+       0,
+       0,
+       0
+      ]
+     ],
+     "edge_aux": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       0
+      ]
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      -1,
+      0,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      -0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_skew_axes",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      2,
+      0,
+      0
+     ],
+     "y": [
+      1,
+      1,
+      0
+     ],
+     "scale": null
+    }
+   }
+  },
+  {
+   "name": "adv_transform_identity_scale_only",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1,
+      1.000000000000001
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_transform_parallel_axes",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "transform",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      1,
+      0,
+      0
+     ],
+     "scale": [
+      2,
+      2,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_degenerate_mix",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1e-06,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1e-06,
+       0,
+       1e-05,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       1e-12,
+       1e-05
+      ],
+      [
+       1,
+       1e-05,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 0,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3,
+          4
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "degenerate",
+     "calls": [
+      [
+       0,
+       null
+      ],
+      [
+       0,
+       0.0
+      ],
+      [
+       0,
+       1e-06
+      ],
+      [
+       0,
+       -1e-05
+      ],
+      [
+       0,
+       0.0001
+      ],
+      [
+       1,
+       null
+      ],
+      [
+       1,
+       0.0
+      ],
+      [
+       1,
+       1e-06
+      ],
+      [
+       1,
+       -1e-05
+      ],
+      [
+       1,
+       0.0001
+      ],
+      [
+       2,
+       null
+      ],
+      [
+       2,
+       0.0
+      ],
+      [
+       2,
+       1e-06
+      ],
+      [
+       2,
+       -1e-05
+      ],
+      [
+       2,
+       0.0001
+      ],
+      [
+       3,
+       null
+      ],
+      [
+       3,
+       0.0
+      ],
+      [
+       3,
+       1e-06
+      ],
+      [
+       3,
+       -1e-05
+      ],
+      [
+       3,
+       0.0001
+      ],
+      [
+       4,
+       null
+      ],
+      [
+       4,
+       0.0
+      ],
+      [
+       4,
+       1e-06
+      ],
+      [
+       4,
+       -1e-05
+      ],
+      [
+       4,
+       0.0001
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_degenerate_okback_noorig",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1e-06,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1e-06,
+       0,
+       1e-05,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       1e-12,
+       1e-05
+      ],
+      [
+       1,
+       1e-05,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3,
+          4
+         ]
+        }
+       ]
+      }
+     ],
+     "ok_back_ptrs": true
+    },
+    "op": {
+     "kind": "degenerate",
+     "calls": [
+      [
+       0,
+       null
+      ],
+      [
+       1,
+       null
+      ],
+      [
+       2,
+       null
+      ],
+      [
+       3,
+       null
+      ],
+      [
+       4,
+       null
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_empty_face_sphere",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": []
+      }
+     ]
+    },
+    "op": {
+     "kind": "sphere",
+     "calls": [
+      [
+       0,
+       false
+      ],
+      [
+       0,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_empty_face_normal",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": []
+      }
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_empty_face_bbox",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": []
+      }
+     ]
+    },
+    "op": {
+     "kind": "bbox",
+     "pseudo": false,
+     "points": null,
+     "centroid": true,
+     "normal": null
+    }
+   }
+  },
+  {
+   "name": "adv_no_vertices_bbox",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [],
+     "faces": []
+    },
+    "op": {
+     "kind": "bbox",
+     "pseudo": false,
+     "points": null,
+     "centroid": true,
+     "normal": null
+    }
+   }
+  },
+  {
+   "name": "adv_bbox_zero_normal",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "bbox",
+     "pseudo": true,
+     "points": [],
+     "centroid": true,
+     "normal": [
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_bbox_given_pts",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "bbox",
+     "pseudo": true,
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -1,
+       5,
+       2
+      ]
+     ],
+     "centroid": true,
+     "normal": [
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_bbox_one_pt",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "bbox",
+     "pseudo": true,
+     "points": [
+      [
+       1,
+       2,
+       3
+      ]
+     ],
+     "centroid": true,
+     "normal": null
+    }
+   }
+  },
+  {
+   "name": "adv_cpoly_ops_normal",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       20,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       20,
+       10,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      },
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          1,
+          4,
+          5,
+          2
+         ]
+        }
+       ]
+      }
+     ],
+     "cpolys": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       2,
+       false,
+       true
+      ],
+      [
+       2,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_cpoly_ops_sphere",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       20,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       20,
+       10,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      },
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          1,
+          4,
+          5,
+          2
+         ]
+        }
+       ]
+      }
+     ],
+     "cpolys": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "op": {
+     "kind": "sphere",
+     "calls": [
+      [
+       2,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_cpoly_ops_contains",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       20,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       20,
+       10,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      },
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          1,
+          4,
+          5,
+          2
+         ]
+        }
+       ]
+      }
+     ],
+     "cpolys": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "op": {
+     "kind": "contains",
+     "queries": [
+      {
+       "face": true,
+       "id": 2,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 2,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 0,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 2,
+       "point": [
+        15,
+        5,
+        0
+       ],
+       "tol": 0,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 2,
+       "point": [
+        15,
+        5,
+        0
+       ],
+       "tol": 0,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 2,
+       "point": [
+        10,
+        5,
+        0
+       ],
+       "tol": 0,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 2,
+       "point": [
+        10,
+        5,
+        0
+       ],
+       "tol": 0,
+       "work_in_3d": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_cpoly_ops_bbox",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       10,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       10,
+       0,
+       1e-05
+      ],
+      [
+       20,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       20,
+       10,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      },
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          1,
+          4,
+          5,
+          2
+         ]
+        }
+       ]
+      }
+     ],
+     "cpolys": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "op": {
+     "kind": "bbox",
+     "pseudo": false,
+     "points": null,
+     "centroid": false,
+     "normal": null
+    }
+   }
+  },
+  {
+   "name": "adv_strut_contains",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       4,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       4,
+       4,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       4,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       2,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          4,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "radials": [
+      [
+       2,
+       3
+      ]
+     ]
+    },
+    "op": {
+     "kind": "contains",
+     "queries": [
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        3,
+        3,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        3,
+        3,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        3,
+        2,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        3,
+        2,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        3,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        2,
+        3,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": true
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": false
+      },
+      {
+       "face": true,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        1,
+        1,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3,
+        3,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3,
+        3,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3,
+        2,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        3,
+        2,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        3,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        2,
+        3,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": true
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": false
+      },
+      {
+       "face": false,
+       "id": 0,
+       "point": [
+        5,
+        5,
+        0
+       ],
+       "tol": 1e-09,
+       "work_in_3d": true
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_strut_normal",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       4,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       4,
+       4,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       4,
+       0,
+       1e-05
+      ],
+      [
+       2,
+       2,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          4,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ],
+     "radials": [
+      [
+       2,
+       3
+      ]
+     ]
+    },
+    "op": {
+     "kind": "normal",
+     "calls": [
+      [
+       0,
+       true,
+       true
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "adv_mutate_setpoint_then",
+   "inputs": {
+    "brep": {
+     "tol": 1e-05,
+     "regions": [
+      1
+     ],
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       0,
+       0,
+       1e-05
+      ],
+      [
+       1,
+       1,
+       0,
+       1e-05
+      ],
+      [
+       0,
+       1,
+       0,
+       1e-05
+      ]
+     ],
+     "faces": [
+      {
+       "shell": 0,
+       "tol": 1e-05,
+       "loops": [
+        {
+         "mode": 1,
+         "edge_tol": 1e-05,
+         "verts": [
+          0,
+          1,
+          2,
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "op": {
+     "kind": "mutate",
+     "cmds": [
+      {
+       "cmd": "set_point",
+       "v": 2,
+       "p": [
+        1,
+        1,
+        1e-20
+       ]
+      },
+      {
+       "cmd": "set_point",
+       "v": 0,
+       "p": [
+        0,
+        0,
+        1
+       ]
+      },
+      {
+       "cmd": "set_vertex_tolerance",
+       "v": 1,
+       "t": -5
+      },
+      {
+       "cmd": "set_edge_tolerance",
+       "e": 0,
+       "t": 9876543.21
+      },
+      {
+       "cmd": "set_face_tolerance",
+       "f": 0,
+       "t": -0.001
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

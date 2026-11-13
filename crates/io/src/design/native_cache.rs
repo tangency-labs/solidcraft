@@ -1,12 +1,13 @@
 //! The model cache: a design's evaluated timeline (every feature's result and the state after
 //! it, [`SavedModel`]), saved with it so opening need not evaluate it again. Bodies use
 //! SolidCraft's exact native B-rep encoding (a mesh body, its own triangles); the key ties the
-//! cache to the exact document, and to the source and platform that computed it
+//! cache to the exact document, and to the source, platform and geometry kernel that computed it
 //! (docs/design-container.md).
 use super::*;
+use sha2::{Digest, Sha256};
 use solidcraft_doc::{ModelState, SavedModel};
 
-const FORMAT: &str = "solidcraft-model-cache/8";
+const FORMAT: &str = "solidcraft-model-cache/10";
 const PRODUCER: &str = "solidcraft-truck-adapter/4";
 const MANIFEST: &str = "cache/model.json";
 const PAYLOAD: &str = "cache/bodies.bin";
@@ -27,6 +28,15 @@ fn build() -> String {
 /// build before it; one that changed it (a kernel fix, the codec) evaluates the design again.
 fn evaluation() -> String {
     format!("{}/{}-{}", env!("SOLIDCRAFT_EVALUATION_SOURCE"), std::env::consts::ARCH, std::env::consts::OS)
+}
+
+/// The geometry kernel that computed a cache. A cache another kernel wrote (the C++ SMLib, which
+/// earlier builds could run on) is not this build's result: the kernels differ in tolerances and in
+/// what they refuse, so a design opened from it evaluates again.
+pub(super) const KERNEL: &str = "solidcore";
+
+pub(super) fn identity() -> Value {
+    json!([FORMAT, PRODUCER, env!("CARGO_PKG_VERSION"), build()])
 }
 
 /// A 4 x 4 matrix as its 16 numbers, in storage order.
@@ -126,13 +136,19 @@ const MAX_MESH_HEADER: usize = 16 << 20;
 /// colour and paint), then each vertex as three f64 and each triangle as three u32, little-endian.
 fn encode_mesh_body(body: &solidcraft_kernel::Body) -> Option<Vec<u8>> {
     let (positions, triangles) = body.triangle_mesh()?;
+    let normals = body.triangle_corner_normals()?;
     let header =
-        serde_json::to_vec(&json!({"positions": positions.len(), "triangles": triangles.len(), "color": body.color(), "paint": body.paint()}))
+        serde_json::to_vec(&json!({"positions": positions.len(), "triangles": triangles.len(), "corner_normals": normals.len(), "color": body.color(), "paint": body.paint()}))
             .ok()?;
     if header.len() > MAX_MESH_HEADER {
         return None;
     }
-    let size = positions.len().checked_mul(24)?.checked_add(triangles.len().checked_mul(12)?)?.checked_add(12 + header.len())?;
+    let size = positions
+        .len()
+        .checked_mul(24)?
+        .checked_add(triangles.len().checked_mul(12)?)?
+        .checked_add(normals.len().checked_mul(72)?)?
+        .checked_add(12 + header.len())?;
     let mut out = Vec::with_capacity(size);
     out.extend_from_slice(MESH_TAG);
     out.extend_from_slice(&u32::try_from(header.len()).ok()?.to_le_bytes());
@@ -147,6 +163,11 @@ fn encode_mesh_body(body: &solidcraft_kernel::Body) -> Option<Vec<u8>> {
             out.extend_from_slice(&i.to_le_bytes());
         }
     }
+    for n in normals.iter().flatten() {
+        for x in [n.x, n.y, n.z] {
+            out.extend_from_slice(&x.to_le_bytes());
+        }
+    }
     Some(out)
 }
 
@@ -159,39 +180,57 @@ fn decode_mesh_body(bytes: &[u8]) -> Option<solidcraft_kernel::Body> {
     let header: Value = serde_json::from_slice(header).ok()?;
     let count = |key: &str| header.get(key).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
     let (vertices, triangles) = (count("positions")?, count("triangles")?);
+    let normals = count("corner_normals").unwrap_or(0);
+    if normals != 0 && normals != triangles {
+        return None;
+    }
     if triangles > solidcraft_kernel::MAX_TRIANGLES {
         return None;
     }
     // The counts must account for every byte, so nothing is allocated for data that is not there.
     let split = vertices.checked_mul(24)?;
-    if split.checked_add(triangles.checked_mul(12)?)? != data.len() {
+    let normal_start = split.checked_add(triangles.checked_mul(12)?)?;
+    if normal_start.checked_add(normals.checked_mul(72)?)? != data.len() {
         return None;
     }
-    let (coordinates, corners) = data.split_at_checked(split)?;
+    let (coordinates, rest) = data.split_at_checked(split)?;
+    let (corners, shading) = rest.split_at_checked(triangles.checked_mul(12)?)?;
     let f64_at = |c: &[u8], at: usize| c.get(at..at + 8)?.try_into().ok().map(f64::from_le_bytes);
     let u32_at = |c: &[u8], at: usize| c.get(at..at + 4)?.try_into().ok().map(u32::from_le_bytes);
-    let positions: Vec<solidcraft_geom::Vec3> = coordinates
+    let positions: Vec<solidcore_record::Vec3> = coordinates
         .as_chunks::<24>()
         .0
         .iter()
-        .map(|c| Some(solidcraft_geom::Vec3::new(f64_at(c, 0)?, f64_at(c, 8)?, f64_at(c, 16)?)))
+        .map(|c| Some(solidcore_record::Vec3::new(f64_at(c, 0)?, f64_at(c, 8)?, f64_at(c, 16)?)))
         .collect::<Option<_>>()?;
     let triangles: Vec<[u32; 3]> =
         corners.as_chunks::<12>().0.iter().map(|c| Some([u32_at(c, 0)?, u32_at(c, 4)?, u32_at(c, 8)?])).collect::<Option<_>>()?;
+    let normals: Vec<[solidcore_record::Vec3; 3]> = shading
+        .as_chunks::<72>()
+        .0
+        .iter()
+        .map(|c| {
+            let n = |offset| Some(solidcore_record::Vec3::new(f64_at(c, offset)?, f64_at(c, offset + 8)?, f64_at(c, offset + 16)?));
+            Some([n(0)?, n(24)?, n(48)?])
+        })
+        .collect::<Option<_>>()?;
     let color: Option<[f32; 3]> = serde_json::from_value(header.get("color").cloned().unwrap_or(Value::Null)).ok()?;
     let paint: Option<solidcraft_kernel::Paint> = serde_json::from_value(header.get("paint").cloned().unwrap_or(Value::Null)).ok()?;
     if color.is_some_and(|c| c.iter().any(|x| !x.is_finite())) {
         return None;
     }
-    Some(solidcraft_kernel::mesh_body(&positions, &triangles).ok()?.with_color(color).with_paint(paint))
+    Some(solidcraft_kernel::mesh_body_with_normals(&positions, &triangles, &normals).ok()?.with_color(color).with_paint(paint))
 }
 
 /// A mesh body decoded is the one encoded: the same vertices, bit for bit, the same triangles,
 /// colour and paint.
 fn same_mesh(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> bool {
     let (Some((pa, ta)), Some((pb, tb))) = (a.triangle_mesh(), b.triangle_mesh()) else { return false };
-    let bits = |p: &[solidcraft_geom::Vec3]| p.iter().map(|v| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()]).collect::<Vec<_>>();
-    ta == tb && bits(pa) == bits(pb) && a.color() == b.color() && a.paint() == b.paint()
+    let bits = |p: &[solidcore_record::Vec3]| p.iter().map(|v| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()]).collect::<Vec<_>>();
+    let normals = |body: &solidcraft_kernel::Body| {
+        body.triangle_corner_normals().unwrap_or_default().iter().flatten().map(|n| [n.x.to_bits(), n.y.to_bits(), n.z.to_bits()]).collect::<Vec<_>>()
+    };
+    ta == tb && bits(pa) == bits(pb) && normals(a) == normals(b) && a.color() == b.color() && a.paint() == b.paint()
 }
 
 /// A body of the cache's payload, mesh or B-rep by the slice's tag.
@@ -296,6 +335,7 @@ impl Encoded {
             document: digest(document),
             evaluation: evaluation(),
             format: FORMAT,
+            kernel: KERNEL,
             model: records,
             payload: digest(&data),
             producer: PRODUCER,
@@ -320,6 +360,7 @@ struct Manifest<'a> {
     document: String,
     evaluation: String,
     format: &'a str,
+    kernel: &'a str,
     model: &'a Value,
     payload: String,
     producer: &'a str,
@@ -336,14 +377,15 @@ pub fn read_design_geometry(bytes: &[u8]) -> Option<std::sync::Arc<ModelState>> 
     DesignContainerReader::new(Cursor::new(bytes)).ok()?.geometry()?.final_state().ok()
 }
 
-/// Whether `manifest` is a model cache of this build's evaluation source for `document`. The
-/// application version and commit that wrote it are not asked: another version of the same
+/// Whether `manifest` is a model cache of this build's evaluation source and kernel for `document`.
+/// The application version and commit that wrote it are not asked: another version of the same
 /// evaluation source computed the same model.
 fn current(manifest: &Value, document: &[u8]) -> bool {
     let is = |key: &str, value: &str| manifest.get(key).and_then(Value::as_str) == Some(value);
     is("format", FORMAT)
         && is("producer", PRODUCER)
         && is("evaluation", &evaluation())
+        && is("kernel", KERNEL)
         && is("document", &digest(document))
         && source_trusted(env!("SOLIDCRAFT_EVALUATION_SOURCE"), cfg!(any(test, feature = "trust-unknown-source")))
 }
@@ -478,7 +520,7 @@ pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<De
             }
         };
         triangles = triangles.saturating_add(faces.len());
-        display_bytes = display_bytes.saturating_add(positions.len().saturating_mul(24)).saturating_add(faces.len().saturating_mul(12));
+        display_bytes = display_bytes.saturating_add(positions.len().saturating_mul(24)).saturating_add(faces.len().saturating_mul(84));
         if triangles > 1_000_000 || display_bytes > 128 << 20 {
             return Err(invalid("regenerated display budget"));
         }
@@ -487,6 +529,7 @@ pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<De
             positions: positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
             triangles: faces.iter().flatten().copied().collect(),
             color: entry.body.color(),
+            corner_normals: entry.body.triangle_corner_normals().unwrap_or_default().iter().flatten().flat_map(|n| [n.x, n.y, n.z]).collect(),
         };
         validate_mesh(&displayed)?;
         preview.meshes.push(displayed);

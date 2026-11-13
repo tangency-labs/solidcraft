@@ -1,0 +1,1090 @@
+{
+  "cases": [
+    {
+      "name": "mixed_planar_1_False_True",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -2,
+              -2,
+              2,
+              2
+            ]
+          },
+          "networks": 1
+        },
+        "coincidence": false,
+        "find_all": true
+      }
+    },
+    {
+      "name": "mixed_planar_1_True_False",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -2,
+              -2,
+              2,
+              2
+            ]
+          },
+          "networks": 1
+        },
+        "coincidence": true,
+        "find_all": false
+      }
+    },
+    {
+      "name": "mixed_planar_1_True_True",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -2,
+              -2,
+              2,
+              2
+            ]
+          },
+          "networks": 1
+        },
+        "coincidence": true,
+        "find_all": true
+      }
+    },
+    {
+      "name": "mixed_planar_2_False_True",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -2,
+              -2,
+              2,
+              2
+            ]
+          },
+          "networks": 2
+        },
+        "coincidence": false,
+        "find_all": true
+      }
+    },
+    {
+      "name": "mixed_planar_2_True_False",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -2,
+              -2,
+              2,
+              2
+            ]
+          },
+          "networks": 2
+        },
+        "coincidence": true,
+        "find_all": false
+      }
+    },
+    {
+      "name": "mixed_planar_2_True_True",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_topology; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0,
+                  0,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -2,
+              -2,
+              2,
+              2
+            ]
+          },
+          "networks": 2
+        },
+        "coincidence": true,
+        "find_all": true
+      }
+    },
+    {
+      "name": "reversal_repair_False_2",
+      "upstream_ref": "source/SMLib/src/NL_CrvBasic.cpp:N_CrvIsNotReversed; source/SMLib/src/SmEdge.cpp:ValidateGeometry",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 2,
+            "cpts": [
+              [
+                0,
+                0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                2,
+                0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                1,
+                0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0,
+                0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                3,
+                0,
+                0.0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 3,
+            "u": [
+              0,
+              0,
+              0,
+              0,
+              0.5,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "coincidence": false
+      }
+    },
+    {
+      "name": "reversal_repair_False_3",
+      "upstream_ref": "source/SMLib/src/NL_CrvBasic.cpp:N_CrvIsNotReversed; source/SMLib/src/SmEdge.cpp:ValidateGeometry",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                2,
+                0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                1,
+                0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0,
+                0,
+                0.0,
+                -1.7976931348623157e+308
+              ],
+              [
+                3,
+                0,
+                0.0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 3,
+            "u": [
+              0,
+              0,
+              0,
+              0,
+              0.5,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "coincidence": false
+      }
+    },
+    {
+      "name": "reversal_repair_True_2",
+      "upstream_ref": "source/SMLib/src/NL_CrvBasic.cpp:N_CrvIsNotReversed; source/SMLib/src/SmEdge.cpp:ValidateGeometry",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 2,
+            "cpts": [
+              [
+                0,
+                0,
+                0.0,
+                1.0
+              ],
+              [
+                2,
+                0,
+                0.0,
+                1.0
+              ],
+              [
+                1,
+                0,
+                0.0,
+                1.0
+              ],
+              [
+                0,
+                0,
+                0.0,
+                1.0
+              ],
+              [
+                3,
+                0,
+                0.0,
+                1.0
+              ]
+            ],
+            "p": 3,
+            "u": [
+              0,
+              0,
+              0,
+              0,
+              0.5,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "coincidence": false
+      }
+    },
+    {
+      "name": "reversal_repair_True_3",
+      "upstream_ref": "source/SMLib/src/NL_CrvBasic.cpp:N_CrvIsNotReversed; source/SMLib/src/SmEdge.cpp:ValidateGeometry",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0.0,
+                1.0
+              ],
+              [
+                2,
+                0,
+                0.0,
+                1.0
+              ],
+              [
+                1,
+                0,
+                0.0,
+                1.0
+              ],
+              [
+                0,
+                0,
+                0.0,
+                1.0
+              ],
+              [
+                3,
+                0,
+                0.0,
+                1.0
+              ]
+            ],
+            "p": 3,
+            "u": [
+              0,
+              0,
+              0,
+              0,
+              0.5,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "coincidence": false
+      }
+    },
+    {
+      "name": "curve_on_surface_5_False",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+      "inputs": {
+        "brep": {
+          "kind": "crv_on_surf_face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    -0.4,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.2,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    2.0,
+                    -0.2,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    3.0,
+                    0.4,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    -0.4,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    1.0,
+                    2.0,
+                    0.2,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    1.0,
+                    3.0,
+                    -0.2,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    2.0,
+                    0.0,
+                    0.4,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    2.0,
+                    1.0,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    2.0,
+                    2.0,
+                    -0.4,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    2.0,
+                    3.0,
+                    0.2,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    3.0,
+                    0.0,
+                    -0.2,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    3.0,
+                    1.0,
+                    0.4,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    3.0,
+                    2.0,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    3.0,
+                    3.0,
+                    -0.4,
+                    -1.7976931348623157e+308
+                  ]
+                ]
+              ],
+              "p": 3,
+              "q": 3,
+              "u": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "coincidence": false
+      }
+    },
+    {
+      "name": "curve_on_surface_5_True",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+      "inputs": {
+        "brep": {
+          "kind": "crv_on_surf_face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    -0.4,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.2,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    2.0,
+                    -0.2,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    3.0,
+                    0.4,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    -0.4,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    1.0,
+                    2.0,
+                    0.2,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    1.0,
+                    3.0,
+                    -0.2,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    2.0,
+                    0.0,
+                    0.4,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    2.0,
+                    1.0,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    2.0,
+                    2.0,
+                    -0.4,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    2.0,
+                    3.0,
+                    0.2,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    3.0,
+                    0.0,
+                    -0.2,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    3.0,
+                    1.0,
+                    0.4,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    3.0,
+                    2.0,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    3.0,
+                    3.0,
+                    -0.4,
+                    -1.7976931348623157e+308
+                  ]
+                ]
+              ],
+              "p": 3,
+              "q": 3,
+              "u": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "coincidence": true
+      }
+    },
+    {
+      "name": "curve_on_surface_6_False",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+      "inputs": {
+        "brep": {
+          "kind": "crv_on_surf_face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    -0.0004,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    0.001,
+                    0.0002,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    0.002,
+                    -0.0002,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    0.003,
+                    0.0004,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    0.001,
+                    0.0,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.001,
+                    0.001,
+                    -0.0004,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.001,
+                    0.002,
+                    0.0002,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.001,
+                    0.003,
+                    -0.0002,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    0.002,
+                    0.0,
+                    0.0004,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.002,
+                    0.001,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.002,
+                    0.002,
+                    -0.0004,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.002,
+                    0.003,
+                    0.0002,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    0.003,
+                    0.0,
+                    -0.0002,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.003,
+                    0.001,
+                    0.0004,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.003,
+                    0.002,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.003,
+                    0.003,
+                    -0.0004,
+                    -1.7976931348623157e+308
+                  ]
+                ]
+              ],
+              "p": 3,
+              "q": 3,
+              "u": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0.1,
+            0.2,
+            0.7,
+            0.9
+          ]
+        },
+        "coincidence": false
+      }
+    },
+    {
+      "name": "curve_on_surface_6_True",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:632",
+      "inputs": {
+        "brep": {
+          "kind": "crv_on_surf_face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    -0.0004,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    0.001,
+                    0.0002,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    0.002,
+                    -0.0002,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.0,
+                    0.003,
+                    0.0004,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    0.001,
+                    0.0,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.001,
+                    0.001,
+                    -0.0004,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.001,
+                    0.002,
+                    0.0002,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.001,
+                    0.003,
+                    -0.0002,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    0.002,
+                    0.0,
+                    0.0004,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.002,
+                    0.001,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.002,
+                    0.002,
+                    -0.0004,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.002,
+                    0.003,
+                    0.0002,
+                    -1.7976931348623157e+308
+                  ]
+                ],
+                [
+                  [
+                    0.003,
+                    0.0,
+                    -0.0002,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.003,
+                    0.001,
+                    0.0004,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.003,
+                    0.002,
+                    0.0,
+                    -1.7976931348623157e+308
+                  ],
+                  [
+                    0.003,
+                    0.003,
+                    -0.0004,
+                    -1.7976931348623157e+308
+                  ]
+                ]
+              ],
+              "p": 3,
+              "q": 3,
+              "u": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0.1,
+            0.2,
+            0.7,
+            0.9
+          ]
+        },
+        "coincidence": true
+      }
+    },
+    {
+      "name": "shared_boundaries_1_False_True",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "shared_boundaries": 1,
+        "coincidence": false,
+        "find_all": true
+      }
+    },
+    {
+      "name": "shared_boundaries_1_True_False",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "shared_boundaries": 1,
+        "coincidence": true,
+        "find_all": false
+      }
+    },
+    {
+      "name": "shared_boundaries_1_True_True",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "shared_boundaries": 1,
+        "coincidence": true,
+        "find_all": true
+      }
+    },
+    {
+      "name": "shared_boundaries_2_False_True",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "shared_boundaries": 2,
+        "coincidence": false,
+        "find_all": true
+      }
+    },
+    {
+      "name": "shared_boundaries_2_True_False",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "shared_boundaries": 2,
+        "coincidence": true,
+        "find_all": false
+      }
+    },
+    {
+      "name": "shared_boundaries_2_True_True",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ContainsCoincidentTopology",
+      "inputs": {
+        "shared_boundaries": 2,
+        "coincidence": true,
+        "find_all": true
+      }
+    }
+  ]
+}

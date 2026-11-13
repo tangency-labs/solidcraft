@@ -109,6 +109,12 @@ impl Cache {
             && self.sketch == app.session.active_sketch
             && self.colors == colors
         {
+            // A Save As can move the design to a new file without changing the document;
+            // the top row follows the file's name (#7267).
+            let name = component_name(app, 0);
+            if self.root.name != name {
+                self.root.name = name;
+            }
             return;
         }
         self.components.clear();

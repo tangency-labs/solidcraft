@@ -8,7 +8,7 @@
 
 use serde_json::{Map, Value};
 
-use crate::i18n::{format as trf, tr, tr_label};
+use solidcraft_ui_text::{format as trf, tr, tr_label};
 
 /// Steps of a batch named before "and N more".
 const MAX_STEPS: usize = 4;

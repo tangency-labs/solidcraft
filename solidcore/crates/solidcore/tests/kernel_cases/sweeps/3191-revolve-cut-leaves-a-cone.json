@@ -1,0 +1,167 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "3191-revolve-cut-leaves-a-cone",
+  "expected": {
+    "area_mm2": 3522.0717412637123,
+    "bbox": {
+      "max": [
+        20,
+        20,
+        30
+      ],
+      "min": [
+        -20,
+        -20,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 2,
+    "method": "the triangle (20,0) (20,30) (0,30) revolved about the cylinder axis removes everything outside the cone from the apex (0,0,30) to the base rim r 20 at z = 0: V = pi 20^2 30 / 3, A = base pi 20^2 + lateral pi 20 sqrt(20^2 + 30^2); faces: cone and base disc.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3911",
+      "tangency-labs/solidcraft#3191"
+    ],
+    "volume_mm3": 12566.370614359172,
+    "what": "a triangle sharing the cylinder side and top rim revolved as a cut to leave a cone (the cut never completed)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 3,
+      "faces": 2,
+      "vertices": 3
+    }
+  },
+  "records": "3191-revolve-cut-leaves-a-cone.bodies.json.gz",
+  "result": [
+    {
+      "body": "Blank",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3522.071741264798,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 2,
+      "vertices": 3,
+      "volume_mm3": 12566.370614482572
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3911",
+    "tangency-labs/solidcraft#3191"
+  ],
+  "traced_ops": [
+    "extrude",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a triangle sharing the cylinder side and top rim revolved as a cut to leave a cone (the cut never completed)",
+  "why_not": []
+}

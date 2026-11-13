@@ -1,0 +1,5 @@
+# Frozen archives (new entries are one file each under plan/findings/ and
+# plan/upstream-issues/). Kept so branches that still append here merge locally;
+# GitHub's own mergeability check ignores merge=union.
+plan/findings.md merge=union
+plan/upstream-issues.md merge=union

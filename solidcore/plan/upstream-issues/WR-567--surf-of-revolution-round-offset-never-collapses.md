@@ -1,0 +1,13 @@
+#### WR-567. `SmSurfOfRevolution` never says its offset collapses, so an inward shell thicker than a round along a circular edge builds the round's arc inside out (1.0.1)
+- **Severity:** Wrong result
+- **Area:** Offsets and shells
+- **Location:** `source/SMLib/inc/SmSurfOfRevolution.h` at `3fd5b95` (no `OffsetCollapses` override: the `SmSurface` default says never) and `source/SMLib/src/SmSurfOfRevolution.cpp`, `SmSurfOfRevolution::CreateOffsetSurface`, which offsets the generatrix in its plane whatever the distance.
+- **What happens:** a fillet along a circular edge is a surface of revolution whose generatrix is one circular arc, a torus in all but its type. `SmTorus`, `SmCone` and `SmSphere` say when an offset shrinks them onto their spine, and the offset then mates the faces on either side across them. `SmSurfOfRevolution` says never, and `CreateOffsetSurface` builds the generatrix's offset past the arc's centre as the arc turned inside out: r 0.1 for a 1.5 round moved in 1.6. The offset is not a closed solid.
+- **Trigger:** a disc r 15, 5 thick (`SmApiCreateCylinder`), one circular rim rounded r 1.5 (`SmApiFilletEdges`, circular), shelled 1.6 or 2 inward and open at one end (`SmApiShellBrepFull`). Shelled 1.6 or 2 and open at the end opposite the round, it fails with 1001. Open at the rounded end, the volume is 0.85% and 4.2% low.
+- **How found:** SolidCraft shell_of_a_disc_rounded_smaller_than_the_wall (tangency-labs/solidcraft#319); fixed in the fork as tangency-labs/smlib@8b2090f (smlib#64).
+- **Confirmed:** the fork's C API test `shelled_disc_round_thinner_than_the_wall` (capi/tests/ops_kernel.cpp) fails before its fix. The Rust port's default reproduces upstream (`crates/solidcore/tests/wr567_revolution_round_offset_collapses.rs`, `wr567_default_fails_open_at_the_other_end`).
+- **Fix (opt-in, not the default):** `Kernel::fixes.revolution_round_offset_collapses`.
+  - `Surface::offset_collapses` answers for a surface of revolution whose generatrix is one arc (`IsArc(9, tol)`, radius above `tol`). It is true when the offset runs towards the arc's centre by the radius or more.
+  - The test: the radius `r - d (N . k) r`, with `k` the curvature vector of the generatrix-direction iso-curve and `N` the normal at the middle of the natural UV domain, is below `tol`.
+  - `create_offset_surface` then builds no surface, as a torus's does.
+  - With `offset_collapsed_rounds_mated`, the faces on either side meet across the round in a circle. Every case of the test is then an intact manifold solid of the closed-form volume, to 1e-6 relative: rounded at either end, open at either end, shelled 1.6 and 2.

@@ -3,6 +3,7 @@
 //! corner (a clear error that leaves the sketch as it was).
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -203,6 +204,26 @@ fn a_fillet_where_a_line_runs_on_smoothly_from_an_arc_is_refused() {
     assert_eq!(sk(&s).curves.len(), n);
 }
 
+/// An ellipse's construction axes take no part in a corner: a line drawn from the major end
+/// meets the major axis there, and Fillet or Chamfer at that point, or on that pair, is refused
+/// instead of rounding the line into the axis.
+#[test]
+fn an_ellipse_s_axis_is_not_a_side_of_a_corner() {
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}));
+    let major = r["created"]["curves"][1].as_str().unwrap().to_string();
+    let l = curves(&run(&mut s, "sketch.line", json!({"points": [format!("{major}.end"), [20, 15]], "infer": false, "connect": false})))[0].clone();
+    let before = sk(&s);
+    for (cmd, size) in [("sketch.fillet", "radius"), ("sketch.chamfer.equal_distance", "distance")] {
+        for corner in [json!({"point": format!("{l}.start")}), json!({"a": l, "b": major})] {
+            let mut p = corner;
+            p[size] = json!(2);
+            assert!(s.execute(cmd, &p).is_err(), "{cmd} {p}: {:?}", sk(&s).curves);
+            assert_eq!(sk(&s), before, "{cmd} {p}");
+        }
+    }
+}
+
 /// The ids of the constraints driven by the model parameter `name`.
 fn driven_by(s: &Session, name: &str) -> Vec<String> {
     sk(s).constraints.iter().filter(|c| c.param.as_deref() == Some(name)).map(|c| c.id.clone()).collect()
@@ -299,9 +320,9 @@ fn a_fillet_keeps_the_dimensions_of_its_corner_on_a_virtual_sharp() {
     // The virtual corner sits where the corner was, and the part keeps its size.
     let k = sk(&s);
     let vc = k.point(k.point_index(&corner).unwrap()).unwrap();
-    assert!(vc.dist(solidcraft_geom::Vec2::new(0.0, 100.0)) < 1e-6, "{vc:?}");
+    assert!(vc.dist(solidcore_record::Vec2::new(0.0, 100.0)) < 1e-6, "{vc:?}");
     let top_end = k.point(k.resolve_point("top.end").unwrap()).unwrap();
-    assert!(top_end.dist(solidcraft_geom::Vec2::new(-80.0, 100.0)) < 1e-6, "{top_end:?}");
+    assert!(top_end.dist(solidcore_record::Vec2::new(-80.0, 100.0)) < 1e-6, "{top_end:?}");
     let (lo, hi) = k.bounds().unwrap();
     assert!((hi.x - lo.x - 80.0).abs() < 1e-6 && (hi.y - lo.y - 100.0).abs() < 1e-6, "{lo:?} {hi:?}");
     // It is drawn with extension lines from both lines' ends to it.
@@ -357,7 +378,7 @@ fn a_fillet_of_a_nearly_straight_or_folded_corner_with_dimensions_does_not_panic
 /// by other geometry and a dimensioned length are refused, and change nothing.
 #[test]
 fn a_fillet_or_chamfer_brings_two_separate_lines_to_where_they_meet() {
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
     use solidcraft_sketch::CurveKind;
     let lines = |s: &mut Session, a: [[f64; 2]; 2], b: [[f64; 2]; 2]| {
         let la = curves(&run(s, "sketch.line", json!({"points": a, "connect": false})))[0].clone();

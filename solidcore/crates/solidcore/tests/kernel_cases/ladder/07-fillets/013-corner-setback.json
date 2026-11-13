@@ -1,0 +1,235 @@
+{
+  "area": "ladder/07-fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_setback",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "corners": {
+          "kind": "vertex",
+          "picked": [
+            {
+              "at": [
+                [
+                  60.0,
+                  40.0,
+                  20.0
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              60.0,
+              40.0,
+              20.0
+            ]
+          ],
+          "tolerance": 3.7426573867739417
+        },
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  60.0,
+                  40.0,
+                  20.0
+                ],
+                [
+                  0.0,
+                  40.0,
+                  20.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  60.0,
+                  0.0,
+                  20.0
+                ],
+                [
+                  60.0,
+                  40.0,
+                  20.0
+                ]
+              ],
+              "index": 2
+            },
+            {
+              "at": [
+                [
+                  60.0,
+                  40.0,
+                  0.0
+                ],
+                [
+                  60.0,
+                  40.0,
+                  20.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              30.0,
+              40.0,
+              20.0
+            ],
+            [
+              60.0,
+              20.0,
+              20.0
+            ],
+            [
+              60.0,
+              40.0,
+              10.0
+            ]
+          ],
+          "tolerance": 3.7426573867739417
+        },
+        "kind": "round",
+        "setbacks": [
+          8.0
+        ],
+        "sizes": [
+          5.0,
+          5.0,
+          5.0
+        ]
+      }
+    }
+  ],
+  "case": "013-corner-setback",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "edges": 36,
+    "faces": 15,
+    "method": "outside the corner cube C = [52,60]x[32,40]x[12,20] the body is the sphere corner's (009: V0 = 47377.120025868, of which 512 - 225 (1-pi/4) - 125 (1-pi/6) lies in C); the body is convex, so in C it holds the hull of its points on C's faces (the rounds' sections at the setback planes x=52, y=32, z=12 and the cube's corners outside the patch: 299.0201 by a hull of the sections sampled, below the true hull) and lies within the planes tangent to it along those sections, the three rounds' prisms (512 - 225 (1-pi/4) - 125 (sqrt2-1): the corner cube of r keeps the cylinders' common octant (2-sqrt2) r^3). The volume is the middle of [47271.9757, 47384.8935] with that half width as its tolerance. The box is unchanged. SMLib's setback patch is two quadrilaterals per side meeting at its centre: 6 box faces, 3 rounds, 6 patch pieces; vertices: 4 untouched box corners, 2 at each round's far end, the 6 section ends (where the patch starts, 8 from the vertex along each edge), the 6 side middles and the centre (23); edges by Euler, 23 + 15 - 2",
+    "source": "invariants",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.00119391703234033
+    },
+    "vertices": 23,
+    "volume_mm3": 47328.434587888,
+    "what": "three r5 rounds at the corner (60,40,20) with setbacks of 8 mm along each edge"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 8509.186444397299,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 15,
+      "vertices": 23,
+      "volume_mm3": 47325.531676946535
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 15,
+      "vertices": 23
+    }
+  },
+  "records": "013-corner-setback.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8509.186444306852,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 15,
+      "vertices": 23,
+      "volume_mm3": 47325.53167672539
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_setback"
+  ],
+  "ungraded": [],
+  "what": "three r5 rounds at the corner (60,40,20) with setbacks of 8 mm along each edge",
+  "why_not": []
+}

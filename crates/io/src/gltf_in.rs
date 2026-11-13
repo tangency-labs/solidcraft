@@ -17,14 +17,15 @@
 //! sRGB here), alpha (blended materials only) and metallic/roughness factors give the body's
 //! look. Textures are not read.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use gltf::accessor::{DataType, Dimensions};
 use gltf::mesh::Mode;
+use solidcore_record::Vec3;
 use solidcraft_doc::appearance::Look;
 use solidcraft_doc::{Mat, MeshData, mat_mul};
-use solidcraft_geom::Vec3;
 
 use crate::{IoError, MAX_3MF_BYTES, MeshFeature, Result};
 
@@ -703,6 +704,7 @@ impl<'d> Reader<'d, '_, '_> {
                 positions: positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: triangles.iter().flatten().copied().collect(),
                 color: look.as_ref().map(Look::rgb),
+                corner_normals: Default::default(),
             });
             self.looks.push(look);
             self.plan.bodies.push(slot);
@@ -841,7 +843,7 @@ impl<'d> Reader<'d, '_, '_> {
 
 /// A linear base colour channel as an 8-bit sRGB code; one that isn't a number reads as 0.8.
 fn srgb(c: f32) -> u8 {
-    solidcraft_geom::srgb::encode8(if c.is_finite() { f64::from(c) } else { 0.8 })
+    solidcraft_color::srgb::encode8(if c.is_finite() { f64::from(c) } else { 0.8 })
 }
 
 /// A material's look: base colour, alpha when blended, metallic/roughness when opaque.

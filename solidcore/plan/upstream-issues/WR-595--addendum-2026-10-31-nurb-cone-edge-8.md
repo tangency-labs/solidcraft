@@ -1,0 +1,9 @@
+Updates: WR-595
+
+**Edge 8 of `Fillet/nurb_cone.smb`: the fork's next commit, not a port divergence.** With `Kernel::fixes.fillet_tangent_point_one_sided_step` alone, edge 8's r 0.5 round, which the pinned C++ and the port with the flag off build (volume 213.72140827897), fails with `SM_ERR` from the session's finish. The port's flag path is the fork's change as written (tangency-labs/smlib@f8fd83e, `SmFilletSolver::ComputePointValues`: `bFoundForw && bFoundBack && ! bTangentPoint`, nothing else changed): the regression is the fork's too, in f8fd83e on its own.
+
+The fork committed tangency-labs/smlib@68fb916 after it (`SmFilletSolver::CalcFilletGeom`: a trace whose first through point is a tangent point starts toward the next through point), ported as WR-603, `Kernel::fixes.fillet_trace_from_tangent_point_toward_next`. Edge 8's trace starts at such a tangent point: with only WR-595's flag the forward step along the edge's end tangent alone sets the curve tangent, where upstream's central difference had corrected it; WR-603 starts the trace along the chord to the next through point instead. With both flags on, as the fork has them (and as at tangency-labs/smlib@eaa998a: no later fork commit touches `ComputePointValues`), edge 8 builds the same body as upstream (volume equal to the last digit) and edge 5's rails have 181 control points (310 upstream, 286 with WR-595's flag alone; volume within 5e-9 of upstream).
+
+So `fillet_tangent_point_one_sided_step` is to be used with `fillet_trace_from_tangent_point_toward_next`. No code change.
+
+Tests: `edge_8_builds_with_the_fix_and_the_trace_toward_the_next_point` in `crates/solidcore/tests/wr595_tangent_point_one_sided_step.rs` (edge 8 fails with WR-595's flag alone and builds upstream's volume to 1e-9 with WR-603's as well; edge 5 with both has 181 rail control points).

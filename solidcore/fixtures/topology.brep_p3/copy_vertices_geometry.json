@@ -1,0 +1,367 @@
+{
+  "cases": [
+    {
+      "name": "copy_vertices_geometry_0.001_empty",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::CopyVertices)",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0.002,
+                -0.003,
+                0.005,
+                1
+              ],
+              [
+                0.007,
+                0.011,
+                -0.013000000000000001,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "editing": -1,
+        "op": "copy_vertices",
+        "vertices": []
+      }
+    },
+    {
+      "name": "copy_vertices_geometry_0.001_reordered",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::CopyVertices)",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0.002,
+                -0.003,
+                0.005,
+                1
+              ],
+              [
+                0.007,
+                0.011,
+                -0.013000000000000001,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "editing": -1,
+        "op": "copy_vertices",
+        "vertices": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "copy_vertices_geometry_0.001_repeated",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::CopyVertices)",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0.002,
+                -0.003,
+                0.005,
+                1
+              ],
+              [
+                0.007,
+                0.011,
+                -0.013000000000000001,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "editing": -1,
+        "op": "copy_vertices",
+        "vertices": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "copy_vertices_geometry_1_empty",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::CopyVertices)",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                2,
+                -3,
+                5,
+                1
+              ],
+              [
+                7,
+                11,
+                -13,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "editing": -1,
+        "op": "copy_vertices",
+        "vertices": []
+      }
+    },
+    {
+      "name": "copy_vertices_geometry_1_reordered",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::CopyVertices)",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                2,
+                -3,
+                5,
+                1
+              ],
+              [
+                7,
+                11,
+                -13,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "editing": -1,
+        "op": "copy_vertices",
+        "vertices": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "copy_vertices_geometry_1_repeated",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::CopyVertices)",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                2,
+                -3,
+                5,
+                1
+              ],
+              [
+                7,
+                11,
+                -13,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "editing": -1,
+        "op": "copy_vertices",
+        "vertices": [
+          1,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "copy_vertices_geometry_1000_empty",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::CopyVertices)",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                2000,
+                -3000,
+                5000,
+                1
+              ],
+              [
+                7000,
+                11000,
+                -13000,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "editing": -1,
+        "op": "copy_vertices",
+        "vertices": []
+      }
+    },
+    {
+      "name": "copy_vertices_geometry_1000_reordered",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::CopyVertices)",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                2000,
+                -3000,
+                5000,
+                1
+              ],
+              [
+                7000,
+                11000,
+                -13000,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "editing": -1,
+        "op": "copy_vertices",
+        "vertices": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "copy_vertices_geometry_1000_repeated",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp (SmBrep::CopyVertices)",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                2000,
+                -3000,
+                5000,
+                1
+              ],
+              [
+                7000,
+                11000,
+                -13000,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "editing": -1,
+        "op": "copy_vertices",
+        "vertices": [
+          1,
+          0,
+          1
+        ]
+      }
+    }
+  ]
+}

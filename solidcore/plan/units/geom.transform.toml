@@ -1,0 +1,12 @@
+id = "geom.transform"
+upstream = ["source/SMLib/inc/SmTransform.h", "source/SMLib/src/SmTransform.cpp"]
+rust_module = "geom::transform"
+depends_on = ["geom.extent3d", "geom.object", "geom.solution_array", "topology.database_io"]
+soft_depends_on = ["geom.tol"]
+est_lines = 681
+layer = 5
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-geom.transform-a1"
+claimed_at = "2026-10-12T20:43:11Z"
+notes = "46 fns; largest: SmTransform::EvaluateBoundingBoxSimple, SmTransform::EvaluateSimple, SmTransform::ReadFromDB, SmTransform::GlobalPointSolveSimple; cycle back-edges (call into later units; stub or co-port): geom.vector3d(15), geom.pseudo_box(9), surface.volume_p1(6), geom.extent1d(5), geom.axis2_placement(4), geom.geom_utility_p1(2), geom.geom_utility_p2(2), surface.volume_p2(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest green: 3042 cases (42 fixtures + 3000 generated), 3042 pass, 0 deferred (geom.pseudo_box, surface.volume_p1 and surface.volume_p2 wired; promoted by surface.volume_p2), max_rel_err 0; 20k-seed run clean"

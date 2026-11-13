@@ -10,12 +10,14 @@
 //! the record curve's own points. A point that settles off its face (past the
 //! face's boundary) is dropped: the face's edges, offered too, then carry the minimum.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use solidcore_record::Vec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::mesh_distance::{MeshClosest, TriangleSet};
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcraft_geom::{Aabb3, Mesh};
 
 use crate::body::Body;
 use crate::surface_kind::{FaceSurface, surface_of};

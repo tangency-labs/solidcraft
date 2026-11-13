@@ -142,11 +142,12 @@ mod tests {
                     body: "Old".into(),
                     origin_feature: 3,
                     name: "F3:+z".into(),
-                    point: solidcraft_geom::Vec3::new(1., 1., 2.),
+                    point: solidcore_record::Vec3::new(1., 1., 2.),
                     certificate: None,
                 }),
             ],
             rows: vec![ConfigRow {
+                id: 1,
                 name: "Default".into(),
                 cells: vec!["d1 * 2 + d2".into(), "4 mm".into(), "d1".into(), String::new(), String::new()],
             }],
@@ -199,11 +200,11 @@ mod tests {
                     body: "Foreign".into(),
                     origin_feature: 3,
                     name: "F3:+z".into(),
-                    point: solidcraft_geom::Vec3::ZERO,
+                    point: solidcore_record::Vec3::ZERO,
                     certificate: None,
                 }),
             ],
-            rows: vec![ConfigRow { name: "Default".into(), cells: vec!["2 mm".into(), String::new()] }],
+            rows: vec![ConfigRow { id: 2, name: "Default".into(), cells: vec!["2 mm".into(), String::new()] }],
             ..Default::default()
         };
         let original = table.clone();

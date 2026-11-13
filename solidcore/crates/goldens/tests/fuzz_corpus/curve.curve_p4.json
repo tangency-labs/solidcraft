@@ -1,0 +1,6 @@
+{
+  "unit": "curve.curve_p4",
+  "cases": [
+    {"name": "fuzz00562_bad_index_count_4294967296", "origin": "fuzz-out/n2000/curve.curve_p4/fuzz00562.json (timeout: rust: no result after 20 s)", "cpp": "harness: invalid argument: bad index/count 4294967296", "rust": "harness: 4294967296 samples", "inputs": {"count": 4294967296, "curve": {"hermite": {"d1": [0.746, 2.79, -0.513], "d2": [2.78, 2.46, -1.56], "dim": 3, "p1": [0.831, 2.73, 2.59], "p2": [-2.05, 2.51, 1.37]}}, "ivl": [0.0, 1.0], "op": "polar_box"}}
+  ]
+}

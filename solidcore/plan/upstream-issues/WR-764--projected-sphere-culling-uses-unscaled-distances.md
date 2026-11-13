@@ -1,0 +1,16 @@
+#### WR-764. `SmGlobalSolver` culls projected extrema in different units from its objective
+
+- **Severity:** Wrong result
+- **Area:** Solvers
+- **Location:** `source/SMLib/src/SmGlobalSolver.cpp:490-623`, the sphere-bound branch test for `SM_SO_PROJECTED_MINIMIZE` and `SM_SO_PROJECTED_MAXIMIZE`, at v1.0.1 (`3fd5b9548d19aa8c12c29bc9637a96d42a06f8a5`).
+- **What happens:** The projected objective is `|N x D x N|`, from `sVecProj = sPlaneNorm * sDiff * sPlaneNorm` and `dDistSq = sVecProj.LengthSquared()` (`SmTopologySolver.cpp:186-189`). That equals `(N . N) |P(D)|`, where `P` is the orthogonal projection onto the plane. The branch test instead projects the second sphere centre with `smgu_PointProjectToPlane` (`:579-583`), which divides by `N . N` (`SmGeomUtility.cpp:3862-3865`) and so returns the unscaled `P`. It then compares the unscaled centre distance, plus or minus the unscaled sphere radii, against `m_dBestAnswerSoFarSq` (`:602-623`), which holds the scaled objective squared. With a unit normal the two agree. Otherwise the bound is off by the factor `N . N`, and for each operation one direction culls a branch that holds the answer:
+  - For a minimum with `N . N < 1`, the unscaled bound overstates the branch's best value, so a branch holding a better minimum is culled.
+  - For a maximum with `N . N > 1`, it understates the branch's best value, so the branch holding the true maximum is culled.
+  - In the other two cases it only keeps branches it could have culled, which costs time but not correctness.
+- **Trigger:** One tree is the single point (0, 0, 0). The other is a leaf holding the segment x in [2, 4] at y = 0, z = 7, so its sphere bound has centre (3, 0, 7) and radius 1. The unscaled projected centre distance is 3, so the C++ bounds are 3 - 1 = 2 for the minimum and 3 + 1 = 4 for the maximum.
+  - Minimum, N = (0, 0, 0.5), `N . N = 0.25`: the true projected minimum in the branch is 2 x 0.25 = 0.5. With an incumbent of 0.625, which the branch can beat, the C++ test culls, because 2 > 0 and 2² = 4 exceeds 0.625² = 0.390625.
+  - Maximum, N = (0, 0, 2), `N . N = 4`: the true projected maximum in the branch is 4 x 4 = 16. With an incumbent of 14, which the branch can beat, the C++ test culls, because 4² = 16 is below 14² = 196.
+- **How found:** Reviewing projected maxima with non-unit normals while porting the projected query path. Issue [#2967](https://github.com/tangency-labs/solidcore/issues/2967) exposed it: a tilted sphere face at normal length 1000 returned a vertex at 2481066.05 instead of the face maximum 2502498.44.
+- **Confirmed:** yes, from the pinned source. The objective and the branch test use the two projections named above. No C++ build was run. The Rust test `projected_extrema_bounds_share_objective_units` in `geom/global_solver.rs` encodes this trigger, at normal lengths 0.5, 1, 2 and -2. On the ported comparison it fails its first assertion (normal length 0.5, the minimum case above). It passes with the bound scaled by `N . N`.
+
+The Rust fix scales the projected centre distance and both radii by `N . N` and adds the tolerance in objective units. A zero or non-finite normal keeps the branch, because it cannot certify an exclusion.

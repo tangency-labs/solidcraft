@@ -1,0 +1,13 @@
+Updates: WR-697
+
+#### WR-697 (update, 2026-11-05). The ball cut flat: 3272.765 is the half rim's body, not the whole rim's, and the whole rim meets the closed form
+- **Severity:** Wrong result (the comparison with the whole rim's closed form is withdrawn)
+- **Area:** Fillets (corners)
+- **What changed:** The 2026-11-02 addendum (`WR-697--addendum-2026-11-02-smooth-end-and-overflow.md`) lists the ball R 10 cut flat at z = 4, its rim rounded r 2, under "Differences from the fork found after the port": both build it with 5 faces and 3272.764885312161, and "the round takes away only 11.246635 of the 22.492758" of the closed form 3261.518762521043 (tangency-labs/solidcore#2441). That comparison was wrong: the two volumes are of different bodies.
+  - The rim z = 4 is **two** edges, joined at (+-sqrt 84, 0, 4). The case in `fork_099cf96_exact_class_cases` picked one point, (0, sqrt 84, 4), which selects the half y > 0 only. A partly selected tangent chain is rounded on its selected edges and ends at the smooth vertex with an End (`docs/generic-blend.md` §5), so 3272.764885312161 is the half rim's body. It cannot be compared with the whole rim's closed form.
+  - With a point on each edge the whole rim is rounded: both round faces revolved and 2.6e-14 off the ball, valid at level 2, volume 3261.518763866034 with every current fix, 4.1e-10 relative from the closed form.
+  - The pipes case of the same file reads the same way: B's seam at (5, 5 sqrt 3, -5) splits their arc, and the case's two points both lie on the long piece, so the round ended at that vertex (1001). With a point on the short piece as well it builds: rational (12, 2) rounds 3.1e-13 off the ball, valid at level 2, 13442.703241789897 against the case's 13442.703130586538 (8.3e-9 relative).
+  - The fork's capi changed both cases for the same reason in tangency-labs/smlib@18bd2f5 (a point on every edge of the rim, expected volumes unchanged).
+- **What this does not settle:** whether the half rim's End takes away the right amount. It is measured in tangency-labs/solidcore#2660 and is a question about the End, not about the closed form. Since tangency-labs/solidcore#2864 the half rim is refused (1001), its round ending at the sphere's seam; the whole rim does not end, and builds as above.
+- **How found:** measured on Linux (WSL, Rust 1.98.0, `--profile difftest`) at solidcore main `d93a19bd4`, with `cargo test -p solidcore --test fork_099cf96_exact_class_cases` before and after its cases select every edge of their rims.
+- **Confirmed:** yes, `crates/solidcore/tests/fork_099cf96_exact_class_cases.rs` (`sphere_plane` and `cylinders_touching_at_a_point` select every edge of their rims; `sphere_plane` is checked against `sphere_plane_closed_form`).

@@ -1,7 +1,7 @@
 //! A face whose edge is an intersection curve that does not evaluate (#1252): meshing it neither
 //! panics nor gives non-finite points.
 
-use solidcraft_geom::brep::{self as b, Curve, Curve2, Surface};
+use solidcore_record::brep::{self as b, Curve, Curve2, Surface};
 
 /// A plane at height `z` with its parameters along x and y.
 fn plane(z: f64) -> Surface {

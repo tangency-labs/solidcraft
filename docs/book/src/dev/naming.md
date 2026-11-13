@@ -29,13 +29,13 @@ tool built from a sketch, cut from each target, the cut body split into lumps) i
 |---|---|
 | a body of the model before the feature | as they were |
 | a moved copy of one (pattern, mirror) | `<name>@F<feature>.<instance>` |
-| the cavity side of a shell grown outward | `F<feature>:inner:<name>` |
+| the cavity side of a shell grown outward | `F<feature>:inner(<name>)` |
 | a body the feature built | by role: `F<feature>:side:<sketch curve>`, `start`/`top`/`bottom`/`end` caps, `+x`… box sides, `face:<k>` imported faces, `link:<digest>` faces of a linked design (see below) |
 | a copied tool of a patterned feature | `F<feature>:<role>@F<pattern>.<instance>` |
 
 `crates/doc/src/history_names.rs` names each face of the result from its origins: a kept or
-trimmed face keeps its origin's name, a fillet or chamfer face is `F<feature>:blend:<edge>` of the
-edge it replaces, a shell's inner wall `F<feature>:inner:<face>`. A side's sketch curve is the
+trimmed face keeps its origin's name, a fillet or chamfer face is `F<feature>:blend(<edge>)` of the
+edge it replaces, a shell's inner wall `F<feature>:inner(<face>)`. A side's sketch curve is the
 curve the profile segment lies on exactly; nothing is sampled.
 
 - **Pieces.** Faces that end up with one name are pieces of one face, and are told apart by the
@@ -128,7 +128,10 @@ best match and warns, instead of failing and taking its body and everything afte
    fewest curves the loop did not have, and a tie left after that is an error, as is a loop
    that matches nothing.
 
-Loops of offset curves and legacy graph-span multisets keep their exact meaning. Commands still
+A line, arc or circle listed twice (the pieces a circle was cut into when the pick was saved) is
+one curve to a pick, so a line that ends on a circle and gives it more arcs changes nothing; the
+outputs of an analytic offset take step 1 only, never step 2 (#9368). Loops of free-form offset
+curves, free curves and legacy graph-span multisets keep their exact meaning. Commands still
 check a pick with the exact rule, so a curve list that names no profile is refused when given.
 A sketch on such an extrude's cap falls back the same way: its certificate names the loop, and
 the cap of the same solid extrude at the same end, from the same sketch and on the same body,

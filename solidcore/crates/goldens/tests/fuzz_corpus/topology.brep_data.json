@@ -1,0 +1,6 @@
+{
+  "unit": "topology.brep_data",
+  "cases": [
+    {"name": "fuzz00656_ffi_rejected_invalid_argument_pre_64", "origin": "fuzz-out/n2000/topology.brep_data/fuzz00656.json (crash: rust: killed by signal 6 (memory allocation of 4831838208 bytes failed))", "cpp": "harness: ffi rejected: invalid argument: pre > 64", "rust": "harness: pre > 64", "inputs": {"mode": "db", "pre": 4294967296}}
+  ]
+}

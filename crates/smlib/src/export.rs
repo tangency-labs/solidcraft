@@ -29,61 +29,68 @@
 //!   on the surface's internal rational B-spline, whose angular parameter is not the angle
 //!   (SmCylinder.h: "the map from one to the other is not linear"), and a circle's or ellipse's
 //!   on its NURBS parameter, not its angle; those pcurves are computed from the edge record on
-//!   the face's surface record (`solidcraft_geom::brep::pcurve`). Every loop is moved by whole
+//!   the face's surface record (`solidcore_ops::pcurve`). Every loop is moved by whole
 //!   periods into the face's domain.
 //! - **Tolerances:** each edge's and vertex's own as SMLib reports it (`EDGE_TOLERANCE`,
 //!   `VERTEX_TOLERANCE`), never below a floor of 10⁻⁶ of the body's size (at least 10⁻⁵ mm),
 //!   which is the body's; from a library without them, SMLib's intersection tolerance (or the
 //!   floor where larger) for the body, every edge and every vertex.
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep as b;
+use solidcore_record::Vec3;
+use solidcore_record::brep as b;
 
 use crate::flat::{self, *};
 use crate::history::{Order, Piece};
 use crate::import::Arrays;
-use crate::{Brep, Result, error, ffi, init};
+use crate::{Brep, Result};
 
 impl Brep {
     /// A cylinder about +Z: base centre, radius and height (mm, > 0).
     pub fn make_cylinder(origin: [f64; 3], radius: f64, height: f64) -> Result<Brep> {
-        init()?;
-        ffi::make_cylinder(&origin, radius, height).map(Brep).map_err(error)
+        let r = crate::core::make_cylinder(origin, radius, height).map(Brep::made_core);
+        crate::trace::made("make_cylinder", &[], &r, || serde_json::json!({"origin": origin, "radius": radius, "height": height}));
+        r
     }
 
     /// A sphere: centre and radius (mm, > 0).
     pub fn make_sphere(center: [f64; 3], radius: f64) -> Result<Brep> {
-        init()?;
-        ffi::make_sphere(&center, radius).map(Brep).map_err(error)
+        let r = crate::core::make_sphere(center, radius).map(Brep::made_core);
+        crate::trace::made("make_sphere", &[], &r, || serde_json::json!({"center": center, "radius": radius}));
+        r
     }
 
     /// A cone or frustum about +Z: base centre, base radius (> 0), top radius (≥ 0, not the base
     /// radius) and height (> 0), in mm.
     pub fn make_cone(origin: [f64; 3], base_radius: f64, top_radius: f64, height: f64) -> Result<Brep> {
-        init()?;
-        ffi::make_cone(&origin, base_radius, top_radius, height).map(Brep).map_err(error)
+        let r = crate::core::make_cone(origin, base_radius, top_radius, height).map(Brep::made_core);
+        crate::trace::made(
+            "make_cone",
+            &[],
+            &r,
+            || serde_json::json!({"origin": origin, "base_radius": base_radius, "top_radius": top_radius, "height": height}),
+        );
+        r
     }
 
     /// A ring torus about +Z: centre, major radius > minor radius > 0 (mm).
     pub fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64) -> Result<Brep> {
-        init()?;
-        ffi::make_torus(&center, major_radius, minor_radius).map(Brep).map_err(error)
+        let r = crate::core::make_torus(center, major_radius, minor_radius).map(Brep::made_core);
+        crate::trace::made(
+            "make_torus",
+            &[],
+            &r,
+            || serde_json::json!({"center": center, "major_radius": major_radius, "minor_radius": minor_radius}),
+        );
+        r
     }
 
-    /// The flat arrays of this body that the mapping reads ([`Brep::export`]), copied out.
+    /// The flat arrays of this body that the mapping reads.
     pub fn arrays(&self) -> Result<Arrays> {
-        let f = self.export()?;
-        let mut out = Arrays::default();
-        for &id in I64_IDS {
-            out.ints.insert(id, f.get_i64(id)?);
-        }
-        for &id in F64_IDS {
-            out.reals.insert(id, f.get_f64(id)?);
-        }
-        Ok(out)
+        crate::core::to_arrays(self.core())
     }
 
     /// This body as a schema 4 B-rep, validated.
@@ -94,7 +101,14 @@ impl Brep {
     /// [`Brep::to_native`], with what the mapping kept as SMLib wrote it.
     pub fn to_native_report(&self) -> std::result::Result<(b::Brep, Report), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        native(&arrays)
+        let r = native_ordered(&arrays).and_then(|(mut brep, report, order)| {
+            self.with_definitions(&mut brep, &order)?;
+            Ok((brep, report))
+        });
+        if let Ok((record, _)) = &r {
+            crate::trace::exported(self, record);
+        }
+        r
     }
 
     /// [`Brep::to_native`], with where each of SMLib's faces and edges went in the record's
@@ -103,7 +117,37 @@ impl Brep {
     /// `GetEdges`), the order its history uses.
     pub fn to_native_ordered(&self) -> std::result::Result<(b::Brep, Order), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        native_ordered(&arrays).map(|(brep, _, order)| (brep, order))
+        let r = native_ordered(&arrays).and_then(|(mut brep, _, order)| {
+            self.with_definitions(&mut brep, &order)?;
+            Ok((brep, order))
+        });
+        if let Ok((record, _)) = &r {
+            crate::trace::exported(self, record);
+        }
+        r
+    }
+}
+
+impl Brep {
+    /// The record's blend faces as their definitions: each face of this body whose surface carries
+    /// a definition a record keeps (a procedural blend, a round of an exact class whose net has no
+    /// analytic label) is written as that definition, with its net, the face's NURBS, as its form.
+    /// The arrays carry the net alone; `order` places this body's faces in the record.
+    fn with_definitions(&self, record: &mut b::Brep, order: &Order) -> Res<()> {
+        let definitions = crate::core::definition::definitions(self.core()).map_err(ExportError::Smlib)?;
+        for (i, definition) in definitions.into_iter().enumerate() {
+            let Some(definition) = definition else { continue };
+            let at = if order.faces.is_empty() { i } else { *order.faces.get(i).ok_or_else(|| invalid("a face the order does not place"))? };
+            let face = record.faces.get_mut(at).ok_or_else(|| invalid("a face the record does not have"))?;
+            let net = face.nurbs.as_ref().unwrap_or(&face.surface);
+            if !matches!(net, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. }) {
+                continue;
+            }
+            let net = face.nurbs.take().unwrap_or_else(|| face.surface.clone());
+            face.surface = b::Surface::Blend { definition: Box::new(definition) };
+            face.nurbs = Some(net);
+        }
+        Ok(())
     }
 }
 
@@ -149,92 +193,6 @@ fn unsupported(what: impl std::fmt::Display) -> ExportError {
 }
 
 // ---- The arrays (ids and kinds from `crate::flat`, as in capi/include/smlib.h) ------------
-
-/// The int64 arrays this mapping reads.
-const I64_IDS: &[i32] = &[
-    REGION_SHELL_COUNT,
-    REGION_TYPE,
-    SHELL_FACEUSE_COUNT,
-    SHELL_WIRE_EDGE_COUNT,
-    SHELL_POINT_TYPE,
-    FACEUSE_FACE,
-    FACEUSE_ORIENTATION,
-    FACE_LOOP_COUNT,
-    FACE_SURFACE_TYPE,
-    LOOP_EDGEUSE_COUNT,
-    LOOP_VERTEX,
-    EDGEUSE_EDGE,
-    EDGEUSE_ORIENTATION,
-    EDGEUSE_NEXT_RADIAL,
-    EDGEUSE_RADIAL_ENTRY,
-    EDGEUSE_NURBS_VERTEX_COUNT,
-    EDGEUSE_NURBS_ORDER,
-    EDGE_CURVE_TYPE,
-    EDGE_VERTICES,
-    EDGE_NURBS_VERTEX_COUNT,
-    EDGE_NURBS_ORDER,
-    FACE_NURBS_U_VERTEX_COUNT,
-    FACE_NURBS_V_VERTEX_COUNT,
-    FACE_NURBS_U_ORDER,
-    FACE_NURBS_V_ORDER,
-    FACE_NURBS_FORM,
-    EDGE_NURBS_FORM,
-    FACE_DEFINITION_REAL_COUNT,
-];
-
-/// The double arrays this mapping reads.
-const F64_IDS: &[i32] = &[
-    TOLERANCE,
-    EXTENT,
-    FACE_RANGE,
-    EDGE_RANGE,
-    VERTEX_POSITION,
-    EDGE_NURBS_CVS,
-    EDGE_NURBS_KNOTS,
-    EDGE_NURBS_WEIGHTS,
-    EDGE_CIRCLE_CENTER,
-    EDGE_CIRCLE_AXIS,
-    EDGE_CIRCLE_REF_DIRECTION,
-    EDGE_CIRCLE_RADIUS,
-    EDGE_LINE_ORIGIN,
-    EDGE_LINE_DIRECTION,
-    EDGE_ELLIPSE_CENTER,
-    EDGE_ELLIPSE_AXIS,
-    EDGE_ELLIPSE_REF_DIRECTION,
-    EDGE_ELLIPSE_X_RADIUS,
-    EDGE_ELLIPSE_Y_RADIUS,
-    EDGEUSE_NURBS_CVS,
-    EDGEUSE_NURBS_KNOTS,
-    EDGEUSE_NURBS_WEIGHTS,
-    FACE_NURBS_CVS,
-    FACE_NURBS_U_KNOTS,
-    FACE_NURBS_V_KNOTS,
-    FACE_NURBS_WEIGHTS,
-    FACE_SPHERE_CENTER,
-    FACE_SPHERE_AXIS,
-    FACE_SPHERE_REF_DIRECTION,
-    FACE_SPHERE_RADIUS,
-    FACE_PLANE_ORIGIN,
-    FACE_PLANE_AXIS,
-    FACE_PLANE_REF_DIRECTION,
-    FACE_CYLINDER_ORIGIN,
-    FACE_CYLINDER_AXIS,
-    FACE_CYLINDER_REF_DIRECTION,
-    FACE_CYLINDER_RADIUS,
-    FACE_CONE_ORIGIN,
-    FACE_CONE_AXIS,
-    FACE_CONE_REF_DIRECTION,
-    FACE_CONE_RADIUS,
-    FACE_CONE_SEMI_ANGLE,
-    FACE_TORUS_ORIGIN,
-    FACE_TORUS_AXIS,
-    FACE_TORUS_REF_DIRECTION,
-    FACE_TORUS_MAJOR_RADIUS,
-    FACE_TORUS_MINOR_RADIUS,
-    EDGE_TOLERANCE,
-    VERTEX_TOLERANCE,
-    FACE_DEFINITION_REALS,
-];
 
 // The kind values as the arrays hold them (int64); a local item shadows the glob import.
 const SURFACE_NURBS: i64 = flat::SURFACE_NURBS as i64;
@@ -384,8 +342,9 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
                     v3(flat.f(FACE_CONE_REF_DIRECTION), i, "cone")?,
                 );
                 let (radius, half) = (at(flat.f(FACE_CONE_RADIUS), i, "cone")?, at(flat.f(FACE_CONE_SEMI_ANGLE), i, "cone")?);
-                // SMLib's cone of semi-angle 0 is its cylinder.
-                if half == 0.0 {
+                // SMLib's cone of semi-angle 0 is its cylinder, and one within rounding of it (a thread's
+                // cone of 1e-13 comes out of the trims) is too: the portable record refuses it as a cone.
+                if half.abs() < 1e-12 {
                     b::Surface::Cylinder { frame: f, radius }
                 } else {
                     b::Surface::Cone { frame: f, radius_at_origin: radius, half_angle: half }
@@ -446,7 +405,7 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
 /// `form`, the NURBS the edge runs on over `range`: what [`b::Edge::curve_interval`] reads (an
 /// ellipse's radii scale its axes, not the way its angle turns).
 fn along(f: b::Frame, form: &b::Curve, range: [f64; 2]) -> Res<b::Frame> {
-    let eval = b::eval::CurveEval::new(form).map_err(|e| invalid(format!("circle NURBS form: {e}")))?;
+    let eval = solidcraft_geom::brep::eval::CurveEval::new(form).map_err(|e| invalid(format!("circle NURBS form: {e}")))?;
     let [t0, t1] = range;
     let (p, q) = (eval.point(t0), eval.point(t0 + 1e-3 * (t1 - t0)));
     let (Some(p), Some(q)) = (p, q) else { return Err(invalid("circle NURBS form")) };
@@ -619,9 +578,13 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 /// edgeuse runs against the edge (`same` false) reversed exactly (control points in reverse
 /// order, knots t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's
 /// interval; where the two ends differ by the rounding of SMLib's own or this remap (within the
-/// schema's 10⁻⁹ of the interval's magnitude, at least 1), the knots at the trim's ends are the
-/// edge record's interval ends, so the pcurve is defined there; farther apart is an error.
-fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2]) -> Res<b::Curve2> {
+/// schema's 10⁻⁹ of the interval's magnitude, at least 1), or by more but at one point of the edge
+/// within its tolerance (`on_edge`: a circle on its NURBS form whose end lies a rounding past the
+/// quarter line its trim stops on moves along it 10⁻⁷ of the form's parameter, a micron), every
+/// knot within that of an interval end is that end, and the end spans this leaves without length
+/// go with their control points, so the pcurve is a valid record defined on the edge; farther
+/// apart is an error.
+fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2], on_edge: &dyn Fn(f64, f64) -> bool) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
             return (knots.to_vec(), points.to_vec());
@@ -629,26 +592,77 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
         let (a, b) = (knots.first().copied().unwrap_or(0.0), knots.last().copied().unwrap_or(0.0));
         (knots.iter().rev().map(|t| a + b - t).collect(), points.iter().rev().cloned().collect())
     }
-    let map = |k: Vec<f64>, n: usize| -> Res<Vec<f64>> {
+    // The knots mapped, and the points with them: a knot within the slack of an end of the edge's
+    // interval, inside or past it, is that end, and the end spans that leaves without length are
+    // dropped with their control points (on an edgeuse against its edge the trim is reversed
+    // first, so the issue's dead span sits inside the start as a run a rounding after it). SMLib can hand over a trim whose domain runs a rounding
+    // past the edge's interval with a dead span there (knots `5 x4, 5.00000000003 x5` on an edge
+    // ending at 5: the slot of a sloped bar, solidcraft#12365), or whose last interior knots lie
+    // one ulp past its end knots. Moving the ends alone left a run of 9 knots at 5, or an
+    // unordered vector, which the record refuses, and the body was lost. A basis function whose
+    // support has no length is zero on the domain, so dropping its knot and point leaves the
+    // curve on the edge as it was (exact where the dead span starts at a knot of multiplicity
+    // degree + 1, within the slack otherwise).
+    fn map<T: Clone>(
+        k: Vec<f64>,
+        points: Vec<T>,
+        [scale, offset]: [f64; 2],
+        [t0, t1]: [f64; 2],
+        on_edge: &dyn Fn(f64, f64) -> bool,
+    ) -> Res<(Vec<f64>, Vec<T>)> {
         let mut k: Vec<f64> = k.into_iter().map(|t| scale * t + offset).collect();
+        let n = points.len();
         let degree = k.len().checked_sub(n + 1).ok_or_else(|| invalid("UV trim knots"))?;
         let (a, z) = (at(&k, degree, "UV trim knots")?, at(&k, n, "UV trim knots")?);
-        let slack = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
-        if (a - t0).abs() > slack || (z - t1).abs() > slack {
+        let rounding = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
+        // Each end's slack: the rounding, or the gap where it is one point of the edge (less
+        // than a quarter of the interval, so the two ends' slacks never meet).
+        let end = |x: f64, t: f64| {
+            let gap = (x - t).abs();
+            if gap <= rounding {
+                Some(rounding)
+            } else if gap < 0.25 * (t1 - t0).abs() && on_edge(x, t) {
+                Some(gap * (1.0 + 1e-12) + rounding)
+            } else {
+                None
+            }
+        };
+        let (Some(s0), Some(s1)) = (end(a, t0), end(z, t1)) else {
             return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]")));
+        };
+        // A knot within the rounding of an end is that end, and so is one past the end on the
+        // side the trim runs over it, up to the trim's end; a knot inside the edge's interval
+        // farther than the rounding stays (moving it would change the curve).
+        let snaps = |x: f64, t: f64, end: f64, slack: f64| (x - t).abs() <= rounding || ((x - t) * (end - t) > 0.0 && (x - t).abs() <= slack);
+        for x in &mut k {
+            if snaps(*x, t0, a, s0) {
+                *x = t0;
+            } else if snaps(*x, t1, z, s1) {
+                *x = t1;
+            }
         }
-        k.iter_mut().filter(|x| **x == a).for_each(|x| *x = t0);
-        k.iter_mut().filter(|x| **x == z).for_each(|x| *x = t1);
-        Ok(k)
-    };
+        let mut points = points;
+        let run_at_start = k.iter().take_while(|x| **x == t0).count();
+        let surplus = run_at_start.saturating_sub(degree + 1).min(n.saturating_sub(degree + 1));
+        k.drain(..surplus);
+        points.drain(..surplus);
+        let run_at_end = k.iter().rev().take_while(|x| **x == t1).count();
+        let n = points.len();
+        let surplus = run_at_end.saturating_sub(degree + 1).min(n.saturating_sub(degree + 1));
+        k.truncate(k.len() - surplus);
+        points.truncate(n - surplus);
+        Ok((k, points))
+    }
     Ok(match trim {
         b::Curve2::Spline { knots, points } => {
             let (k, points) = along(knots, points, same);
-            b::Curve2::Spline { knots: map(k, points.len())?, points }
+            let (knots, points) = map(k, points, [scale, offset], [t0, t1], on_edge)?;
+            b::Curve2::Spline { knots, points }
         }
         b::Curve2::RationalSpline { knots, homogeneous } => {
             let (k, homogeneous) = along(knots, homogeneous, same);
-            b::Curve2::RationalSpline { knots: map(k, homogeneous.len())?, homogeneous }
+            let (knots, homogeneous) = map(k, homogeneous, [scale, offset], [t0, t1], on_edge)?;
+            b::Curve2::RationalSpline { knots, homogeneous }
         }
     })
 }
@@ -814,7 +828,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         let r = range.get(4 * f..4 * f + 4).ok_or_else(|| invalid("face range"))?;
         // A face with a NURBS form is parameterised on it: its range and trims are that NURBS's.
         let params = nurbs.as_ref().unwrap_or(&surface);
-        let natural = params.natural();
+        let natural = solidcore_ops::label::surface_natural(params);
         let domain = [onto([r[0], r[2]], natural[0]), onto([r[1], r[3]], natural[1])];
         // SMLib's own trims are taken where the arrays carry them: B-spline faces, NURBS forms, and
         // planes (mapped onto the plane's own (u, v) by the export).
@@ -841,7 +855,16 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
                 l.push((index(e)?, same != edge.reversed));
                 let trim = trims.get(u).ok_or_else(|| invalid("edgeuse"))?.as_ref();
                 g.push(match (spline, edge.trim_map, trim) {
-                    (true, Some(map), Some(trim)) => Some(mapped(trim, same, map, edge.interval)?),
+                    (true, Some(map), Some(trim)) => {
+                        // The edge's points at two of its parameters lie within its tolerance.
+                        let curve = edge.nurbs.as_ref().unwrap_or(&edge.curve);
+                        let reach = tolerances.edges.as_ref().and_then(|t| t.get(e)).copied().unwrap_or(tolerance);
+                        let on_edge = |s: f64, t: f64| match (point3(curve, s), point3(curve, t)) {
+                            (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= reach,
+                            _ => false,
+                        };
+                        Some(mapped(trim, same, map, edge.interval, &on_edge)?)
+                    }
                     _ => None,
                 });
             }
@@ -1336,7 +1359,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
         })
         .collect::<Res<Vec<_>>>()?;
     let brep = b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices };
-    brep.validate_built().map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
+    solidcore_ops::record_check::validate_built(&brep).map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
     let placed = |new: &[Option<u32>]| {
         new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()
     };
@@ -1589,7 +1612,7 @@ fn pcurves<'a>(
         let mut loop_uses = Vec::with_capacity(l.len());
         for (&(e, forward), given) in l.iter().zip(g) {
             let geometry = edge(e).ok_or_else(|| invalid("edge"))?;
-            loop_uses.push(b::pcurve::EdgeUse {
+            loop_uses.push(solidcore_ops::pcurve::EdgeUse {
                 edge: e,
                 curve: geometry.curve,
                 interval: geometry.interval,
@@ -1600,7 +1623,7 @@ fn pcurves<'a>(
         }
         uses.push(loop_uses);
     }
-    let mut curves = b::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
+    let mut curves = solidcore_ops::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
     into_domain(surface, domain, &mut curves);
     Ok(curves)
 }
@@ -1627,6 +1650,38 @@ fn outer_area(face: &Face, edges: &[Edge], tolerance: f64) -> Res<f64> {
     }
     let n = pts.len();
     Ok(0.5 * (0..n).filter_map(|k| Some((pts.get(k)?, pts.get((k + 1) % n)?))).map(|(p, q)| p[0] * q[1] - q[0] * p[1]).sum::<f64>())
+}
+
+/// An edge curve's point at `t` within its domain: a line's, or a spline's (de Boor on the
+/// homogeneous coefficients); none for other kinds, or outside the domain.
+fn point3(c: &b::Curve, t: f64) -> Option<[f64; 3]> {
+    let (knots, pts): (&[f64], Vec<[f64; 4]>) = match c {
+        b::Curve::Line { start, end } => return Some([0, 1, 2].map(|k| start[k] + t * (end[k] - start[k]))),
+        b::Curve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
+        b::Curve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+        _ => return None,
+    };
+    let n = pts.len();
+    let p = knots.len().checked_sub(n + 1)?;
+    if !(*knots.get(p)? <= t && t <= *knots.get(n)?) {
+        return None;
+    }
+    let mut s = p;
+    while s + 1 < n && *knots.get(s + 1)? <= t {
+        s += 1;
+    }
+    let mut d: Vec<[f64; 4]> = (0..=p).map(|j| pts.get(s + j - p).copied()).collect::<Option<_>>()?;
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = s + j - p;
+            let den = knots.get(i + p + 1 - r)? - knots.get(i)?;
+            let a = if den == 0.0 { 0.0 } else { (t - knots.get(i)?) / den };
+            let (lo, hi) = (*d.get(j - 1)?, *d.get(j)?);
+            *d.get_mut(j)? = [0, 1, 2, 3].map(|c| (1.0 - a) * lo[c] + a * hi[c]);
+        }
+    }
+    let q = d.get(p)?;
+    (q[3] != 0.0).then(|| [q[0] / q[3], q[1] / q[3], q[2] / q[3]])
 }
 
 /// A pcurve's point at `t` (de Boor on the homogeneous coefficients).
@@ -1658,7 +1713,7 @@ fn point2(c: &b::Curve2, t: f64) -> Option<[f64; 2]> {
 
 /// Moves each loop's pcurves by whole periods so the loop's middle is nearest the domain's.
 fn into_domain(surface: &b::Surface, domain: [[f64; 2]; 2], curves: &mut [Vec<b::Curve2>]) {
-    for (d, natural) in surface.natural().into_iter().enumerate() {
+    for (d, natural) in solidcore_ops::label::surface_natural(surface).into_iter().enumerate() {
         if natural != b::Natural::Periodic {
             continue;
         }

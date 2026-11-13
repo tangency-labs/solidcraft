@@ -1,0 +1,100 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b18": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "stitch",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "tolerance": 0.00007380109889280518
+      }
+    }
+  ],
+  "case": "cov-fillet-g2-pocket-corner",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g2"
+    },
+    "method": "a 60 x 40 x 10 plate less a 30 x 20 pocket 5 deep from (15, 10); the floor edges and the upright edge at (15, 10); the fillet type curvature (G2 sections and G2 corner patches): every seam of a round and of the corner patch with its neighbours G2, one valid body",
+    "source": "invariants",
+    "what": "a pocket's corner (its two floor edges and the upright edge between them, all concave) filleted 2 as a curvature-continuous (G2) fillet"
+  },
+  "expressible": false,
+  "gallery_note": "the G2 corner patch meets the order-2 section's rounds only G1 at one face seam (its volume holds); the corner step rebuilds the patch",
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 42,
+      "faces": 15,
+      "vertices": 30
+    }
+  },
+  "records": "cov-fillet-g2-pocket-corner.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b20"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": "[fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0",
+    "measured": {
+      "area_mm2": 7251.1347600972895,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 15,
+      "vertices": 24,
+      "volume_mm3": 21046.314358255764
+    },
+    "refused_with": null,
+    "status": "fail"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_setback_open",
+    "tagged",
+    "stitch"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a pocket's corner (its two floor edges and the upright edge between them, all concave) filleted 2 as a curvature-continuous (G2) fillet",
+  "why_not": []
+}

@@ -1,0 +1,48 @@
+[package]
+name = "solidcraft-ui-kit"
+description = "The UI kit and its components: tokenised egui controls, panels, menus and the ribbon, app bar, history bar, navigation bar, view compass, window chrome and theme files, drawn from plain data"
+version.workspace = true
+edition.workspace = true
+license-file = "LICENSE"
+
+[lints]
+workspace = true
+
+[features]
+# The kit's test fixtures (its test context and catalog, headless frames, the CPU rasteriser, the
+# gallery and theme-file fixtures) for a host's own tests of the kit with its data.
+test-support = ["dep:image"]
+
+[dependencies]
+# The token contract every control draws with.
+solidcraft-theme = { workspace = true }
+# The widget registry (handles, rects, counts) every control publishes into.
+solidcraft-ui-registry = { workspace = true }
+solidcraft-ui-text = { workspace = true }
+solidcraft-color = { workspace = true }
+# The blurred backing behind translucent panels: drawn over the viewport's GPU picture.
+solidcraft-viewport-egui = { workspace = true }
+solidcraft-viewport-gpu = { workspace = true }
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+web-time = { workspace = true }
+# Rasterises the host's icon SVGs at the size they are drawn.
+tiny-skia = { workspace = true }
+image = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Text fields' context menu reads the system clipboard.
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The macOS menu bar (window_chrome::native_menu; MIT OR Apache-2.0, already in the tree through
+# the desktop app).
+muda = { version = "0.21.2", default-features = false }
+
+[dev-dependencies]
+image = { workspace = true }
+# The gallery's coverage test reads the kit's sources.
+syn = { workspace = true }

@@ -35,8 +35,8 @@ than adding broad ignores. The first scan prompted an update to quick-xml 0.41.0
 [RUSTSEC-2026-0194](https://rustsec.org/advisories/RUSTSEC-2026-0194) and
 [RUSTSEC-2026-0195](https://rustsec.org/advisories/RUSTSEC-2026-0195).
 
-Coverage excludes the version matching of local path patches: `truck-shapeops`,
-`truck-stepio`, `truck-meshalgo`, `matext4cgmath` and `egui-wgpu` in `vendor/`. Their checked-in
+Coverage excludes the version matching of local path patches: `egui-wgpu` and `winit` in
+`vendor/`, and the vendored kernel in `solidcore/`. Their checked-in
 code and patches still need comparison with their permissively licensed upstreams; a green
 scan does not establish their security or incorporate an upstream fix automatically.
 
@@ -62,9 +62,8 @@ the fix removes the step.
 ## CI profile
 
 CI runs the tests with `--profile ci`: light optimisation, line tables, no LTO and debug
-assertions off. Some truck debug assertions fail on valid geometry; the `ci` profile disables
-them while building faster than `--release`. If a test fails only in a plain debug build, say
-so in the PR.
+assertions off, which builds much faster than `--release`. If a test fails only in a plain
+debug build, say so in the PR.
 
 Run `cargo xtask test` to build with this profile and run the test binaries concurrently,
 with doc tests alongside. Arguments after `--` go to each test binary, for example

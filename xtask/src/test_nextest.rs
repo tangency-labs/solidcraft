@@ -59,6 +59,9 @@ impl Prepared {
         }
         .clamp(1, cpus.max(1));
         c.arg(threads).env("ACTION_MATRIX_JOBS", matrix_jobs.unwrap_or_else(|| slots.to_string().into()));
+        if let Some(stack) = crate::test::stack_env(std::env::var_os("RUST_MIN_STACK").as_deref()) {
+            c.env("RUST_MIN_STACK", stack);
+        }
         c
     }
 }

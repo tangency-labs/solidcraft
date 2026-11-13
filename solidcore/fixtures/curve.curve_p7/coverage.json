@@ -1,0 +1,152 @@
+{
+ "cases": [
+  {
+   "name": "cov_property_comb_zero_speed_start_p3",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:13084 (coverage: crates/solidcore/src/curve/curve/p7.rs:1224)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "prop": 3,
+    "val": 0.5,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "tol": 1e-06,
+    "comb": true
+   }
+  },
+  {
+   "name": "cov_property_comb_zero_speed_start_p11",
+   "upstream_ref": "source/SMLib/src/SmCurve.cpp:13084 (coverage: crates/solidcore/src/curve/curve/p7.rs:1224)",
+   "inputs": {
+    "op": "property",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "prop": 11,
+    "val": 0.0,
+    "vecs": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "tol": 1e-06,
+    "comb": true
+   }
+  }
+ ]
+}

@@ -1,0 +1,592 @@
+{
+ "cases": [
+  {
+   "name": "write_bytes_box_roundtrip_ascii",
+   "upstream_ref": "tests/SM_API_test/src/TestSmImportExport.cpp:21",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      20
+     ]
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_box_roundtrip_binary",
+   "upstream_ref": "tests/SM_API_test/src/TestSmImportExport.cpp:21",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      20
+     ]
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_sphere_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "sphere",
+     "center": [
+      1,
+      2,
+      3
+     ],
+     "radius": 4
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_sphere_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "sphere",
+     "center": [
+      1,
+      2,
+      3
+     ],
+     "radius": 4
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_cylinder_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 2,
+     "height": 5
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_cylinder_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 2,
+     "height": 5
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_cone_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "cone",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius_base": 3,
+     "radius_top": 1,
+     "height": 4
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_cone_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "cone",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius_base": 3,
+     "radius_top": 1,
+     "height": 4
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_cone_apex_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "cone",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius_base": 3,
+     "radius_top": 0,
+     "height": 4
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_cone_apex_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "cone",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius_base": 3,
+     "radius_top": 0,
+     "height": 4
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_torus_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "torus",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "major": 5,
+     "minor": 1
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_torus_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "torus",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "major": 5,
+     "minor": 1
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_plane_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "plane",
+     "origin": [
+      -1,
+      -1,
+      0
+     ],
+     "size": [
+      2,
+      3
+     ]
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_plane_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "plane",
+     "origin": [
+      -1,
+      -1,
+      0
+     ],
+     "size": [
+      2,
+      3
+     ]
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_box_far_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "box",
+     "origin": [
+      1000,
+      -2000,
+      3000
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_box_far_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "box",
+     "origin": [
+      1000,
+      -2000,
+      3000
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_box_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/box.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_box_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/box.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_cylinder_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_cylinder_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_sphere_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_sphere_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_pyramid_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/pyramid.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_pyramid_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/pyramid.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_revolution_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/revolution.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_revolution_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/revolution.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_extrusion_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/extrusion.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_extrusion_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/extrusion.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_l_shape_with_boss_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_l_shape_with_boss_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_nurb_fillet_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/nurb_fillet.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_nurb_fillet_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/nurb_fillet.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_cone_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "cone.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_cone_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "cone.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_disk_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "disk.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_disk_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "disk.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_box_with_large_fillet_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_box_with_large_fillet_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_plane_circ_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "plane_circ.smb"
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_file_plane_circ_binary",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "plane_circ.smb"
+    },
+    "ascii": false
+   }
+  },
+  {
+   "name": "write_bytes_file_box_rebuild_ascii",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "file",
+     "file": "Solids/box.smb",
+     "rebuild": true
+    },
+    "ascii": true
+   }
+  },
+  {
+   "name": "write_bytes_box_zero_length",
+   "inputs": {
+    "op": "write_bytes",
+    "brep": {
+     "source": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      0,
+      1,
+      1
+     ]
+    },
+    "ascii": true
+   }
+  }
+ ]
+}

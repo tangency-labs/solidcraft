@@ -1,6 +1,6 @@
 //! Reduced diagnostics must preserve placement, rollback, feasibility and exact freedom results.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_sketch::{Analysis, ConstraintKind, Hold, Sketch, solve_with};
 
 fn compare(sketch: &Sketch, hold: &Hold) {

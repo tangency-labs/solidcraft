@@ -106,8 +106,8 @@ fn a_drawing_container_refuses_what_it_cant_take() {
     let text = drawing().to_json().unwrap();
     let drawing_json = |content: &str| format!(r#"{{"content":{content},"format":"solidcraft-container/1"}}"#);
     let cases: [(Vec<u8>, &str); 6] = [
-        (container(&[("container.json", drawing_json("\"sketch\"").as_bytes()), ("drawing.json", text.as_bytes())]), "container content \"sketch\""),
-        (container(&[("container.json", drawing_json("7").as_bytes()), ("drawing.json", text.as_bytes())]), "container content 7"),
+        (container(&[("container.json", drawing_json("\"sketch\"").as_bytes()), ("drawing.json", text.as_bytes())]), "it holds \"sketch\""),
+        (container(&[("container.json", drawing_json("7").as_bytes()), ("drawing.json", text.as_bytes())]), "it holds 7"),
         (
             container(&[
                 ("container.json", drawing_json("\"drawing\"").as_bytes()),
@@ -117,10 +117,7 @@ fn a_drawing_container_refuses_what_it_cant_take() {
             "also holds a design's document.json",
         ),
         (container(&[("container.json", drawing_json("\"drawing\"").as_bytes())]), "required part `drawing.json`"),
-        (
-            container(&[("container.json", &br#"{"content":"drawing","format":"solidcraft-container/9"}"#[..]), ("drawing.json", text.as_bytes())]),
-            "version",
-        ),
+        (container(&[("container.json", &br#"{"content":"drawing","format":"another-tool/9"}"#[..]), ("drawing.json", text.as_bytes())]), "version"),
         (
             container(&[("container.json", drawing_json("\"drawing\"").as_bytes()), ("drawing.json", text.replace("en-GB", "e").as_bytes())]),
             "damaged drawing",
@@ -130,7 +127,11 @@ fn a_drawing_container_refuses_what_it_cant_take() {
         let e = error(read_drawing(&bytes));
         assert!(e.contains(says), "{says}: {e}");
     }
-    assert!(error(read_design(&container(&[("container.json", drawing_json("\"sketch\"").as_bytes())]))).contains("container content"));
+    assert!(error(read_design(&container(&[("container.json", drawing_json("\"sketch\"").as_bytes())]))).contains("this version doesn't know"));
+    // A later container of ours still holds a drawing: it opens.
+    let later =
+        container(&[("container.json", &br#"{"content":"drawing","format":"solidcraft-container/9"}"#[..]), ("drawing.json", text.as_bytes())]);
+    assert!(read_drawing(&later).is_ok());
 }
 
 /// Drawing files: the extension, and reading one from disk in either form.

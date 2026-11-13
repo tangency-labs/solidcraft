@@ -13,7 +13,11 @@ Every platform and package. The links point at the latest release.
   With Snap: `sudo snap install solidcraft` ([Snap Store][snap-store], or the [.snap file][linux-snap]).
   For ARM64: [AppImage][linux-arm64-appimage], [.deb][linux-arm64-deb], [.rpm][linux-arm64-rpm].
   On Arch Linux: `sudo pacman -U` the [package][linux-arch] (ARM64: [package][linux-arm64-arch]).
-- **Web:** [try it in your browser][web-app], no install.
+- **Web:** [try it in your browser][web-app], no install. This is the latest release. To try
+  what is coming, there are two more builds: the [release candidate][web-rc] (the newest
+  `-rc` pre-release) and the [edge build][web-edge] (the current `main`, rebuilt on every
+  change). Both can break, and a design saved in them may not open in the release, so keep a copy
+  of anything you care about. Each keeps its own designs and settings, apart from the release's.
 
 
 ## Code signing
@@ -51,3 +55,5 @@ Install details, upgrading from earlier builds and building from source are in
 [linux-arm64-arch]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-aarch64.pkg.tar.zst
 [snap-store]: https://snapcraft.io/solidcraft
 [web-app]: https://solidcraft.io/app
+[web-rc]: https://docs.solidcraft.io/app-rc/
+[web-edge]: https://docs.solidcraft.io/app-edge/

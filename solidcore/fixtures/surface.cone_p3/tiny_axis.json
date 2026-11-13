@@ -1,0 +1,244 @@
+{
+  "cases": [
+    {
+      "name": "rejected_tiny_axis_0_cone",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 0,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "rejected_tiny_axis_0_other",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion)",
+      "inputs": {
+        "cone": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "other": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 0,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "rejected_tiny_axis_3_cone",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 3,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "rejected_tiny_axis_3_other",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion)",
+      "inputs": {
+        "cone": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "other": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 3,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "rejected_tiny_axis_cylinders_cone",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 1],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 1],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 0,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "rejected_tiny_axis_cylinders_other",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion)",
+      "inputs": {
+        "cone": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 1],
+        "other": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 1],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 0,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "rejected_zero_axis",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 0.0, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 0,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "rejected_below_unitize_threshold_axis",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2966-2967; SmEllipse.cpp:491 (issue #207; missing polar curve at conversion)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -5e-13, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 0,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "tiny_axis_neighbor_0_self",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 0,
+        "tolerance": 1e-07,
+        "same": true
+      }
+    },
+    {
+      "name": "tiny_axis_neighbor_0_disjoint",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 10, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 0,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "tiny_axis_neighbor_0_unit_axis",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1.0, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 0,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "tiny_axis_neighbor_0_above_unitize_threshold",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -2e-12, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 0,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "tiny_axis_neighbor_3_self",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 3,
+        "tolerance": 1e-07,
+        "same": true
+      }
+    },
+    {
+      "name": "tiny_axis_neighbor_3_disjoint",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 10, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 3,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "tiny_axis_neighbor_3_unit_axis",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1.0, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 3,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "tiny_axis_neighbor_3_above_unitize_threshold",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2656-2683,2966-2967 (issue #207; defined neighboring input remains callable)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -2e-12, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0.5539, 0.5539, 1, 0, 0, 0, 0, 1, 1.5628, 1.5628, 1.1078, 0, 360, 0, 0, 0],
+        "domains": [0, 0, 1, 1, 0, 0.125, 1, 0.875],
+        "op": 3,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "missing_polar_height_plane_1_z",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268,3292 (issue #207; defined zero GetHeight after failed conversions; y-plane returns a circle)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0, 0.5539, 1, 0, 0, 0, 1, 0, -4, -4, 4, 4],
+        "domains": [0, 0, 1, 1, 0, 0, 1, 1],
+        "op": 1,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "missing_polar_height_plane_1_y",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268,3292 (issue #207; defined zero GetHeight after failed conversions; y-plane returns a circle)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0, 0, 1, 0, 0, 0, 0, 1, -4, -4, 4, 4],
+        "domains": [0, 0, 1, 1, 0, 0, 1, 1],
+        "op": 1,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "missing_polar_height_plane_2_z",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268,3292 (issue #207; defined zero GetHeight after failed conversions; y-plane returns a circle)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0, 0.5539, 1, 0, 0, 0, 1, 0, -4, -4, 4, 4],
+        "domains": [0, 0, 1, 1, 0, 0, 1, 1],
+        "op": 2,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    },
+    {
+      "name": "missing_polar_height_plane_2_y",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268,3292 (issue #207; defined zero GetHeight after failed conversions; y-plane returns a circle)",
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, -1e-300, 0, 1.5628, 1.5628, 1.1078, 0, 360, 0, 1, 0],
+        "other": [0, 0, 0, 1, 0, 0, 0, 0, 1, -4, -4, 4, 4],
+        "domains": [0, 0, 1, 1, 0, 0, 1, 1],
+        "op": 2,
+        "tolerance": 1e-07,
+        "same": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+#### UB-21. `SmMatrix::Compute3x3EigenVectors` returns uninitialised eigenvectors
+- **Severity:** Crash / undefined behaviour
+- **Area:** NLib: matrices and polynomials
+- **Location:** `SmMatrix.cpp:1482`, `SmMatrix::Compute3x3EigenVectors`.
+- **What happens:** It ignores the `EigenSystemJacobiSolver` status. For a non-symmetric matrix it returns `SM_SUCCESS` with eigenvectors read from an uninitialised `SmMatrix`. It is also `const` but mutates `this` through a cast.
+- **Trigger:** A non-symmetric 3x3 matrix.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** Reports `SM_ERR`.
+- **Fuzz sweep trigger (2026-10-20):** `smgu_BestFitPlaneToPoints` (`SmGeomUtility.cpp:4478`, call at `:4555`) on a point set with coordinates near `±1e300`. The scatter matrix overflows to `inf`, `inf - inf` is NaN, `IsSymmetric` (`SmMatrix.cpp:222`) fails, `EigenSystemJacobiSolver` returns `SM_ERR` before writing `sV`, and `Compute3x3EigenVectors` returns `SM_SUCCESS` with the uninitialised small-matrix storage as eigenvectors. Cases: `geom.point_set` `fuzz00533` (`/pts/9/2 = 1e+300`, `/pts/0/1 = 1e+300`) and `fuzz01968` (`fuzz-out/verify2000/geom.point_set/`), 12 more in `fuzz-out/geom/geom.point_set/`. The C++ reports success while Rust returns `SM_ERR` (1001), so the ignored status is confirmed in a C++ run. The uninitialised values were not observed directly.

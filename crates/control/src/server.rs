@@ -1,0 +1,1433 @@
+//! The loopback JSON-lines control server: one request per line, one reply per line, behind the
+//! launch's token (docs/control-protocol.md). Agents and tests drive an app through it (adapted
+//! from CADCraft, MIT OR Apache-2.0). What the app's requests mean is the app's [`Protocol`]; the
+//! window answers them from the [`ControlRequest`]s it is sent.
+
+use std::io::{BufRead, BufReader, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
+
+use serde_json::{Value, json};
+
+use crate::Effect;
+use crate::auth::tokens_match;
+use crate::cancel::{Cancel, Ticket};
+use crate::request::{ControlRequest, DOCUMENT_WATCH, DocumentWatch, Subscriber};
+
+/// What the server needs to know of a request before it sends it to the window: how to name it
+/// in messages, what it does if it outlasts its wait, and what `control.running` shows of it.
+#[derive(Clone, Debug)]
+pub struct Summary {
+    /// The request in messages ("`engine.execute` (solid.fillet)").
+    pub what: String,
+    /// What it still does when it finishes after its wait.
+    pub effect: Effect,
+    /// The command it runs, for `control.running` (never its parameters).
+    pub command: Option<&'static str>,
+    /// The number of steps it runs, for `control.running`.
+    pub steps: Option<usize>,
+    /// It may take as long as a batch.
+    pub long: bool,
+}
+
+/// What an app's requests mean to its control server.
+pub trait Protocol: Send + Sync {
+    fn summary(&self, method: &str, params: &Value) -> Summary;
+    /// What the app calls its document in messages ("design").
+    fn document(&self) -> &'static str;
+    /// The event a subscribed connection is sent when the document moves ("design.changed").
+    fn change_event(&self) -> &'static str;
+    /// The method that answers the document's id and revision now ("document.revision").
+    fn revision_method(&self) -> &'static str;
+    /// Where a client reads how to talk to the channel, named when its token is refused
+    /// ("docs/control-protocol.md").
+    fn docs(&self) -> &'static str;
+    /// The `control.capabilities` result: what this app's channel does beyond the methods every
+    /// version has, for a client to find out before it relies on it (an older app answers
+    /// `control.capabilities` with "unknown method").
+    fn capabilities(&self) -> Value;
+}
+
+/// An app's control server: its [`Protocol`], how it wakes the window for a request, and the
+/// requests every connection of its listeners has the window running (`control.running`).
+pub struct Hub {
+    protocol: Box<dyn Protocol>,
+    wake: Box<dyn Fn() + Send + Sync>,
+    /// Longest request line accepted.
+    max_line: usize,
+    waits: Waits,
+    watch: &'static DocumentWatch,
+    running: Arc<Running>,
+    open: AtomicUsize,
+}
+
+impl Hub {
+    /// A server for `protocol`'s requests; `wake` makes the window look at its requests now.
+    pub fn new(protocol: impl Protocol + 'static, wake: impl Fn() + Send + Sync + 'static, max_line: usize) -> Self {
+        Hub {
+            protocol: Box::new(protocol),
+            wake: Box::new(wake),
+            max_line,
+            waits: Waits::default(),
+            watch: &DOCUMENT_WATCH,
+            running: Arc::new(Running::new()),
+            open: AtomicUsize::new(0),
+        }
+    }
+
+    /// Other waits (tests).
+    pub fn with_waits(mut self, waits: Waits) -> Self {
+        self.waits = waits;
+        self
+    }
+
+    /// Another document watch than the app's [`DOCUMENT_WATCH`] (tests).
+    pub fn with_watch(mut self, watch: &'static DocumentWatch) -> Self {
+        self.watch = watch;
+        self
+    }
+
+    /// Serve `listener` with `token` on threads of their own, at most [`MAX_CONNECTIONS`]
+    /// connections at once. `patient`: every request may wait as long as a batch (a person decides
+    /// on it). A listener that is not on a loopback address is refused: the channel never goes on
+    /// the network.
+    pub fn listen(self: &Arc<Self>, listener: TcpListener, token: String, requests: Sender<ControlRequest>, patient: bool) -> std::io::Result<()> {
+        self.listen_stoppable(listener, token, requests, patient).map(drop)
+    }
+
+    /// [`Hub::listen`], and a [`Stop`] that closes the listener and the connections it accepted
+    /// (a channel turned off in the app's settings). Dropping the [`Stop`] leaves it serving.
+    pub fn listen_stoppable(
+        self: &Arc<Self>,
+        listener: TcpListener,
+        token: String,
+        requests: Sender<ControlRequest>,
+        patient: bool,
+    ) -> std::io::Result<Stop> {
+        let addr = listener.local_addr()?;
+        if !addr.ip().is_loopback() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("the control channel listens on loopback only, not {addr}")));
+        }
+        let hub = Arc::clone(self);
+        let token = Arc::new(token);
+        let shared = Arc::new(Accepted::default());
+        let (closed_tx, closed) = channel::<()>();
+        let stop = Stop { addr, shared: Arc::clone(&shared), closed };
+        std::thread::spawn(move || {
+            // Dropped when this thread ends, with the listener: `Stop::stop` waits for that.
+            let _closed = closed_tx;
+            for stream in listener.incoming().flatten() {
+                if shared.stopped.load(Ordering::SeqCst) {
+                    break;
+                }
+                if hub.open.fetch_add(1, Ordering::Relaxed) >= MAX_CONNECTIONS {
+                    hub.open.fetch_sub(1, Ordering::Relaxed);
+                    let mut refused = stream;
+                    let _ = send(&mut refused, &json!({"ok": false, "error": "too many connections"}));
+                    continue;
+                }
+                let id = shared.next.fetch_add(1, Ordering::Relaxed);
+                if let Ok(copy) = stream.try_clone() {
+                    shared.lock().push((id, copy));
+                }
+                // Stopped while this one was being accepted: it is closed with the rest.
+                if shared.stopped.load(Ordering::SeqCst) {
+                    shared.close_all();
+                }
+                let (hub, tx, token, shared) = (Arc::clone(&hub), requests.clone(), Arc::clone(&token), Arc::clone(&shared));
+                std::thread::spawn(move || {
+                    hub.serve(stream, &token, tx, patient);
+                    hub.open.fetch_sub(1, Ordering::Relaxed);
+                    shared.lock().retain(|(i, _)| *i != id);
+                });
+            }
+            // A captured value drops after the body's locals, so without this `_closed` would tell
+            // `Stop::stop` the port is free while the listener still holds it (#14752).
+            drop(listener);
+        });
+        Ok(stop)
+    }
+}
+
+/// The connections a stoppable listener accepted, so stopping it can close them too.
+#[derive(Default)]
+struct Accepted {
+    stopped: AtomicBool,
+    next: AtomicU64,
+    streams: Mutex<Vec<(u64, TcpStream)>>,
+}
+
+impl Accepted {
+    fn lock(&self) -> MutexGuard<'_, Vec<(u64, TcpStream)>> {
+        self.streams.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn close_all(&self) {
+        for (_, stream) in self.lock().drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
+/// Stops a listener started with [`Hub::listen_stoppable`].
+pub struct Stop {
+    addr: std::net::SocketAddr,
+    shared: Arc<Accepted>,
+    closed: Receiver<()>,
+}
+
+impl Stop {
+    /// The port the listener is on.
+    pub fn port(&self) -> u16 {
+        self.addr.port()
+    }
+
+    /// Stop accepting, close the port and end every connection it accepted. Returns once the
+    /// port is closed (at most a couple of seconds), so the same port can be bound again at once.
+    pub fn stop(self) {
+        self.shared.stopped.store(true, Ordering::SeqCst);
+        // The listener waits in `accept`: a connection of our own wakes it to see the flag.
+        let _ = TcpStream::connect_timeout(&self.addr, Duration::from_secs(1));
+        let _ = self.closed.recv_timeout(Duration::from_secs(2));
+        self.shared.close_all();
+    }
+}
+
+/// Connections served at once, so a flood must not be able to spawn threads without end.
+pub const MAX_CONNECTIONS: usize = 16;
+/// Lines that are not JSON before the connection is closed, so garbage cannot loop forever.
+const MAX_BAD_LINES: usize = 8;
+/// How long a subscribed connection waits after a `design.changed` line before the next: what
+/// changes meanwhile (a parameter dragged) goes out as one line, the latest (#6985).
+const EVENT_GAP: Duration = Duration::from_millis(100);
+/// How long a new connection has to show the token. A client connects when it has a request to
+/// send, so this is plenty; one that doesn't send it loses the connection, and its seat among
+/// [`MAX_CONNECTIONS`] goes to someone else.
+const TOKEN_WAIT: Duration = Duration::from_secs(5);
+
+/// A new random token: 32 bytes from the operating system, as hex.
+pub fn new_token() -> Option<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).ok()?;
+    Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// One line without its newline, or `None` at the end of the stream. A client that sends
+/// gigabytes with no newline would otherwise make this thread allocate until the process is
+/// killed, so the line is refused as soon as it passes `max`.
+fn read_line(r: &mut impl BufRead, max: usize) -> std::io::Result<Option<Vec<u8>>> {
+    let mut line = Vec::new();
+    loop {
+        let (done, used) = {
+            let available = r.fill_buf()?;
+            if available.is_empty() {
+                return Ok((!line.is_empty()).then_some(line));
+            }
+            match available.iter().position(|b| *b == b'\n') {
+                Some(i) => {
+                    line.extend_from_slice(available.get(..i).unwrap_or(&[]));
+                    (true, i + 1)
+                }
+                None => {
+                    line.extend_from_slice(available);
+                    (false, available.len())
+                }
+            }
+        };
+        r.consume(used);
+        if done {
+            return Ok(Some(line));
+        }
+        if line.len() > max {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "request too large"));
+        }
+    }
+}
+
+/// A reply line, written to the socket at once. `writeln!` with a JSON value hands the socket each
+/// of its pieces apart, a system call for every string, number and comma: half a second for a
+/// design's component tree when it has thousands of components.
+fn send(out: &mut impl Write, reply: &Value) -> std::io::Result<()> {
+    let mut line = serde_json::to_vec(reply).map_err(std::io::Error::other)?;
+    line.push(b'\n');
+    out.write_all(&line)
+}
+
+/// The `"token"` of a request line that is a JSON object, read without building the rest of it.
+/// Until a connection shows the token, a line costs only its own bytes: parsed whole, a 16 MiB
+/// line of `[0,0,…]` is hundreds of MB, and 16 such connections could exhaust memory before any
+/// token was checked.
+fn token_of(line: &str) -> Option<String> {
+    struct Token;
+    impl<'de> serde::de::Visitor<'de> for Token {
+        type Value = Option<String>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a request object")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut token = None;
+            while let Some(key) = map.next_key::<String>()? {
+                if key == "token" {
+                    token = Some(map.next_value::<String>()?);
+                } else {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+            Ok(token)
+        }
+    }
+    let mut de = serde_json::Deserializer::from_str(line);
+    let token = serde::Deserializer::deserialize_map(&mut de, Token).ok()?;
+    de.end().ok()?;
+    token
+}
+
+/// The reply to a connection that didn't show the token, naming the app's `docs`; the
+/// connection is then closed.
+fn unauthorized(docs: &str) -> Value {
+    json!({"ok": false, "error": format!("unauthorized: send the control token as \"token\" (see {docs})")})
+}
+
+/// Refuse the connection: the reply, then the end of what we send, then what the client had
+/// already sent read and dropped (a little, briefly). Closing a socket with unread input resets
+/// the connection, and a reset can reach the client before it has read the refusal.
+fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>, docs: &str) {
+    use std::io::Read;
+    let _ = send(out, &unauthorized(docs));
+    let _ = out.shutdown(std::net::Shutdown::Write);
+    reader.get_mut().deadline = Some(Instant::now() + Duration::from_millis(500));
+    let _ = std::io::copy(&mut reader.by_ref().take(64 * 1024), &mut std::io::sink());
+}
+
+/// What a client sends. Until it shows the token, all of its reads share one deadline, so neither
+/// blank lines nor a line sent a byte at a time buy it more time. After that it may stay idle as
+/// long as it likes.
+struct ClientInput {
+    socket: TcpStream,
+    deadline: Option<Instant>,
+}
+
+impl ClientInput {
+    /// No deadline any more: the client showed the token.
+    fn admit(&mut self) -> std::io::Result<()> {
+        self.deadline = None;
+        self.socket.set_read_timeout(None)
+    }
+}
+
+impl std::io::Read for ClientInput {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if let Some(deadline) = self.deadline {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
+            self.socket.set_read_timeout(Some(left))?;
+        }
+        self.socket.read(buf)
+    }
+}
+
+/// How long a request waits for the app's reply: most requests, and a batch (or every request,
+/// on a patient connection); and how long a new connection has to show the token.
+#[derive(Clone, Copy, Debug)]
+pub struct Waits {
+    pub short: Duration,
+    pub long: Duration,
+    pub token: Duration,
+}
+
+impl Default for Waits {
+    fn default() -> Self {
+        Waits { short: Duration::from_secs(60), long: Duration::from_secs(3600), token: TOKEN_WAIT }
+    }
+}
+
+/// A request that timed out but is still running in the app (#1618): its id and method, and where
+/// its reply will land.
+struct Pending {
+    id: Value,
+    method: String,
+    /// The request in messages ("`engine.execute` (solid.fillet)").
+    what: String,
+    reply: Receiver<Value>,
+    /// Where it is in the app, to cancel it (`control.cancel`).
+    job: Arc<Ticket>,
+}
+
+/// `control.cancel {id?}`: cancel the request this connection still waits for (the one
+/// `control.pending` reports; `id`, when given, must name it). A connection can only cancel its
+/// own requests. Waiting its turn, it is removed; computing off the window thread, it is stopped
+/// as the app's Stop stops it. Either way nothing of it is applied and the connection is free.
+/// One that runs on the window thread can't be cancelled; one that finished is answered.
+fn cancel(pending: &mut Option<Pending>, late: Option<Value>, id: Option<&Value>, document: &str) -> Value {
+    let id = id.filter(|v| !v.is_null());
+    let mine = pending.as_ref().filter(|p| id.is_none_or(|id| *id == p.id));
+    let Some(p) = mine else {
+        return match id {
+            None => json!({"ok": true, "result": {"cancelled": null, "note": "nothing to cancel: no request of this connection is running"}}),
+            Some(id) => json!({"ok": false, "error": format!(
+                "nothing to cancel: request {} is not running on this connection (a connection can only cancel its own requests)",
+                id.to_string().chars().take(64).collect::<String>()
+            )}),
+        };
+    };
+    let (what, id) = (format!("request {} ({})", p.id, p.what), p.id.clone());
+    let finished = |p: Pending, reply: Value| {
+        json!({"ok": true, "result": {"cancelled": null, "pending": p.id, "method": p.method, "done": true, "reply": reply,
+            "note": format!("nothing to cancel: {what} had already finished; its reply is here")}})
+    };
+    if let Some(reply) = late {
+        return pending.take().map_or(Value::Null, |p| finished(p, reply));
+    }
+    let outcome = p.job.cancel();
+    let note = match outcome {
+        Cancel::Removed => format!("cancelled: {what} was still waiting its turn and will not run; nothing was applied"),
+        Cancel::Stopped { writes_file: false } => format!("stopped: {what} was computing off the window thread; nothing was applied"),
+        Cancel::Stopped { writes_file: true } => {
+            format!("stopped: {what} was computing on a copy of the {document}, which is unchanged; its worker may still write the file")
+        }
+        Cancel::Already => format!("{what} was already cancelled or stopped; nothing of it was applied"),
+        Cancel::Running => {
+            // It may have just finished.
+            if let Some(reply) = pending.as_ref().and_then(|p| p.reply.try_recv().ok()) {
+                return pending.take().map_or(Value::Null, |p| finished(p, reply));
+            }
+            return json!({"ok": false, "cancellable": false, "error": format!(
+                "cannot be cancelled: {what} already runs in the app (on its window thread, or as a file it opens) and will \
+                 still finish; ask `control.pending` for its result. Only a request still waiting its turn, or a change or \
+                 export computing off the window thread, can be cancelled"
+            )});
+        }
+    };
+    let method = pending.take().map(|p| p.method);
+    let how = match outcome {
+        Cancel::Removed => "removed",
+        Cancel::Stopped { .. } => "stopped",
+        _ => "already",
+    };
+    json!({"ok": true, "result": {"cancelled": id, "method": method, "outcome": how, "note": note}})
+}
+
+/// Every request the app has been sent and not answered yet, from every connection, for
+/// `control.running` (#3654). Each connection's own thread answers that, so it never waits behind
+/// a running request.
+struct Running {
+    list: Mutex<Vec<InFlight>>,
+    connections: AtomicU64,
+    keys: AtomicU64,
+}
+
+/// What `control.running` says about a request: never its parameters beyond the command id.
+struct InFlight {
+    key: u64,
+    connection: u64,
+    id: Value,
+    method: String,
+    command: Option<&'static str>,
+    steps: Option<usize>,
+    since: Instant,
+    started: Arc<AtomicBool>,
+}
+
+impl Running {
+    fn new() -> Self {
+        Running { list: Mutex::new(Vec::new()), connections: AtomicU64::new(0), keys: AtomicU64::new(0) }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Vec<InFlight>> {
+        self.list.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// List `req`, sent on `connection`, until the returned ticket is dropped; `command` and
+    /// `steps` as the app's [`Protocol`] summarised it.
+    fn add(self: &Arc<Self>, connection: u64, id: &Value, req: &ControlRequest, command: Option<&'static str>, steps: Option<usize>) -> Listing {
+        let key = self.keys.fetch_add(1, Ordering::Relaxed);
+        // Ids and methods come from the client: only short ones are repeated to the others.
+        let id = match id {
+            Value::Number(_) => id.clone(),
+            Value::String(s) if s.len() <= 64 => id.clone(),
+            _ => Value::Null,
+        };
+        let method = req.method.chars().take(64).collect();
+        let started = req.started.clone();
+        self.lock().push(InFlight { key, connection, id, method, command, steps, since: Instant::now(), started });
+        Listing { running: Arc::clone(self), key }
+    }
+
+    /// The `control.running` result, as `asker`'s connection sees it.
+    fn result(&self, asker: u64) -> Value {
+        let rows: Vec<Value> = self
+            .lock()
+            .iter()
+            .map(|e| {
+                let mut r = json!({
+                    "connection": e.connection,
+                    "id": e.id,
+                    "method": e.method,
+                    "running_s": (e.since.elapsed().as_secs_f64() * 10.0).round() / 10.0,
+                    "queued": !e.started.load(Ordering::Relaxed),
+                });
+                if let Some(c) = e.command {
+                    r["command"] = json!(c);
+                }
+                if let Some(n) = e.steps {
+                    r["steps"] = json!(n);
+                }
+                if e.connection == asker {
+                    r["self"] = json!(true);
+                }
+                r
+            })
+            .collect();
+        json!({"running": rows})
+    }
+}
+
+/// A listed request; dropped when its reply arrives.
+struct Listing {
+    running: Arc<Running>,
+    key: u64,
+}
+
+impl Drop for Listing {
+    fn drop(&mut self) {
+        let key = self.key;
+        self.running.lock().retain(|e| e.key != key);
+    }
+}
+
+/// The reply to a timed-out request, received on a thread of its own so the request stays listed
+/// until the app answers, also once its connection has closed (#3654).
+fn watch(reply: Receiver<Value>, ticket: Listing) -> Receiver<Value> {
+    let (late_tx, late_rx) = channel();
+    // A small thread per timed-out request (each connection has at most one). If none can be
+    // made, the reply is lost and `control.pending` says the app ended the request without one.
+    // The reply is passed on before the request leaves the list: once `control.running` no longer
+    // shows it, its connection's `control.pending` has it.
+    let _ = std::thread::Builder::new().stack_size(64 * 1024).spawn(move || {
+        if let Ok(v) = reply.recv() {
+            let _ = late_tx.send(v);
+        }
+        drop(late_tx);
+        drop(ticket);
+    });
+    late_rx
+}
+
+/// The reply text for a request that outlasts its wait. A request that only reads changes
+/// nothing when it finishes; an export or a save still writes its file, and any other request
+/// still applies, as it was not cancelled.
+pub fn timeout_message(what: &str, effect: Effect, document: &str) -> String {
+    match effect {
+        Effect::ReadsOnly => {
+            format!("timeout: {what} is still running in the app ({}); ask `control.pending` for its answer", effect.when_done(document))
+        }
+        Effect::WritesFile => format!(
+            "timeout: {what} is still running in the app and will still write the file when it finishes (it was not cancelled: \
+             don't send it again; the {document} does not change); ask `control.pending` for its result, or `control.cancel` to \
+             cancel it"
+        ),
+        Effect::Changes => format!(
+            "timeout: {what} is still running in the app and will still apply when it finishes (it was not cancelled: don't send it \
+             again); ask `control.pending` for its result, or `control.cancel` to cancel it"
+        ),
+    }
+}
+
+/// The reply text for a request refused because an earlier one on the connection still runs.
+fn busy_message(p: &Pending, method: &str) -> String {
+    let method: String = method.chars().take(128).collect();
+    format!(
+        "busy: request {} ({}) is still running, so `{method}` was not run; ask `control.pending` for that request's result, then \
+         send this one again",
+        p.id, p.what
+    )
+}
+
+/// A subscribed connection's socket, for its replies and its events: each line is written whole
+/// and alone, so an event never lands inside a reply (#6985).
+struct Lines {
+    socket: TcpStream,
+    turn: Mutex<()>,
+}
+
+impl Lines {
+    fn send(&self, line: &Value) -> std::io::Result<()> {
+        let _turn = self.turn.lock().unwrap_or_else(PoisonError::into_inner);
+        send(&mut &self.socket, line)
+    }
+}
+
+/// A subscribed connection's seat on the watch: it leaves exactly once, whichever thread sees
+/// the connection's end first — the connection's own thread at the end of the stream, or the
+/// events thread at the first write a closed client refuses. The seat used to wait for the
+/// events thread alone, and that thread only leaves its wait when the design moves, so the
+/// count could outlive the connection by a second or more (#8315).
+struct Seat(Mutex<Option<Subscriber>>);
+
+impl Seat {
+    fn new(counted: Subscriber) -> Self {
+        Seat(Mutex::new(Some(counted)))
+    }
+
+    /// Leave the watch now: the seat goes once, whoever gets here first.
+    fn release(&self) {
+        let counted = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+        drop(counted);
+    }
+}
+
+impl Drop for Seat {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// A connection's `control.subscribe` (#6985): its `design.changed` lines, sent from a thread of
+/// their own until the connection ends.
+struct Subscription {
+    lines: Arc<Lines>,
+    stop: Arc<AtomicBool>,
+    seat: Arc<Seat>,
+}
+
+impl Subscription {
+    /// Write `reply`, the window's answer to `control.subscribe` naming the design `seen`, on
+    /// `out`, then send `design`'s changes after it: the reply goes out before any event. `None`,
+    /// with nothing written, when no thread or socket was left for the events.
+    fn start(
+        watch: &'static DocumentWatch,
+        event: &'static str,
+        counted: Subscriber,
+        out: &TcpStream,
+        seen: (String, u64),
+        reply: &Value,
+    ) -> Option<(Self, std::io::Result<()>)> {
+        let lines = Arc::new(Lines { socket: out.try_clone().ok()?, turn: Mutex::new(()) });
+        let stop = Arc::new(AtomicBool::new(false));
+        let seat = Arc::new(Seat::new(counted));
+        let first = lines.turn.lock().unwrap_or_else(PoisonError::into_inner);
+        let (l, s, watch_seat) = (lines.clone(), stop.clone(), Arc::clone(&seat));
+        // The connection's seat on the watch rides the events thread: it leaves when the thread
+        // does, so the next failed write to a closed client retires it even while the connection's
+        // own thread is slow to see the end of the stream (#7226). The connection's own thread
+        // leaves it too, so a closed connection stops counting at once (#8315).
+        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(watch, event, &l, &s, seen, watch_seat)).ok()?;
+        let sent = send(&mut &lines.socket, reply);
+        drop(first);
+        Some((Subscription { lines, stop, seat }, sent))
+    }
+}
+
+/// The design a `control.subscribe` reply names.
+fn document_of(reply: &Value) -> Option<(String, u64)> {
+    let result = reply.get("result")?;
+    Some((result.get("document_id")?.as_str()?.to_string(), result.get("revision")?.as_u64()?))
+}
+
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        // The seat on the watch goes now: the connection is over, and nothing counts it any more
+        // (#8315).
+        self.seat.release();
+        // The socket closes now, not when the thread next looks; a line blocked on a client that
+        // stopped reading ends too.
+        let _ = self.lines.socket.shutdown(std::net::Shutdown::Both);
+    }
+}
+
+/// The `design.changed` lines of a subscribed connection, each time the design differs from the
+/// last one it was told of (`seen`), until `stop`. Holds the connection's seat on the watch
+/// (`seat`), which it leaves when the thread ends: on `stop`, or on the first write a closed
+/// client refuses (#7226).
+fn send_events(watch: &DocumentWatch, event: &str, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), seat: Arc<Seat>) {
+    while !stop.load(Ordering::Relaxed) {
+        let Some(now) = watch.wait(&seen, stop, Duration::from_secs(1)).filter(|now| *now != seen) else { continue };
+        if lines.send(&json!({"event": event, "params": {"document_id": now.0, "revision": now.1}})).is_err() {
+            break;
+        }
+        seen = now;
+        std::thread::sleep(EVENT_GAP);
+    }
+    // The client is gone: it is not counted on the watch any more, whatever the connection's own
+    // thread still has to notice (#8315).
+    seat.release();
+}
+
+/// Write `reply` on the connection: through its subscription once it has one.
+fn answer(out: &mut TcpStream, events: Option<&Subscription>, reply: &Value) -> std::io::Result<()> {
+    match events {
+        Some(e) => e.lines.send(reply),
+        None => send(out, reply),
+    }
+}
+
+impl Hub {
+    /// Serve one connection until it closes: the token first, then one request per line, each
+    /// sent to the window on `requests` and its reply written back.
+    pub fn serve(&self, stream: TcpStream, token: &str, requests: Sender<ControlRequest>, patient: bool) {
+        let (waits, running, documents, tx) = (self.waits, &self.running, self.watch, requests);
+        let connection = running.connections.fetch_add(1, Ordering::Relaxed) + 1;
+        let Ok(read) = stream.try_clone() else { return };
+        let mut out = stream;
+        let mut reader = BufReader::new(ClientInput { socket: read, deadline: Some(Instant::now() + waits.token) });
+        let mut bad = 0usize;
+        let mut authenticated = false;
+        let mut pending: Option<Pending> = None;
+        let mut events: Option<Subscription> = None;
+        loop {
+            // A first `control.subscribe` on its way to the window (#6985).
+            let mut joining = None;
+            let line = match read_line(&mut reader, self.max_line) {
+                Ok(Some(l)) => String::from_utf8_lossy(&l).into_owned(),
+                Ok(None) => break,
+                // Closed without a word: a client that connected early and only now sends its first
+                // request would read a line here as the reply to it. It finds the connection closed
+                // and opens another.
+                Err(e) if !authenticated && matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => break,
+                Err(e) => {
+                    let _ = answer(&mut out, events.as_ref(), &json!({"ok": false, "error": e.to_string()}));
+                    break;
+                }
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+            // The first request must carry the token; later ones on the same connection may.
+            if !authenticated {
+                match token_of(&line) {
+                    Some(t) if tokens_match(&t, token) => {
+                        if reader.get_mut().admit().is_err() {
+                            break;
+                        }
+                        authenticated = true;
+                    }
+                    _ => {
+                        refuse(&mut out, &mut reader, self.protocol.docs());
+                        break;
+                    }
+                }
+            }
+            let reply = match serde_json::from_str::<Value>(&line) {
+                Ok(msg) => {
+                    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+                    let method = msg.get("method").and_then(Value::as_str).unwrap_or("").to_string();
+                    let params = msg.get("params").cloned().unwrap_or(json!({}));
+                    // A request that timed out may have finished since (#1618). `control.running` and
+                    // `control.capabilities` only look, so they leave that reply where it is.
+                    let late = pending.as_ref().filter(|_| !matches!(method.as_str(), "control.running" | "control.capabilities")).and_then(|p| {
+                        match p.reply.try_recv() {
+                            Ok(reply) => Some(reply),
+                            Err(TryRecvError::Disconnected) => Some(json!({"ok": false, "error": "the app ended the request without a reply"})),
+                            Err(TryRecvError::Empty) => None,
+                        }
+                    });
+                    let mut r = if method == "control.running" {
+                        json!({"ok": true, "result": running.result(connection)})
+                    } else if method == "control.capabilities" {
+                        json!({"ok": true, "result": self.protocol.capabilities()})
+                    } else if method == "control.cancel" {
+                        let r = cancel(&mut pending, late, params.get("id"), self.protocol.document());
+                        (self.wake)();
+                        r
+                    } else if method == "control.pending" {
+                        match (pending.take(), late) {
+                            (None, _) => json!({"ok": true, "result": {"pending": null}}),
+                            (Some(p), Some(reply)) => {
+                                json!({"ok": true, "result": {"pending": p.id, "method": p.method, "done": true, "reply": reply}})
+                            }
+                            (Some(p), None) => {
+                                let r = json!({"ok": true, "result": {"pending": p.id, "method": p.method, "done": false}});
+                                pending = Some(p);
+                                r
+                            }
+                        }
+                    } else if let Some(p) = pending.as_ref().filter(|_| late.is_none()) {
+                        // Nothing more is queued behind it, to run unseen when it ends.
+                        json!({"ok": false, "busy": true, "error": busy_message(p, &method)})
+                    } else if method == "control.subscribe" && events.is_some() {
+                        if late.is_some() {
+                            // As below: finished, and the client moved on without asking.
+                            pending = None;
+                        }
+                        // Its events already say how the design moves; a second answer could only
+                        // arrive behind a newer one.
+                        {
+                            let (event, revision, document) =
+                                (self.protocol.change_event(), self.protocol.revision_method(), self.protocol.document());
+                            json!({"ok": false, "error": format!("already subscribed: this connection is sent {event} lines; ask {revision} for the {document} now")})
+                        }
+                    } else {
+                        if late.is_some() {
+                            // Finished, and the client moved on without asking: it is dropped.
+                            pending = None;
+                        }
+                        // A batch replaces many short requests: the whole of it may take long (#743).
+                        let Summary { what, effect, command, steps, long } = self.protocol.summary(&method, &params);
+                        let wait = if patient || long { waits.long } else { waits.short };
+                        // Counted before the window answers, so it publishes every change from its
+                        // answer on.
+                        joining = (method == "control.subscribe").then(|| documents.join());
+                        let (req, rrx) = ControlRequest::new(method.clone(), params);
+                        let job = Arc::clone(&req.ticket);
+                        let ticket = running.add(connection, &id, &req, command, steps);
+                        if tx.send(req).is_err() {
+                            break;
+                        }
+                        (self.wake)();
+                        match rrx.recv_timeout(wait) {
+                            Ok(r) => r,
+                            Err(_) => {
+                                let r = json!({"ok": false, "running": true, "error": timeout_message(&what, effect, self.protocol.document())});
+                                pending = Some(Pending { id: id.clone(), method, what, reply: watch(rrx, ticket), job });
+                                r
+                            }
+                        }
+                    };
+                    if let Some(o) = r.as_object_mut() {
+                        o.insert("id".into(), id);
+                    }
+                    r
+                }
+                Err(e) => {
+                    bad += 1;
+                    json!({"ok": false, "error": format!("bad JSON: {e}")})
+                }
+            };
+            // Subscribed once the window named the design (not when it refused or timed out).
+            let sent = match joining.zip(document_of(&reply)) {
+                Some((counted, seen)) => match Subscription::start(documents, self.protocol.change_event(), counted, &out, seen, &reply) {
+                    Some((subscription, sent)) => {
+                        events = Some(subscription);
+                        sent
+                    }
+                    None => send(
+                        &mut out,
+                        &json!({"id": reply.get("id"), "ok": false, "error": "not subscribed: no thread or socket left for the events"}),
+                    ),
+                },
+                None => answer(&mut out, events.as_ref(), &reply),
+            };
+            if sent.is_err() {
+                break;
+            }
+            if bad >= MAX_BAD_LINES {
+                break;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The longest request line, as an app might accept.
+    const MAX_LINE: usize = 16 << 20;
+
+    /// An app whose requests all may change its document and take the short wait.
+    struct Plain;
+
+    impl Protocol for Plain {
+        fn summary(&self, method: &str, _: &Value) -> Summary {
+            Summary { what: format!("`{method}`"), effect: Effect::Changes, command: None, steps: None, long: false }
+        }
+        fn document(&self) -> &'static str {
+            "design"
+        }
+        fn change_event(&self) -> &'static str {
+            "design.changed"
+        }
+        fn revision_method(&self) -> &'static str {
+            "document.revision"
+        }
+        fn docs(&self) -> &'static str {
+            "docs/control-protocol.md"
+        }
+        fn capabilities(&self) -> Value {
+            json!({})
+        }
+    }
+
+    /// A server for [`Plain`] with these waits and this document watch.
+    fn hub(waits: Waits, watch: &'static DocumentWatch) -> Arc<Hub> {
+        Arc::new(Hub::new(Plain, || {}, MAX_LINE).with_waits(waits).with_watch(watch))
+    }
+
+    /// The channel never goes on the network: a listener on any address but loopback is refused,
+    /// and nothing is served on it.
+    #[test]
+    fn a_listener_off_loopback_is_refused() {
+        let (tx, _rx) = channel::<ControlRequest>();
+        let open = TcpListener::bind("0.0.0.0:0").unwrap();
+        let e = hub(Waits::default(), &DOCUMENT_WATCH).listen(open, "0123456789abcdef0123456789abcdef".into(), tx.clone(), false).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput, "{e}");
+        assert!(e.to_string().contains("loopback only"), "{e}");
+        let local = TcpListener::bind("127.0.0.1:0").unwrap();
+        assert!(hub(Waits::default(), &DOCUMENT_WATCH).listen(local, "0123456789abcdef0123456789abcdef".into(), tx, false).is_ok());
+    }
+
+    /// A connection that doesn't show the token in time is closed without a word, however it fills
+    /// the time. One that does keeps working when it idles for longer than that.
+    #[test]
+    fn the_token_has_a_time_limit_and_an_authenticated_client_may_idle() {
+        use std::io::Read;
+        let token = "0123456789abcdef0123456789abcdef";
+        let limit = Duration::from_millis(500);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        std::thread::spawn(move || {
+            for req in rx {
+                let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+            }
+        });
+        let waits = Waits { short: Duration::from_secs(10), long: Duration::from_secs(10), token: limit };
+        let hub = hub(waits, &DOCUMENT_WATCH);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (tx, hub) = (tx.clone(), Arc::clone(&hub));
+                std::thread::spawn(move || hub.serve(stream, token, tx, false));
+            }
+        });
+        let open = || {
+            let s = TcpStream::connect(addr).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+            s
+        };
+        // Sends `drip` every 50 ms until the server closes; what it read, and when it closed.
+        let closed_after = |drip: &[u8]| {
+            let mut s = open();
+            let start = Instant::now();
+            s.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+            let mut got = Vec::new();
+            loop {
+                let mut buf = [0u8; 256];
+                match s.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => got.extend_from_slice(buf.get(..n).unwrap()),
+                    Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                        assert!(start.elapsed() < Duration::from_secs(20), "still open");
+                        let _ = s.write_all(drip);
+                    }
+                    Err(_) => break,
+                }
+            }
+            (got, start.elapsed())
+        };
+        for drip in [&b""[..], b"\n", b"\r\n \n", b" ", b"{"] {
+            let (got, took) = closed_after(drip);
+            assert!(got.is_empty(), "{drip:?} was answered: {}", String::from_utf8_lossy(&got));
+            assert!(took >= limit.saturating_sub(Duration::from_millis(50)), "{drip:?} closed after {took:?}");
+        }
+
+        let mut s = open();
+        let mut lines = BufReader::new(s.try_clone().unwrap());
+        let mut ask = |line: Value| -> Value {
+            writeln!(s, "{line}").unwrap();
+            let mut l = String::new();
+            lines.read_line(&mut l).unwrap();
+            serde_json::from_str(&l).unwrap()
+        };
+        assert_eq!(ask(json!({"id": 1, "method": "ui.view", "token": token}))["ok"], true);
+        std::thread::sleep(limit * 3);
+        assert_eq!(ask(json!({"id": 2, "method": "ui.view"}))["ok"], true, "idle for longer than the limit");
+
+        // A wrong token is still answered, at once.
+        let mut wrong = open();
+        writeln!(wrong, "{}", json!({"id": 1, "method": "ui.view", "token": "nope"})).unwrap();
+        let mut l = String::new();
+        BufReader::new(wrong).read_line(&mut l).unwrap();
+        assert!(l.contains("unauthorized"), "{l}");
+    }
+
+    /// #1989: `control.cancel` cancels the connection's own outstanding request. One still
+    /// waiting its turn is removed and never runs, and the connection is free at once; one that
+    /// already runs in the app can't be, and says so; another connection's request is refused;
+    /// with nothing outstanding there is nothing to cancel.
+    #[test]
+    fn control_cancel_cancels_only_this_connections_request() {
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let (gate_tx, gate_rx) = channel::<()>();
+        let ran = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = ran.clone();
+        // A stand-in for the window thread: `queued` waits behind the others (never taken until
+        // `slow` is done), `slow` runs until the gate opens.
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for req in rx {
+                if req.method == "queued" {
+                    held.push(req);
+                    continue;
+                }
+                if !req.ticket.take() {
+                    continue;
+                }
+                seen.lock().unwrap().push(req.method.clone());
+                if req.method == "slow" {
+                    let _ = gate_rx.recv();
+                }
+                let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+                if req.method == "slow" {
+                    for req in held.drain(..) {
+                        if req.ticket.take() {
+                            seen.lock().unwrap().push(req.method.clone());
+                        }
+                    }
+                }
+            }
+        });
+        let waits = Waits { short: Duration::from_millis(100), long: Duration::from_millis(100), token: TOKEN_WAIT };
+        let hub = hub(waits, &DOCUMENT_WATCH);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (tx, hub) = (tx.clone(), Arc::clone(&hub));
+                std::thread::spawn(move || hub.serve(stream, token, tx, false));
+            }
+        });
+        let connect = || {
+            let s = TcpStream::connect(addr).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            let out = s.try_clone().unwrap();
+            (out, BufReader::new(s))
+        };
+        let ask = |(out, lines): &mut (TcpStream, BufReader<TcpStream>), v: Value| -> Value {
+            writeln!(out, "{v}").unwrap();
+            let mut l = String::new();
+            lines.read_line(&mut l).unwrap();
+            serde_json::from_str(&l).unwrap()
+        };
+        let mut a = connect();
+        let mut b = connect();
+        let r = ask(&mut b, json!({"id": 1, "method": "control.cancel", "token": token}));
+        assert!(r["ok"] == true && r["result"]["cancelled"].is_null(), "nothing to cancel: {r}");
+
+        // Waiting its turn: removed, never run, and the connection is free.
+        let r = ask(&mut a, json!({"id": 1, "method": "queued", "token": token}));
+        assert_eq!(r["running"], true, "{r}");
+        let r = ask(&mut a, json!({"id": 2, "method": "control.cancel", "params": {"id": 1}}));
+        assert_eq!((&r["ok"], &r["result"]["cancelled"], &r["result"]["outcome"]), (&json!(true), &json!(1), &json!("removed")), "{r}");
+        assert!(r["result"]["note"].as_str().is_some_and(|n| n.contains("will not run")), "{r}");
+        let r = ask(&mut a, json!({"id": 3, "method": "control.pending"}));
+        assert_eq!(r["result"]["pending"], Value::Null, "{r}");
+
+        // Already running in the app: it can't be, and it still answers.
+        let r = ask(&mut a, json!({"id": 4, "method": "slow"}));
+        assert_eq!(r["running"], true, "{r}");
+        let r = ask(&mut b, json!({"id": 2, "method": "control.cancel", "params": {"id": 4}}));
+        assert!(r["ok"] == false && r["error"].as_str().is_some_and(|e| e.contains("its own requests")), "another connection's: {r}");
+        let r = ask(&mut a, json!({"id": 5, "method": "control.cancel", "params": {"id": 99}}));
+        assert!(r["ok"] == false && r["error"].as_str().is_some_and(|e| e.starts_with("nothing to cancel")), "{r}");
+        let r = ask(&mut a, json!({"id": 6, "method": "control.cancel"}));
+        assert!(r["ok"] == false && r["cancellable"] == false, "{r}");
+        assert!(r["error"].as_str().is_some_and(|e| e.starts_with("cannot be cancelled") && e.contains("control.pending")), "{r}");
+        gate_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let r = loop {
+            let r = ask(&mut a, json!({"id": 7, "method": "control.pending"}));
+            if r["result"]["done"] == true || Instant::now() > deadline {
+                break r;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(r["result"]["reply"]["result"], "slow", "{r}");
+        let r = ask(&mut a, json!({"id": 8, "method": "control.cancel"}));
+        assert!(r["ok"] == true && r["result"]["cancelled"].is_null(), "{r}");
+        assert_eq!(*ran.lock().unwrap(), ["slow"], "the cancelled request never ran");
+    }
+
+    /// #1618: a request that outlasts its wait says it is still running; the connection keeps its
+    /// reply for `control.pending`, and refuses other requests as `busy` until it lands, so none
+    /// is queued to run unseen behind it.
+    #[test]
+    fn a_timed_out_request_can_be_asked_for_later() {
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        // The slow request is held until the test has seen it time out, so the test does not
+        // race the clock on a loaded machine.
+        let (gate_tx, gate_rx) = channel::<()>();
+        let ran = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = ran.clone();
+        std::thread::spawn(move || {
+            for req in rx {
+                seen.lock().unwrap().push(req.method.clone());
+                if req.method == "slow" {
+                    let _ = gate_rx.recv();
+                }
+                let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+            }
+        });
+        let waits = Waits { short: Duration::from_millis(100), long: Duration::from_millis(100), token: TOKEN_WAIT };
+        let hub = hub(waits, &DOCUMENT_WATCH);
+        std::thread::spawn(move || {
+            if let Some(stream) = listener.incoming().flatten().next() {
+                hub.serve(stream, token, tx, false);
+            }
+        });
+        let s = TcpStream::connect(addr).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let mut out = s.try_clone().unwrap();
+        let mut lines = BufReader::new(s);
+        let mut ask = |v: Value| -> Value {
+            writeln!(out, "{v}").unwrap();
+            let mut l = String::new();
+            lines.read_line(&mut l).unwrap();
+            serde_json::from_str(&l).unwrap()
+        };
+        let r = ask(json!({"id": 1, "method": "slow", "token": token}));
+        assert!(r["ok"] == false && r["running"] == true && r["error"].as_str().is_some_and(|e| e.starts_with("timeout")), "{r}");
+        let r = ask(json!({"id": 2, "method": "ui.view"}));
+        assert!(r["busy"] == true && r["id"] == 2, "{r}");
+        let r = ask(json!({"id": 3, "method": "control.pending"}));
+        assert_eq!((&r["result"]["pending"], &r["result"]["done"]), (&json!(1), &json!(false)), "{r}");
+        gate_tx.send(()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let r = loop {
+            let r = ask(json!({"id": 4, "method": "control.pending"}));
+            if r["result"]["done"] == true || std::time::Instant::now() > deadline {
+                break r;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(
+            (&r["result"]["pending"], &r["result"]["done"], &r["result"]["reply"]["result"]),
+            (&json!(1), &json!(true), &json!("slow")),
+            "{r}"
+        );
+        let r = ask(json!({"id": 5, "method": "control.pending"}));
+        assert_eq!(r["result"]["pending"], Value::Null, "{r}");
+        let r = ask(json!({"id": 6, "method": "ui.view"}));
+        assert_eq!((&r["ok"], &r["result"]), (&json!(true), &json!("ui.view")), "{r}");
+        assert_eq!(*ran.lock().unwrap(), ["slow", "ui.view"], "the busy request never reached the app");
+    }
+
+    /// #6985: a connection that sends `control.subscribe` gets the design in the reply, then a
+    /// `design.changed` line each time the window publishes another: never before the reply,
+    /// none for the same design, the latest after a burst, each line whole between its replies.
+    /// A second subscribe is refused without reaching the window. A connection that did not
+    /// subscribe gets no events, and one that closed is no longer counted.
+    #[test]
+    fn subscribed_connections_are_told_of_design_changes() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        // The window: it answers `control.subscribe` as the app does, publishing the design first;
+        // then the design changes at once, before the reply may have been written.
+        std::thread::spawn(move || {
+            for req in rx {
+                if req.method == "control.subscribe" {
+                    WATCH.publish("d-1", 3);
+                    let _ = req.reply.send(json!({"ok": true, "result": {"document_id": "d-1", "revision": 3}}));
+                    WATCH.publish("d-1", 4);
+                } else {
+                    let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+                }
+            }
+        });
+        let hub = hub(Waits::default(), &WATCH);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (tx, hub) = (tx.clone(), Arc::clone(&hub));
+                std::thread::spawn(move || hub.serve(stream, token, tx, false));
+            }
+        });
+        let open = || {
+            let s = TcpStream::connect(addr).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            (s.try_clone().unwrap(), BufReader::new(s))
+        };
+        let next = |lines: &mut BufReader<TcpStream>| -> Value {
+            let mut l = String::new();
+            lines.read_line(&mut l).unwrap();
+            serde_json::from_str(&l).unwrap()
+        };
+        let changed = |id: &str, revision: u64| json!({"event": "design.changed", "params": {"document_id": id, "revision": revision}});
+
+        let (mut quiet_out, mut quiet) = open();
+        writeln!(quiet_out, "{}", json!({"id": 1, "method": "ui.view", "token": token})).unwrap();
+        assert_eq!(next(&mut quiet)["id"], 1);
+
+        let (mut out, mut lines) = open();
+        writeln!(out, "{}", json!({"id": 1, "method": "control.subscribe", "token": token})).unwrap();
+        assert_eq!(next(&mut lines), json!({"id": 1, "ok": true, "result": {"document_id": "d-1", "revision": 3}}));
+        assert_eq!(next(&mut lines), changed("d-1", 4), "the change after the window's answer comes after the reply");
+        assert!(WATCH.subscribed());
+        // The design it was told of is no news; another revision is.
+        WATCH.publish("d-1", 4);
+        WATCH.publish("d-1", 5);
+        assert_eq!(next(&mut lines), changed("d-1", 5));
+        // A burst ends with its latest.
+        for revision in 6..=10 {
+            WATCH.publish("d-1", revision);
+        }
+        let mut last = 5;
+        while last < 10 {
+            let e = next(&mut lines);
+            let revision = e["params"]["revision"].as_u64().unwrap();
+            assert!(e["event"] == "design.changed" && revision > last, "{e} after {last}");
+            last = revision;
+        }
+        // Another tab: another id, whatever its revision.
+        WATCH.publish("d-2", 2);
+        assert_eq!(next(&mut lines), changed("d-2", 2));
+        // Subscribed already: refused here (the window would have published d-1 again).
+        writeln!(out, "{}", json!({"id": 2, "method": "control.subscribe"})).unwrap();
+        let r = next(&mut lines);
+        assert!(r["id"] == 2 && r["ok"] == false && r["error"].as_str().is_some_and(|e| e.starts_with("already subscribed")), "{r}");
+        // Replies still come, whole, and nothing else was sent meanwhile.
+        writeln!(out, "{}", json!({"id": 3, "method": "ui.view"})).unwrap();
+        assert_eq!(next(&mut lines), json!({"id": 3, "ok": true, "result": "ui.view"}));
+        writeln!(quiet_out, "{}", json!({"id": 2, "method": "ui.view"})).unwrap();
+        assert_eq!(next(&mut quiet), json!({"id": 2, "ok": true, "result": "ui.view"}), "no events without subscribing");
+        // Closed, it is no longer counted. Each publish asks the events thread for one more line,
+        // and its write to the closed connection is what retires the seat; that keeps the wait off
+        // the connection's own thread, which anything else this process is doing may hold up past
+        // the deadline (#7226).
+        drop((out, lines));
+        let mut revision = 11;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while WATCH.subscribed() && Instant::now() < deadline {
+            WATCH.publish("d-1", revision);
+            revision += 1;
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!WATCH.subscribed());
+    }
+
+    /// #8315: a closed connection leaves the watch at once. The seat of a subscribed connection
+    /// goes when the connection's own thread sees the end of the stream, not only when the
+    /// events thread notices: that thread waits for the design to move, so a connection that
+    /// closed while the design stood still kept the watch counting it for a second or more.
+    #[test]
+    fn a_closed_connection_leaves_the_watch_at_once() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        // The window names the design once and then leaves it alone: nothing moves it, so the
+        // events thread has nothing to write and only the end of the connection can retire it.
+        std::thread::spawn(move || {
+            for req in rx {
+                if req.method == "control.subscribe" {
+                    WATCH.publish("d-1", 3);
+                    let _ = req.reply.send(json!({"ok": true, "result": {"document_id": "d-1", "revision": 3}}));
+                } else {
+                    let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+                }
+            }
+        });
+        let hub = hub(Waits::default(), &WATCH);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (tx, hub) = (tx.clone(), Arc::clone(&hub));
+                std::thread::spawn(move || hub.serve(stream, token, tx, false));
+            }
+        });
+        let s = TcpStream::connect(addr).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let mut out = s.try_clone().unwrap();
+        let mut lines = BufReader::new(s);
+        writeln!(out, "{}", json!({"id": 1, "method": "control.subscribe", "token": token})).unwrap();
+        let mut l = String::new();
+        lines.read_line(&mut l).unwrap();
+        let reply: Value = serde_json::from_str(&l).unwrap();
+        assert!(reply["ok"] == true, "{reply}");
+        assert!(WATCH.subscribed(), "the connection is subscribed");
+        // Let the events thread settle into its wait: the design stands still, so it has nothing
+        // to write, and only the end of the connection can retire it.
+        std::thread::sleep(Duration::from_millis(200));
+        // The client goes away without asking anything else.
+        drop((out, lines));
+        let deadline = Instant::now() + Duration::from_millis(400);
+        while WATCH.subscribed() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!WATCH.subscribed(), "a closed connection is not counted on the watch");
+    }
+
+    /// The token is read from a request object without building the rest of it: other fields,
+    /// however large or nested, are only skipped. Anything but an object with a string token is
+    /// no token.
+    #[test]
+    fn token_is_read_without_parsing_the_request() {
+        assert_eq!(token_of(r#"{"id":1,"token":"abc","params":{"a":[1,[2,{"b":null}]]}}"#).as_deref(), Some("abc"));
+        let flood = format!(r#"{{"params":[{}0],"token":"t"}}"#, "0,".repeat(1 << 20));
+        assert_eq!(token_of(&flood).as_deref(), Some("t"));
+        for no in [r#"["abc"]"#, r#"{"token":5}"#, r#"{"token":"a"} x"#, r#"{"id":1}"#, "GET / HTTP/1.1", r#""token""#] {
+            assert_eq!(token_of(no), None, "{no}");
+        }
+    }
+
+    /// #205: a connection runs nothing until a request carries the launch's token; a wrong or
+    /// missing token, or garbage, is refused and the connection closed. Once shown, the token
+    /// need not be repeated on that connection.
+    #[test]
+    fn requests_run_only_after_the_token() {
+        use std::io::Read;
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        let ran = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = ran.clone();
+        std::thread::spawn(move || {
+            for req in rx {
+                seen.lock().unwrap().push(req.method.clone());
+                let _ = req.reply.send(json!({"ok": true, "result": null}));
+            }
+        });
+        let hub = hub(Waits::default(), &DOCUMENT_WATCH);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (tx, hub) = (tx.clone(), Arc::clone(&hub));
+                std::thread::spawn(move || hub.serve(stream, token, tx, false));
+            }
+        });
+        let session = |lines: &[String]| {
+            let mut s = TcpStream::connect(addr).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            for l in lines {
+                let _ = writeln!(s, "{l}");
+            }
+            let _ = s.shutdown(std::net::Shutdown::Write);
+            let mut text = String::new();
+            let _ = s.read_to_string(&mut text);
+            text.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).collect::<Vec<_>>()
+        };
+        for first in [
+            json!({"id": 1, "method": "app.quit", "params": {"force": true}}).to_string(),
+            json!({"id": 1, "method": "app.quit", "token": "0123456789abcdef0123456789abcdee"}).to_string(),
+            json!({"id": 1, "method": "app.quit", "token": "0123"}).to_string(),
+            json!({"id": 1, "method": "app.quit", "token": 7}).to_string(),
+            "not json".to_string(),
+        ] {
+            let replies = session(&[first.clone(), json!({"id": 2, "method": "app.quit", "token": token}).to_string()]);
+            assert_eq!(replies.len(), 1, "{first}: closed after refusing: {replies:?}");
+            assert!(replies[0]["error"].as_str().is_some_and(|e| e.starts_with("unauthorized")), "{first}: {replies:?}");
+        }
+        assert!(ran.lock().unwrap().is_empty(), "nothing ran without the token");
+        let replies = session(&[
+            json!({"id": 1, "method": "ui.inspect", "token": token}).to_string(),
+            json!({"id": 2, "method": "engine.commands"}).to_string(),
+        ]);
+        assert_eq!(replies.len(), 2, "{replies:?}");
+        assert!(replies.iter().all(|r| r["ok"] == true), "{replies:?}");
+        assert_eq!(*ran.lock().unwrap(), ["ui.inspect", "engine.commands"]);
+    }
+
+    /// A request longer than the cap is refused instead of allocated.
+    #[test]
+    fn lines_past_the_cap_are_refused() {
+        let flood = vec![b'A'; MAX_LINE + 2];
+        let mut r = BufReader::new(flood.as_slice());
+        let e = read_line(&mut r, MAX_LINE).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+        assert!(e.to_string().contains("request too large"), "{e}");
+    }
+
+    /// Ordinary framing: lines split on newlines, blank lines kept, no trailing newline needed.
+    #[test]
+    fn lines_split_on_newlines() {
+        let text = b"{\"a\":1}\n\n{\"b\":2}\nlast".to_vec();
+        let mut r = BufReader::new(text.as_slice());
+        let mut got = Vec::new();
+        while let Some(line) = read_line(&mut r, MAX_LINE).unwrap() {
+            got.push(String::from_utf8(line).unwrap());
+        }
+        assert_eq!(got, vec!["{\"a\":1}", "", "{\"b\":2}", "last"]);
+        assert!(read_line(&mut r, MAX_LINE).unwrap().is_none());
+    }
+
+    /// A line that spans several reads of the underlying stream still arrives whole.
+    #[test]
+    fn lines_longer_than_one_buffer_arrive_whole() {
+        let long = "x".repeat(200_000);
+        let text = format!("{long}\n{long}\n").into_bytes();
+        let mut r = BufReader::with_capacity(64, text.as_slice());
+        assert_eq!(read_line(&mut r, MAX_LINE).unwrap().unwrap().len(), long.len());
+        assert_eq!(read_line(&mut r, MAX_LINE).unwrap().unwrap().len(), long.len());
+        assert!(read_line(&mut r, MAX_LINE).unwrap().is_none());
+        // The same line against a smaller cap is refused.
+        let mut r = BufReader::with_capacity(64, text.as_slice());
+        assert!(read_line(&mut r, 1000).is_err());
+    }
+
+    /// A large reply reaches the socket in one write, not one per JSON piece (a component tree of
+    /// thousands of components took half a second to send), and reads back as it was.
+    #[test]
+    fn a_large_reply_is_written_at_once() {
+        struct Counted {
+            writes: usize,
+            bytes: Vec<u8>,
+        }
+        impl Write for Counted {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.writes += 1;
+                self.bytes.extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let components: Vec<Value> = (0..2000).map(|i| json!({"id": i, "name": format!("Part {i}"), "bodies": ["a", "b"], "parent": 0})).collect();
+        let reply = json!({"ok": true, "id": 7, "result": {"components": components}});
+        let mut out = Counted { writes: 0, bytes: Vec::new() };
+        send(&mut out, &reply).unwrap();
+        assert_eq!(out.writes, 1);
+        assert_eq!(out.bytes.last(), Some(&b'\n'));
+        assert_eq!(serde_json::from_slice::<Value>(&out.bytes).unwrap(), reply);
+    }
+
+    /// A stopped listener frees its port at once and ends the connections it had, so a channel
+    /// turned off in the settings leaves nothing listening and can be turned on again on the
+    /// same port.
+    #[test]
+    fn a_stopped_listener_closes_its_port_and_its_connections() {
+        use std::io::Read;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, _rx) = channel();
+        let stop = hub(Waits::default(), &DOCUMENT_WATCH).listen_stoppable(listener, "0123456789abcdef0123456789abcdef".into(), tx, false).unwrap();
+        assert_eq!(stop.port(), port);
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
+        // Wait until the server holds the connection, so stopping has one to close.
+        let held = Instant::now();
+        while stop.shared.lock().is_empty() && held.elapsed() < Duration::from_secs(4) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let started = Instant::now();
+        stop.stop();
+        let mut byte = [0u8; 1];
+        match client.read(&mut byte) {
+            Ok(n) => assert_eq!(n, 0, "the connection ends"),
+            Err(e) => {
+                assert!(!matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut), "the connection ends, not waits: {e}")
+            }
+        }
+        assert!(started.elapsed() < Duration::from_secs(3), "before the token wait runs out");
+        // The listener thread closes its socket when it notices the stop; on a loaded machine that can
+        // take a moment after `stop()` returns. Wait for the port to be free, not for one instant.
+        let freed = Instant::now();
+        let mut bound = TcpListener::bind(("127.0.0.1", port));
+        while bound.is_err() && freed.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(10));
+            bound = TcpListener::bind(("127.0.0.1", port));
+        }
+        assert!(bound.is_ok(), "the port is free again: {:?}", bound.err());
+    }
+}

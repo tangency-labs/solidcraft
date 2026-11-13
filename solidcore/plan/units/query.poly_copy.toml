@@ -1,0 +1,12 @@
+id = "query.poly_copy"
+upstream = ["source/SMLib/src/SmPoly.cpp", "source/SMLib/inc/SmPoly.h", "source/SMLib/src/SmPolyBrepData.cpp", "source/SMLib/inc/SmPolyBrepData.h", "source/SMLib/src/SmAttribute.cpp", "source/SM_API/src/SmApiPolygons.cpp"]
+rust_module = "query::poly::copy"
+depends_on = ["query.poly", "geom.attribute", "geom.tol"]
+soft_depends_on = []
+est_lines = 700
+layer = 45
+tests = ["tests/SM_API_test/src/TestSmGeneral.cpp"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "SM_API gap M2 (SmApiPolyBrepCopy). NOT IN callgraph/units.json: the SmPolyBrep copy constructor, SmPolyBrepData::FromPolyBrep and SmPolyBrep::MakeTopologyFromData are in harness/callgraph/unused_functions.txt; SmApiPolyBrepCopy is a v1.0.1 addition. Owns those, the SmPolyBrepData record classes (private), SmPolyEdge(SmZoneTol3d) / SmPolyLoop(SmPolyFace*) construction as used there, and the poly B-rep's sm_ExtractAttributes / AddAttribute. Rust: PolyBrep::copy, poly_brep_copy, PolyCopyAttributes; inspection accessors PolyBrep::edge_links / vertex_edge_list. Fixtures and generated cases include degenerate faces (collinear / repeated-point triangles and quads, a one-edge open loop) for GetNormal's (1,1,1) paths. Uncompared (not copied by upstream either; follow-up): the source's composite faces, back pointer flag TRUE, original face/edge use/vertex keys and vertex normals. Not ported: SmCopyPolyBrepMap outputs (no SM_API caller), SmPolyBrepData file I/O. Status pending the gate run."

@@ -8,33 +8,67 @@ use solidcraft_doc::{
 };
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{Dir, FacePick, Position};
+use solidcraft_geom::prelude::*;
 use solidcraft_kernel::{Construction, Continuity};
 
 use super::CommandSpec;
 use super::features::{add_feature, axis_param, check_expr, extent_param, feature_sketch, operation, plane_param, profiles, sketch_id};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec3};
+use crate::schema::features::{FeatureResult, SurfaceSweepParams};
+use crate::schema::surface::{
+    FairParams, OffsetParams, PatchParams, PatchResult, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceLoftParams, SurfaceTrimParams,
+    ThickenParams, UnstitchParams, UntrimParams,
+};
+use crate::schema::surface_blend::BlendParams;
+use crate::schema::surface_ruled::SurfaceRuledParams;
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+const PATCH_CONTRACT: TypedContract<PatchParams> = TypedContract::new();
+const STITCH_CONTRACT: TypedContract<StitchParams> = TypedContract::new();
+const UNSTITCH_CONTRACT: TypedContract<UnstitchParams> = TypedContract::new();
+const REVERSE_NORMAL_CONTRACT: TypedContract<ReverseNormalParams> = TypedContract::new();
+const THICKEN_CONTRACT: TypedContract<ThickenParams> = TypedContract::new();
+const OFFSET_CONTRACT: TypedContract<OffsetParams> = TypedContract::new();
+const UNTRIM_CONTRACT: TypedContract<UntrimParams> = TypedContract::new();
+const FAIR_CONTRACT: TypedContract<FairParams> = TypedContract::new();
+const SURFACE_EXTEND_CONTRACT: TypedContract<SurfaceExtendParams> = TypedContract::new();
+const SURFACE_TRIM_CONTRACT: TypedContract<SurfaceTrimParams> = TypedContract::new();
+const SURFACE_SWEEP_CONTRACT: TypedContract<SurfaceSweepParams> = TypedContract::new();
+const SURFACE_LOFT_CONTRACT: TypedContract<SurfaceLoftParams> = TypedContract::new();
+const BLEND_CONTRACT: TypedContract<BlendParams> = TypedContract::new();
+const SURFACE_RULED_CONTRACT: TypedContract<SurfaceRuledParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("surface.patch", "Patch", patch)
+    CommandSpec::new("surface.patch", "Patch", crate::checked!("surface.patch", patch))
         .at("SURFACE", "CREATE")
         .icon("surface_patch")
-        .params("sketch?: id|name and profiles? (planar patches of sketch regions) | edges: [[x,y,z]] (points on a closed loop of a body's edges: one face on them, planar when the loop is, else a smooth B-spline surface) and body?; continuity?: g0|g1|g2|g3|g4 (edges only, default g0: how the patch meets the faces beside the loop — g1 their tangent planes, g2 also their curvature across the edges, g3 also its rate of change, g4 the change of that rate) or [{edge: [x,y,z], g: g0|g1|g2|g3|g4}] (those edges so, the rest g0) or {all, edges}; points?: [[x,y,z]] (edges only, up to 64: points the patch passes through); crown?: number −0.9…3 (default 0: only a fitted patch, whose middle becomes fuller by this many times the loop's size — the bump vanishes on the loop, so the face still meets the picked edges and the continuity across them; a loop that is planar and g0 is the exact plane whatever the crown; with points, crown needs a g1 or higher edge); name?, body_name?"),
-    CommandSpec::new("surface.stitch", "Stitch", stitch)
+        .contract(&PATCH_CONTRACT)
+        .output(output_schema_for::<PatchResult>)
+        .params("sketch?: id|name and profiles? (planar patches of sketch regions) or profiles_3d: [indices] (the sketch's planar 3D-sketch loops, each patched in its own plane, as listed by sketch.inspect) | edges: [[x,y,z]] (points on a closed loop of a body's edges: one face on them, planar when the loop is, else a smooth B-spline surface) and body?; continuity?: g0|g1|g2|g3|g4 (edges only, default g0: how the patch meets the faces beside the loop — g1 their tangent planes, g2 also their curvature across the edges, g3 also its rate of change, g4 the change of that rate) or [{edge: [x,y,z], g: g0|g1|g2|g3|g4}] (those edges so, the rest g0) or {all, edges}; points?: [[x,y,z]] (edges only, up to 64: points the patch passes through); crown?: number −0.9…3 (default 0: only a fitted patch, whose middle becomes fuller by this many times the loop's size — the bump vanishes on the loop, so the face still meets the picked edges and the continuity across them; a loop that is planar and g0 is the exact plane whatever the crown; with points, crown needs a g1 or higher edge); name?, body_name?"),
+    CommandSpec::new("surface.stitch", "Stitch", crate::checked!("surface.stitch", stitch))
         .at("SURFACE", "MODIFY")
         .icon("surface_stitch")
+        .contract(&STITCH_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("bodies: [names] (surfaces sewn into the first; a solid when they close); tolerance?: expr (default: tight)"),
-    CommandSpec::new("surface.thicken", "Thicken", thicken)
+    CommandSpec::new("surface.thicken", "Thicken", crate::checked!("surface.thicken", thicken))
         .at("SURFACE", "CREATE")
         .icon("surface_thicken")
+        .contract(&THICKEN_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("bodies: [surface names]; thickness: expr (negative: against the normal); symmetric?: bool; operation?: new|join|cut|intersect; targets?"),
-    CommandSpec::new("surface.extend", "Extend", extend)
+    CommandSpec::new("surface.extend", "Extend", crate::checked!("surface.extend", extend))
         .at("SURFACE", "MODIFY")
         .icon("surface_extend")
+        .contract(&SURFACE_EXTEND_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body: surface name; edges: [[x,y,z]] (points on boundary edges to push out); distance: expr (unless up_to); mode?: natural (the surface itself continued: a B-spline's end spans continued, which keeps planes and surfaces of revolution on themselves; the default) | tangent (the face continued tangent to its surface across the edge, G1) | curvature (continued keeping the surface's curvature across the edge too, G2); up_to?: plane (XY|XZ|YZ|plane name|{origin, normal}) | {body, point} (a face, its surface extended) | \"bounds\" (natural: back to the surface's own bounds, undoing a trim); neighbours?: bool (default true: the edges next to an extended edge are lengthened to meet it; false: the extension's sides run square to the edge)"),
-    CommandSpec::new("surface.trim", "Trim", trim)
+    CommandSpec::new("surface.trim", "Trim", crate::checked!("surface.trim", trim))
         .at("SURFACE", "MODIFY")
         .icon("surface_trim")
+        .contract(&SURFACE_TRIM_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
     CommandSpec::new("surface.extrude", "Surface Extrude", surface_extrude)
         .at("SURFACE", "CREATE")
@@ -43,42 +77,60 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.revolve", "Surface Revolve", surface_revolve)
         .at("SURFACE", "CREATE")
         .icon("surface_revolve")
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|construction axis name|{origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
-    CommandSpec::new("surface.sweep", "Surface Sweep", surface_sweep)
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
+    CommandSpec::new("surface.sweep", "Surface Sweep", crate::checked!("surface.sweep", surface_sweep))
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
-    CommandSpec::new("surface.loft", "Surface Loft", surface_loft)
+        .contract(&SURFACE_SWEEP_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
+    CommandSpec::new("surface.loft", "Surface Loft", crate::checked!("surface.loft", surface_loft))
         .at("SURFACE", "CREATE")
         .icon("surface_loft")
+        .contract(&SURFACE_LOFT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sections: [{sketch, curves?: [curve ids], profiles?} | {body, edges: [[x,y,z]]}] (2…50 in order; each one chain: a profile without holes, or curves meeting end to end; all open or all closed; a body edge chain takes the face the chain bounds as the surface the end repeats); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g0: how much of the surface at the first and last section the loft repeats — the tangent plane, the curvature, or how that curvature changes); crown?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); rails?, rail_fit? (as solid.loft; sketch sections only, both ends g0); name?, body_name? (a surface body: ruled between two sections, smooth through three or more; no caps)"),
-    CommandSpec::new("surface.offset", "Offset Surface", offset)
+    CommandSpec::new("surface.offset", "Offset Surface", crate::checked!("surface.offset", offset))
         .at("SURFACE", "CREATE")
         .icon("surface_offset")
+        .contract(&OFFSET_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z]] (points on the faces); body?; distance: expr (signed, along the faces' normals; 0 copies the faces); chain?: bool (each pick's whole smooth chain of faces); tolerance?: expr (how far a fitted face may stray, default 0.01 mm). Planes and cylinders move exactly; other faces are fitted. A new surface body (a solid where its faces close)"),
-    CommandSpec::new("surface.ruled", "Ruled Surface", ruled)
+    CommandSpec::new("surface.ruled", "Ruled Surface", crate::checked!("surface.ruled", ruled))
         .at("SURFACE", "CREATE")
         .icon("surface_ruled")
+        .contract(&SURFACE_RULED_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body; edges: [[x,y,z]] (points on a chain of its edges, open or closed); distance: expr (how far the strip reaches); mode?: normal|tangent|angle|direction (default normal: along the normal of the face beside each edge; tangent: continuing it); angle?: expr (angle mode: from `direction`, else from the face's normal, turned away from the face; 90 deg from the normal is tangent); direction?: [x,y,z] (direction mode: the rulings; angle mode: the reference, e.g. a pull direction for a draft); face?: [x,y,z] (a point on the face the directions come from; default: the face beside the most picked edges); flip?: bool (the other side); corners?: mitre|round (sharp corners of the chain; inside corners are always cut back); far?: [null|[[x,y,z]]] (per chain edge, the interior control points of a free strip's far curve, as the default curve's handles list them; null: the default). A constant ruling, or one keeping its angle to an arc's axis, gives an exact plane, cylinder or cone; where the rulings turn freely along an edge, the strip is the exact ruled surface to a far curve of its own (from corner to corner, fair, near the rulings' ends). A new surface body"),
-    CommandSpec::new("surface.blend", "Blend Surface", blend)
+    CommandSpec::new("surface.blend", "Blend Surface", crate::checked!("surface.blend", blend))
         .at("SURFACE", "CREATE")
         .icon("surface_blend")
+        .contract(&BLEND_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("from, to: {body, edges: [[x,y,z]]} (points on the edges of one chain of each body: two picks on the same edge is that one edge, more chain up); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g1: how much of the surface at the picked edges the blend repeats — the tangent plane, the curvature, or how that curvature changes); bulge?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); align?: [[x,y,z], [x,y,z]] (a point each end leaves towards, when the faces at the picks do not say); seam?: [[x,y,z], [x,y,z]] (a point on each chain its stations start from: two closed chains otherwise pair the way that keeps the blend from twisting; an open chain starts at the end nearer its point; a closed chain blends only to a closed chain); stitch?: bool (sew the blend onto its two bodies where the boundaries meet, replacing them); name?, body_name?"),
-    CommandSpec::new("surface.untrim", "Untrim", untrim)
+    CommandSpec::new("surface.untrim", "Untrim", crate::checked!("surface.untrim", untrim))
         .at("SURFACE", "MODIFY")
         .icon("surface_untrim")
+        .contract(&UNTRIM_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("face: {body, point}; holes?: all|[[x,y,z]] (points on the inner loops to remove; default: all); outer?: bool (restore the outer boundary to the surface's natural bounds: a free-form surface's own, an analytic surface's span of the face); in_place?: bool (untrim a surface body's face where it is; a solid's face is always copied out). A surface body; the face keeps its name"),
-    CommandSpec::new("surface.unstitch", "Unstitch", unstitch)
+    CommandSpec::new("surface.unstitch", "Unstitch", crate::checked!("surface.unstitch", unstitch))
         .at("SURFACE", "MODIFY")
         .icon("surface_unstitch")
+        .contract(&UNSTITCH_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body; faces?: [[x,y,z]] (points on the faces to take out, each its own surface body; the rest stay together under the body's name; default: every face its own surface body). A solid comes apart into surfaces"),
-    CommandSpec::new("surface.reverse_normal", "Reverse Normal", reverse_normal)
+    CommandSpec::new("surface.reverse_normal", "Reverse Normal", crate::checked!("surface.reverse_normal", reverse_normal))
         .at("SURFACE", "MODIFY")
         .icon("surface_reverse_normal")
+        .contract(&REVERSE_NORMAL_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body (a surface); faces?: [[x,y,z]] (points on the faces to turn over; default: all of them)"),
-    CommandSpec::new("surface.fair", "Fair Surface", fair)
+    CommandSpec::new("surface.fair", "Fair Surface", crate::checked!("surface.fair", fair))
         .at("SURFACE", "MODIFY")
         .icon("surface_fair")
+        .contract(&FAIR_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body: surface name; faces?: [[x,y,z]] points on the faces to fair (default: every face); strength?: number (0..1 of the full fairing step, default 1); iterations?: number (1..1000 steps, default 1); keep_edges?: bool (default true: hold the boundary row and the row next to it, so a face keeps meeting its neighbours in position and in tangent); tolerance?: expr mm (how far a control vertex may move, default 0.001 of the body's size). Moves the interior control vertices of each B-spline face to flatten its curvature variation while the boundary stays put: the face keeps its edges and the body its shape within the tolerance, and the warning in the reply carries the energy before and after; name?"),
     planned!("surface.fillet", "Surface Fillet", "769")
         .at("SURFACE", "MODIFY")
@@ -91,8 +143,13 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
     let crown = crown_param(p, cmd)?;
     let continuity = patch_continuity(p, cmd)?;
     let points: Vec<Position> = patch_points(p, cmd)?.into_iter().map(Position).collect();
-    let edges: Vec<solidcraft_geom::Vec3> = p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let profiles_3d = profiles_3d_param(p, cmd)?;
+    let edges: Vec<solidcore_record::Vec3> =
+        p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     let mut v = if !edges.is_empty() {
+        if !profiles_3d.is_empty() {
+            return Err(bad(cmd, "`profiles_3d` is for a patch on a sketch"));
+        }
         if edges.len() > 10_000 {
             return Err(bad(cmd, "too many edges"));
         }
@@ -103,6 +160,7 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
             FeatureKind::Patch {
                 sketch: None,
                 profiles: ProfileSel::All,
+                profiles_3d: Vec::new(),
                 body: body.map(BodyName),
                 edges: edges.into_iter().map(Position).collect(),
                 crown,
@@ -115,10 +173,13 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`continuity` and `points` are for a patch on a loop of edges"));
         }
         let sketch = feature_sketch(s, p, cmd)?;
-        let profiles = profiles(p, cmd)?;
+        // With only 3D loops asked for, the sketch's own-plane profiles stay untouched.
+        let profiles =
+            if !profiles_3d.is_empty() && p.get("profiles").is_none() { ProfileSel::Indices { indices: Vec::new() } } else { profiles(p, cmd)? };
         let kind = FeatureKind::Patch {
             sketch: Some(SketchId(sketch)),
             profiles,
+            profiles_3d,
             body: None,
             edges: Vec::new(),
             crown,
@@ -132,6 +193,22 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
         o.insert("continuity".into(), serde_json::to_value(&continuity).unwrap_or(Value::Null));
     }
     Ok(v)
+}
+
+/// Indices of the sketch's planar 3D loops (#741): `profiles_3d: [0, 2]`, as listed by
+/// `sketch.inspect`.
+fn profiles_3d_param(p: &Value, cmd: &str) -> Result<Vec<usize>> {
+    let Some(v) = p.get("profiles_3d") else { return Ok(Vec::new()) };
+    let a = v.as_array().ok_or_else(|| bad(cmd, "`profiles_3d` must be a list of indices"))?;
+    if a.is_empty() || a.len() > 128 {
+        return Err(bad(cmd, "`profiles_3d` needs 1 to 128 indices"));
+    }
+    a.iter()
+        .map(|i| {
+            let n = i.as_u64().ok_or_else(|| bad(cmd, "`profiles_3d` indices must be whole numbers"))?;
+            usize::try_from(n).map_err(|_| bad(cmd, format!("there is no profile {n}")))
+        })
+        .collect()
 }
 
 /// A continuity word for a patch, within what a patch builds ([`Construction::Patch`]).
@@ -177,7 +254,7 @@ fn patch_continuity(p: &Value, cmd: &str) -> Result<PatchContinuity> {
 }
 
 /// The points a patch passes through (at most 64, each a finite point).
-fn patch_points(p: &Value, cmd: &str) -> Result<Vec<solidcraft_geom::Vec3>> {
+fn patch_points(p: &Value, cmd: &str) -> Result<Vec<solidcore_record::Vec3>> {
     let Some(v) = p.get("points") else { return Ok(Vec::new()) };
     let list = v
         .as_array()
@@ -202,7 +279,7 @@ fn crown_param(p: &Value, cmd: &str) -> Result<f64> {
 fn blend_side(p: &Value, cmd: &str, key: &str) -> Result<BlendSide> {
     let side = p.get(key).ok_or_else(|| bad(cmd, format!("`{key}` must be {{body, edges}}")))?;
     let body = str_(side, "body").ok_or_else(|| bad(cmd, format!("`{key}.body` must name a body")))?;
-    let edges: Vec<solidcraft_geom::Vec3> =
+    let edges: Vec<solidcore_record::Vec3> =
         side.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if edges.is_empty() || edges.len() > 10_000 {
         return Err(bad(cmd, format!("`{key}.edges` must list 1 to 10000 points on the edges of a chain")));
@@ -261,12 +338,13 @@ fn surface_extrude(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// A body by name, and points on some of its faces (none: all of them).
-fn body_faces(s: &Session, p: &Value, cmd: &str) -> Result<(String, Vec<solidcraft_geom::Vec3>)> {
+fn body_faces(s: &Session, p: &Value, cmd: &str) -> Result<(String, Vec<solidcore_record::Vec3>)> {
     let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
-    let faces: Vec<solidcraft_geom::Vec3> = p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let faces: Vec<solidcore_record::Vec3> =
+        p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if faces.len() > 10_000 {
         return Err(bad(cmd, "too many faces"));
     }
@@ -298,7 +376,7 @@ fn untrim(s: &mut Session, p: &Value) -> Result<Value> {
             if points.len() > 10_000 {
                 return Err(bad(cmd, "too many holes"));
             }
-            let points: Option<Vec<solidcraft_geom::Vec3>> = points.iter().map(vec3).collect();
+            let points: Option<Vec<solidcore_record::Vec3>> = points.iter().map(vec3).collect();
             Some(points.ok_or_else(|| bad(cmd, "`holes` must list points [x, y, z] on the inner loops"))?)
         }
         Some(_) => return Err(bad(cmd, "`holes` must be \"all\" or a list of points [x, y, z] on the inner loops")),
@@ -346,13 +424,12 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "surface.sweep";
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
-    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() || path.len() > 1000 {
+    let (path_sketch, path, path_body, path_edges) = super::features::sweep_path(s, p, cmd)?;
+    if path_body.is_none() && (path.is_empty() || path.len() > 1000) {
         return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
     }
     let (orientation, twist, scale) = super::features::sweep_options(s, p, cmd)?;
-    let (rails, rail_fit) = super::features::sweep_rails(s, p, cmd, path_sketch)?;
+    let (rails, rail_fit) = super::features::sweep_rails(s, p, cmd, path_body.is_none().then_some(path_sketch))?;
     add_feature(
         s,
         p,
@@ -362,6 +439,8 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
             curves,
             path_sketch: SketchId(path_sketch),
             path,
+            path_body,
+            path_edges,
             orientation,
             twist,
             scale,
@@ -382,7 +461,7 @@ fn surface_loft(s: &mut Session, p: &Value) -> Result<Value> {
         // A section is a chain of sketch curves, or an edge chain of a body whose face the end of
         // the loft repeats.
         if let Some(body) = str_(sec, "body") {
-            let edges: Vec<solidcraft_geom::Vec3> =
+            let edges: Vec<solidcore_record::Vec3> =
                 sec.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
             if edges.is_empty() || edges.len() > 10_000 {
                 return Err(bad(cmd, "`sections.edges` must list 1 to 10000 points on the edges of a chain"));
@@ -433,7 +512,8 @@ fn surface_loft(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn offset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "surface.offset";
-    let faces: Vec<solidcraft_geom::Vec3> = p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let faces: Vec<solidcore_record::Vec3> =
+        p.get("faces").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if faces.is_empty() || faces.len() > 10_000 {
         return Err(bad(cmd, "`faces` must list points on the faces to offset"));
     }
@@ -459,7 +539,8 @@ fn ruled(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
-    let edges: Vec<solidcraft_geom::Vec3> = p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let edges: Vec<solidcore_record::Vec3> =
+        p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if edges.is_empty() || edges.len() > 10_000 {
         return Err(bad(cmd, "`edges` must list points on a chain of the body's edges"));
     }
@@ -573,7 +654,8 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
-    let edges: Vec<solidcraft_geom::Vec3> = p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
+    let edges: Vec<solidcore_record::Vec3> =
+        p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     if edges.is_empty() || edges.len() > 10_000 {
         return Err(bad(cmd, "`edges` must list points on the edges to extend"));
     }
@@ -614,7 +696,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Points to keep: one `[x, y, z]`, or a list of them (at most 10 000).
-fn keep_points(v: Option<&Value>, cmd: &str, key: &str) -> Result<Vec<solidcraft_geom::Vec3>> {
+fn keep_points(v: Option<&Value>, cmd: &str, key: &str) -> Result<Vec<solidcore_record::Vec3>> {
     let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(Vec::new()) };
     if let Some(p) = vec3(v) {
         return Ok(vec![p]);
@@ -1196,7 +1278,7 @@ mod tests {
         plate_with_three_holes(&mut s);
         let top = [5.0, 5.0, 2.0];
         let name =
-            solidcraft_doc::naming::face_name_at_body(s.model.state().body("Plate").unwrap(), solidcraft_geom::Vec3::new(5.0, 5.0, 2.0)).unwrap();
+            solidcraft_doc::naming::face_name_at_body(s.model.state().body("Plate").unwrap(), solidcore_record::Vec3::new(5.0, 5.0, 2.0)).unwrap();
         run(&mut s, "surface.untrim", json!({"face": {"body": "Plate", "point": top}, "body_name": "Top"}));
         let st = s.world_state().unwrap();
         let made = &st.body("Top").unwrap().body;
@@ -1973,7 +2055,7 @@ mod tests {
         run(&mut s, "surface.patch", json!({"edges": rim, "body": "Saddle", "body_name": "Shell"}));
         let st = s.world_state().unwrap();
         assert!(st.body("Shell").unwrap().body.is_surface(), "a patch on a rim is a sheet");
-        let before: Vec<solidcraft_geom::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
+        let before: Vec<solidcore_record::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
         assert!(!before.is_empty());
         let area_before = area(&s, "Shell");
         // The fairing reports both energies. The fit is not the fairest surface on its own rim, so
@@ -1986,7 +2068,7 @@ mod tests {
         // The edges do not move: every boundary point of the faired body is where it was, bit for
         // bit, and the sheet is still the one face.
         let st = s.world_state().unwrap();
-        let after: Vec<solidcraft_geom::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
+        let after: Vec<solidcore_record::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
         assert_eq!(after, before, "fairing must not move the face's edges");
         assert_eq!(st.body("Shell").unwrap().body.face_count(), 1);
         // Undo takes the fairing back, redo puts it back, and a cold reopen rebuilds the same.

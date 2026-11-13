@@ -1,0 +1,54 @@
+# Publishes the vendored SolidCore kernel's `solidcore` crate to crates.io when a tag
+# "solidcore-v<version>" is pushed, e.g. `git tag solidcore-v0.0.1 && git push origin solidcore-v0.0.1`.
+# SolidCore's own release workflow (solidcore/.github/workflows/release.yml), run from solidcore/:
+# GitHub does not run a subfolder's workflows. SolidCraft's releases use no tag trigger, so the
+# solidcore- prefix keeps the two apart.
+# Needs the repository secret CRATES_IO_TOKEN (crates.io token, scope publish-update), in the
+# crates-io environment.
+name: Release SolidCore
+
+on:
+  push:
+    tags: ["solidcore-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: crates-io
+    defaults:
+      run:
+        working-directory: solidcore
+    steps:
+      # Pinned by SHA and no third-party actions: this job holds the crates.io token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # full history, for the on-main check below
+      - name: Tagged commit is on main
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not an ancestor of origin/main"
+            exit 1
+          fi
+      - name: Toolchain (solidcore/rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Tag matches crate version
+        run: |
+          want="${GITHUB_REF_NAME#solidcore-v}"
+          have="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="solidcore"))')"
+          echo "tag $want, solidcore/crates/solidcore/Cargo.toml $have"
+          test "$want" = "$have"
+      - run: cargo test -p solidcore --locked
+      - run: rustup target add wasm32-unknown-unknown && cargo check -p solidcore --locked --target wasm32-unknown-unknown
+      # Package and verify without the token first; only the real publish sees it.
+      - name: Publish (dry run)
+        run: cargo publish -p solidcore --locked --dry-run
+      - name: Publish
+        run: cargo publish -p solidcore --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}

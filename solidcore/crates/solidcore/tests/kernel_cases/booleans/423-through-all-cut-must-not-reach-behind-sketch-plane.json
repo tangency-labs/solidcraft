@@ -1,0 +1,171 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "423-through-all-cut-must-not-reach-behind-sketch-plane",
+  "expected": {
+    "bbox": {
+      "max": [
+        100,
+        7.25,
+        10
+      ],
+      "min": [
+        0,
+        -7.25,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "frame 100x14.5x10 = 14500 with a 1.5x2x10 end notch (x 98.5..100, y 0..2) = 30 removed. The cut tool is y -0.0022..3 for the full height, from x=98 to x=0: 98*3.0022*10 = 2942.156. It never reaches x>98, so the notch is untouched: V = 14500 - 30 - 2942.156 = 11527.844. Reduced from a STEP frame (not committed)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#423"
+    ],
+    "volume_mm3": 11527.844000000001,
+    "what": "a one-sided Through All cut from a sketch plane at x=98 toward -x, with its wall 0.0022 mm from a face of a notch beyond the plane: the cut must remove nothing at x > 98"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 14,
+      "vertices": 24
+    }
+  },
+  "records": "423-through-all-cut-must-not-reach-behind-sketch-plane.bodies.json.gz",
+  "result": [
+    {
+      "body": "Frame",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6585.5688,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 14,
+      "vertices": 24,
+      "volume_mm3": 11527.844
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#423"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a one-sided Through All cut from a sketch plane at x=98 toward -x, with its wall 0.0022 mm from a face of a notch beyond the plane: the cut must remove nothing at x > 98",
+  "why_not": []
+}

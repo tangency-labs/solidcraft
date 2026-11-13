@@ -1,6 +1,6 @@
 [package]
 name = "solidcraft-profile"
-description = "SolidCraft profiler: nested, per-thread timed spans of SMLib calls, kernel operations, feature evaluation, commands and imports, as a table and a Chrome trace"
+description = "SolidCraft profiler: nested, per-thread timed spans of kernel calls, kernel operations, feature evaluation, commands and imports, as a table and a Chrome trace"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

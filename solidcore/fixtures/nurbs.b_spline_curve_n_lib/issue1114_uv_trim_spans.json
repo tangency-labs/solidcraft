@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "name": "issue1114_dim2_head_notify",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 2, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.4999965, "b": 0.9, "mode": 0
+      }
+    },
+    {
+      "name": "issue1114_dim2_head_silent",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 2, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.4999965, "b": 0.9, "mode": 1
+      }
+    },
+    {
+      "name": "issue1114_dim2_head_interval_only",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 2, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.4999965, "b": 0.9, "mode": 2
+      }
+    },
+    {
+      "name": "issue1114_dim2_tail_notify",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 2, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.1, "b": 0.5000035, "mode": 0
+      }
+    },
+    {
+      "name": "issue1114_dim2_tail_silent",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 2, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.1, "b": 0.5000035, "mode": 1
+      }
+    },
+    {
+      "name": "issue1114_dim2_tail_interval_only",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 2, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.1, "b": 0.5000035, "mode": 2
+      }
+    },
+    {
+      "name": "issue1114_dim3_head_notify",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 3, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.4999965, "b": 0.9, "mode": 0
+      }
+    },
+    {
+      "name": "issue1114_dim3_head_silent",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 3, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.4999965, "b": 0.9, "mode": 1
+      }
+    },
+    {
+      "name": "issue1114_dim3_head_interval_only",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 3, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.4999965, "b": 0.9, "mode": 2
+      }
+    },
+    {
+      "name": "issue1114_dim3_tail_notify",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 3, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.1, "b": 0.5000035, "mode": 0
+      }
+    },
+    {
+      "name": "issue1114_dim3_tail_silent",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 3, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.1, "b": 0.5000035, "mode": 1
+      }
+    },
+    {
+      "name": "issue1114_dim3_tail_interval_only",
+      "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:4624; tangency-labs/solidcore#1114 (pinned default behavior)",
+      "inputs": {
+        "this": {"dim": 3, "crv": {"p": 2, "u": [0, 0, 0, 0.5, 0.5, 1, 1, 1], "cpts": [[0.14, 0, 0, 1], [0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [0, 0.14, 0, 1], [-0.09899494936611666, 0.09899494936611666, 0, 0.7071067811865476], [-0.14, 0, 0, 1]]}},
+        "op": "trim", "a": 0.1, "b": 0.5000035, "mode": 2
+      }
+    }
+  ]
+}

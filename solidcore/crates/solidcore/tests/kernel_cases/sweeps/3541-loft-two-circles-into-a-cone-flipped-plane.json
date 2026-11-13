@@ -1,0 +1,130 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "loft",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "degree": 1,
+        "sections": [
+          [
+            {
+              "arc": {
+                "axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "end": 6.283185307179586,
+                "radius": 20.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": 3.4634019343920817e-16
+              }
+            }
+          ],
+          [
+            {
+              "arc": {
+                "axis": [
+                  -0.0,
+                  -0.0,
+                  1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  30.0
+                ],
+                "end": 0.0,
+                "radius": 8.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": -6.283185307179586
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ],
+  "case": "3541-loft-two-circles-into-a-cone-flipped-plane",
+  "expected": {
+    "bbox": {
+      "max": [
+        20,
+        20,
+        30
+      ],
+      "min": [
+        -20,
+        -20,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 3,
+    "method": "two coaxial circles lofted ruled give a cone frustum whichever way the section planes face: V = h/3 (A1 + A2 + sqrt(A1 A2)) = 10 pi (400 + 64 + 160) = 19603.5; faces: cone and two caps.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3541"
+    ],
+    "volume_mm3": 19603.538158400308,
+    "what": "a loft from a circle of radius 8 to a circle of radius 20, 30 mm below it (sections given small first, the small one drawn on a plane turned over (normal pointing down)): \"a horizontal narrowing is created\" instead of a cone"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4299.922016278935,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2,
+      "volume_mm3": 19603.538158231953
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3541"
+  ],
+  "traced_ops": [
+    "loft"
+  ],
+  "ungraded": [],
+  "what": "a loft from a circle of radius 8 to a circle of radius 20, 30 mm below it (sections given small first, the small one drawn on a plane turned over (normal pointing down)): \"a horizontal narrowing is created\" instead of a cone",
+  "why_not": []
+}

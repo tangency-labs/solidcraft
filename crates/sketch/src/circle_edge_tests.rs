@@ -2,7 +2,8 @@
 //! arcs (#4064): solved numerically and by construction, measured, drawn between the edge points
 //! that face each other, saved, and refused on other kinds of curve.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::tests::v;
 use crate::*;

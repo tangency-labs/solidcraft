@@ -1,0 +1,153 @@
+{
+  "area": "surfaces",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "extend_sheet",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "distance": 5.0,
+        "edge": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  10.0,
+                  0.0,
+                  20.0
+                ],
+                [
+                  6.123233995736766e-16,
+                  10.0,
+                  20.0
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              9.84807753012208,
+              1.7364817766693033,
+              20.0
+            ]
+          ],
+          "tolerance": 1.224745871391589
+        },
+        "how": "natural"
+      }
+    }
+  ],
+  "case": "cov-extend-quarter-cylinder-along-its-axis",
+  "expected": {
+    "area_mm2": 392.6990816987241,
+    "bbox": {
+      "max": [
+        10,
+        10,
+        25
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "boundary_edges": 4,
+    "faces": 1,
+    "method": "natural extension keeps a surface of revolution on itself: the top arc moves 5 along the rulings: A = (pi/2) 10 25 = 392.70, one cylinder face, 4 free edges",
+    "source": "analytic",
+    "sources": [],
+    "surface_types": [
+      "cylinder"
+    ],
+    "valid": false,
+    "what": "a quarter-cylinder sheet r 10, 20 high, its top arc extended naturally by 5: the cylinder continued to 25 high"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 4,
+      "faces": 1,
+      "vertices": 4
+    }
+  },
+  "records": "cov-extend-quarter-cylinder-along-its-axis.bodies.json.gz",
+  "result": [
+    {
+      "body": "Quarter",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 392.69908169806416,
+      "body_count": 1,
+      "edges": 1,
+      "faces": 1,
+      "vertices": 1,
+      "volume_mm3": 0.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "extend_sheet"
+  ],
+  "ungraded": [],
+  "what": "a quarter-cylinder sheet r 10, 20 high, its top arc extended naturally by 5: the cylinder continued to 25 high",
+  "why_not": []
+}

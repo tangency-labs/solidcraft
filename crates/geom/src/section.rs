@@ -21,10 +21,11 @@
 //! exact or certified measures for conics and freeform curves. Profile values contain geometry
 //! only: callers retain the original result's accuracy declarations and local identities.
 
+use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::profile::coordinates;
-use crate::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 /// Aggregate input records/references, and the selected conversion's output items, at most.
 /// Input counts curves, wires, regions, contacts, curve uses and hole references together.

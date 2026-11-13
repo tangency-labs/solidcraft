@@ -1,0 +1,59 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/4005",
+ "test": "none: geometry is the issue's",
+ "summary": "A rectangle revolved about an oblique axis parallel to two of its edges. The coordinates are the issue's, rounded to 9 decimals, so the 'parallel' edges are off by about 1e-10.",
+ "cases": [
+  {
+   "name": "revolve_rect_oblique_axis_90",
+   "note": "A 10 x 3 rectangle revolved 90 degrees about an axis at 30 degrees in its plane, parallel to two of its edges; coordinates rounded to 9 decimals and the direction to 12, so the 'parallel' edges are off by about 1e-10. Exact intent (rectangle 10 x 3, edges 2 and 5 from the axis): 30 x 3.5 x pi/2 = 164.933614313; the rounding moves it by 4e-11 relative. Area: each lateral face is edge length x its midpoint's distance from the axis x pi/2 (Pappus), plus the two caps (2 x 29.999999997): 202.942465739. Faces: 6 geometric faces (2 cylinders, from the axis-parallel edges at 2 and 5 mm; 2 planes, from the edges perpendicular to the axis; 2 caps). Not an exact expectation: a kernel may split a face at its seam. SolidCraft's STEP writer turned the two near-cylinders into cones with a semi-angle of 8e-12 rad; the kernel-side check is that the revolve itself is closed with this volume.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -1.0,
+         1.732050808
+        ],
+        [
+         7.660254038,
+         6.732050808
+        ],
+        [
+         6.160254038,
+         9.330127019
+        ],
+        [
+         -2.5,
+         4.330127019
+        ]
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.866025403784,
+      0.5,
+      0.0
+     ],
+     "angle_deg": 90.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 164.93361430736465,
+     "tol": 0.00165,
+     "formula": "Pappus, from the typed coordinates (shoelace area and centroid, double precision): area 29.999999997344, centroid 3.500000000180 from the axis, volume = area x distance x pi/2 = 164.933614307."
+    }
+   }
+  }
+ ]
+}

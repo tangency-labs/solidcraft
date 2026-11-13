@@ -1,0 +1,918 @@
+{
+ "coverage": "Upstream .smb shell sources (TestFiles/pt_TestFiles/Shell) through DoSolidOffset, as smOffsetTest.cpp's ShellBrep reads them (file tolerance, the listed shell faces): the extend-corner and rounded paths, MateEdges with two intersection curves, PiecewiseMerge empty-SSI pairs and the BuildOffsetOfFaceuse 2D domain Boolean.",
+ "cases": [
+  {
+   "name": "shell_file_problemShell_face1_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:523 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.002020058662515,
+    "config": {
+     "member_distance": 2.54,
+     "member_approx_tol": 0.002020058662515,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell_face1_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:523 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.002020058662515,
+    "config": {
+     "member_distance": 2.54,
+     "member_approx_tol": 0.002020058662515,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell1_face4_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:537 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 4
+     }
+    ],
+    "tolerance": 0.002020058662515,
+    "config": {
+     "member_distance": 4.58,
+     "member_approx_tol": 0.002020058662515,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell1_face4_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:537 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell1.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 4
+     }
+    ],
+    "tolerance": 0.002020058662515,
+    "config": {
+     "member_distance": 4.58,
+     "member_approx_tol": 0.002020058662515,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell2_face1_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:551 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.002020058662515,
+    "config": {
+     "member_distance": 12.7,
+     "member_approx_tol": 0.002020058662515,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell2_face1_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:551 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell2.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.002020058662515,
+    "config": {
+     "member_distance": 12.7,
+     "member_approx_tol": 0.002020058662515,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell21_face2_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:565 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell21.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.002020058662515,
+    "config": {
+     "member_distance": 12.7,
+     "member_approx_tol": 0.002020058662515,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell21_face2_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:565 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell21.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.002020058662515,
+    "config": {
+     "member_distance": 12.7,
+     "member_approx_tol": 0.002020058662515,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell3_face0_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:580 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell3.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.000635,
+    "config": {
+     "member_distance": 5.08,
+     "member_approx_tol": 0.000635,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell3_face0_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:580 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell3.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.000635,
+    "config": {
+     "member_distance": 5.08,
+     "member_approx_tol": 0.000635,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell4_face2_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:594 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell4.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001459118912221,
+    "config": {
+     "member_distance": 5.08,
+     "member_approx_tol": 0.001459118912221,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell4_face2_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:594 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell4.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 0.001459118912221,
+    "config": {
+     "member_distance": 5.08,
+     "member_approx_tol": 0.001459118912221,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell5_face5_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:610 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell5.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 5
+     }
+    ],
+    "tolerance": 0.001599204352952,
+    "config": {
+     "member_distance": 5.08,
+     "member_approx_tol": 0.001599204352952,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell5_face5_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:610 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell5.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 5
+     }
+    ],
+    "tolerance": 0.001599204352952,
+    "config": {
+     "member_distance": 5.08,
+     "member_approx_tol": 0.001599204352952,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell10_face5_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:638 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell10.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 5
+     }
+    ],
+    "tolerance": 0.001798855365225,
+    "config": {
+     "member_distance": 12.7,
+     "member_approx_tol": 0.001798855365225,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell10_face5_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:638 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell10.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 5
+     }
+    ],
+    "tolerance": 0.001798855365225,
+    "config": {
+     "member_distance": 12.7,
+     "member_approx_tol": 0.001798855365225,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell16_face1_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:653 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell16.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.0018189175696,
+    "config": {
+     "member_distance": 12.7,
+     "member_approx_tol": 0.0018189175696,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell16_face1_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:653 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell16.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.0018189175696,
+    "config": {
+     "member_distance": 12.7,
+     "member_approx_tol": 0.0018189175696,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell10_face1_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:668 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell10.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001798855365225,
+    "config": {
+     "member_distance": 12.7,
+     "member_approx_tol": 0.001798855365225,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell10_face1_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:668 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell10.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 0.001798855365225,
+    "config": {
+     "member_distance": 12.7,
+     "member_approx_tol": 0.001798855365225,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell15_face0_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:705 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell15.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.00056434789697,
+    "config": {
+     "member_distance": 6.858,
+     "member_approx_tol": 0.00056434789697,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell15_face0_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:705 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell15.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.00056434789697,
+    "config": {
+     "member_distance": 6.858,
+     "member_approx_tol": 0.00056434789697,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell18_face4_extend",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:719 (ShellBrep, extend corners)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell18.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 4
+     }
+    ],
+    "tolerance": 0.001086944915808,
+    "config": {
+     "member_distance": 6.35,
+     "member_approx_tol": 0.001086944915808,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "shell_file_problemShell18_face4_round",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:719 (ShellBrep, rounded corners: the ShellBrep FALSE branch)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell18.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 4
+     }
+    ],
+    "tolerance": 0.001086944915808,
+    "config": {
+     "member_distance": 6.35,
+     "member_approx_tol": 0.001086944915808,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "mate_two_curves_problemShell15_face8_inset",
+   "upstream_ref": "source/SMLib/src/SmOffsetGeometryCreation.cpp:1802 (MateEdges, more than one intersection curve)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell15.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 8
+     }
+    ],
+    "tolerance": 0.00056434789697,
+    "config": {
+     "member_distance": 6.858,
+     "member_approx_tol": 0.00056434789697,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "mate_two_curves_problemShell15_face8_outset",
+   "upstream_ref": "source/SMLib/src/SmOffsetGeometryCreation.cpp:1802 (MateEdges, more than one intersection curve)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell15.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 8
+     }
+    ],
+    "tolerance": 0.00056434789697,
+    "config": {
+     "member_distance": 6.858,
+     "member_approx_tol": 0.00056434789697,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "mate_two_curves_problemShell15_face9_inset",
+   "upstream_ref": "source/SMLib/src/SmOffsetGeometryCreation.cpp:1802 (MateEdges, more than one intersection curve)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell15.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 9
+     }
+    ],
+    "tolerance": 0.00056434789697,
+    "config": {
+     "member_distance": 6.858,
+     "member_approx_tol": 0.00056434789697,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "mate_two_curves_problemShell15_face9_outset",
+   "upstream_ref": "source/SMLib/src/SmOffsetGeometryCreation.cpp:1802 (MateEdges, more than one intersection curve)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell15.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 9
+     }
+    ],
+    "tolerance": 0.00056434789697,
+    "config": {
+     "member_distance": 6.858,
+     "member_approx_tol": 0.00056434789697,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "round_merge_deleted_surface_user_ShellBrep_983_none_outset",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:638 (PiecewiseMerge RegisterExistingSSI)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/ShellBrep_983.smb"
+     }
+    },
+    "faces": [],
+    "tolerance": 0.000258859417038,
+    "config": {
+     "member_distance": 1.0,
+     "member_approx_tol": 0.000258859417038,
+     "inset": false,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "round_merge_deleted_surface_user_ShellBrep_983_face0_inset",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:638 (PiecewiseMerge RegisterExistingSSI)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/ShellBrep_983.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.000258859417038,
+    "config": {
+     "member_distance": 1.0,
+     "member_approx_tol": 0.000258859417038,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "round_merge_deleted_surface_user_problemShell15_face8_inset",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:638 (PiecewiseMerge RegisterExistingSSI)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell15.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 8
+     }
+    ],
+    "tolerance": 0.00056434789697,
+    "config": {
+     "member_distance": 6.858,
+     "member_approx_tol": 0.00056434789697,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "round_merge_deleted_surface_user_problemShell22_face0_inset",
+   "upstream_ref": "source/SMLib/src/SmMerge.cpp:638 (PiecewiseMerge RegisterExistingSSI)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell22.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001990651573606,
+    "config": {
+     "member_distance": 2.54,
+     "member_approx_tol": 0.001990651573606,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  },
+  {
+   "name": "boolean_domain_problemShell12_face0_extend",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3765-3928 (BuildOffsetOfFaceuse 2D domain Boolean)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell12.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001376721156494,
+    "config": {
+     "member_distance": 2.54,
+     "member_approx_tol": 0.001376721156494,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "boolean_domain_problemShell12_face0_round",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp:3765-3928 (BuildOffsetOfFaceuse 2D domain Boolean)",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Shell/problemShell12.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.001376721156494,
+    "config": {
+     "member_distance": 2.54,
+     "member_approx_tol": 0.001376721156494,
+     "inset": true,
+     "extend_convex": false,
+     "merge_results": true
+    }
+   }
+  }
+ ]
+}

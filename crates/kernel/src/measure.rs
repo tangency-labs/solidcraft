@@ -1,5 +1,6 @@
 use serde::Serialize;
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::{Aabb3, MeshGeom};
 
 use crate::Result;
 use crate::body::Body;
@@ -102,7 +103,7 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
         return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox, measured_by: m.measured_by, notes: m.notes });
     }
     let m = crate::guard("SMLib mass properties", || {
-        b.smlib()?.mass_properties(ACCURACY).map_err(|e| crate::KernelError::Failed(format!("SMLib mass properties: {e}")))
+        b.smlib()?.mass_properties(ACCURACY).map_err(|e| crate::KernelError::smlib("SMLib mass properties", e))
     })?;
     let [x, y, z] = m.centroid;
     Ok(MassMeasure { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z), bbox: b.exact_bounds()?, measured_by: "smlib", notes: Vec::new() })
@@ -112,6 +113,7 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
 mod tests {
     use super::*;
     use crate::{BoolOp, boolean, cylinder, torus};
+    use solidcraft_geom::prelude::*;
 
     /// The mass properties alone are [`measure`]'s, to the bit; and on a curved intersection
     /// they are the textbook ones.
@@ -133,13 +135,27 @@ mod tests {
         assert!(measure(&ring).unwrap().merged.faces > 0);
     }
 
+    /// A body's exact box is measured once and its clones share it; a moved copy is a new body
+    /// and measures its own.
+    #[test]
+    fn exact_box_is_kept_per_record() {
+        let post = cylinder(Vec3::ZERO, Vec3::Z, 1.5, 10.0).unwrap();
+        let clone = post.clone();
+        let first = post.exact_bounds().unwrap();
+        assert_eq!(*clone.bounds.lock().unwrap(), Some(first));
+        assert_eq!(clone.exact_bounds().unwrap(), first);
+        let moved = transform(&post, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0).unwrap();
+        let b = moved.exact_bounds().unwrap();
+        assert!((b.min.x - first.min.x - 5.0).abs() < 1e-9 && (b.max.x - first.max.x - 5.0).abs() < 1e-9, "{b:?} against {first:?}");
+    }
+
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre
     /// the sums miss a cone of that facet to the centre (0.08 %), where about the origin they are
     /// 17 % over. Closed, it measures the same about either.
     // A body's measured volume does not depend on where it sits: the same revolved ring of cones
     // and cylinders, moved far from the origin, measures what it measures at the origin.
     use crate::{revolve, transform};
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     use std::f64::consts::{PI, TAU};
 
     /// Ring cross-section in (radius, height): cones top and bottom, cylinders inside and out.

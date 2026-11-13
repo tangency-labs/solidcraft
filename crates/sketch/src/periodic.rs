@@ -1,7 +1,8 @@
 //! Explicit cyclic C2 fit splines. Missing periodic markers retain natural interpolation.
 use crate::model::in_range;
 use crate::{MAX_SPLINE_POINTS, Sketch, SketchError};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 type Result<T> = std::result::Result<T, SketchError>;
 fn bad() -> SketchError {
@@ -160,9 +161,16 @@ mod tests {
         let c = sk.add_point(Vec2::new(-4.0, 0.0), None).unwrap();
         let d = sk.add_point(Vec2::new(-3.0, -2.0), None).unwrap();
         let last = sk.add_point(Vec2::ZERO, None).unwrap();
-        sk.add_curve(crate::CurveKind::Spline { pts: vec![first, a, b, seam], control: false, degree: 3, periodic: true, nurbs: None }, None)
-            .unwrap();
-        sk.add_curve(crate::CurveKind::Spline { pts: vec![seam, c, d, last], control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
+        sk.add_curve(
+            crate::CurveKind::Spline { pts: vec![first, a, b, seam], control: false, degree: 3, periodic: true, nurbs: None, handles: Vec::new() },
+            None,
+        )
+        .unwrap();
+        sk.add_curve(
+            crate::CurveKind::Spline { pts: vec![seam, c, d, last], control: false, degree: 3, periodic: true, nurbs: None, handles: Vec::new() },
+            None,
+        )
+        .unwrap();
         sk.points[first].pos = Vec2::new(0.2, 0.1);
         assert!(crate::solve_with(&mut sk, &crate::Hold { points: vec![first], radii: vec![] }, None, crate::Analysis::Full, None).ok());
         assert_eq!(sk.point(first), sk.point(seam));
@@ -198,8 +206,9 @@ mod tests {
         let mut singular = Sketch::new();
         let points =
             [Vec2::ZERO, Vec2::X, Vec2::ZERO, Vec2::new(0.0, 1.0), Vec2::ZERO].into_iter().map(|p| singular.add_point(p, None).unwrap()).collect();
-        let curve =
-            singular.add_curve(crate::CurveKind::Spline { pts: points, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
+        let curve = singular
+            .add_curve(crate::CurveKind::Spline { pts: points, control: false, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None)
+            .unwrap();
         let before = singular.clone();
         assert!(singular.add_freeform_offset(curve, true, 0.1).is_err());
         assert_eq!(singular, before);

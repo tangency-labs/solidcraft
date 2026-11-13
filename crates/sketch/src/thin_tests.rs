@@ -1,9 +1,10 @@
 //! Thin walls against areas worked out by hand: a wall along a chain covers its length times
 //! the thickness, less what corners overlap and plus what mitres add.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
 
 use crate::thin_wall_regions;
 
@@ -61,7 +62,7 @@ fn a_straight_wall_takes_its_side_from_the_drawn_direction() {
 
 #[test]
 fn a_circle_makes_an_exact_ring() {
-    let circle = solidcraft_geom::Loop2::circle(Vec2::new(3.0, 4.0), 10.0).segs;
+    let circle = solidcore_record::Loop2::circle(Vec2::new(3.0, 4.0), 10.0).segs;
     let regions = thin_wall_regions(std::slice::from_ref(&circle), 1.0, 1.0).unwrap();
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].holes.len(), 1);
@@ -84,7 +85,7 @@ fn walls_that_cross_or_meet_are_one_region() {
         close(regions[0].area(), 4.0 * 10.0 * 2.0 - 4.0);
     }
     // A ring with a bar across it.
-    let mut ring = vec![solidcraft_geom::Loop2::circle(Vec2::ZERO, 10.0).segs];
+    let mut ring = vec![solidcore_record::Loop2::circle(Vec2::ZERO, 10.0).segs];
     ring.push(line([-10.0, 0.0], [10.0, 0.0]));
     let regions = thin_wall_regions(&ring, 1.0, 1.0).unwrap();
     assert_eq!(regions.len(), 1);
@@ -114,10 +115,31 @@ fn a_spline_wall_is_its_length_times_its_thickness() {
     }
 }
 
+/// #7333: a wall as thick as the radius of an arc it follows, or thicker, on its inner side.
 #[test]
-fn walls_thicker_than_a_curve_bends_or_without_thickness_are_refused() {
+fn a_wall_thicker_than_an_arcs_radius_covers_the_arcs_whole_sector() {
+    let r: f64 = 2.0;
+    // A line, a quarter arc of radius 2 and a line: the wall follows them on both sides.
+    let path = vec![
+        line([-10.0, 0.0], [0.0, 0.0]),
+        vec![Seg2::Arc { center: Vec2::new(0.0, 2.0), radius: r, start: -PI / 2.0, sweep: PI / 2.0 }],
+        line([2.0, 2.0], [2.0, 12.0]),
+    ];
+    for half in [1.9, 2.0, 2.1, 3.0] {
+        let regions = thin_wall_regions(&path, half, half).unwrap_or_else(|e| panic!("wall of {} mm: {e}", 2.0 * half));
+        assert_eq!(regions.len(), 1, "{} mm", 2.0 * half);
+        assert!(regions[0].holes.is_empty(), "{} mm", 2.0 * half);
+    }
+    // The bands of a half-circle: the sector out to radius + the outer wall, however thick the inner one.
+    let arc = vec![Seg2::Arc { center: Vec2::ZERO, radius: r, start: 0.0, sweep: PI }];
+    close(area(std::slice::from_ref(&arc), 3.0, 0.0), 0.5 * PI * r * r);
+    close(area(std::slice::from_ref(&arc), 2.5, 2.5), 0.5 * PI * 4.5f64.powi(2));
+}
+
+#[test]
+fn walls_thicker_than_a_free_form_curve_bends_or_without_thickness_are_refused() {
     let arc = vec![Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: 0.0, sweep: PI }];
-    assert!(thin_wall_regions(std::slice::from_ref(&arc), 3.0, 0.0).is_err());
+    // (a wall thicker than an arc's radius is no longer refused, see below)
     assert!(thin_wall_regions(&[arc], 0.0, 3.0).is_ok());
     let l = [line([0.0, 0.0], [10.0, 0.0])];
     for (a, b) in [(0.0, 0.0), (-1.0, 2.0), (f64::NAN, 1.0), (1.0, f64::INFINITY)] {

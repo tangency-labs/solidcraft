@@ -1,0 +1,395 @@
+{
+  "coverage": "Rounded outsets of Boolean/extrudeHoles1.smb (one shell face, member distance 0.35-0.37 of the 65 bbox size, file tolerance) through DoSolidOffset: the PiecewiseMerge manifold boolean reaches SmProtoTopologyManager::ResolveOverlappingProtoEdges, whose SetPointClassParameters point solves on faces need a new trimmed surface cache (smsurf_GetSurfaceCache) made on the lent operand B-rep.",
+  "cases": [
+    {
+      "name": "overlap_pc_extrudeHoles1_f0_k0.35_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 0
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 22.75,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f0_k0.36_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 0
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 23.4,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f0_k0.37_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 0
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 24.05,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f2_k0.35_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 2
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 22.75,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f2_k0.36_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 2
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 23.4,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f2_k0.37_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 2
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 24.05,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f3_k0.35_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 3
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 22.75,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f3_k0.36_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 3
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 23.4,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f3_k0.37_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 3
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 24.05,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f4_k0.35_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 4
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 22.75,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f4_k0.36_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 4
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 23.4,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f4_k0.37_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 4
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 24.05,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f5_k0.35_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 5
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 22.75,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f5_k0.36_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 5
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 23.4,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    },
+    {
+      "name": "overlap_pc_extrudeHoles1_f5_k0.37_out_rnd",
+      "inputs": {
+        "operation": "solid",
+        "source": {
+          "kind": "file",
+          "path": {
+            "$upstream_file": "Boolean/extrudeHoles1.smb"
+          }
+        },
+        "faces": [
+          {
+            "origin": "source",
+            "index": 5
+          }
+        ],
+        "tolerance": 0.0059574935488984,
+        "config": {
+          "member_distance": 24.05,
+          "member_approx_tol": 0.0059574935488984,
+          "inset": false,
+          "extend_convex": false,
+          "merge_results": true
+        }
+      }
+    }
+  ]
+}

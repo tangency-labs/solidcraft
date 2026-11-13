@@ -2,7 +2,7 @@
 
 Every colour used on the Preferences boards, taken in light and dark pairs (the dark dialog is the
 same layout as the light one, so the n-th colour of one is the n-th of the other). Token values are
-from `assets/styles/ui/palettes.rs` (`Tokens::light()` and `Tokens::dark()`); field names are in
+from `crates/theme/src/palettes.rs` (`Tokens::light()` and `Tokens::dark()`); field names are in
 `crates/ui-egui/src/theme.rs` (`Tokens`).
 
 The tracker says the board colours are the existing token values. That holds for the dialog chrome

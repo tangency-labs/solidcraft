@@ -4,10 +4,11 @@
 //! every trim it needs (`SmEdgeuse::GetOrCreateUVTrimCurve`, when the body is exported). They are
 //! SMLib's, relayed as it holds them on the record's parameters; nothing here fits a curve.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashSet;
 
-use solidcraft_geom::brep::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
-use solidcraft_geom::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
+use solidcore_ops::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
+use solidcore_record::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
 
 /// [`Trims`] by SMLib.
 #[derive(Clone, Copy, Debug, Default)]
@@ -22,7 +23,7 @@ impl Trims for SmlibTrims {
 fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
     let (record, bare) = sheet(face)?;
     let mut arrays = crate::import::arrays_with_bare_uses(&record, &bare).map_err(|e| e.to_string())?;
-    let import = |a: &crate::import::Arrays| crate::flat::Flat::from_arrays(a).and_then(|f| f.import()).map_err(|e| e.to_string());
+    let import = |a: &crate::import::Arrays| crate::Brep::from_arrays(a).map_err(|e| e.to_string());
     let mut body = import(&arrays)?;
     if cover_gaps(&body, face, &bare, &mut arrays)? {
         body = import(&arrays)?;
@@ -107,12 +108,7 @@ fn cover_gaps(body: &crate::Brep, face: &TrimFace<'_>, bare: &HashSet<(u32, u32,
 /// [`cover_gaps`]), the pcurve is mapped onto our interval by the affine change of parameter
 /// (exact for a B-spline: its knots move), and the record's check measures it against the edge
 /// as any pcurve. Farther is SMLib trimming the edge, refused with how far.
-pub(crate) fn on_our_interval(
-    pc: Curve2,
-    ours: &solidcraft_geom::brep::pcurve::TrimEdge<'_>,
-    theirs: [f64; 2],
-    tolerance: f64,
-) -> Result<Curve2, String> {
+pub(crate) fn on_our_interval(pc: Curve2, ours: &solidcore_ops::pcurve::TrimEdge<'_>, theirs: [f64; 2], tolerance: f64) -> Result<Curve2, String> {
     let [a, b] = ours.interval;
     let [c, d] = theirs;
     if a == c && b == d {

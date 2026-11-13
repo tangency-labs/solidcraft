@@ -1,0 +1,1207 @@
+{
+ "cases": [
+  {
+   "name": "edge_cubic_unit_systol",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0.1234567,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.1234567,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3.1234567,
+        -1.0,
+        1.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.1234567,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6.1234567,
+        0.0,
+        2.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "edge_cubic_unit_tol1e-2",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0.1234567,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.1234567,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3.1234567,
+        -1.0,
+        1.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.1234567,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6.1234567,
+        0.0,
+        2.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "edge_cubic_unit_tol1",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0.1234567,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.1234567,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3.1234567,
+        -1.0,
+        1.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.1234567,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6.1234567,
+        0.0,
+        2.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "edge_cubic_unit_tol1e3",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0.1234567,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.1234567,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3.1234567,
+        -1.0,
+        1.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.1234567,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6.1234567,
+        0.0,
+        2.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1000.0
+   }
+  },
+  {
+   "name": "edge_cubic_1e10_systol",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1234567000.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        11234567000.0,
+        20000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        31234567000.000004,
+        -10000000000.0,
+        10000000000.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        41234567000.0,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        61234567000.0,
+        0.0,
+        20000000000.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "edge_cubic_1e10_tol1e-2",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1234567000.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        11234567000.0,
+        20000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        31234567000.000004,
+        -10000000000.0,
+        10000000000.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        41234567000.0,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        61234567000.0,
+        0.0,
+        20000000000.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "edge_cubic_1e10_tol1",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1234567000.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        11234567000.0,
+        20000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        31234567000.000004,
+        -10000000000.0,
+        10000000000.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        41234567000.0,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        61234567000.0,
+        0.0,
+        20000000000.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "edge_cubic_1e10_tol1e3",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1234567000.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        11234567000.0,
+        20000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        31234567000.000004,
+        -10000000000.0,
+        10000000000.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        41234567000.0,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        61234567000.0,
+        0.0,
+        20000000000.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1000.0
+   }
+  },
+  {
+   "name": "edge_cubic_1p5e10_systol",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1851850500.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        16851850500.0,
+        30000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        46851850500.0,
+        -15000000000.0,
+        15000000000.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        61851850500.0,
+        15000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        91851850500.0,
+        0.0,
+        30000000000.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "edge_cubic_1p5e10_tol1e-2",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1851850500.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        16851850500.0,
+        30000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        46851850500.0,
+        -15000000000.0,
+        15000000000.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        61851850500.0,
+        15000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        91851850500.0,
+        0.0,
+        30000000000.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "edge_cubic_1p5e10_tol1",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1851850500.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        16851850500.0,
+        30000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        46851850500.0,
+        -15000000000.0,
+        15000000000.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        61851850500.0,
+        15000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        91851850500.0,
+        0.0,
+        30000000000.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "edge_cubic_1p5e10_tol1e3",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; cubic B-spline)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1851850500.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        16851850500.0,
+        30000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        46851850500.0,
+        -15000000000.0,
+        15000000000.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        61851850500.0,
+        15000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        91851850500.0,
+        0.0,
+        30000000000.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1000.0
+   }
+  },
+  {
+   "name": "edge_cubic_1e10_tol0",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; zero edge tolerance: context fallback)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1234567000.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        11234567000.0,
+        20000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        31234567000.000004,
+        -10000000000.0,
+        10000000000.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        41234567000.0,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        61234567000.0,
+        0.0,
+        20000000000.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "edge_cubic_1e10_tol1e-9",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; edge tolerance below the system value)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1234567000.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        11234567000.0,
+        20000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        31234567000.000004,
+        -10000000000.0,
+        10000000000.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        41234567000.0,
+        10000000000.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        61234567000.0,
+        0.0,
+        20000000000.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.37,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "edge_rational_1e10_tol1",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; rational quadratic)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        30000000000.0,
+        0.0,
+        0.0,
+        1
+       ],
+       [
+        30000000000.0,
+        10000000000.0,
+        0.0,
+        0.7071067811865476
+       ],
+       [
+        20000000000.0,
+        10000000000.0,
+        5000000000.0,
+        1
+       ],
+       [
+        10000000000.0,
+        10000000000.0,
+        0.0,
+        0.8
+       ],
+       [
+        10000000000.0,
+        0.0,
+        10000000000.0,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.3,
+       0.6,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "edge_rational_unit_tol1e-2",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; rational quadratic)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        3.0,
+        0.0,
+        0.0,
+        1
+       ],
+       [
+        3.0,
+        1.0,
+        0.0,
+        0.7071067811865476
+       ],
+       [
+        2.0,
+        1.0,
+        0.5,
+        1
+       ],
+       [
+        1.0,
+        1.0,
+        0.0,
+        0.8
+       ],
+       [
+        1.0,
+        0.0,
+        1.0,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.3,
+       0.6,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "edge_line_1e10_tol1",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; SmLine)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "line": {
+      "p": [
+       30000000000.0,
+       -20000000000.0,
+       10000000000.0
+      ],
+      "v": [
+       1,
+       2,
+       0.5
+      ],
+      "domain": [
+       0,
+       4000000000.0
+      ]
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "edge_hermite_1e10_tol1",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; SmHermiteCurve spans)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       10000000000.0,
+       20000000000.0,
+       0
+      ],
+      "d1": [
+       30000000000.0,
+       0,
+       10000000000.0
+      ],
+      "p2": [
+       40000000000.0,
+       10000000000.0,
+       20000000000.0
+      ],
+      "d2": [
+       0,
+       30000000000.0,
+       -10000000000.0
+      ]
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "edge_hermite_unit_tol1e-2",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; SmHermiteCurve spans)",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       3,
+       0,
+       1
+      ],
+      "p2": [
+       4,
+       1,
+       2
+      ],
+      "d2": [
+       0,
+       3,
+       -1
+      ]
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "edge_ellipse_systol",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; SmEllipse, MakeNurb on an edge [B630])",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       10,
+       300
+      ],
+      "radii": [
+       50,
+       20
+      ]
+     }
+    },
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "edge_circle_systol",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; SmCircle, MakeNurb on an edge [B630])",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "circle": {
+      "c": [
+       10000.0,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0.6,
+       0.8
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radius": 1000.0
+     }
+    },
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "edge_ellipse_tol1e-2",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; SmEllipse, MakeNurb on an edge [B630])",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       10,
+       300
+      ],
+      "radii": [
+       50,
+       20
+      ]
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "edge_circle_tol1e-2",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; SmCircle, MakeNurb on an edge [B630])",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "circle": {
+      "c": [
+       10000.0,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0.6,
+       0.8
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radius": 1000.0
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "edge_ellipse_tol10",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; SmEllipse, MakeNurb on an edge [B630])",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "ellipse": {
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       10,
+       300
+      ],
+      "radii": [
+       50,
+       20
+      ]
+     }
+    },
+    "tol": 10.0
+   }
+  },
+  {
+   "name": "edge_circle_tol10",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1488 (SmTol::GetApproxTol3d(&m_crCurve) of an edge's curve; SmCircle, MakeNurb on an edge [B630])",
+   "inputs": {
+    "op": "edge_cache",
+    "curve": {
+     "circle": {
+      "c": [
+       10000.0,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       0.6,
+       0.8
+      ],
+      "domain": [
+       0,
+       360
+      ],
+      "radius": 1000.0
+     }
+    },
+    "tol": 10.0
+   }
+  }
+ ]
+}

@@ -1,0 +1,4636 @@
+{
+  "cases": [
+    {
+      "name": "degenerate_vertices_0_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1e-07_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1e-07_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 5e-08
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1e-07_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 1e-07
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1e-07_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 2e-07
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1e-07_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1e-07_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1e-07_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 0.5
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 2
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1000000.0_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1000000.0_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 500000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1000000.0_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 1000000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1000000.0_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": 2000000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1000000.0_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1000000.0_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_0_1000000.0_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1e-07_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1e-07_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 5e-08
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1e-07_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-07
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1e-07_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 2e-07
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1e-07_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1e-07_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1e-07_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0.5
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 2
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1000000.0_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1000000.0_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 500000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1000000.0_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1000000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1000000.0_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 2000000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1000000.0_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1000000.0_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_1_1000000.0_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1e-07_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1e-07_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 5e-08
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1e-07_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-07
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1e-07_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 2e-07
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1e-07_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1e-07_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1e-07_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0.5
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 2
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1000000.0_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1000000.0_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 500000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1000000.0_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1000000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1000000.0_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 2000000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1000000.0_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1000000.0_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_2_1000000.0_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ],
+            [
+              2e-07,
+              0,
+              0
+            ],
+            [
+              3e-07,
+              0,
+              0
+            ],
+            [
+              4e-07,
+              0,
+              0
+            ],
+            [
+              5e-07,
+              0,
+              0
+            ],
+            [
+              6e-07,
+              0,
+              0
+            ],
+            [
+              7e-07,
+              0,
+              0
+            ],
+            [
+              8e-07,
+              0,
+              0
+            ],
+            [
+              9e-07,
+              0,
+              0
+            ],
+            [
+              1e-06,
+              0,
+              0
+            ],
+            [
+              1.1e-06,
+              0,
+              0
+            ],
+            [
+              1.2e-06,
+              0,
+              0
+            ],
+            [
+              1.2999999999999998e-06,
+              0,
+              0
+            ],
+            [
+              1.4e-06,
+              0,
+              0
+            ],
+            [
+              1.5e-06,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ],
+            [
+              2e-07,
+              0,
+              0
+            ],
+            [
+              3e-07,
+              0,
+              0
+            ],
+            [
+              4e-07,
+              0,
+              0
+            ],
+            [
+              5e-07,
+              0,
+              0
+            ],
+            [
+              6e-07,
+              0,
+              0
+            ],
+            [
+              7e-07,
+              0,
+              0
+            ],
+            [
+              8e-07,
+              0,
+              0
+            ],
+            [
+              9e-07,
+              0,
+              0
+            ],
+            [
+              1e-06,
+              0,
+              0
+            ],
+            [
+              1.1e-06,
+              0,
+              0
+            ],
+            [
+              1.2e-06,
+              0,
+              0
+            ],
+            [
+              1.2999999999999998e-06,
+              0,
+              0
+            ],
+            [
+              1.4e-06,
+              0,
+              0
+            ],
+            [
+              1.5e-06,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ],
+            [
+              2e-07,
+              0,
+              0
+            ],
+            [
+              3e-07,
+              0,
+              0
+            ],
+            [
+              4e-07,
+              0,
+              0
+            ],
+            [
+              5e-07,
+              0,
+              0
+            ],
+            [
+              6e-07,
+              0,
+              0
+            ],
+            [
+              7e-07,
+              0,
+              0
+            ],
+            [
+              8e-07,
+              0,
+              0
+            ],
+            [
+              9e-07,
+              0,
+              0
+            ],
+            [
+              1e-06,
+              0,
+              0
+            ],
+            [
+              1.1e-06,
+              0,
+              0
+            ],
+            [
+              1.2e-06,
+              0,
+              0
+            ],
+            [
+              1.2999999999999998e-06,
+              0,
+              0
+            ],
+            [
+              1.4e-06,
+              0,
+              0
+            ],
+            [
+              1.5e-06,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1e-07_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ],
+            [
+              2e-07,
+              0,
+              0
+            ],
+            [
+              3e-07,
+              0,
+              0
+            ],
+            [
+              4e-07,
+              0,
+              0
+            ],
+            [
+              5e-07,
+              0,
+              0
+            ],
+            [
+              6e-07,
+              0,
+              0
+            ],
+            [
+              7e-07,
+              0,
+              0
+            ],
+            [
+              8e-07,
+              0,
+              0
+            ],
+            [
+              9e-07,
+              0,
+              0
+            ],
+            [
+              1e-06,
+              0,
+              0
+            ],
+            [
+              1.1e-06,
+              0,
+              0
+            ],
+            [
+              1.2e-06,
+              0,
+              0
+            ],
+            [
+              1.2999999999999998e-06,
+              0,
+              0
+            ],
+            [
+              1.4e-06,
+              0,
+              0
+            ],
+            [
+              1.5e-06,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1e-07_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ],
+            [
+              2e-07,
+              0,
+              0
+            ],
+            [
+              3e-07,
+              0,
+              0
+            ],
+            [
+              4e-07,
+              0,
+              0
+            ],
+            [
+              5e-07,
+              0,
+              0
+            ],
+            [
+              6e-07,
+              0,
+              0
+            ],
+            [
+              7e-07,
+              0,
+              0
+            ],
+            [
+              8e-07,
+              0,
+              0
+            ],
+            [
+              9e-07,
+              0,
+              0
+            ],
+            [
+              1e-06,
+              0,
+              0
+            ],
+            [
+              1.1e-06,
+              0,
+              0
+            ],
+            [
+              1.2e-06,
+              0,
+              0
+            ],
+            [
+              1.2999999999999998e-06,
+              0,
+              0
+            ],
+            [
+              1.4e-06,
+              0,
+              0
+            ],
+            [
+              1.5e-06,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 5e-08
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1e-07_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ],
+            [
+              2e-07,
+              0,
+              0
+            ],
+            [
+              3e-07,
+              0,
+              0
+            ],
+            [
+              4e-07,
+              0,
+              0
+            ],
+            [
+              5e-07,
+              0,
+              0
+            ],
+            [
+              6e-07,
+              0,
+              0
+            ],
+            [
+              7e-07,
+              0,
+              0
+            ],
+            [
+              8e-07,
+              0,
+              0
+            ],
+            [
+              9e-07,
+              0,
+              0
+            ],
+            [
+              1e-06,
+              0,
+              0
+            ],
+            [
+              1.1e-06,
+              0,
+              0
+            ],
+            [
+              1.2e-06,
+              0,
+              0
+            ],
+            [
+              1.2999999999999998e-06,
+              0,
+              0
+            ],
+            [
+              1.4e-06,
+              0,
+              0
+            ],
+            [
+              1.5e-06,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-07
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1e-07_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ],
+            [
+              2e-07,
+              0,
+              0
+            ],
+            [
+              3e-07,
+              0,
+              0
+            ],
+            [
+              4e-07,
+              0,
+              0
+            ],
+            [
+              5e-07,
+              0,
+              0
+            ],
+            [
+              6e-07,
+              0,
+              0
+            ],
+            [
+              7e-07,
+              0,
+              0
+            ],
+            [
+              8e-07,
+              0,
+              0
+            ],
+            [
+              9e-07,
+              0,
+              0
+            ],
+            [
+              1e-06,
+              0,
+              0
+            ],
+            [
+              1.1e-06,
+              0,
+              0
+            ],
+            [
+              1.2e-06,
+              0,
+              0
+            ],
+            [
+              1.2999999999999998e-06,
+              0,
+              0
+            ],
+            [
+              1.4e-06,
+              0,
+              0
+            ],
+            [
+              1.5e-06,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 2e-07
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1e-07_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ],
+            [
+              2e-07,
+              0,
+              0
+            ],
+            [
+              3e-07,
+              0,
+              0
+            ],
+            [
+              4e-07,
+              0,
+              0
+            ],
+            [
+              5e-07,
+              0,
+              0
+            ],
+            [
+              6e-07,
+              0,
+              0
+            ],
+            [
+              7e-07,
+              0,
+              0
+            ],
+            [
+              8e-07,
+              0,
+              0
+            ],
+            [
+              9e-07,
+              0,
+              0
+            ],
+            [
+              1e-06,
+              0,
+              0
+            ],
+            [
+              1.1e-06,
+              0,
+              0
+            ],
+            [
+              1.2e-06,
+              0,
+              0
+            ],
+            [
+              1.2999999999999998e-06,
+              0,
+              0
+            ],
+            [
+              1.4e-06,
+              0,
+              0
+            ],
+            [
+              1.5e-06,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1e-07_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ],
+            [
+              2e-07,
+              0,
+              0
+            ],
+            [
+              3e-07,
+              0,
+              0
+            ],
+            [
+              4e-07,
+              0,
+              0
+            ],
+            [
+              5e-07,
+              0,
+              0
+            ],
+            [
+              6e-07,
+              0,
+              0
+            ],
+            [
+              7e-07,
+              0,
+              0
+            ],
+            [
+              8e-07,
+              0,
+              0
+            ],
+            [
+              9e-07,
+              0,
+              0
+            ],
+            [
+              1e-06,
+              0,
+              0
+            ],
+            [
+              1.1e-06,
+              0,
+              0
+            ],
+            [
+              1.2e-06,
+              0,
+              0
+            ],
+            [
+              1.2999999999999998e-06,
+              0,
+              0
+            ],
+            [
+              1.4e-06,
+              0,
+              0
+            ],
+            [
+              1.5e-06,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1e-07_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              0,
+              0
+            ],
+            [
+              2e-07,
+              0,
+              0
+            ],
+            [
+              3e-07,
+              0,
+              0
+            ],
+            [
+              4e-07,
+              0,
+              0
+            ],
+            [
+              5e-07,
+              0,
+              0
+            ],
+            [
+              6e-07,
+              0,
+              0
+            ],
+            [
+              7e-07,
+              0,
+              0
+            ],
+            [
+              8e-07,
+              0,
+              0
+            ],
+            [
+              9e-07,
+              0,
+              0
+            ],
+            [
+              1e-06,
+              0,
+              0
+            ],
+            [
+              1.1e-06,
+              0,
+              0
+            ],
+            [
+              1.2e-06,
+              0,
+              0
+            ],
+            [
+              1.2999999999999998e-06,
+              0,
+              0
+            ],
+            [
+              1.4e-06,
+              0,
+              0
+            ],
+            [
+              1.5e-06,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              2,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              4,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              0,
+              0
+            ],
+            [
+              8,
+              0,
+              0
+            ],
+            [
+              9,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              11,
+              0,
+              0
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              0,
+              0
+            ],
+            [
+              14,
+              0,
+              0
+            ],
+            [
+              15,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              2,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              4,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              0,
+              0
+            ],
+            [
+              8,
+              0,
+              0
+            ],
+            [
+              9,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              11,
+              0,
+              0
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              0,
+              0
+            ],
+            [
+              14,
+              0,
+              0
+            ],
+            [
+              15,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              2,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              4,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              0,
+              0
+            ],
+            [
+              8,
+              0,
+              0
+            ],
+            [
+              9,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              11,
+              0,
+              0
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              0,
+              0
+            ],
+            [
+              14,
+              0,
+              0
+            ],
+            [
+              15,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              2,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              4,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              0,
+              0
+            ],
+            [
+              8,
+              0,
+              0
+            ],
+            [
+              9,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              11,
+              0,
+              0
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              0,
+              0
+            ],
+            [
+              14,
+              0,
+              0
+            ],
+            [
+              15,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              2,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              4,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              0,
+              0
+            ],
+            [
+              8,
+              0,
+              0
+            ],
+            [
+              9,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              11,
+              0,
+              0
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              0,
+              0
+            ],
+            [
+              14,
+              0,
+              0
+            ],
+            [
+              15,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0.5
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              2,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              4,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              0,
+              0
+            ],
+            [
+              8,
+              0,
+              0
+            ],
+            [
+              9,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              11,
+              0,
+              0
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              0,
+              0
+            ],
+            [
+              14,
+              0,
+              0
+            ],
+            [
+              15,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              2,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              4,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              0,
+              0
+            ],
+            [
+              8,
+              0,
+              0
+            ],
+            [
+              9,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              11,
+              0,
+              0
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              0,
+              0
+            ],
+            [
+              14,
+              0,
+              0
+            ],
+            [
+              15,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 2
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              2,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              4,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              0,
+              0
+            ],
+            [
+              8,
+              0,
+              0
+            ],
+            [
+              9,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              11,
+              0,
+              0
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              0,
+              0
+            ],
+            [
+              14,
+              0,
+              0
+            ],
+            [
+              15,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              2,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              4,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              0,
+              0
+            ],
+            [
+              8,
+              0,
+              0
+            ],
+            [
+              9,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              11,
+              0,
+              0
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              0,
+              0
+            ],
+            [
+              14,
+              0,
+              0
+            ],
+            [
+              15,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              2,
+              0,
+              0
+            ],
+            [
+              3,
+              0,
+              0
+            ],
+            [
+              4,
+              0,
+              0
+            ],
+            [
+              5,
+              0,
+              0
+            ],
+            [
+              6,
+              0,
+              0
+            ],
+            [
+              7,
+              0,
+              0
+            ],
+            [
+              8,
+              0,
+              0
+            ],
+            [
+              9,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              11,
+              0,
+              0
+            ],
+            [
+              12,
+              0,
+              0
+            ],
+            [
+              13,
+              0,
+              0
+            ],
+            [
+              14,
+              0,
+              0
+            ],
+            [
+              15,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ],
+            [
+              2000000.0,
+              0,
+              0
+            ],
+            [
+              3000000.0,
+              0,
+              0
+            ],
+            [
+              4000000.0,
+              0,
+              0
+            ],
+            [
+              5000000.0,
+              0,
+              0
+            ],
+            [
+              6000000.0,
+              0,
+              0
+            ],
+            [
+              7000000.0,
+              0,
+              0
+            ],
+            [
+              8000000.0,
+              0,
+              0
+            ],
+            [
+              9000000.0,
+              0,
+              0
+            ],
+            [
+              10000000.0,
+              0,
+              0
+            ],
+            [
+              11000000.0,
+              0,
+              0
+            ],
+            [
+              12000000.0,
+              0,
+              0
+            ],
+            [
+              13000000.0,
+              0,
+              0
+            ],
+            [
+              14000000.0,
+              0,
+              0
+            ],
+            [
+              15000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ],
+            [
+              2000000.0,
+              0,
+              0
+            ],
+            [
+              3000000.0,
+              0,
+              0
+            ],
+            [
+              4000000.0,
+              0,
+              0
+            ],
+            [
+              5000000.0,
+              0,
+              0
+            ],
+            [
+              6000000.0,
+              0,
+              0
+            ],
+            [
+              7000000.0,
+              0,
+              0
+            ],
+            [
+              8000000.0,
+              0,
+              0
+            ],
+            [
+              9000000.0,
+              0,
+              0
+            ],
+            [
+              10000000.0,
+              0,
+              0
+            ],
+            [
+              11000000.0,
+              0,
+              0
+            ],
+            [
+              12000000.0,
+              0,
+              0
+            ],
+            [
+              13000000.0,
+              0,
+              0
+            ],
+            [
+              14000000.0,
+              0,
+              0
+            ],
+            [
+              15000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": -1
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ],
+            [
+              2000000.0,
+              0,
+              0
+            ],
+            [
+              3000000.0,
+              0,
+              0
+            ],
+            [
+              4000000.0,
+              0,
+              0
+            ],
+            [
+              5000000.0,
+              0,
+              0
+            ],
+            [
+              6000000.0,
+              0,
+              0
+            ],
+            [
+              7000000.0,
+              0,
+              0
+            ],
+            [
+              8000000.0,
+              0,
+              0
+            ],
+            [
+              9000000.0,
+              0,
+              0
+            ],
+            [
+              10000000.0,
+              0,
+              0
+            ],
+            [
+              11000000.0,
+              0,
+              0
+            ],
+            [
+              12000000.0,
+              0,
+              0
+            ],
+            [
+              13000000.0,
+              0,
+              0
+            ],
+            [
+              14000000.0,
+              0,
+              0
+            ],
+            [
+              15000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1000000.0_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ],
+            [
+              2000000.0,
+              0,
+              0
+            ],
+            [
+              3000000.0,
+              0,
+              0
+            ],
+            [
+              4000000.0,
+              0,
+              0
+            ],
+            [
+              5000000.0,
+              0,
+              0
+            ],
+            [
+              6000000.0,
+              0,
+              0
+            ],
+            [
+              7000000.0,
+              0,
+              0
+            ],
+            [
+              8000000.0,
+              0,
+              0
+            ],
+            [
+              9000000.0,
+              0,
+              0
+            ],
+            [
+              10000000.0,
+              0,
+              0
+            ],
+            [
+              11000000.0,
+              0,
+              0
+            ],
+            [
+              12000000.0,
+              0,
+              0
+            ],
+            [
+              13000000.0,
+              0,
+              0
+            ],
+            [
+              14000000.0,
+              0,
+              0
+            ],
+            [
+              15000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1e-12
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1000000.0_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ],
+            [
+              2000000.0,
+              0,
+              0
+            ],
+            [
+              3000000.0,
+              0,
+              0
+            ],
+            [
+              4000000.0,
+              0,
+              0
+            ],
+            [
+              5000000.0,
+              0,
+              0
+            ],
+            [
+              6000000.0,
+              0,
+              0
+            ],
+            [
+              7000000.0,
+              0,
+              0
+            ],
+            [
+              8000000.0,
+              0,
+              0
+            ],
+            [
+              9000000.0,
+              0,
+              0
+            ],
+            [
+              10000000.0,
+              0,
+              0
+            ],
+            [
+              11000000.0,
+              0,
+              0
+            ],
+            [
+              12000000.0,
+              0,
+              0
+            ],
+            [
+              13000000.0,
+              0,
+              0
+            ],
+            [
+              14000000.0,
+              0,
+              0
+            ],
+            [
+              15000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 500000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1000000.0_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ],
+            [
+              2000000.0,
+              0,
+              0
+            ],
+            [
+              3000000.0,
+              0,
+              0
+            ],
+            [
+              4000000.0,
+              0,
+              0
+            ],
+            [
+              5000000.0,
+              0,
+              0
+            ],
+            [
+              6000000.0,
+              0,
+              0
+            ],
+            [
+              7000000.0,
+              0,
+              0
+            ],
+            [
+              8000000.0,
+              0,
+              0
+            ],
+            [
+              9000000.0,
+              0,
+              0
+            ],
+            [
+              10000000.0,
+              0,
+              0
+            ],
+            [
+              11000000.0,
+              0,
+              0
+            ],
+            [
+              12000000.0,
+              0,
+              0
+            ],
+            [
+              13000000.0,
+              0,
+              0
+            ],
+            [
+              14000000.0,
+              0,
+              0
+            ],
+            [
+              15000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 1000000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1000000.0_6",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ],
+            [
+              2000000.0,
+              0,
+              0
+            ],
+            [
+              3000000.0,
+              0,
+              0
+            ],
+            [
+              4000000.0,
+              0,
+              0
+            ],
+            [
+              5000000.0,
+              0,
+              0
+            ],
+            [
+              6000000.0,
+              0,
+              0
+            ],
+            [
+              7000000.0,
+              0,
+              0
+            ],
+            [
+              8000000.0,
+              0,
+              0
+            ],
+            [
+              9000000.0,
+              0,
+              0
+            ],
+            [
+              10000000.0,
+              0,
+              0
+            ],
+            [
+              11000000.0,
+              0,
+              0
+            ],
+            [
+              12000000.0,
+              0,
+              0
+            ],
+            [
+              13000000.0,
+              0,
+              0
+            ],
+            [
+              14000000.0,
+              0,
+              0
+            ],
+            [
+              15000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": 2000000.0
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1000000.0_7",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ],
+            [
+              2000000.0,
+              0,
+              0
+            ],
+            [
+              3000000.0,
+              0,
+              0
+            ],
+            [
+              4000000.0,
+              0,
+              0
+            ],
+            [
+              5000000.0,
+              0,
+              0
+            ],
+            [
+              6000000.0,
+              0,
+              0
+            ],
+            [
+              7000000.0,
+              0,
+              0
+            ],
+            [
+              8000000.0,
+              0,
+              0
+            ],
+            [
+              9000000.0,
+              0,
+              0
+            ],
+            [
+              10000000.0,
+              0,
+              0
+            ],
+            [
+              11000000.0,
+              0,
+              0
+            ],
+            [
+              12000000.0,
+              0,
+              0
+            ],
+            [
+              13000000.0,
+              0,
+              0
+            ],
+            [
+              14000000.0,
+              0,
+              0
+            ],
+            [
+              15000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "nan"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1000000.0_8",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ],
+            [
+              2000000.0,
+              0,
+              0
+            ],
+            [
+              3000000.0,
+              0,
+              0
+            ],
+            [
+              4000000.0,
+              0,
+              0
+            ],
+            [
+              5000000.0,
+              0,
+              0
+            ],
+            [
+              6000000.0,
+              0,
+              0
+            ],
+            [
+              7000000.0,
+              0,
+              0
+            ],
+            [
+              8000000.0,
+              0,
+              0
+            ],
+            [
+              9000000.0,
+              0,
+              0
+            ],
+            [
+              10000000.0,
+              0,
+              0
+            ],
+            [
+              11000000.0,
+              0,
+              0
+            ],
+            [
+              12000000.0,
+              0,
+              0
+            ],
+            [
+              13000000.0,
+              0,
+              0
+            ],
+            [
+              14000000.0,
+              0,
+              0
+            ],
+            [
+              15000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_vertices_16_1000000.0_9",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate; SmRegion.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              0,
+              0
+            ],
+            [
+              2000000.0,
+              0,
+              0
+            ],
+            [
+              3000000.0,
+              0,
+              0
+            ],
+            [
+              4000000.0,
+              0,
+              0
+            ],
+            [
+              5000000.0,
+              0,
+              0
+            ],
+            [
+              6000000.0,
+              0,
+              0
+            ],
+            [
+              7000000.0,
+              0,
+              0
+            ],
+            [
+              8000000.0,
+              0,
+              0
+            ],
+            [
+              9000000.0,
+              0,
+              0
+            ],
+            [
+              10000000.0,
+              0,
+              0
+            ],
+            [
+              11000000.0,
+              0,
+              0
+            ],
+            [
+              12000000.0,
+              0,
+              0
+            ],
+            [
+              13000000.0,
+              0,
+              0
+            ],
+            [
+              14000000.0,
+              0,
+              0
+            ],
+            [
+              15000000.0,
+              0,
+              0
+            ]
+          ]
+        },
+        "degenerate": {
+          "tolerance": "-inf"
+        }
+      }
+    },
+    {
+      "name": "degenerate_wire_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_wire_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_wire_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "degenerate": {
+          "tolerance": 2
+        }
+      }
+    },
+    {
+      "name": "degenerate_face_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "degenerate": {
+          "tolerance": null
+        }
+      }
+    },
+    {
+      "name": "degenerate_face_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "degenerate": {
+          "tolerance": 0
+        }
+      }
+    },
+    {
+      "name": "degenerate_face_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:IsDegenerate/CalculateBoundingBox",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "degenerate": {
+          "tolerance": 2
+        }
+      }
+    }
+  ]
+}

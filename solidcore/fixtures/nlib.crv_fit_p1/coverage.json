@@ -1,0 +1,344 @@
+{
+ "cases": [
+  {
+   "name": "cov_knots_and_derivs_wrong_knot_count",
+   "upstream_ref": "source/SMLib/src/NL_CrvFit.cpp:3063 N_FitCrvKnotsAndDerivs m != n+p+1 -> NL_INP_ERR (coverage: nurbs/crv_fit/p1.rs:567)",
+   "inputs": {
+    "op": "derivs",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      2
+     ],
+     [
+      5,
+      1,
+      2
+     ]
+    ],
+    "u": [
+     0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     0.25,
+     0.5,
+     0.75,
+     1,
+     1,
+     1,
+     1
+    ],
+    "p": 3,
+    "ds": [
+     1,
+     0,
+     0
+    ],
+    "de": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cov_knots_and_derivs_too_many_knots",
+   "upstream_ref": "source/SMLib/src/NL_CrvFit.cpp:3063 N_FitCrvKnotsAndDerivs m != n+p+1 -> NL_INP_ERR (coverage: nurbs/crv_fit/p1.rs:567)",
+   "inputs": {
+    "op": "derivs",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      2
+     ],
+     [
+      5,
+      1,
+      2
+     ]
+    ],
+    "u": [
+     0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     0.2,
+     0.4,
+     0.5,
+     0.6,
+     0.8,
+     1,
+     1,
+     1,
+     1
+    ],
+    "p": 3,
+    "ds": [
+     1,
+     0,
+     0
+    ],
+    "de": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cov_knots_and_deriv_wrong_knot_count_whr1",
+   "upstream_ref": "source/SMLib/src/NL_CrvFit.cpp:3313 N_FitCrvKnotsAndDeriv m != n+p+1 -> NL_INP_ERR (coverage: nurbs/crv_fit/p1.rs:646)",
+   "inputs": {
+    "op": "deriv",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      2
+     ],
+     [
+      5,
+      1,
+      2
+     ]
+    ],
+    "u": [
+     0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     0.3,
+     0.6,
+     1,
+     1,
+     1,
+     1
+    ],
+    "p": 3,
+    "t": [
+     0,
+     1,
+     0
+    ],
+    "whr": 1
+   }
+  },
+  {
+   "name": "cov_knots_and_deriv_wrong_knot_count_whr2",
+   "upstream_ref": "source/SMLib/src/NL_CrvFit.cpp:3313 N_FitCrvKnotsAndDeriv m != n+p+1 -> NL_INP_ERR (coverage: nurbs/crv_fit/p1.rs:646)",
+   "inputs": {
+    "op": "deriv",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      2
+     ],
+     [
+      5,
+      1,
+      2
+     ]
+    ],
+    "u": [
+     0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     0.3,
+     0.6,
+     1,
+     1,
+     1,
+     1
+    ],
+    "p": 3,
+    "t": [
+     0,
+     1,
+     0
+    ],
+    "whr": 2
+   }
+  },
+  {
+   "name": "cov_approx_knots_n_below_degree",
+   "upstream_ref": "source/SMLib/src/NL_CrvFit.cpp:5461 N_FitCrvApproxKnots n < p -> NL_INP_ERR (coverage: nurbs/crv_fit/p1.rs:822)",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      2
+     ],
+     [
+      5,
+      1,
+      2
+     ]
+    ],
+    "u": [
+     0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     1,
+     1
+    ],
+    "n": 2,
+    "p": 3
+   }
+  }
+ ]
+}

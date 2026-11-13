@@ -1,7 +1,8 @@
 //! Equation curves (#8352): a fit point spline from formulas over the design's parameters.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::CurveKind;
 
 use crate::Session;

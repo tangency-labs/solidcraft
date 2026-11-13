@@ -5,13 +5,14 @@
 //! are never compared with each other. See tests/kernel-cases/README.md.
 
 use serde_json::{Value, json};
+use solidcraft_engine::geom::prelude::*;
 
 use crate::oracle::{ABS_FRAC, Checks, REL_TOL, totals, v3};
 use crate::{read_json, recipe};
 
-/// The kernel the cases run on: SMLib, the only one.
+/// The kernel the cases run on: solidcore, the only one.
 fn kernel() -> String {
-    "smlib".into()
+    "solidcore".into()
 }
 
 /// How many cases a chain of `base` recipes may go through (a ladder case builds on the one
@@ -62,10 +63,10 @@ const MESH_TOL: f64 = 0.01;
 /// A mesh's edges used by one triangle only (open) and by more than two (over-shared). Vertices
 /// closer than `weld` (mm) are one vertex: a mesh repeats a vertex for each face, and faces
 /// meeting at an edge may place it a rounding error apart.
-fn open_edges(positions: &[solidcraft_engine::geom::Vec3], triangles: &[[u32; 3]], weld: f64) -> (usize, usize) {
+fn open_edges(positions: &[solidcore_record::Vec3], triangles: &[[u32; 3]], weld: f64) -> (usize, usize) {
     use std::collections::HashMap;
     let weld = if weld.is_finite() && weld > 0.0 { weld } else { 1e-4 };
-    let cell = |p: &solidcraft_engine::geom::Vec3| [p.x, p.y, p.z].map(|x| (x / weld).floor() as i64);
+    let cell = |p: &solidcore_record::Vec3| [p.x, p.y, p.z].map(|x| (x / weld).floor() as i64);
     // Union-find over positions, joining each vertex with any within `weld` in the 27 cells round it.
     let mut parent: Vec<usize> = (0..positions.len()).collect();
     fn find(parent: &mut [usize], mut i: usize) -> usize {
@@ -125,7 +126,7 @@ const SEAM_ANGLE_DEG: f64 = 1.0;
 /// the patch's boundary, where its neighbours' own G1 seams end and no surface is G2 to both),
 /// with how many seams and stations clear there were. An error where the seams can't be measured.
 fn curvature_jumps(body: &solidcraft_engine::kernel::Body, near: [f64; 3], within: f64, clear: f64) -> Result<Value, String> {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let tol =
         solidcraft_engine::kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: SEAM_ANGLE_DEG, curvature_per_mm: 0.0, ..Default::default() };
     let report = solidcraft_engine::kernel::seam_diagnostics(body, &[], SEAM_SAMPLES, tol).map_err(|e| e.to_string())?;
@@ -182,7 +183,7 @@ fn continuity_seams(b: &solidcraft_engine::doc::ModelBody, edges: &Value) -> Res
     if let Some(points) = edges.as_array() {
         let picks = points
             .iter()
-            .map(|p| v3(p).map(|[x, y, z]| solidcraft_engine::kernel::EdgePick::Point(solidcraft_engine::geom::Vec3::new(x, y, z))))
+            .map(|p| v3(p).map(|[x, y, z]| solidcraft_engine::kernel::EdgePick::Point(solidcore_record::Vec3::new(x, y, z))))
             .collect::<Option<Vec<_>>>()
             .ok_or("continuity `edges` points must each be [x,y,z]")?;
         let picked = solidcraft_engine::kernel::pick_edges(&b.body, &picks).map_err(|e| e.to_string())?;
@@ -479,9 +480,9 @@ fn output_checks(c: &mut Checks, want: &Value, out: &str, results: &[Value], rel
 
 /// The word a `surface_types` check names a face's surface by, as the record holds it: an
 /// analytic kind, `ball_patch` (a corner's patch on a sphere), `bspline` (a B-spline or NURBS
-/// surface) or `revolution` (a revolved curve).
-fn surface_word(s: &solidcraft_engine::geom::brep::Surface) -> &'static str {
-    use solidcraft_engine::geom::brep::Surface as S;
+/// surface), `revolution` (a revolved curve) or `blend` (a round by its definition, on its net).
+fn surface_word(s: &solidcore_record::brep::Surface) -> &'static str {
+    use solidcore_record::brep::Surface as S;
     match s {
         S::Plane { .. } | S::PlaneThrough { .. } => "plane",
         S::Cylinder { .. } => "cylinder",
@@ -491,14 +492,16 @@ fn surface_word(s: &solidcraft_engine::geom::brep::Surface) -> &'static str {
         S::Torus { .. } => "torus",
         S::Spline { .. } | S::RationalSpline { .. } => "bspline",
         S::PlacedRevolution { .. } => "revolution",
+        S::Blend { .. } => "blend",
     }
 }
 
 /// A B-spline face's two directions as `[degree, spans]` (spans: the distinct knot intervals of
 /// the modelled range), the lower first, so a surface parameterised the other way round reads the
-/// same. `None` for a surface that is not a B-spline.
-fn spline_shape(s: &solidcraft_engine::geom::brep::Surface) -> Option<[[u64; 2]; 2]> {
-    use solidcraft_engine::geom::brep::Surface as S;
+/// same. `None` for a surface that is not a B-spline. A blend face is read on its net, its NURBS
+/// form.
+fn spline_shape(s: &solidcore_record::brep::Surface) -> Option<[[u64; 2]; 2]> {
+    use solidcore_record::brep::Surface as S;
     let (u, v, nu, nv) = match s {
         S::Spline { u_knots, v_knots, points } => (u_knots, v_knots, points.len(), points.first().map_or(0, Vec::len)),
         S::RationalSpline { u_knots, v_knots, homogeneous } => (u_knots, v_knots, homogeneous.len(), homogeneous.first().map_or(0, Vec::len)),
@@ -553,7 +556,7 @@ const CONSTRUCT_DIR_TOL: f64 = 1e-6;
 /// parallel to `normal` (either way) and which passes within `tol` of `through`. An axis or plane
 /// is graded as the line or plane it is, never by the origin it happens to keep.
 fn check_construction(s: &solidcraft_engine::Session, want: &Value, tol: f64, c: &mut Checks) {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     use solidcraft_engine::view::{construction_axes, construction_planes, construction_points};
     let Some(named) = want.as_object() else {
         c.push("construction", json!("`construction` must map names to {point} | {axis} | {plane}"), json!("an object"), false);
@@ -657,7 +660,34 @@ fn flat_pattern_checks(c: &mut Checks, want: &Value, results: &[Value], rel: f64
     }
 }
 
-fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft_engine::kernel::Validation) -> Value {
+/// [`check_case_in`], and with `export` the case's corpus entry written under it
+/// ([`crate::kernel_cases_export`]).
+fn check_case(
+    dir: &str,
+    dumps: Option<&std::path::Path>,
+    validation: solidcraft_engine::kernel::Validation,
+    export: Option<&std::path::Path>,
+) -> Value {
+    let mut capture = export.map(|_| crate::kernel_cases_export::Capture::default());
+    let out = check_case_in(dir, dumps, validation, capture.as_mut());
+    if let (Some(root), Some(capture)) = (export, capture)
+        && let Err(e) = crate::kernel_cases_export::write(root, dir, &out, capture)
+    {
+        let mut out = out;
+        out["export_error"] = json!(e);
+        return out;
+    }
+    out
+}
+
+/// One case run and graded. With `capture`, the kernel operations its commands make are traced
+/// and kept there with the bodies the case ends with.
+fn check_case_in(
+    dir: &str,
+    dumps: Option<&std::path::Path>,
+    validation: solidcraft_engine::kernel::Validation,
+    mut capture: Option<&mut crate::kernel_cases_export::Capture>,
+) -> Value {
     let (area, name) = case_name(dir);
     let mut out = json!({"case": name, "area": area, "kernel": kernel()});
     let want = match read_json(&format!("{dir}/expected.json")) {
@@ -692,33 +722,37 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft
             return out;
         }
     };
-    if !solidcraft_engine::kernel::smlib_built() {
-        out["status"] = json!("unsupported");
-        out["error"] = json!("this build has no SMLib: build solidcraft-cli with --features smlib");
-        return out;
-    }
     // `refused`: only a clean refusal is right; `solid_or_refused`: a clean refusal, or a result
     // graded as usual (where the geometry has no manifold answer, such as bodies touching along a
     // curve only).
     let outcome = want["outcome"].as_str().unwrap_or("solid");
     let refused = outcome == "refused";
     let may_refuse = refused || outcome == "solid_or_refused";
-    // The SMLib calls that fail in this case leave their inputs in its own folder.
+    // The kernel calls that fail in this case leave their inputs in its own folder.
     if let Some(root) = dumps {
         let folder = root.join(format!("{area}-{name}"));
-        if let Err(e) = std::fs::create_dir_all(&folder)
-            .map_err(|e| e.to_string())
-            .and_then(|()| solidcraft_engine::kernel::smlib_dump_dir(Some(&folder)).map_err(|e| e.to_string()))
-        {
+        if let Err(e) = std::fs::create_dir_all(&folder) {
             out["status"] = json!("fail");
             out["error"] = json!(format!("--dumps: {}: {e}", folder.display()));
             return out;
         }
+        solidcraft_engine::kernel::smlib_dump_dir(Some(&folder));
     }
     let mut s = solidcraft_engine::Session::default();
     s.set_validation(validation);
     let clock = std::time::Instant::now();
+    if capture.is_some() {
+        solidcraft_engine::kernel::smlib_trace::start();
+    }
     let ran = s.run_script(&commands);
+    // The trace ends with the commands: grading reads the bodies through the kernel too.
+    if let Some(c) = &mut capture {
+        c.events = solidcraft_engine::kernel::smlib_trace::finish();
+        c.ran = Some(match &ran {
+            Ok(_) => s.world_state().map(|w| w.bodies.iter().map(|b| (b.name.clone(), b.body.record().clone())).collect()).map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        });
+    }
     // The commands' own time, without process start or grading: the ladder's timing golden.
     out["seconds"] = json!(clock.elapsed().as_secs_f64());
     let answers = match (ran, may_refuse) {
@@ -783,7 +817,12 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft
         let record = b.body.record();
         for f in &record.faces {
             kinds.insert(surface_word(&f.surface));
-            spline_faces.extend(spline_shape(&f.surface));
+            // A blend face's net is its NURBS form: the spline check reads its degrees there.
+            let net = match &f.surface {
+                solidcore_record::brep::Surface::Blend { .. } => f.nurbs.as_ref(),
+                _ => None,
+            };
+            spline_faces.extend(spline_shape(net.unwrap_or(&f.surface)));
         }
         boundary += record.edges.iter().filter(|e| e.uses.len() == 1).count() as u64;
     }
@@ -983,9 +1022,15 @@ pub fn run(args: &[String]) -> Result<(), String> {
             .ok_or_else(|| format!("kernel-cases: --validation= must be each_step, each_feature or off, not `{m}`"))?,
         None => solidcraft_engine::kernel::Validation::default(),
     };
-    let results: Vec<Value> = dirs.iter().map(|d| check_case(d, dumps.as_deref(), validation)).collect();
+    // `--export=DIR`: each case's kernel operations, their input records and its expected values
+    // go to DIR/<area>/<case>.json, the corpus for solidcore's rig.
+    let export = args.iter().find_map(|a| a.strip_prefix("--export=")).map(std::path::PathBuf::from);
+    if export.as_ref().is_some_and(|d| d.as_os_str().is_empty()) {
+        return Err("kernel-cases: --export= needs a folder".into());
+    }
+    let results: Vec<Value> = dirs.iter().map(|d| check_case(d, dumps.as_deref(), validation, export.as_deref())).collect();
     if dumps.is_some() {
-        solidcraft_engine::kernel::smlib_dump_dir(None).map_err(|e| format!("kernel-cases: --dumps: {e}"))?;
+        solidcraft_engine::kernel::smlib_dump_dir(None);
     }
     report(args, &results);
     let bad = results.iter().filter(|r| matches!(r["status"].as_str(), Some("fail" | "crash"))).count();
@@ -1034,7 +1079,7 @@ mod tests {
     /// either order of directions, spans only where given, and every face must be accounted for.
     #[test]
     fn splines_match_degrees_and_spans_in_either_order() {
-        use solidcraft_engine::geom::brep::Surface;
+        use solidcore_record::brep::Surface;
         let knots = |p: usize, spans: usize| -> Vec<f64> {
             let mut k = vec![0.0; p + 1];
             k.extend((1..spans).map(|i| i as f64));

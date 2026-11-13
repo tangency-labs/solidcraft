@@ -3,7 +3,8 @@
 //! (distance from the centre equals the radius) is a double root there, so it converged to only
 //! sqrt(residual) of tangent and lost a row of rank when the start already was tangent.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::tests::{Lcg, v};
 use crate::*;

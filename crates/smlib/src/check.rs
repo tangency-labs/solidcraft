@@ -1,7 +1,7 @@
 //! SMLib's own validity check: `SmBrep::ValidatePointers`, then `AssertValid` over the whole
 //! topology graph. Tests run it on every SMLib result and every import.
 
-use crate::{Brep, Error, Result, error, ffi};
+use crate::{Brep, Result, core};
 
 /// How many of SMLib's tests to run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,24 +53,36 @@ impl Brep {
     /// Runs SMLib's validity check at `level`. A body that fails it is still `Ok`, with the
     /// failures in the report; `Err` means the check could not run.
     pub fn check(&self, level: CheckLevel) -> Result<CheckReport> {
-        let mut buf = vec![0u8; 1 << 16];
-        let (len, failures) = match ffi::check::check(&self.0, level as i32, &mut buf) {
-            Ok(r) => r,
-            // Too long for the first buffer: once more with the length it asked for.
-            Err((ffi::ERR_BUFFER, needed)) => {
-                buf = vec![0u8; needed.saturating_add(1)];
-                ffi::check::check(&self.0, level as i32, &mut buf).map_err(|(s, _)| error(s))?
-            }
-            Err((s, _)) => return Err(error(s)),
-        };
-        let text = String::from_utf8_lossy(buf.get(..len).ok_or(Error::Argument)?).into_owned();
-        Ok(CheckReport { failures: usize::try_from(failures).unwrap_or(0), text })
+        core::check(self.core(), level)
+    }
+
+    /// [`Brep::check`] of a body nobody else reads, which it takes: the token over this thread's
+    /// work ([`crate::stop`]) stops it ([`crate::Error::Cancelled`]). A check left part way may
+    /// leave the body's caches half-built, so it runs only on a body it consumes.
+    pub fn check_owned(self, level: CheckLevel) -> Result<CheckReport> {
+        core::check_with(self.core(), level, true)
     }
 }
 
-#[cfg(all(test, feature = "native"))]
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stopped token stops the check of a body the check owns, and never the check of a body
+    /// others read (solidcore#3247): stopped part way, it could leave that body's caches half-built.
+    #[test]
+    fn a_stopped_token_stops_an_owned_check_and_never_a_shared_one() {
+        let b = Brep::make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+        let mine = b.try_clone().unwrap();
+        let stop = crate::stop::Stop::new();
+        stop.stop();
+        let shared = stop.within(|| b.check(CheckLevel::All));
+        assert!(shared.is_ok_and(|r| r.is_valid()));
+        let owned = stop.within(|| mine.check_owned(CheckLevel::All));
+        assert!(matches!(owned, Err(crate::Error::Cancelled("check"))), "{owned:?}");
+        let mine = b.try_clone().unwrap();
+        assert!(mine.check_owned(CheckLevel::All).is_ok_and(|r| r.is_valid()), "no token, no stop");
+    }
 
     #[test]
     fn a_box_is_valid_at_every_level() {

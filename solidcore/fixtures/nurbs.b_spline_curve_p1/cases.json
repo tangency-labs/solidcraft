@@ -1,0 +1,6324 @@
+{
+ "cases": [
+  {
+   "name": "DropCurveCurve_state",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "DropCurveCurve_eval0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_eval1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.37,
+    "nd": 3,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_eval2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.5,
+    "nd": 2,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_eval3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 1.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "knots"
+   }
+  },
+  {
+   "name": "DropCurveCurve_polygon",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "control_polygon"
+   }
+  },
+  {
+   "name": "DropCurveCurve_cpts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "data",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "control_points"
+   }
+  },
+  {
+   "name": "DropCurveCurve_ends",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "ends"
+   }
+  },
+  {
+   "name": "DropCurveCurve_counts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "copy",
+     "dim": 3,
+     "oob": true,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "counts"
+   }
+  },
+  {
+   "name": "DropCurveCurve_greville",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "greville",
+    "index": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_continuities",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "continuities",
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_reparam",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "edit_param",
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "notify": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_extra",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_extra_borrowed",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_transform",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      -1,
+      0,
+      0
+     ]
+    ],
+    "scale": [
+     2,
+     0.5,
+     1
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_mirror",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "mirror",
+    "frame": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0.6,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_projection_parallel",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 0,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     0.1,
+     0.2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_projection_perspective",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 1,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     3,
+     4,
+     50
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "DropCurveCurve_to2d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "convert2d"
+   }
+  },
+  {
+   "name": "DropCurveCurve_eq_self_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "gw_copy",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_state",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "data",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "closedCurve_eval0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "closedCurve_eval1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.37,
+    "nd": 3,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "closedCurve_eval2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.5,
+    "nd": 2,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "closedCurve_eval3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 1.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "closedCurve_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "knots"
+   }
+  },
+  {
+   "name": "closedCurve_polygon",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "control_polygon"
+   }
+  },
+  {
+   "name": "closedCurve_cpts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "data",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "control_points"
+   }
+  },
+  {
+   "name": "closedCurve_ends",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "ends"
+   }
+  },
+  {
+   "name": "closedCurve_counts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "copy",
+     "dim": 3,
+     "oob": true,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "counts"
+   }
+  },
+  {
+   "name": "closedCurve_greville",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "greville",
+    "index": 1
+   }
+  },
+  {
+   "name": "closedCurve_continuities",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "continuities",
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "closedCurve_reparam",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "edit_param",
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "notify": true
+   }
+  },
+  {
+   "name": "closedCurve_remove_extra",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "closedCurve_remove_extra_borrowed",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_transform",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      -1,
+      0,
+      0
+     ]
+    ],
+    "scale": [
+     2,
+     0.5,
+     1
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_mirror",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "mirror",
+    "frame": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0.6,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_projection_parallel",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 0,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     0.1,
+     0.2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_projection_perspective",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 1,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     3,
+     4,
+     50
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "closedCurve_to2d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "convert2d"
+   }
+  },
+  {
+   "name": "closedCurve_eq_self_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "gw_copy",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_state",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "gw_copy",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "crvToOffset_eval0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvToOffset_eval1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.37,
+    "nd": 3,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvToOffset_eval2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.5,
+    "nd": 2,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvToOffset_eval3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 1.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvToOffset_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "knots"
+   }
+  },
+  {
+   "name": "crvToOffset_polygon",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "control_polygon"
+   }
+  },
+  {
+   "name": "crvToOffset_cpts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "data",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "control_points"
+   }
+  },
+  {
+   "name": "crvToOffset_ends",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "ends"
+   }
+  },
+  {
+   "name": "crvToOffset_counts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "copy",
+     "dim": 3,
+     "oob": true,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "counts"
+   }
+  },
+  {
+   "name": "crvToOffset_greville",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "greville",
+    "index": 1
+   }
+  },
+  {
+   "name": "crvToOffset_continuities",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "continuities",
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "crvToOffset_reparam",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "edit_param",
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "notify": true
+   }
+  },
+  {
+   "name": "crvToOffset_remove_extra",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvToOffset_remove_extra_borrowed",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvToOffset_transform",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      -1,
+      0,
+      0
+     ]
+    ],
+    "scale": [
+     2,
+     0.5,
+     1
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_mirror",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "mirror",
+    "frame": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0.6,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_projection_parallel",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 0,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     0.1,
+     0.2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_projection_perspective",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 1,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     3,
+     4,
+     50
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "crvToOffset_to2d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "convert2d"
+   }
+  },
+  {
+   "name": "crvToOffset_eq_self_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "gw_copy",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_state",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "copy",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "crvTrim1_eval0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvTrim1_eval1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.37,
+    "nd": 3,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvTrim1_eval2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.5,
+    "nd": 2,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvTrim1_eval3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 1.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvTrim1_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "knots"
+   }
+  },
+  {
+   "name": "crvTrim1_polygon",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "control_polygon"
+   }
+  },
+  {
+   "name": "crvTrim1_cpts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "data",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "control_points"
+   }
+  },
+  {
+   "name": "crvTrim1_ends",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "ends"
+   }
+  },
+  {
+   "name": "crvTrim1_counts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "copy",
+     "dim": 3,
+     "oob": true,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "counts"
+   }
+  },
+  {
+   "name": "crvTrim1_greville",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "greville",
+    "index": 1
+   }
+  },
+  {
+   "name": "crvTrim1_continuities",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "continuities",
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "crvTrim1_reparam",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "edit_param",
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "notify": true
+   }
+  },
+  {
+   "name": "crvTrim1_remove_extra",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim1_remove_extra_borrowed",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_transform",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      -1,
+      0,
+      0
+     ]
+    ],
+    "scale": [
+     2,
+     0.5,
+     1
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_mirror",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "mirror",
+    "frame": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0.6,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_projection_parallel",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 0,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     0.1,
+     0.2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_projection_perspective",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 1,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     3,
+     4,
+     50
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "crvTrim1_to2d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "convert2d"
+   }
+  },
+  {
+   "name": "crvTrim1_eq_self_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "gw_copy",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_state",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "crvTrim2_eval0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvTrim2_eval1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.37,
+    "nd": 3,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvTrim2_eval2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.5,
+    "nd": 2,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvTrim2_eval3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 1.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "crvTrim2_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "knots"
+   }
+  },
+  {
+   "name": "crvTrim2_polygon",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "control_polygon"
+   }
+  },
+  {
+   "name": "crvTrim2_cpts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "data",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "control_points"
+   }
+  },
+  {
+   "name": "crvTrim2_ends",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "ends"
+   }
+  },
+  {
+   "name": "crvTrim2_counts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "copy",
+     "dim": 3,
+     "oob": true,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "counts"
+   }
+  },
+  {
+   "name": "crvTrim2_greville",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "greville",
+    "index": 1
+   }
+  },
+  {
+   "name": "crvTrim2_continuities",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "continuities",
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "crvTrim2_reparam",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "edit_param",
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "notify": true
+   }
+  },
+  {
+   "name": "crvTrim2_remove_extra",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim2_remove_extra_borrowed",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_transform",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      -1,
+      0,
+      0
+     ]
+    ],
+    "scale": [
+     2,
+     0.5,
+     1
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_mirror",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "mirror",
+    "frame": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0.6,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_projection_parallel",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 0,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     0.1,
+     0.2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_projection_perspective",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 1,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     3,
+     4,
+     50
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "crvTrim2_to2d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "convert2d"
+   }
+  },
+  {
+   "name": "crvTrim2_eq_self_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "gw_copy",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "curve0_state",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "curve0_eval0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "curve0_eval1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.37,
+    "nd": 3,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "curve0_eval2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 0.5,
+    "nd": 2,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "curve0_eval3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "evaluate",
+    "t": 1.0,
+    "nd": 1,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "curve0_knots",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "knots"
+   }
+  },
+  {
+   "name": "curve0_polygon",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "control_polygon"
+   }
+  },
+  {
+   "name": "curve0_cpts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "data",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "control_points"
+   }
+  },
+  {
+   "name": "curve0_ends",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "ends"
+   }
+  },
+  {
+   "name": "curve0_counts",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "copy",
+     "dim": 3,
+     "oob": true,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "counts"
+   }
+  },
+  {
+   "name": "curve0_greville",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "greville",
+    "index": 1
+   }
+  },
+  {
+   "name": "curve0_continuities",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "continuities",
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "curve0_reparam",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "edit_param",
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "notify": true
+   }
+  },
+  {
+   "name": "curve0_remove_extra",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "curve0_remove_extra_borrowed",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "remove_extra",
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "curve0_transform",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      -1,
+      0,
+      0
+     ]
+    ],
+    "scale": [
+     2,
+     0.5,
+     1
+    ]
+   }
+  },
+  {
+   "name": "curve0_mirror",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "mirror",
+    "frame": [
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0.6,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "curve0_projection_parallel",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 0,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     0.1,
+     0.2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "curve0_projection_perspective",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "projection",
+    "kind": 1,
+    "point": [
+     0,
+     0,
+     -1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     3,
+     4,
+     50
+    ]
+   }
+  },
+  {
+   "name": "curve0_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "curve0_to2d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "convert2d"
+   }
+  },
+  {
+   "name": "curve0_eq_self_copy",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; my_test_surface_closest_point / my_test_drop_point / my_test_reversed_line_join reach SmBSplineCurve)",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "gw_copy",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "smc": {
+       "$upstream_file": "curve0.smc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "sweep_line_468",
+   "upstream_ref": "upstream/tests/prog_test/src/smSweepTest.cpp:468",
+   "inputs": {
+    "op": "line",
+    "dim": 3,
+    "p0": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     0,
+     5,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sweep_line_472",
+   "upstream_ref": "upstream/tests/prog_test/src/smSweepTest.cpp:472",
+   "inputs": {
+    "op": "line",
+    "dim": 3,
+    "p0": [
+     5,
+     5,
+     0
+    ],
+    "p1": [
+     0,
+     5,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sweep_line_490",
+   "upstream_ref": "upstream/tests/prog_test/src/smSweepTest.cpp:490",
+   "inputs": {
+    "op": "line",
+    "dim": 3,
+    "p0": [
+     5,
+     0,
+     0
+    ],
+    "p1": [
+     5,
+     5,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sweep_line_494",
+   "upstream_ref": "upstream/tests/prog_test/src/smSweepTest.cpp:494",
+   "inputs": {
+    "op": "line",
+    "dim": 3,
+    "p0": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sweep_line_498",
+   "upstream_ref": "upstream/tests/prog_test/src/smSweepTest.cpp:498",
+   "inputs": {
+    "op": "line",
+    "dim": 3,
+    "p0": [
+     2,
+     1,
+     0
+    ],
+    "p1": [
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sweep_line_502",
+   "upstream_ref": "upstream/tests/prog_test/src/smSweepTest.cpp:502",
+   "inputs": {
+    "op": "line",
+    "dim": 3,
+    "p0": [
+     2,
+     1,
+     0
+    ],
+    "p1": [
+     2,
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sweep_line_506",
+   "upstream_ref": "upstream/tests/prog_test/src/smSweepTest.cpp:506",
+   "inputs": {
+    "op": "line",
+    "dim": 3,
+    "p0": [
+     1,
+     1,
+     0
+    ],
+    "p1": [
+     2,
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sweep_circle_479",
+   "upstream_ref": "upstream/tests/prog_test/src/smSweepTest.cpp:479",
+   "inputs": {
+    "op": "circle",
+    "dim": 3,
+    "frame": [
+     [
+      3,
+      3,
+      0
+     ],
+     [
+      -1,
+      0,
+      0
+     ],
+     [
+      0,
+      -1,
+      0
+     ]
+    ],
+    "r": 0.5,
+    "a0": 0.0,
+    "a1": 360.0,
+    "quintic": false
+   }
+  },
+  {
+   "name": "sweep_circle_486",
+   "upstream_ref": "upstream/tests/prog_test/src/smSweepTest.cpp:486",
+   "inputs": {
+    "op": "circle",
+    "dim": 3,
+    "frame": [
+     [
+      4,
+      4,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      -1,
+      0
+     ]
+    ],
+    "r": 0.5,
+    "a0": 0.0,
+    "a1": 360.0,
+    "quintic": false
+   }
+  },
+  {
+   "name": "line_same_point",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "line",
+    "dim": 3,
+    "p0": [
+     1,
+     2,
+     3
+    ],
+    "p1": [
+     1,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "line_near_same_point",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "line",
+    "dim": 3,
+    "p0": [
+     1,
+     2,
+     3
+    ],
+    "p1": [
+     1,
+     2,
+     3.0000000000001
+    ]
+   }
+  },
+  {
+   "name": "line_dim1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "line",
+    "dim": 1,
+    "p0": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_dim2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "line",
+    "dim": 2,
+    "p0": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_quintic_2d",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "circle",
+    "dim": 2,
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "r": 2.0,
+    "a0": -90.0,
+    "a1": 270.0,
+    "quintic": true
+   }
+  },
+  {
+   "name": "circle_radius_tiny",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "circle",
+    "dim": 3,
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "r": 1e-12,
+    "a0": 0.0,
+    "a1": 90.0,
+    "quintic": false
+   }
+  },
+  {
+   "name": "circle_angle_361",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "circle",
+    "dim": 3,
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "r": 1.0,
+    "a0": 0.0,
+    "a1": 361.0,
+    "quintic": false
+   }
+  },
+  {
+   "name": "circle_start_after_end",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "circle",
+    "dim": 3,
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "r": 1.0,
+    "a0": 300.0,
+    "a1": 10.0,
+    "quintic": false
+   }
+  },
+  {
+   "name": "circle_bad_frame",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "circle",
+    "dim": 3,
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ]
+    ],
+    "r": 1.0,
+    "a0": 0.0,
+    "a1": 90.0,
+    "quintic": false
+   }
+  },
+  {
+   "name": "arc_quarter",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "arc",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     1,
+     0,
+     0
+    ],
+    "p2": [
+     0,
+     1,
+     0
+    ],
+    "quintic": false
+   }
+  },
+  {
+   "name": "arc_cw",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "arc",
+    "center": [
+     1,
+     1,
+     1
+    ],
+    "p1": [
+     2,
+     1,
+     1
+    ],
+    "p2": [
+     1,
+     0,
+     1
+    ],
+    "quintic": true
+   }
+  },
+  {
+   "name": "arc_half",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "arc",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     1,
+     0,
+     0
+    ],
+    "p2": [
+     -1,
+     0,
+     0
+    ],
+    "quintic": false
+   }
+  },
+  {
+   "name": "arc_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "arc",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     1,
+     0,
+     0
+    ],
+    "p2": [
+     1,
+     0,
+     0
+    ],
+    "quintic": false
+   }
+  },
+  {
+   "name": "arc_radii_differ",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "arc",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     1,
+     0,
+     0
+    ],
+    "p2": [
+     0,
+     2,
+     0
+    ],
+    "quintic": false
+   }
+  },
+  {
+   "name": "degenerate_3d",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "degenerate",
+    "dim": 3,
+    "p": [
+     1,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "degenerate_2d",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "degenerate",
+    "dim": 2,
+    "p": [
+     1,
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "degenerate_dim4",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "degenerate",
+    "dim": 4,
+    "p": [
+     1,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "canonical_cubic",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "canonical",
+    "dim": 3,
+    "deg": 3,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      -1,
+      2
+     ]
+    ],
+    "form": 6,
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "mults": [
+     4,
+     1,
+     4
+    ],
+    "kt": 1
+   }
+  },
+  {
+   "name": "canonical_rational_trim",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "canonical",
+    "dim": 3,
+    "deg": 3,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      -1,
+      2
+     ]
+    ],
+    "form": 6,
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "mults": [
+     4,
+     1,
+     4
+    ],
+    "kt": 1,
+    "weights": [
+     1,
+     2,
+     0.5,
+     1,
+     1
+    ],
+    "trim": [
+     0.2,
+     0.8
+    ]
+   }
+  },
+  {
+   "name": "canonical_unit_weights",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "canonical",
+    "dim": 3,
+    "deg": 3,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      -1,
+      2
+     ]
+    ],
+    "form": 1,
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "mults": [
+     4,
+     1,
+     4
+    ],
+    "kt": 3,
+    "weights": [
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "canonical_deg33",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "canonical",
+    "dim": 3,
+    "deg": 33,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      -1,
+      2
+     ]
+    ],
+    "form": 6,
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "mults": [
+     4,
+     1,
+     4
+    ],
+    "kt": 1
+   }
+  },
+  {
+   "name": "canonical_dim0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "canonical",
+    "dim": 0,
+    "deg": 3,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      -1,
+      2
+     ]
+    ],
+    "form": 6,
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "mults": [
+     4,
+     1,
+     4
+    ],
+    "kt": 1
+   }
+  },
+  {
+   "name": "canonical_dim1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "canonical",
+    "dim": 1,
+    "deg": 3,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      -1,
+      2
+     ]
+    ],
+    "form": 6,
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "mults": [
+     4,
+     1,
+     4
+    ],
+    "kt": 1
+   }
+  },
+  {
+   "name": "canonical_weight_count",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "canonical",
+    "dim": 3,
+    "deg": 3,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      -1,
+      2
+     ]
+    ],
+    "form": 6,
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "mults": [
+     4,
+     1,
+     4
+    ],
+    "kt": 1,
+    "weights": [
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "canonical_negative_weight",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "canonical",
+    "dim": 3,
+    "deg": 3,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      -1,
+      2
+     ]
+    ],
+    "form": 6,
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "mults": [
+     4,
+     1,
+     4
+    ],
+    "kt": 1,
+    "weights": [
+     1,
+     -1,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "canonical_trim_outside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "canonical",
+    "dim": 3,
+    "deg": 3,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      -1,
+      2
+     ]
+    ],
+    "form": 6,
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "mults": [
+     4,
+     1,
+     4
+    ],
+    "kt": 1,
+    "trim": [
+     -1.0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "canonical_2d_points_dim2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "canonical",
+    "dim": 2,
+    "deg": 3,
+    "cps": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      2,
+      0
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      -1,
+      0
+     ]
+    ],
+    "form": 6,
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "mults": [
+     4,
+     1,
+     4
+    ],
+    "kt": 1
+   }
+  },
+  {
+   "name": "fair_basic",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "fair",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      4,
+      0,
+      0
+     ]
+    ],
+    "tans": [
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      1,
+      -1,
+      0
+     ]
+    ],
+    "hi": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "prevent": true
+   }
+  },
+  {
+   "name": "fair_four_hi",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "fair",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      4,
+      1,
+      0
+     ]
+    ],
+    "tans": [
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      2,
+      -1,
+      1
+     ]
+    ],
+    "hi": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "prevent": false
+   }
+  },
+  {
+   "name": "fair_parallel_tangents",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "fair",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      4,
+      0,
+      0
+     ]
+    ],
+    "tans": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ]
+    ],
+    "prevent": true
+   }
+  },
+  {
+   "name": "fair_zero_tangent",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "fair",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      4,
+      0,
+      0
+     ]
+    ],
+    "tans": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ]
+    ],
+    "prevent": false
+   }
+  },
+  {
+   "name": "fair_three_points",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "fair",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      5,
+      5,
+      5
+     ]
+    ],
+    "tans": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ]
+    ],
+    "prevent": false
+   }
+  },
+  {
+   "name": "fair_s_curve",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "fair",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      4,
+      0,
+      0
+     ]
+    ],
+    "tans": [
+     [
+      1,
+      3,
+      0
+     ],
+     [
+      1,
+      3,
+      0
+     ]
+    ],
+    "hi": [],
+    "prevent": true
+   }
+  },
+  {
+   "name": "empty_state_174",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "state"
+   }
+  },
+  {
+   "name": "empty_intervals_175",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "intervals"
+   }
+  },
+  {
+   "name": "empty_edit_param_176",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "edit_param",
+    "ivl": [
+     0,
+     0
+    ],
+    "notify": true
+   }
+  },
+  {
+   "name": "empty_edit_param_177",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "edit_param",
+    "ivl": [
+     0,
+     1
+    ],
+    "notify": true
+   }
+  },
+  {
+   "name": "empty_remove_extra_178",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "remove_extra",
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "empty_set_from_gw_179",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "set_from_gw",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       2,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       5,
+       -1,
+       2,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "empty_set_from_gw_180",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "set_from_gw"
+   }
+  },
+  {
+   "name": "empty_eq_181",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    }
+   }
+  },
+  {
+   "name": "empty_is_kind_of_182",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "is_kind_of",
+    "t": 14033
+   }
+  },
+  {
+   "name": "empty_type_183",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "type"
+   }
+  },
+  {
+   "name": "empty_make_nurb_184",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "make_nurb"
+   }
+  },
+  {
+   "name": "empty_copy_185",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "empty",
+     "dim": 3,
+     "oob": false
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "zero_tangent_start_nd1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "evaluate",
+    "t": 0.0,
+    "nd": 1,
+    "from_left": false,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "zero_tangent_start_exact",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "evaluate",
+    "t": 0.0,
+    "nd": 2,
+    "from_left": false,
+    "non_zero": false
+   }
+  },
+  {
+   "name": "zero_tangent_start_nd3",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "evaluate",
+    "t": 0.0,
+    "nd": 3,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "eval_oob_clamped",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "evaluate",
+    "t": 1.5,
+    "nd": 2,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "eval_oob_enabled",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": true,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "evaluate",
+    "t": 1.5,
+    "nd": 2,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "eval_point_oob_enabled",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": true,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "evaluate_point",
+    "t": -0.25
+   }
+  },
+  {
+   "name": "eval_knot_left",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "evaluate",
+    "t": 0.5,
+    "nd": 3,
+    "from_left": true,
+    "non_zero": false
+   }
+  },
+  {
+   "name": "eval_knot_right",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "evaluate",
+    "t": 0.5,
+    "nd": 3,
+    "from_left": false,
+    "non_zero": false
+   }
+  },
+  {
+   "name": "eval_nd8",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "evaluate",
+    "t": 0.25,
+    "nd": 8,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "eval_rational_2d",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        0,
+        1.7976931348623157e+308,
+        1
+       ],
+       [
+        1,
+        1,
+        1.7976931348623157e+308,
+        0.7071067811865476
+       ],
+       [
+        0,
+        1,
+        1.7976931348623157e+308,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "evaluate",
+    "t": 0.3,
+    "nd": 2,
+    "from_left": true,
+    "non_zero": true
+   }
+  },
+  {
+   "name": "greville_beyond",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "greville",
+    "index": 7
+   }
+  },
+  {
+   "name": "edit_end_weight_nonrational",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "edit_end",
+    "p": [
+     9,
+     9,
+     9
+    ],
+    "start": true,
+    "w": 2.0
+   }
+  },
+  {
+   "name": "edit_end_rational_project",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        0,
+        1.7976931348623157e+308,
+        1
+       ],
+       [
+        1,
+        1,
+        1.7976931348623157e+308,
+        0.7071067811865476
+       ],
+       [
+        0,
+        1,
+        1.7976931348623157e+308,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "edit_end",
+    "p": [
+     2,
+     0,
+     5
+    ],
+    "start": true
+   }
+  },
+  {
+   "name": "edit_end_rational_weight",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        0,
+        1.7976931348623157e+308,
+        1
+       ],
+       [
+        1,
+        1,
+        1.7976931348623157e+308,
+        0.7071067811865476
+       ],
+       [
+        0,
+        1,
+        1.7976931348623157e+308,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "edit_end",
+    "p": [
+     0,
+     3,
+     5
+    ],
+    "start": false,
+    "w": 0.5
+   }
+  },
+  {
+   "name": "edit_param_same",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "edit_param",
+    "ivl": [
+     1e-13,
+     1.0
+    ],
+    "notify": false
+   }
+  },
+  {
+   "name": "edit_param_reversed",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "edit_param",
+    "ivl": [
+     4.0,
+     2.0
+    ],
+    "notify": true
+   }
+  },
+  {
+   "name": "set_from_gw_null_borrowed",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_borrowed",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "set_from_gw"
+   }
+  },
+  {
+   "name": "set_from_gw_null_owned",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "set_from_gw"
+   }
+  },
+  {
+   "name": "transform_identity",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ]
+    ],
+    "scale": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "transform_2d_curve",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        1,
+        0,
+        1.7976931348623157e+308,
+        1
+       ],
+       [
+        1,
+        1,
+        1.7976931348623157e+308,
+        0.7071067811865476
+       ],
+       [
+        0,
+        1,
+        1.7976931348623157e+308,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "transform",
+    "frame": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      -1,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "projection_rotation",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "projection",
+    "kind": 2,
+    "point": [
+     0,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "projection_dir_in_plane",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "projection",
+    "kind": 0,
+    "point": [
+     0,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "projection_eye_on_plane",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "projection",
+    "kind": 1,
+    "point": [
+     0,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "dir": [
+     1,
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "projection_zero_normal",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "projection",
+    "kind": 0,
+    "point": [
+     0,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1e-12
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "continuities_bezier",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "continuities",
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "is_kind_of_other",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "is_kind_of",
+    "t": 14000
+   }
+  },
+  {
+   "name": "tessellate",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "tessellate",
+    "ivl": [
+     0,
+     1
+    ],
+    "chord": 0.05,
+    "angle": 10.0,
+    "min_segments": 4
+   }
+  },
+  {
+   "name": "eq_dim_differs",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "fast_owned",
+     "dim": 2,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "eq_tiny_change",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "eq",
+    "other": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        1e-14,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "fixup_close_knots",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "this": {
+     "ctor": "fast_owned",
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        2,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -1,
+        2,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       0.50000000001,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "fixup",
+    "tol": 1e-08
+   }
+  }
+ ]
+}

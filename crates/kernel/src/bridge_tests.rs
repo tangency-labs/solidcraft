@@ -80,7 +80,7 @@ fn valley_between_cylinders(count: usize, r: f64) -> (Vec<Frame>, Vec<Frame>) {
 /// The edges of `body`'s face `face` chained into one loop (its outer loop, as it runs).
 fn loop_of(body: &Body, face: usize) -> Chain {
     let r = body.record();
-    let solidcraft_geom::brep::Loop::Edges { edges } = &r.faces[face].loops[0] else { panic!("a vertex loop") };
+    let solidcore_record::brep::Loop::Edges { edges } = &r.faces[face].loops[0] else { panic!("a vertex loop") };
     edges.iter().map(|u| (u.edge as usize, u.forward)).collect()
 }
 

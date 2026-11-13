@@ -9,7 +9,8 @@ use crate::test_support::sample_app;
 use std::collections::BTreeSet;
 
 use crate::browser;
-use crate::context_menu::{self, Item, Target};
+use crate::context_menu::{self, Target};
+use crate::ui_kit::Item;
 use crate::{Services, SolveApp};
 use serde_json::json;
 use solidcraft_engine::Session;
@@ -41,6 +42,7 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
         Target::HistoryControls,
         Target::Workspace,
         Target::NamedViews,
+        Target::ViewGizmo,
         Target::InsertDesign,
         Target::VisualStyle,
         Target::ViewTool,
@@ -56,6 +58,7 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
     for id in &features {
         take_items(out, &context_menu::items(app, &Target::Sketch { id: *id }));
         take_items(out, &context_menu::items(app, &Target::Plane { id: *id }));
+        take_items(out, &context_menu::items(app, &Target::Timeline { feature: *id }));
     }
     for id in &components {
         take_items(out, &context_menu::items(app, &Target::Component { id: *id }));
@@ -138,7 +141,7 @@ fn command_done_echo_follows_the_language_preference_without_a_render_scope() {
     app.preferences.language = "zh".into();
     app.run("solid.box", json!({ "length": 5, "width": 5, "height": 5 })).expect("box");
     let echo = app.session.log.last().expect("the echo is logged");
-    let zh = crate::i18n::Locale::for_language("zh");
+    let zh = solidcraft_ui_text::Locale::for_language("zh");
     let expected = zh.format("ui.command_done", &[("command", zh.label(crate::command_label("solid.box")))]);
     assert_eq!(echo, &expected);
     assert!(echo.contains("完成"), "{echo}");

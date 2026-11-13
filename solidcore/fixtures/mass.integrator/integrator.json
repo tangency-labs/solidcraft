@@ -1,0 +1,1210 @@
+{
+  "cases": [
+    {
+      "name": "constant_0",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "reversed_0",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          2.0,
+          -1.0,
+          1e-06,
+          -0.3,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "zero_accuracy_0",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          0.0,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "negative_accuracy_0",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          -1.0,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "evaluator_error_0",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 0,
+        "kind": 3,
+        "coefficients": [
+          [
+            0.5,
+            1.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "constant_1",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "reversed_1",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          2.0,
+          -1.0,
+          1e-06,
+          -0.3,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "zero_accuracy_1",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          0.0,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "negative_accuracy_1",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          -1.0,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "evaluator_error_1",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 3,
+        "coefficients": [
+          [
+            0.5,
+            1.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "constant_2",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 2,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [
+          1.0
+        ],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "reversed_2",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 2,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [
+          1.0
+        ],
+        "controls": [
+          2.0,
+          -1.0,
+          1e-06,
+          -0.3,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "zero_accuracy_2",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 2,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [
+          1.0
+        ],
+        "controls": [
+          0.0,
+          1.0,
+          0.0,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "negative_accuracy_2",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 2,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [
+          1.0
+        ],
+        "controls": [
+          0.0,
+          1.0,
+          -1.0,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "evaluator_error_2",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 2,
+        "kind": 3,
+        "coefficients": [
+          [
+            0.5,
+            1.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [
+          1.0
+        ],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "zero_domain",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          3.0,
+          3.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "near_equal_large_domain",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          10000000000.0,
+          10000000000.001,
+          1e-06,
+          0.0001,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "zero_step",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.0,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "step_epsilon_early_return",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          1e-12,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "below_step_epsilon",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          1.99e-12,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "above_step_epsilon",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          2.01e-12,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "zero_step_budget",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 0
+      }
+    },
+    {
+      "name": "insufficient_steps",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            0.0,
+            1.0,
+            3.0,
+            0.5
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 1
+      }
+    },
+    {
+      "name": "polynomial_state",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            2.0,
+            3.0,
+            0.5
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "floor_zero_scale",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 2,
+        "kind": 0,
+        "coefficients": [
+          [
+            0.0,
+            2.0,
+            3.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [
+          0.0
+        ],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "floor_negative_scale",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 2,
+        "kind": 0,
+        "coefficients": [
+          [
+            0.0,
+            2.0,
+            3.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [
+          -1e-15
+        ],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "large_negative_scale",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 2,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            2.0,
+            3.0,
+            0.5
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [
+          -1.0
+        ],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "many_components",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ],
+          [
+            2.0,
+            -3.0,
+            4.0,
+            -0.5
+          ]
+        ],
+        "initial": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150,
+          1e+150
+        ],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "tiny_integrand",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "coefficients": [
+          [
+            1e-150,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "huge_integrand",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "coefficients": [
+          [
+            1e+150,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "tiny_domain",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1e-13,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "tiny_domain_boundary",
+      "upstream_ref": "source/SMLib/src/SmIntegrator.cpp:78,368,516",
+      "inputs": {
+        "op": 0,
+        "kind": 0,
+        "coefficients": [
+          [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "initial": [
+          7.0
+        ],
+        "scale": [],
+        "controls": [
+          0.0,
+          1e-12,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    },
+    {
+      "name": "empty_component_system",
+      "inputs": {
+        "op": 1,
+        "kind": 0,
+        "coefficients": [],
+        "initial": [],
+        "scale": [],
+        "controls": [
+          0.0,
+          1.0,
+          1e-06,
+          0.1,
+          0.0,
+          1e-24,
+          0.0
+        ],
+        "max_steps": 10000
+      }
+    }
+  ]
+}

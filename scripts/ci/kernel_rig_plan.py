@@ -10,7 +10,8 @@ by hand). --root is the repository (default: two folders up from this script).
 The areas are the folders of tests/kernel-cases/ (the ladder aside), so a new area joins by
 having a folder with its cases, its KNOWN_FAILING and its PATHS. A changed path selects:
 - every area, when it matches tests/kernel-cases/PATHS-ALL (the shared core: SMLib, geom, the
-  kernel's core, the rig's grader and runner, the workflow);
+  kernel's core and the vendored SolidCore source in solidcore, the rig's grader and
+  runner, the workflow);
 - an area, when it is under tests/kernel-cases/<area>/ or matches that area's PATHS: one git
   pathspec glob a line (`*` within a folder, `**` across folders), `#` starts a comment.
 The ladder spans every operation: it runs whenever any area does, and on a change under

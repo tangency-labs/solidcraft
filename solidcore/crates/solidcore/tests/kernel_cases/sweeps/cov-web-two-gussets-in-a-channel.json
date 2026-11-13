@@ -1,0 +1,214 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b24": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b28": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b32": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b27"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b29"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b30"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b31"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b32"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b33"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b34"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b34"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b35"
+      ],
+      "params": {
+        "operand": 2
+      }
+    },
+    {
+      "inputs": [
+        "b27",
+        "b31",
+        "b35"
+      ],
+      "op": "union_all",
+      "outputs": [
+        "b36"
+      ],
+      "params": {}
+    }
+  ],
+  "case": "cov-web-two-gussets-in-a-channel",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        40
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "channel: base 60x40x5 + two walls 5x40x35 = 26000; each line closes a right triangle of legs 15 with its wall and the base: 2 * 112.5 * 2 thick = 450",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 26450.0,
+    "what": "a web of two lines, one wall each, across the two inside corners of a U channel"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 294,
+      "faces": 100,
+      "vertices": 196
+    }
+  },
+  "records": "cov-web-two-gussets-in-a-channel.bodies.json.gz",
+  "result": [
+    {
+      "body": "Bracket",
+      "made": "b36"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 12514.852813742316,
+      "body_count": 1,
+      "edges": 42,
+      "faces": 16,
+      "vertices": 28,
+      "volume_mm3": 26450.00000000001
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "union_all"
+  ],
+  "ungraded": [],
+  "what": "a web of two lines, one wall each, across the two inside corners of a U channel",
+  "why_not": []
+}

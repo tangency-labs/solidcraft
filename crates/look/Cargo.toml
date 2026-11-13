@@ -1,0 +1,25 @@
+[package]
+name = "solidcraft-look"
+description = "SolidCraft's look, ready to install into the UI kit: its icon masters and colour roles, code-drawn glyphs, IBM Plex interface faces and built-in themes"
+version.workspace = true
+edition.workspace = true
+license-file = "LICENSE"
+
+[lints]
+workspace = true
+
+[dependencies]
+# The kit the look is installed into: its icon set, glyph table, type families and theme files.
+solidcraft-ui-kit = { workspace = true }
+# The tokens the glyph painters draw with.
+solidcraft-theme = { workspace = true }
+egui = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+# The masters' tests rasterise them.
+tiny-skia = { workspace = true }
+
+[build-dependencies]
+# Reads icons/design/palette.toml and aliases.toml into compiled tables.
+toml = { workspace = true }

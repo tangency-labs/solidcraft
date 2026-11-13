@@ -1,6 +1,8 @@
 use super::*;
-use solidcraft_geom::{Vec2, Vec3};
-use solidcraft_render::StandardView;
+use serde_json::json;
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::prelude::*;
+use solidcraft_viewport::StandardView;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap()
@@ -128,6 +130,23 @@ fn view_dxf_cylinders_have_side_silhouettes_and_perspective_is_supported() {
 }
 
 #[test]
+fn view_dxf_camera_without_fov_is_orthographic() {
+    // docs/mcp.md: `{target, yaw, pitch, distance, fov?}`; no `fov` is an orthographic view (#13112).
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":10,"height":5}));
+    let v = run(&mut s, CMD, json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100}}));
+    assert_eq!(v["projection"], "orthographic", "{v}");
+    assert!(v["visible"].as_u64().unwrap() > 0, "{v}");
+    // The input schema takes it too.
+    let mut strict = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    run(&mut strict, "solid.box", json!({"length":20,"width":10,"height":5}));
+    assert_eq!(run(&mut strict, CMD, json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100}}))["projection"], "orthographic");
+    // `distance` stays required.
+    let err = s.execute(CMD, &json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0}})).unwrap_err().to_string();
+    assert!(err.contains("invalid camera"), "{err}");
+}
+
+#[test]
 fn view_dxf_rejects_invalid_options_and_near_eye_geometry_without_panicking() {
     let mut s = sample();
     for extra in [json!({"hidden":"all"}), json!({"hidden":true}), json!({"tolerance":0}), json!({"tolerance":"x"}), json!({"path":false})] {
@@ -157,7 +176,7 @@ fn view_dxf_keeps_every_occurrence_while_sharing_geometry() {
     let result = export(&mut s, camera(StandardView::Top), "dashed");
     assert_eq!(result["stats"]["bodies"], 3);
     assert_eq!(result["stats"]["shared_meshes"], 1);
-    assert_eq!(result["stats"]["worker_limit"], meshes::WORKERS);
+    assert_eq!(result["stats"]["worker_limit"], mesh_lines::WORKERS);
     assert!(result["hidden"].as_u64().unwrap() > 0);
     let lines = solidcraft_io::read_dxf(result["dxf"].as_str().unwrap()).unwrap();
     let mut centers = std::collections::BTreeSet::new();
@@ -232,4 +251,103 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     let dashed = export(&mut s, camera(StandardView::Top), "dashed");
     assert_eq!(dashed["sketch"], 2);
     assert!((length(&dashed) - 80.).abs() < 1e-3, "{}", length(&dashed));
+}
+
+#[test]
+fn view_dxf_zero_origin_puts_the_model_origin_at_the_drawing_zero() {
+    let mut s = sample();
+    let bounds = |v: &Value| {
+        let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+        for g in solidcraft_io::read_dxf(v["dxf"].as_str().unwrap()).unwrap() {
+            let solidcraft_io::Geom2::Line(a, b) = g else { panic!("{g:?}") };
+            for p in [a, b] {
+                (lo, hi) = (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)));
+            }
+        }
+        (lo, hi)
+    };
+    let near = |a: Vec2, x: f64, y: f64| (a.x - x).abs() < 1e-3 && (a.y - y).abs() < 1e-3;
+    // By default the drawing is centred on the camera target (20, 15), whatever the model origin.
+    let (lo, hi) = bounds(&export(&mut s, camera(StandardView::Top), "omit"));
+    assert!(near(lo, -20., -15.) && near(hi, 20., 15.), "{lo:?} {hi:?}");
+    // `zero: origin` is the same drawing with the model origin, the plate's corner, at 0,0.
+    for zero in [None, Some("target")] {
+        let mut p = json!({"camera": camera(StandardView::Top)});
+        if let Some(z) = zero {
+            p["zero"] = json!(z);
+        }
+        let (lo, _) = bounds(&run(&mut s, CMD, p));
+        assert!(near(lo, -20., -15.), "{zero:?}");
+    }
+    let v = run(&mut s, CMD, json!({"camera": camera(StandardView::Top), "zero": "origin"}));
+    let (lo, hi) = bounds(&v);
+    assert!(near(lo, 0., 0.) && near(hi, 40., 30.), "{lo:?} {hi:?}");
+    let err = s.execute(CMD, &json!({"camera": camera(StandardView::Top), "zero": "corner"})).unwrap_err().to_string();
+    assert!(err.contains("zero must be target or origin"), "{err}");
+}
+
+/// The lines of a regular polygon with `n` sides round `c`, from angle `from` to `to`.
+/// Over a whole turn the last line returns to the first point and the ring is closed.
+fn ring(c: Vec2, r: f64, n: usize, from: f64, to: f64) -> Vec<DxfEntity> {
+    let at = |i: usize| {
+        let t = from + (to - from) * i as f64 / n as f64;
+        Vec2::new(c.x + r * t.cos(), c.y + r * t.sin())
+    };
+    (0..n).map(|i| DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(at(i), at(i + 1)) }).collect()
+}
+
+#[test]
+fn view_dxf_arcs_turn_a_tessellated_circle_into_a_circle_and_keep_polygons_as_lines() {
+    let tau = std::f64::consts::TAU;
+    let c = Vec2::new(3., -2.);
+    // A fine ring is a circle; coarse rings (an octagon, even a 32-gon) sag too far from the
+    // circle for the 0.01 mm the drawing was made with, so they are polygons and stay lines.
+    let fine = arcs::recognise(ring(c, 10., 64, 0., tau), 0.01);
+    assert_eq!(fine.len(), 1, "{fine:?}");
+    let DxfShape::Circle { c: found, r } = &fine[0].shape else { panic!("{fine:?}") };
+    assert!((*found - c).len() < 1e-9 && (r - 10.).abs() < 1e-9, "{fine:?}");
+    for sides in [6, 8, 32] {
+        let polygon = arcs::recognise(ring(c, 10., sides, 0., tau), 0.01);
+        assert_eq!(polygon.len(), sides, "{sides} sides");
+        assert!(polygon.iter().all(|e| matches!(e.shape, DxfShape::Line(..))));
+    }
+}
+
+#[test]
+fn view_dxf_arcs_turn_a_run_of_lines_into_an_arc_that_runs_counter_clockwise() {
+    let c = Vec2::new(0., 0.);
+    let quarter = std::f64::consts::FRAC_PI_2;
+    // The run goes round clockwise, from 90 to 0 degrees: the DXF arc names 0 first, then 90.
+    let run = arcs::recognise(ring(c, 10., 40, quarter, 0.), 0.01);
+    assert_eq!(run.len(), 1, "{run:?}");
+    let DxfShape::Arc { r, a0, a1, .. } = &run[0].shape else { panic!("{run:?}") };
+    assert!((r - 10.).abs() < 1e-9 && a0.abs() < 1e-6 && (a1 - 90.).abs() < 1e-6, "{run:?}");
+    // A straight run, and a few lines, are never an arc.
+    let straight: Vec<DxfEntity> = (0..10)
+        .map(|i| DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(Vec2::new(i as f64, 0.), Vec2::new(i as f64 + 1., 0.)) })
+        .collect();
+    assert_eq!(arcs::recognise(straight, 0.01).len(), 10);
+    assert_eq!(arcs::recognise(ring(c, 10., 3, 0., quarter), 0.01).len(), 3);
+}
+
+#[test]
+fn view_dxf_curves_arcs_write_a_round_hole_as_one_circle_and_the_default_still_writes_lines() {
+    let mut s = sample();
+    // The sample's blind hole is hidden from above; this one goes right through.
+    run(&mut s, "solid.cylinder", json!({"radius":5,"height":10,"base":[20,15,0],"operation":"cut","targets":["Plate"]}));
+    let top = camera(StandardView::Top);
+    let geometry = |v: &Value| solidcraft_io::read_dxf(v["dxf"].as_str().unwrap()).unwrap();
+    let as_lines = geometry(&run(&mut s, CMD, json!({"camera": top})));
+    assert!(as_lines.iter().all(|g| matches!(g, solidcraft_io::Geom2::Line(..))), "the default is unchanged");
+    let as_arcs = geometry(&run(&mut s, CMD, json!({"camera": top, "curves": "arcs"})));
+    let circles: Vec<_> = as_arcs.iter().filter_map(|g| if let solidcraft_io::Geom2::Circle(c, r) = g { Some((*c, *r)) } else { None }).collect();
+    // The hole is centred on the camera target (20, 15), so it is the circle at 0,0.
+    assert_eq!(circles.len(), 1, "{as_arcs:?}");
+    assert!(circles[0].0.len() < 1e-3 && (circles[0].1 - 5.).abs() < 1e-4, "{circles:?}");
+    // The plate's four sides stay four lines, and the hole's ring no longer adds dozens of lines.
+    let lines = as_arcs.iter().filter(|g| matches!(g, solidcraft_io::Geom2::Line(..))).count();
+    assert_eq!(lines, 4, "{as_arcs:?}");
+    assert!(as_lines.len() > 40);
+    let err = s.execute(CMD, &json!({"camera": top, "curves": "splines"})).unwrap_err().to_string();
+    assert!(err.contains("curves must be lines or arcs"), "{err}");
 }

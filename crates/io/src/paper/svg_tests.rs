@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
+use solidcore_record::{Loop2, Region2};
 use solidcraft_geom::paper::{Group, ObjectKind, Scene};
-use solidcraft_geom::{Loop2, Region2};
 
 use super::*;
 use crate::{Geom2, read_svg};

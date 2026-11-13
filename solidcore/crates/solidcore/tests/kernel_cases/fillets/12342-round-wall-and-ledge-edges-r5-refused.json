@@ -1,0 +1,99 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "error": "solidcore failed (status 1001)",
+      "inputs": [
+        "b1"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  20.0,
+                  20.0,
+                  -40.0
+                ],
+                [
+                  20.0,
+                  20.0,
+                  2.0
+                ]
+              ],
+              "index": 0
+            },
+            {
+              "at": [
+                [
+                  23.0,
+                  20.0,
+                  -50.0
+                ],
+                [
+                  23.0,
+                  20.0,
+                  -40.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              20.0,
+              -19.0
+            ],
+            [
+              23.0,
+              20.0,
+              -45.0
+            ]
+          ],
+          "tolerance": 0.01
+        },
+        "kind": "round",
+        "sizes": [
+          5.0,
+          5.0
+        ]
+      }
+    }
+  ],
+  "case": "12342-round-wall-and-ledge-edges-r5-refused",
+  "expected": {
+    "method": "the ledge's round ends on the ledge's top face z = -40, which is 3 mm wide from the wall (x 20..23); past R3 its rail on y = 20 leaves that face. The wall's round takes the 4 mm wide strip of y = 20 beside the wall whole at R4. The smaller bound is 3",
+    "outcome": "refused",
+    "refusal": "the largest radius that fits is 3",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#12342",
+      "tangency-labs/solidcore#2845"
+    ],
+    "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R5 (solidcraft#12342, case 2): past the 3 mm ledge and the 4 mm wall, so it must be refused naming the largest radius that fits, 3; it fails with status 1001. Each edge alone is refused (the ledge naming 3) or builds up to its fit, and the pair at R3.5 or R4 is refused naming 3"
+  },
+  "expressible": true,
+  "gallery_note": "the back face y = 20 and the 3 mm ledge top highlighted: both vertical edges at R5 should be refused naming 3, and fail with status 1001",
+  "operation_expressible": true,
+  "records": "12342-round-wall-and-ledge-edges-r5-refused.bodies.json.gz",
+  "result": [],
+  "sources": [
+    "tangency-labs/solidcraft#12342",
+    "tangency-labs/solidcore#2845"
+  ],
+  "ungraded": [
+    "refusal \"the largest radius that fits is 3\""
+  ],
+  "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R5 (solidcraft#12342, case 2): past the 3 mm ledge and the 4 mm wall, so it must be refused naming the largest radius that fits, 3; it fails with status 1001. Each edge alone is refused (the ledge naming 3) or builds up to its fit, and the pair at R3.5 or R4 is refused naming 3",
+  "why_not": []
+}

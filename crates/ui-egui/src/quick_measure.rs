@@ -1,11 +1,13 @@
 //! Quick measurement (#7000): what the selection measures, in the view's bottom right corner above
 //! History, so a simple size needs no Measure tool. One item gives the Measure tool's rows (an
-//! edge's length, Ø and R for a round one, a face's area, a point's position); two give their
-//! distance and angle; several edges or several faces their count and total length or area.
+//! edge's length, Ø and R for a round one, a face's area and perimeter, a point's position); two
+//! give their distance and angle; several edges or several faces their count and total length or
+//! area.
 //! Computed off the window thread from a copy of the session ([`Session::measure_items`]) whenever
 //! the selection or the design changes; nothing shows while it computes, or for a selection with
 //! nothing to measure. A click copies the readout.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 
@@ -127,9 +129,9 @@ fn measure(session: &solidcraft_engine::Session, selection: &[Sel]) -> Option<Va
 
 /// One measured item's rows, each "label  value": Ø, R and the length of a round one (its
 /// circumference, or an arc's length and angle), a slot's sizes, a straight edge's length, a face's
-/// area, a point's position. The Measure tool lists the same.
+/// area and perimeter, a point's position. The Measure tool lists the same.
 pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
-    let tr = crate::i18n::tr;
+    let tr = solidcraft_ui_text::tr;
     let mm = |v: &Value| v.as_f64().map(|x| crate::prefs::show_mm(app, x, 1)).unwrap_or_default();
     let mut lines: Vec<String> = Vec::new();
     if it.get("diameter").is_some() {
@@ -139,7 +141,7 @@ pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
             lines.push(format!("{}  {}", tr("Circumference"), mm(&it["circumference"])));
         } else if let Some(a) = it["angle_deg"].as_f64() {
             lines.push(format!("{}  {}", tr("Arc length"), mm(&it["arc_length"])));
-            lines.push(format!("{}  {a:.2}°", crate::i18n::tr_label("Angle")));
+            lines.push(format!("{}  {a:.2}°", solidcraft_ui_text::tr_label("Angle")));
         }
     }
     if let Some(sl) = it.get("slot") {
@@ -150,7 +152,18 @@ pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
     let round = it.get("diameter").is_some();
     match it["type"].as_str() {
         Some("edge" | "sketch_curve") if !round => lines.push(format!("{}  {}", tr("Length"), mm(&it["length_mm"]))),
-        Some("face" | "profile") => lines.push(format!("{}  {}", tr("Area"), crate::prefs::show_mm(app, it["area_mm2"].as_f64().unwrap_or(0.0), 2))),
+        Some("face" | "profile") => {
+            lines.push(format!("{}  {}", tr("Area"), crate::prefs::show_mm(app, it["area_mm2"].as_f64().unwrap_or(0.0), 2)));
+            for (id, key) in [
+                ("measure.perimeter", "perimeter_mm"),
+                ("measure.perimeter_outer", "outer_perimeter_mm"),
+                ("measure.perimeter_inner", "inner_perimeter_mm"),
+            ] {
+                if it.get(key).is_some() {
+                    lines.push(format!("{}  {}", tr(id), mm(&it[key])));
+                }
+            }
+        }
         Some("vertex" | "sketch_point" | "point") => {
             let p = &it["position"];
             lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
@@ -172,6 +185,17 @@ pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
     lines
 }
 
+/// The label of a pair's centre distance: from a straight edge to a circle's centre, or
+/// centre to centre.
+pub(crate) fn centre_distance_label(r: &Value) -> &'static str {
+    let is_circle = |item: &Value| item.get("round").and_then(Value::as_str) == Some("circle");
+    let is_line = |item: &Value| matches!(item.get("type").and_then(Value::as_str), Some("edge" | "sketch_curve")) && item.get("round").is_none();
+    match r["items"].as_array().map(Vec::as_slice) {
+        Some([a, b]) if (is_circle(a) && is_line(b)) || (is_circle(b) && is_line(a)) => solidcraft_ui_text::tr("measure.line_to_centre"),
+        _ => solidcraft_ui_text::tr("Centre to centre"),
+    }
+}
+
 /// The readout's rows for a measurement.
 fn lines(app: &SolveApp, r: &Value) -> Vec<(String, String)> {
     let split = |line: String| match line.split_once("  ") {
@@ -181,8 +205,8 @@ fn lines(app: &SolveApp, r: &Value) -> Vec<(String, String)> {
     if let Some(n) = r["count"].as_u64() {
         let n = n.to_string();
         return match (r["total_length_mm"].as_f64(), r["total_area_mm2"].as_f64()) {
-            (Some(l), _) => vec![(crate::i18n::format("measure.quick_edges", &[("count", &n)]), crate::prefs::show_mm(app, l, 1))],
-            (_, Some(a)) => vec![(crate::i18n::format("measure.quick_faces", &[("count", &n)]), crate::prefs::show_mm(app, a, 2))],
+            (Some(l), _) => vec![(solidcraft_ui_text::format("measure.quick_edges", &[("count", &n)]), crate::prefs::show_mm(app, l, 1))],
+            (_, Some(a)) => vec![(solidcraft_ui_text::format("measure.quick_faces", &[("count", &n)]), crate::prefs::show_mm(app, a, 2))],
             _ => Vec::new(),
         };
     }
@@ -192,13 +216,13 @@ fn lines(app: &SolveApp, r: &Value) -> Vec<(String, String)> {
     }
     let mut rows = Vec::new();
     if let Some(d) = r["center_distance"].as_f64() {
-        rows.push((crate::i18n::tr("Centre to centre").to_string(), crate::prefs::show_mm(app, d, 1)));
+        rows.push((centre_distance_label(r).to_string(), crate::prefs::show_mm(app, d, 1)));
     }
     if let Some(d) = r["distance_mm"].as_f64() {
-        rows.push((crate::i18n::tr_label("Distance").to_string(), crate::prefs::show_mm(app, d, 1)));
+        rows.push((solidcraft_ui_text::tr_label("Distance").to_string(), crate::prefs::show_mm(app, d, 1)));
     }
     if let Some(a) = r["angle_deg"].as_f64() {
-        rows.push((crate::i18n::tr_label("Angle").to_string(), format!("{a:.2}°")));
+        rows.push((solidcraft_ui_text::tr_label("Angle").to_string(), format!("{a:.2}°")));
     }
     rows
 }
@@ -211,7 +235,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: egui::Rect, taken: &
     if rows.is_empty() || !view.is_finite() || !view.is_positive() {
         return None;
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let painter = ui.painter().clone();
     let font = egui::FontId::proportional(t.font_label);
     let pad = egui::vec2(t.space_8, t.space_4);
@@ -239,7 +263,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: egui::Rect, taken: &
     if !view.contains_rect(r) {
         return None;
     }
-    let response = ui.interact(r, egui::Id::new("sc_quick_measure"), egui::Sense::click()).on_hover_text(crate::i18n::tr("measure.quick_copy"));
+    let response = ui
+        .interact(r, egui::Id::unique("sc_quick_measure"), egui::Sense::click())
+        .backing_on_hover_text(solidcraft_ui_text::tr("measure.quick_copy"));
     crate::scenario::publish_rect("measure:quick", r);
     painter.rect_filled(r, t.radius_sm, if response.hovered() { t.hover } else { t.overlay });
     painter.rect_stroke(r, t.radius_sm, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
@@ -255,7 +281,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: egui::Rect, taken: &
             .collect::<Vec<_>>()
             .join("\n");
         ui.ctx().copy_text(text);
-        app.set_status(crate::i18n::tr("measure.quick_copied"), false);
+        app.set_status(solidcraft_ui_text::tr("measure.quick_copied"), false);
     }
     Some(r)
 }

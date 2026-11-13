@@ -1,0 +1,191 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "not supported yet: a curvature-continuous fillet on solidcore over edges whose faces meet at different angles: every edge takes the equal-area thumbweight of the first one's angle, so the others take off the wrong area (https://github.com/tangency-labs/solidcore/issues/2250#issuecomment-6563419897)",
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_setback_open",
+      "params": {
+        "corners": {
+          "kind": "vertex",
+          "picked": [
+            {
+              "at": [
+                [
+                  2.6794919243112267,
+                  2.6794919243112285,
+                  10.0
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              2.6794919243112267,
+              2.6794919243112285,
+              10.0
+            ]
+          ],
+          "tolerance": 1.8718286933869708
+        },
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  2.6794919243112267,
+                  2.6794919243112285,
+                  10.0
+                ],
+                [
+                  27.320508075688767,
+                  2.679491924311227,
+                  10.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  2.679491924311228,
+                  17.32050807568877,
+                  10.0
+                ],
+                [
+                  2.6794919243112267,
+                  2.6794919243112285,
+                  10.0
+                ]
+              ],
+              "index": 2
+            },
+            {
+              "at": [
+                [
+                  -2.7755575615628914e-17,
+                  0.0,
+                  0.0
+                ],
+                [
+                  2.6794919243112267,
+                  2.6794919243112285,
+                  10.0
+                ]
+              ],
+              "index": 6
+            }
+          ],
+          "points": [
+            [
+              14.999999999999998,
+              2.679491924311227,
+              10.0
+            ],
+            [
+              2.6794919243112267,
+              10.0,
+              10.0
+            ],
+            [
+              1.3397459621556136,
+              1.3397459621556145,
+              5.0
+            ]
+          ],
+          "tolerance": 1.8718286933869708
+        },
+        "kind": "curvature",
+        "setbacks": [
+          3.0
+        ],
+        "sizes": [
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-g2-oblique-three-edge-corner",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g2"
+    },
+    "method": "a 30 x 20 rectangle extruded 10 with a 15 deg inward taper; the top front edge, the top left edge and the drafted edge between them at the corner near (0, 0, 10); the fillet type curvature (G2 sections and G2 corner patches): every seam of a round and of the corner patch with its neighbours G2, one valid body",
+    "source": "invariants",
+    "what": "the three edges at a top corner of a block drafted 15 deg (an oblique convex corner) filleted 2 as a curvature-continuous (G2) fillet"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 8 (solid.fillet): invalid input: not supported yet: a curvature-continuous fillet on solidcore over edges whose faces meet at different angles: every edge takes the equal-area thumbweight of the first one's angle, so the others take off the wrong area (https://github.com/tangency-labs/solidcore/issues/2250#issuecomment-6563419897)",
+    "kernel_error": "not supported yet: a curvature-continuous fillet on solidcore over edges whose faces meet at different angles: every edge takes the equal-area thumbweight of the first one's angle, so the others take off the wrong area (https://github.com/tangency-labs/solidcore/issues/2250#issuecomment-6563419897)",
+    "ran": false
+  },
+  "records": "cov-fillet-g2-oblique-three-edge-corner.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "step 8 (solid.fillet): invalid input: not supported yet: a curvature-continuous fillet on solidcore over edges whose faces meet at different angles: every edge takes the equal-area thumbweight of the first one's angle, so the others take off the wrong area (https://github.com/tangency-labs/solidcore/issues/2250#issuecomment-6563419897)",
+    "known_failing": "[unsupported] refused on solidcore: its three edges meet at different wedge angles, and one curvature fillet takes the first edge's equal-area thumbweight for every edge (solidcore#2250, issuecomment-6563419897); SMLib d01d7b0 fails it too",
+    "measured": null,
+    "refused_with": null,
+    "status": "unsupported"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_setback_open"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the three edges at a top corner of a block drafted 15 deg (an oblique convex corner) filleted 2 as a curvature-continuous (G2) fillet",
+  "why_not": []
+}

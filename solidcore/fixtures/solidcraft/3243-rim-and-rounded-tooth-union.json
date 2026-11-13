@@ -1,0 +1,161 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3243",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "Joining a small rounded tooth to the cylindrical rim it overlaps failed with 'no result' on SolidCraft's truck kernel (#3243). The base is an r 16.65 cylinder 5 tall with an r 15.27 hole from z = 1.76 (a disc and a rim r 15.27..16.65 up to z = 5). The tooth is a triangle with a rounded tip (the arc through (0, 7.7), centre (0, 7.450) and radius 0.250 from the issue's three points) in the XZ plane from z = 4.99, extruded over y 14.962..16.65 (the issue's plane faces +y; the profile is symmetric, so the runner's xz plane at y = 16.65 extruded toward -y gives the same solid). It is then cut by the r 15.27 cylinder and intersected with the r 16.65 one over z 4.98..7.71, so it sits on the rim and overlaps it by 0.01 in z. The union must be one solid; its volume has no closed form here.",
+ "cases": [
+  {
+   "name": "tooth_joined_to_rim",
+   "note": "union(base, trimmed tooth).",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "outer",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 16.65,
+     "height": 5
+    },
+    {
+     "op": "cylinder",
+     "id": "bore",
+     "origin": [
+      0,
+      0,
+      1.76
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 15.27,
+     "height": 4
+    },
+    {
+     "op": "difference",
+     "id": "base",
+     "a": "outer",
+     "b": "bore"
+    },
+    {
+     "op": "extrude",
+     "id": "tooth",
+     "plane": "xz",
+     "origin": [
+      0,
+      16.65,
+      0
+     ],
+     "distance": 1.6875953835063608,
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        -0.1706475844770042,
+        7.63270030627277
+       ],
+       "to": [
+        -3,
+        4.99
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        -3,
+        4.99
+       ],
+       "to": [
+        3,
+        4.99
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        3,
+        4.99
+       ],
+       "to": [
+        0.1706475844770042,
+        7.63270030627277
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        0,
+        7.45000000000003
+       ],
+       "radius": 0.2499999999999698,
+       "start_deg": 46.953605695752145,
+       "end_deg": 133.04639430424785
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "inner_trim",
+     "origin": [
+      0,
+      0,
+      4.98
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 15.27,
+     "height": 2.73
+    },
+    {
+     "op": "difference",
+     "id": "tooth_cut",
+     "a": "tooth",
+     "b": "inner_trim"
+    },
+    {
+     "op": "cylinder",
+     "id": "outer_trim",
+     "origin": [
+      0,
+      0,
+      4.98
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 16.65,
+     "height": 2.73
+    },
+    {
+     "op": "intersection",
+     "id": "tooth_trimmed",
+     "a": "tooth_cut",
+     "b": "outer_trim"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "base",
+     "b": "tooth_trimmed"
+    }
+   ],
+   "expect": {
+    "lumps": 1
+   }
+  }
+ ]
+}

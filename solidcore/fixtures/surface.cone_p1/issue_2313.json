@@ -1,0 +1,892 @@
+{
+ "cases": [
+  {
+   "name": "i2313_b1.0_s10.0_in0_sw0_z1",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "p": [
+     0.7057961884250791,
+     0.9410615845667721,
+     1.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in0_sw0_apex",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "p": [
+     0.0001057961884251446,
+     0.00014106158456685946,
+     -5.670281819617709
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in0_sw0_far",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "p": [
+     1058.5618842507897,
+     1411.4158456677199,
+     10000.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in0_sw1_z1",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "p": [
+     0.7057961884250791,
+     0.9410615845667721,
+     1.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in0_sw1_apex",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "p": [
+     0.0001057961884251446,
+     0.00014106158456685946,
+     -5.670281819617709
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in0_sw1_far",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "p": [
+     1058.5618842507897,
+     1411.4158456677199,
+     10000.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in1_sw0_z1",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "p": [
+     0.7057961884250791,
+     0.9410615845667721,
+     1.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in1_sw0_apex",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "p": [
+     0.0001057961884251446,
+     0.00014106158456685946,
+     -5.670281819617709
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in1_sw0_far",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "p": [
+     1058.5618842507897,
+     1411.4158456677199,
+     10000.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in1_sw1_z1",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "p": [
+     0.7057961884250791,
+     0.9410615845667721,
+     1.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in1_sw1_apex",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "p": [
+     0.0001057961884251446,
+     0.00014106158456685946,
+     -5.670281819617709
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b1.0_s10.0_in1_sw1_far",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 1.0,
+      "semi": 10.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "p": [
+     1058.5618842507897,
+     1411.4158456677199,
+     10000.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in0_sw0_z1",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "p": [
+     1.0392304845413263,
+     1.3856406460551018,
+     1.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in0_sw0_apex",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "p": [
+     0.00016076951545866968,
+     0.00021435935394489294,
+     7.463101615137755
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in0_sw0_far",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": false,
+      "inside": false
+     }
+    },
+    "p": [
+     1608.895154586736,
+     2145.1935394489815,
+     -10000.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in0_sw1_z1",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "p": [
+     1.0392304845413263,
+     1.3856406460551018,
+     1.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in0_sw1_apex",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "p": [
+     0.00016076951545866968,
+     0.00021435935394489294,
+     7.463101615137755
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in0_sw1_far",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": true,
+      "inside": false
+     }
+    },
+    "p": [
+     1608.895154586736,
+     2145.1935394489815,
+     -10000.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in1_sw0_z1",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "p": [
+     1.0392304845413263,
+     1.3856406460551018,
+     1.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in1_sw0_apex",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "p": [
+     0.00016076951545866968,
+     0.00021435935394489294,
+     7.463101615137755
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in1_sw0_far",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": false,
+      "inside": true
+     }
+    },
+    "p": [
+     1608.895154586736,
+     2145.1935394489815,
+     -10000.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in1_sw1_z1",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "p": [
+     1.0392304845413263,
+     1.3856406460551018,
+     1.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in1_sw1_apex",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "p": [
+     0.00016076951545866968,
+     0.00021435935394489294,
+     7.463101615137755
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "i2313_b2.0_s-15.0_in1_sw1_far",
+   "upstream_ref": "issue #2313 (unbounded cone iso circle through a point)",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical_semi",
+      "bot": 2.0,
+      "semi": -15.0,
+      "swap": true,
+      "inside": true
+     }
+    },
+    "p": [
+     1608.895154586736,
+     2145.1935394489815,
+     -10000.0
+    ],
+    "tol": 0.001
+   }
+  }
+ ]
+}

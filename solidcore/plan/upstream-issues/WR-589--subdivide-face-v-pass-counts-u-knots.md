@@ -1,0 +1,9 @@
+#### WR-589. SubdivideFaceAtDiscontinuities cuts along as many V knots as there are U knots
+- **Severity:** Wrong result
+- **Area:** Topology
+- **Location:** `source/SMLib/src/SmBrep.cpp:18483`, `SmBrep::SubdivideFaceAtDiscontinuities` (def. `:18223`).
+- **What happens:** The V pass of the loop that builds the iso lines takes its count from the U knots: `lArraySize = (ii==0) ? sUKnotsAtSplit.GetSize() : sUKnotsAtSplit.GetSize()`. When a surface has more V knots than U knots, the face is not split at the extra V knots. When it has no U knot, the face is not split in V at all. The face is then left with V discontinuities inside it.
+- **Trigger:** `SubdivideFaceAtDiscontinuities` on a face whose surface has fewer U knots than V knots at or below the requested continuity. For example, a degree-1 sheet with one interior U knot and two interior V knots comes out as 4 faces, not 6. No upstream caller reaches this function. The SolidCraft fork calls it after a variable round (tangency-labs/smlib@6eecf04) and fixes the count to `sVKnotsAtSplit.GetSize()`.
+- **How found:** review of the loop while porting it for the fork's variable-round split.
+- **Confirmed:** yes. The C++ reference gives 4 faces for one U knot and two V knots (`topology.brep_p10` case `subdivide_u1v2_cinf`) and 1 face for no U knot and one V knot (`subdivide_u0v1_cinf`). The sheets' knots are at their control points, so the cuts are the grid lines through them: 6 and 2 faces.
+- **Rust port:** fixed on the default path, with no flag: no upstream caller reaches the function, so no existing result changes. The V pass counts the V knots, as the fork's 6eecf04 does. `crates/solidcore/tests/subdivide_face_v_knots.rs` checks the face counts and the cut positions on the three crafted sheets (x = 0.3 and y = 0.2, 0.7; y = 0.3; x = 0.3). The two cases above are known mismatches with `cpp_defect = "WR-589"`.

@@ -1,0 +1,272 @@
+{
+ "cases": [
+  {
+   "name": "svd_identity_3x3",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 3,
+    "cols": 3,
+    "m": [
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "svd_issue_1570_shear",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 3,
+    "cols": 3,
+    "m": [
+     1,
+     0.5,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "svd_non_uniform_scale",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 3,
+    "cols": 3,
+    "m": [
+     2,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "svd_mirror_x",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 3,
+    "cols": 3,
+    "m": [
+     -1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "svd_singular_z",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 3,
+    "cols": 3,
+    "m": [
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "svd_zero_3x3",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 3,
+    "cols": 3,
+    "m": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "svd_near_singular",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 3,
+    "cols": 3,
+    "m": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9.000000001
+    ]
+   }
+  },
+  {
+   "name": "svd_rank_one",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 3,
+    "cols": 3,
+    "m": [
+     1,
+     2,
+     3,
+     2,
+     4,
+     6,
+     -1,
+     -2,
+     -3
+    ]
+   }
+  },
+  {
+   "name": "svd_huge",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 3,
+    "cols": 3,
+    "m": [
+     1e+90,
+     2e+89,
+     0,
+     0,
+     3e+90,
+     1e+88,
+     5e+87,
+     0,
+     7e+89
+    ]
+   }
+  },
+  {
+   "name": "svd_tiny",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 3,
+    "cols": 3,
+    "m": [
+     1e-90,
+     2e-91,
+     0,
+     0,
+     3e-90,
+     1e-92,
+     5e-93,
+     0,
+     7e-91
+    ]
+   }
+  },
+  {
+   "name": "svd_tall_4x3",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 4,
+    "cols": 3,
+    "m": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12
+    ]
+   }
+  },
+  {
+   "name": "svd_column_5x1",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 5,
+    "cols": 1,
+    "m": [
+     3,
+     -4,
+     0,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "svd_scalar_1x1",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 1,
+    "cols": 1,
+    "m": [
+     -2.5
+    ]
+   }
+  },
+  {
+   "name": "svd_wide_2x3_sm_err",
+   "upstream_ref": "source/SMLib/src/SmMatrix.cpp SmMatrix::SVDecompose",
+   "inputs": {
+    "op": "svd",
+    "rows": 2,
+    "cols": 3,
+    "m": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6
+    ]
+   }
+  }
+ ]
+}

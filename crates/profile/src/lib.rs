@@ -36,7 +36,7 @@ pub const OTHER: &str = "other";
 /// One span name's aggregate.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Row {
-    /// What the span is: `smlib`, `kernel`, `feature`, `command`, `import`, …
+    /// What the span is: `solidcore`, `kernel`, `feature`, `command`, `import`, …
     pub category: &'static str,
     pub name: &'static str,
     /// Times the span ran.
