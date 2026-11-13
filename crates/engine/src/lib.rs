@@ -776,7 +776,8 @@ impl SurfaceAnalysis {
     pub fn mode(self) -> solidcraft_viewport::AnalysisMode {
         use solidcraft_viewport::AnalysisMode as M;
         match self {
-            SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes },
+            // Bars standing upright around the viewer, half white: the picture as it always was.
+            SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes, direction: Vec3::new(0.0, 0.0, 1.0), width: 0.5 },
             SurfaceAnalysis::Draft { pull, angle } => M::Draft { pull, angle },
             SurfaceAnalysis::Curvature { radius } => M::Curvature { radius },
             SurfaceAnalysis::Environment => M::Environment,

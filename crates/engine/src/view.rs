@@ -1059,7 +1059,15 @@ fn build_scene(
         // body is drawn solid, so the selection colour reads.
         let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
         let cut_solid = section.is_some() && body.is_closed() && opacity >= solidcraft_viewport::SEE_THROUGH;
-        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
+        sc.meshes.push(SceneMesh {
+            mesh: Arc::clone(&mesh),
+            color,
+            face_colors,
+            opacity,
+            closed: body.is_closed(),
+            hatch: Default::default(),
+            values: None,
+        });
         let at = sc.meshes.len() - 1;
         if cosmetic_threads
             && thread_budget.available()
