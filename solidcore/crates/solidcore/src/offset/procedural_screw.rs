@@ -829,7 +829,7 @@ mod tests {
             let sweep = replacements[index].procedural_sweep().unwrap();
             let continued = sweep
                 .definition()
-                .extended_for_offset(sweep.net(), margin.reach, tolerance / 2.0)
+                .extended_for_offset(sweep.net(), margin.reach, margin.turns, tolerance / 2.0)
                 .unwrap();
             let continued = continued.procedural_sweep().unwrap();
             assert!(sweep
@@ -1498,7 +1498,7 @@ mod tests {
                     let retained = surface.procedural_sweep().unwrap();
                     retained
                         .definition()
-                        .extended_for_offset(retained.net(), 0.22, 5e-6)
+                        .extended_for_offset(retained.net(), 0.22, 0.0, 5e-6)
                         .unwrap()
                 };
                 let ea = extend(oa);

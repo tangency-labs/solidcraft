@@ -4266,7 +4266,7 @@ mod tests {
         let screw = original.procedural_sweep().unwrap();
         let extension = screw
             .definition()
-            .extended_for_offset(screw.net(), 0.05, 1e-3)
+            .extended_for_offset(screw.net(), 0.05, 0.0, 1e-3)
             .unwrap();
         assert!(screw
             .definition()

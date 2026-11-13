@@ -903,6 +903,9 @@ impl OffsetExecutive {
                     sweep.definition().extended_for_offset(
                         sweep.net(),
                         margin,
+                        self.thread_extension_reach
+                            .as_ref()
+                            .map_or(0.0, |t| t.turns),
                         self.approximation_tol_3d,
                     )?
                 } else if let Some(cylinder) = cylinder {
@@ -4090,6 +4093,7 @@ mod tests {
                 crate::offset::procedural_screw::ThreadReach {
                     reach: 0.21693393959008678,
                     caps: Vec::new(),
+                    turns: 0.0,
                 },
             ));
             let grown = executive
