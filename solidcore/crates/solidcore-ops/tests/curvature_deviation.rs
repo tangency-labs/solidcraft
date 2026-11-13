@@ -35,12 +35,18 @@ fn a_sphere_reads_its_inverse_radius_twice() {
     let (sphere, _) = make_sphere([0.0; 3], 4.0).unwrap().to_record().unwrap();
     let got = principal_curvatures(&sphere, &[[3.0, 4.0, 5.0]]).unwrap();
     let p = got[0].unwrap();
-    assert!((p.k1 - 0.25).abs() < 1e-9 && (p.k2 - 0.25).abs() < 1e-9, "{p:?}");
+    assert!(
+        (p.k1 - 0.25).abs() < 1e-9 && (p.k2 - 0.25).abs() < 1e-9,
+        "{p:?}"
+    );
 }
 
 #[test]
 fn a_cylinder_reads_its_inverse_radius_round_and_nothing_along() {
-    let (can, _) = make_cylinder([0.0; 3], 3.0, 10.0).unwrap().to_record().unwrap();
+    let (can, _) = make_cylinder([0.0; 3], 3.0, 10.0)
+        .unwrap()
+        .to_record()
+        .unwrap();
     let got = principal_curvatures(&can, &[[5.0, 0.0, 5.0]]).unwrap();
     let p = got[0].unwrap();
     assert!((p.k1 - 1.0 / 3.0).abs() < 1e-9, "{p:?}");
@@ -60,7 +66,10 @@ fn a_saddle_reads_one_curvature_up_and_one_down() {
     let got = principal_curvatures(&saddle, &[[0.0, 0.0, 0.5]]).unwrap();
     let p = got[0].unwrap();
     assert!(p.k1 > 0.0 && p.k2 < 0.0, "{p:?}");
-    assert!((p.k1 - 1.0).abs() < 1e-9 && (p.k2 + 1.0).abs() < 1e-9, "{p:?}");
+    assert!(
+        (p.k1 - 1.0).abs() < 1e-9 && (p.k2 + 1.0).abs() < 1e-9,
+        "{p:?}"
+    );
     assert_eq!(
         principal_curvatures(&saddle, &[[f64::NAN, 0.0, 0.0]]).err(),
         Some(Error::Argument)
@@ -89,7 +98,12 @@ fn a_curve_on_a_flat_sheet_deviates_by_nothing() {
         false,
     )
     .unwrap();
-    let c = cubic([[1.0, 1.0, 0.0], [5.0, 9.0, 0.0], [12.0, 3.0, 0.0], [18.0, 15.0, 0.0]]);
+    let c = cubic([
+        [1.0, 1.0, 0.0],
+        [5.0, 9.0, 0.0],
+        [12.0, 3.0, 0.0],
+        [18.0, 15.0, 0.0],
+    ]);
     let d = curve_surface_deviation(&c, &plate, 21).unwrap();
     assert!(d.max < 1e-9, "{d:?}");
     assert_eq!(d.bound, None);
@@ -98,7 +112,12 @@ fn a_curve_on_a_flat_sheet_deviates_by_nothing() {
 /// A cubic and the same cubic 0.0056 higher: the gap reads back.
 #[test]
 fn a_gap_of_0_0056_reads_back() {
-    let pts = [[0.0, 0.0, 0.0], [3.0, 4.0, 0.0], [7.0, -2.0, 0.0], [10.0, 1.0, 0.0]];
+    let pts = [
+        [0.0, 0.0, 0.0],
+        [3.0, 4.0, 0.0],
+        [7.0, -2.0, 0.0],
+        [10.0, 1.0, 0.0],
+    ];
     let up = pts.map(|p| [p[0], p[1], p[2] + 0.0056]);
     let d = curve_deviation(&cubic(pts), &cubic(up), 33).unwrap();
     assert!((d.max - 0.0056).abs() < 1e-9, "{d:?}");

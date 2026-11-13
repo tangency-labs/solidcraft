@@ -53,7 +53,12 @@ fn two_parallel_lines_five_apart_deviate_by_five() {
 #[test]
 fn a_small_offset_reads_back() {
     let k = Kernel::new(&KernelOptions::default());
-    let pts = [[0.0, 0.0, 0.0], [3.0, 4.0, 0.0], [7.0, -2.0, 0.0], [10.0, 1.0, 0.0]];
+    let pts = [
+        [0.0, 0.0, 0.0],
+        [3.0, 4.0, 0.0],
+        [7.0, -2.0, 0.0],
+        [10.0, 1.0, 0.0],
+    ];
     let up = pts.map(|p| [p[0], p[1], p[2] + 0.0056]);
     let d = curve_deviation(&k, &cubic(&pts), &cubic(&up), 33).unwrap();
     assert!((d.max - 0.0056).abs() < 1e-9, "{d:?}");
@@ -64,9 +69,15 @@ fn a_small_offset_reads_back() {
 #[test]
 fn a_curve_lying_on_a_plane_does_not_deviate() {
     let k = Kernel::new(&KernelOptions::default());
-    let plane = Surface::from(create_plane_surface(Point3::new(0.0, 0.0, 0.0), 20.0, 20.0).unwrap());
+    let plane =
+        Surface::from(create_plane_surface(Point3::new(0.0, 0.0, 0.0), 20.0, 20.0).unwrap());
     let domain = plane.natural_uv_domain_with_nurb(&k).unwrap();
-    let c = cubic(&[[1.0, 1.0, 0.0], [5.0, 9.0, 0.0], [12.0, 3.0, 0.0], [18.0, 15.0, 0.0]]);
+    let c = cubic(&[
+        [1.0, 1.0, 0.0],
+        [5.0, 9.0, 0.0],
+        [12.0, 3.0, 0.0],
+        [18.0, 15.0, 0.0],
+    ]);
     let d = curve_surface_deviation(&k, &c, &plane, &domain, 21).unwrap();
     assert!(d.max < 1e-9, "{d:?}");
     assert_eq!(d.bound, None);

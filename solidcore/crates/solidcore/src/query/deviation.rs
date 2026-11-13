@@ -61,7 +61,9 @@ fn stations(c: &Curve, samples: usize) -> Result<Vec<f64>> {
     }
     let ivl = c.natural_interval();
     let steps = (samples - 1) as f64;
-    Ok((0..samples).map(|i| ivl.evaluate(i as f64 / steps)).collect())
+    Ok((0..samples)
+        .map(|i| ivl.evaluate(i as f64 / steps))
+        .collect())
 }
 
 /// The deviation from the pairs `comb`, with `bound`; refused when no station measured.
@@ -74,7 +76,10 @@ fn of(comb: Vec<(Point3, Point3)>, bound: Option<f64>) -> Result<Deviation> {
         }
     }
     let Some((max, at, to)) = worst else {
-        return Err(SolidError::query_failed(OP, "no station dropped onto the other"));
+        return Err(SolidError::query_failed(
+            OP,
+            "no station dropped onto the other",
+        ));
     };
     Ok(Deviation {
         max,

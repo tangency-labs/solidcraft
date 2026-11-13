@@ -195,7 +195,12 @@ pub struct Principal {
 /// [`SolidError::InvalidInput`] for a point not finite, a face without a surface or without a
 /// face use; [`SolidError::Unsupported`] for a face use whose orientation is unknown; those of
 /// the drop; an unported evaluation or a cancellation.
-pub fn principal_curvatures(k: &Kernel, b: &Brep, f: FaceId, p: Point3) -> Result<Option<Principal>> {
+pub fn principal_curvatures(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    p: Point3,
+) -> Result<Option<Principal>> {
     if !finite(p) {
         return Err(SolidError::invalid_input(OP, "a point that is not finite"));
     }
@@ -574,7 +579,10 @@ mod tests {
         let mut k = Kernel::new(&KernelOptions::default());
         let b = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 4.0).unwrap();
         let pr = principal_of(&k, &b, Point3::new(3.0, 4.0, 5.0));
-        assert!((pr.k1 - 0.25).abs() < 1e-9 && (pr.k2 - 0.25).abs() < 1e-9, "{pr:?}");
+        assert!(
+            (pr.k1 - 0.25).abs() < 1e-9 && (pr.k2 - 0.25).abs() < 1e-9,
+            "{pr:?}"
+        );
         assert!((pr.point.length() - 4.0).abs() < 1e-9, "{pr:?}");
     }
 
@@ -614,6 +622,9 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(pr.k1 > 0.0 && pr.k2 < 0.0, "{pr:?}");
-        assert!((pr.k1 - 1.0).abs() < 1e-9 && (pr.k2 + 1.0).abs() < 1e-9, "{pr:?}");
+        assert!(
+            (pr.k1 - 1.0).abs() < 1e-9 && (pr.k2 + 1.0).abs() < 1e-9,
+            "{pr:?}"
+        );
     }
 }
