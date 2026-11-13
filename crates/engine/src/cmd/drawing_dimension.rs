@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::dimension::{
@@ -70,7 +70,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              it, {point} or {body, index}, each with path?: the \
              occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10;              a linear, length or chain one's on the side away from what it measures); \
              text?: centred (default) or {at: [x, y]} from the view's centre; decimals?: 0..6 (default 2); override_text? (not a \
-             chain's) → what drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
+             chain's); dry_run?: true to answer what it would add, adding nothing (no id is taken, no undo step) → what \
+             drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
              view can't measure, or on a part it doesn't draw, is refused. One undo step; no model is evaluated.",
         ),
     CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit))
@@ -119,6 +120,18 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let request: AddParams = crate::schema::read(ADD, p)?;
+    if request.dry_run == Some(true) {
+        // As selection.delete and sketch.trim.path: the add itself, on a copy of the session, so the
+        // answer is the add's and nothing it takes (an id, an undo step, a last good value) stays.
+        let mut reply = added(&mut s.scratch(), request)?;
+        reply["dry_run"] = json!(true);
+        return Ok(reply);
+    }
+    added(s, request)
+}
+
+/// The dimension `request` asks for, added to the open drawing of `s`, and what inspect answers for it.
+fn added(s: &mut Session, request: AddParams) -> Result<Value> {
     let mut record = Drawing::clone(s.drawing(ADD)?);
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
@@ -575,6 +588,7 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         exact: r.exact,
         candidates,
         warnings: drawn_warning(&d, dimension.view, dimension.kind.paths()),
+        dry_run: false,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

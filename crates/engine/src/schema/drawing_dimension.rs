@@ -407,6 +407,11 @@ pub struct AddParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub override_text: Option<String>,
+    /// True to answer what it would add, adding nothing: no id is taken and no undo step made.
+    /// Default: false.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub dry_run: Option<bool>,
 }
 
 /// What `drawing.dimension.inspect` takes.
@@ -539,6 +544,9 @@ pub struct DimensionResult {
     /// What to know about it: a view edited since to leave out what it points at.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// `true` for a dry run of `drawing.dimension.add`, which added nothing; left out otherwise.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dry_run: bool,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
