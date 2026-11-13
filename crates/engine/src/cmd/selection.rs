@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
-use solidcore_record::Vec3;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
@@ -255,6 +255,91 @@ enum Entity {
     Point,
     Midpoint,
     Constraint,
+}
+
+/// The point a note anchors to when the caller names none: where the selection points, the
+/// newest item first, or the origin when nothing is selected (#16015).
+pub(super) fn anchor_from_selection(s: &Session) -> Vec3 {
+    s.selection.iter().rev().find_map(|sel| anchor_of(s, sel)).unwrap_or(Vec3::ZERO)
+}
+
+/// The point a selected item points at, when it names one. An item that names no point (a
+/// feature, a constraint, a profile) leaves the anchor to the next selected item.
+fn anchor_of(s: &Session, sel: &Sel) -> Option<Vec3> {
+    match sel {
+        // A picked face, edge or vertex: the point it was picked at.
+        Sel::Face { point, .. } | Sel::Edge { point, .. } | Sel::Vertex { point, .. } => point.is_finite().then_some(*point),
+        // A body: the middle of its box.
+        Sel::Body { name } => {
+            let st = s.world_state().ok()?;
+            st.body(name).map(|b| b.outline_bounds().center())
+        }
+        // A construction point: where it sits.
+        Sel::ConstructionPoint { name } => crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p),
+        // A datum plane or axis: the point it passes through.
+        Sel::Plane { name } => super::measure_sel::plane_named(s, name).map(|(p, _)| p),
+        Sel::Axis { name } => super::measure_sel::axis_named(s, name).map(|(p, _)| p),
+        // A sketch point: where it is in the world.
+        Sel::SketchPoint { id } => sketch_point(s, None, id),
+        Sel::ExternalSketchPoint { sketch, id } => sketch_point(s, Some(*sketch), id),
+        // A sketch line's midpoint.
+        Sel::SketchMidpoint { id } => sketch_midpoint(s, id),
+        // A sketch curve: its middle.
+        Sel::SketchCurve { id, sketch } => sketch_curve_point(s, *sketch, id),
+        Sel::ExternalSketchCurve { sketch, id } => sketch_curve_point(s, Some(*sketch), id),
+        // An occurrence: where it is placed in the world.
+        Sel::Occurrence { path } => s.occurrence_placement(path).ok().map(|p| solidcraft_doc::apply_point(&p.world, Vec3::ZERO)),
+        Sel::Feature { .. } | Sel::SketchConstraint { .. } | Sel::Profile { .. } => None,
+    }
+}
+
+/// A sketch point's world position. The id of a point of any sketch may name its sketch
+/// ("<sketch id>:<point id>").
+fn sketch_point(s: &Session, sketch: Option<u64>, id: &str) -> Option<Vec3> {
+    let st = s.world_state().ok()?;
+    let (sketch, id) = match id.split_once(':').and_then(|(k, p)| k.parse::<u64>().ok().map(|k| (k, p))) {
+        Some((k, p)) if sketch.is_none() => (Some(k), p),
+        _ => (sketch, id),
+    };
+    let ss = sketch_of(s, &st, sketch, |sk| sk.point_index(id).is_some())?;
+    let pt = ss.sketch.point_index(id).and_then(|i| ss.sketch.points.get(i))?;
+    Some(ss.plane.to_world(pt.pos))
+}
+
+/// A sketch line's midpoint, in world space.
+fn sketch_midpoint(s: &Session, id: &str) -> Option<Vec3> {
+    let st = s.world_state().ok()?;
+    let ss = sketch_of(s, &st, None, |sk| sk.curve_index(id).is_some())?;
+    let curve = ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i))?;
+    let solidcraft_sketch::CurveKind::Line { a, b } = curve.kind else { return None };
+    let (a, b) = (ss.sketch.point(a)?, ss.sketch.point(b)?);
+    Some(ss.plane.to_world(a.lerp(b, 0.5)))
+}
+
+/// The middle of a sketch curve, in world space: the middle of a line, the centre of a circle
+/// or an ellipse, and the point halfway along an arc.
+fn sketch_curve_point(s: &Session, sketch: Option<u64>, id: &str) -> Option<Vec3> {
+    let st = s.world_state().ok()?;
+    let ss = sketch_of(s, &st, sketch, |sk| sk.curve_index(id).is_some())?;
+    let curve = ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i))?;
+    let at = |i: usize| ss.sketch.point(i);
+    match curve.kind {
+        solidcraft_sketch::CurveKind::Line { a, b } => {
+            let (a, b) = (at(a)?, at(b)?);
+            Some(ss.plane.to_world(a.lerp(b, 0.5)))
+        }
+        solidcraft_sketch::CurveKind::Circle { c, .. } | solidcraft_sketch::CurveKind::Ellipse { c, .. } => Some(ss.plane.to_world(at(c)?)),
+        solidcraft_sketch::CurveKind::Arc { c, a, b } => {
+            let (centre, a, b) = (at(c)?, at(a)?, at(b)?);
+            let radius = (a - centre).len();
+            let start = (a - centre).angle();
+            // The arc runs counter-clockwise from `a` to `b` about its centre.
+            let sweep = ((b - centre).angle() - start).rem_euclid(std::f64::consts::TAU);
+            let mid = centre + Vec2::from_angle(start + sweep / 2.0) * radius;
+            Some(ss.plane.to_world(mid))
+        }
+        _ => None,
+    }
 }
 
 /// The `type` tag of a serialized sketch curve or constraint.
