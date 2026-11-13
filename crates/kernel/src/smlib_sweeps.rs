@@ -82,6 +82,34 @@ pub(crate) use imp::{
     revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
 };
 
+/// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
+/// the next pair, and so on, a part left over at the end of a level carried up as it is. Every
+/// join is of two neighbouring stretches, the left one first, and every part takes part in about
+/// log2(n) joins; joining each part onto all those before it instead hands the growing whole to
+/// every join, n²/2 parts' worth of work in all. None for no parts.
+fn union_tree<T>(parts: Vec<T>, mut join: impl FnMut(T, T) -> Result<T>) -> Result<Option<T>> {
+    let mut level = parts;
+    while level.len() > 1 {
+        let mut next = Vec::with_capacity(level.len().div_ceil(2));
+        let mut it = level.into_iter();
+        while let Some(a) = it.next() {
+            next.push(match it.next() {
+                Some(b) => join(a, b)?,
+                None => a,
+            });
+        }
+        level = next;
+    }
+    Ok(level.pop())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The runs' pieces the unions joining a cornered sweep's runs have taken in on this thread,
+    /// both operands counted: how the joining's work grows with the number of corners.
+    pub(crate) static UNION_LOAD: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Refuses what no SMLib sweep does, before any work.
 pub(crate) fn refuse(what: &str) -> KernelError {
     not_supported(&format!("SMLib {what}"))
@@ -151,7 +179,8 @@ mod imp {
     }
 
     /// The pieces as SMLib's curves: one each, but one B-spline for each run of pieces that join
-    /// the one before them ([`Piece::joins_previous`]).
+    /// the one before them ([`Piece::joins_previous`]). A Bézier piece whose control points turn
+    /// back on themselves goes in as its halves ([`unfolded`]): the same curve.
     fn curves(plane: &Plane, pieces: &[Piece]) -> Result<Vec<Curve>> {
         let mut out = Vec::new();
         let mut run = Vec::new();
@@ -159,12 +188,76 @@ mod imp {
             if !x.joins_previous && !run.is_empty() {
                 out.push(joined(std::mem::take(&mut run))?);
             }
-            run.push(curve(plane, &x.seg)?);
+            run.extend(unfolded(curve(plane, &x.seg)?, UNFOLD_DEPTH));
         }
         if !run.is_empty() {
             out.push(joined(run)?);
         }
         Ok(out)
+    }
+
+    /// How sharply a Bézier piece's control polygon may turn back between neighbouring steps
+    /// before the piece goes in as its halves (cosine of the turn, 160°). SMLib's check refuses
+    /// a swept wall whose control net turns back by more than 170° ("Bad NonMonotonic CPts",
+    /// #13243, #12107), though the curve itself may be smooth: a lettering outline drawn with
+    /// one handle pulled past the other. Its halves are the same curve on control polygons
+    /// closer to it, which turn less; 160° leaves the halves room below SMLib's 170°.
+    const UNFOLD_TURN: f64 = -0.939_692_620_785_908_4;
+
+    /// How many times a piece is halved at most: a curve that really turns back on itself (a
+    /// cusp) has a control polygon that does at any depth, and goes in as it is.
+    const UNFOLD_DEPTH: usize = 4;
+
+    /// `c` as it goes into a sweep: a Bézier piece whose control polygon turns back by more than
+    /// [`UNFOLD_TURN`] as its two halves at the middle of its parameter (de Casteljau, in
+    /// homogeneous points, so a rational piece is split exactly too), each again so up to
+    /// `depth` times; anything else as it is. [`joined`] takes the halves back as one B-spline:
+    /// one curve, one wall.
+    fn unfolded(c: Curve, depth: usize) -> Vec<Curve> {
+        let Curve::Nurbs { degree, points, knots } = &c else { return vec![c] };
+        if depth == 0 || points.len() != degree + 1 || knots.len() != 2 * (degree + 1) || !turns_back(points) {
+            return vec![c];
+        }
+        let (left, right) = halves(points);
+        let piece = |points: Vec<[f64; 4]>| Curve::Nurbs { degree: *degree, points, knots: knots.clone() };
+        let mut out = unfolded(piece(left), depth - 1);
+        out.extend(unfolded(piece(right), depth - 1));
+        out
+    }
+
+    /// Whether the control polygon `points` (`[x, y, z, weight]`) turns back by more than
+    /// [`UNFOLD_TURN`] between two steps, a step too short to have a direction passed over.
+    fn turns_back(points: &[[f64; 4]]) -> bool {
+        let at = |q: &[f64; 4]| Vec3::new(q[0], q[1], q[2]);
+        let size = points.iter().map(|q| at(q).len()).fold(1.0, f64::max);
+        let mut last: Option<Vec3> = None;
+        for w in points.windows(2) {
+            let [a, b] = w else { continue };
+            let d = at(b) - at(a);
+            let Some(step) = d.normalized().filter(|_| d.len() > size * 1e-12) else { continue };
+            if last.is_some_and(|l| l.dot(step) < UNFOLD_TURN) {
+                return true;
+            }
+            last = Some(step);
+        }
+        false
+    }
+
+    /// The control points of the two halves of the Bézier `points` (`[x, y, z, weight]`) split
+    /// at the middle of its parameter, by de Casteljau's construction on the homogeneous points.
+    fn halves(points: &[[f64; 4]]) -> (Vec<[f64; 4]>, Vec<[f64; 4]>) {
+        let hom = |q: &[f64; 4]| [q[0] * q[3], q[1] * q[3], q[2] * q[3], q[3]];
+        let euclid = |h: [f64; 4]| if h[3] != 0.0 { [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]] } else { h };
+        let mut row: Vec<[f64; 4]> = points.iter().map(hom).collect();
+        let (mut left, mut right) = (Vec::with_capacity(row.len()), Vec::with_capacity(row.len()));
+        while let (Some(first), Some(last)) = (row.first().copied(), row.last().copied()) {
+            left.push(euclid(first));
+            right.push(euclid(last));
+            let mid = |a: &[f64; 4], b: &[f64; 4]| [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2]), 0.5 * (a[3] + b[3])];
+            row = row.iter().zip(row.iter().skip(1)).map(|(a, b)| mid(a, b)).collect();
+        }
+        right.reverse();
+        (left, right)
     }
 
     /// Bézier curves of one degree, each starting where the one before ends, as the one B-spline
@@ -466,9 +559,11 @@ mod imp {
         if !inside.is_empty() {
             let (ops, order) = ops()?;
             let points = points(inside);
-            let ds = (0..n)
-                .map(|f| ops.face_distances(order, f, &points).map_err(|e| KernelError::Failed(format!("sweep history: face {f}: {e}"))))
-                .collect::<Result<Vec<_>>>()?;
+            // Only a face within `reach` of a point can claim it below or be its nearest, so the
+            // seam is asked about those alone and answers `None` for the rest: every face against
+            // every point grew with the square of the profile's segment count (#15134).
+            let ds =
+                ops.face_distances_within(order, &points, reach).map_err(|e| KernelError::Failed(format!("sweep history: face distances: {e}")))?;
             for (j, s) in inside.iter().enumerate() {
                 let d = |f: usize| ds.get(f).and_then(|d| d.get(j).copied().flatten()).unwrap_or(f64::INFINITY);
                 let nearest = (0..n).map(d).fold(f64::INFINITY, f64::min);
@@ -813,7 +908,27 @@ mod imp {
         let c = curves(plane, pieces)?;
         let route = path.iter().map(path_curve).collect::<Result<Vec<_>>>()?;
         let frame = if translate { SweepFrame::Translate } else { SweepFrame::Follow };
-        Brep::sweep_placed(&c, &route, frame, true).map_err(|e| failed("sweep", e))
+        Brep::sweep_placed(&c, &route, frame, true).map_err(|e| sweep_failed(path, e))
+    }
+
+    /// SMLib's refusal of a sweep along `path`, in words where its status says why: an arc of the
+    /// path is swept as a turn about the arc's axis, and `SM_ERR_AXIS_INSIDE_FACE` (1025) is the
+    /// profile reaching across that axis, past the centre of the bend (#12126).
+    fn sweep_failed(path: &[crate::PathSeg], e: solidcraft_smlib::Error) -> KernelError {
+        let tightest = path
+            .iter()
+            .filter_map(|s| match *s {
+                crate::PathSeg::Arc { a, center, .. } => Some(a.dist(center)),
+                _ => None,
+            })
+            .min_by(f64::total_cmp);
+        match (&e, tightest) {
+            (solidcraft_smlib::Error::Status(1025), Some(radius)) => KernelError::Invalid(format!(
+                "the profile reaches past the centre of a bend in the path: it must stay inside the radius of every bend it turns towards (the tightest bend here is {} mm)",
+                crate::blend::trimmed_mm(radius)
+            )),
+            _ => failed("sweep", e),
+        }
     }
 
     /// `q` moved by the motion `a`.
@@ -886,6 +1001,17 @@ mod imp {
         a.boolean(b, op).map_err(|e| failed(what, e))?.ok_or_else(|| failed(what, "nothing is left"))
     }
 
+    /// The union of the runs' pieces, in a balanced tree ([`union_tree`]) of the plain union.
+    fn joined_runs(parts: Vec<Brep>) -> Result<Brep> {
+        let held: Vec<(Brep, usize)> = parts.into_iter().map(|b| (b, 1)).collect();
+        let joined = union_tree(held, |(a, m), (b, n)| {
+            #[cfg(test)]
+            UNION_LOAD.with(|l| l.set(l.get() + m + n));
+            Ok((combined(&a, &b, solidcraft_smlib::BooleanOp::Union, "sweep corner")?, m + n))
+        })?;
+        joined.map(|(b, _)| b).ok_or_else(|| KernelError::Invalid("empty path".into()))
+    }
+
     /// A sweep along a path with corners: each smooth run of it swept on its own, and the runs
     /// joined at each corner. Turning with the path, the profile turns at a corner about the
     /// line square to both directions, and the runs meet in a mitre: each run is swept on
@@ -927,7 +1053,7 @@ mod imp {
         let closed = end.dist(start) <= 1e-6;
         let closing = (closed && last_t.dot(first_t) < (1e-3f64).cos()).then_some(first_t);
         let mut pose = *plane;
-        let mut body: Option<Brep> = None;
+        let mut parts: Vec<Brep> = Vec::with_capacity(runs.len());
         let mut inside = Vec::new();
         // The mitre the next run starts from: its point, its normal (along the run) and the turn.
         let mut entry: Option<(Vec3, Vec3, f64)> = match closing {
@@ -992,10 +1118,7 @@ mod imp {
                 }
                 (piece, moved_plane(&placed(&from, &last), t1 * -post))
             };
-            body = Some(match body {
-                None => piece,
-                Some(b) => combined(&b, &piece, solidcraft_smlib::BooleanOp::Union, "sweep corner")?,
-            });
+            parts.push(piece);
             // The profile at the run's end, then turned through the corner onto the next run.
             pose = at_end;
             entry = None;
@@ -1005,7 +1128,7 @@ mod imp {
                 entry = Some((b1, m, turn));
             }
         }
-        let brep = body.ok_or_else(|| KernelError::Invalid("empty path".into()))?;
+        let brep = joined_runs(parts)?;
         let body = body_of(brep, "sweep")?;
         let roles = roles(&body, plane, (!closed).then_some(&pose), &seeds(plane, pieces, |q| q), &inside, false)?;
         with_history(body, &roles, pieces)
@@ -1550,7 +1673,7 @@ mod imp {
             _ => None,
         };
         let mut before = 0.0f64;
-        let mut body: Option<Brep> = None;
+        let mut parts: Vec<Brep> = Vec::with_capacity(runs.len());
         let mut inside = Vec::new();
         for (ri, run) in runs.iter().enumerate() {
             let segs = path.get(run.clone()).ok_or_else(|| KernelError::Invalid("path run".into()))?;
@@ -1624,10 +1747,7 @@ mod imp {
                     piece = combined(&piece, &half_space(b1, m, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
             }
-            body = Some(match body {
-                None => piece,
-                Some(b) => combined(&b, &piece, solidcraft_smlib::BooleanOp::Union, "sweep corner")?,
-            });
+            parts.push(piece);
             // The section at the run's end, turned through the corner onto the next run.
             at_start = end_map;
             entry = None;
@@ -1638,7 +1758,7 @@ mod imp {
             }
             before += length;
         }
-        let brep = body.ok_or_else(|| KernelError::Invalid("empty path".into()))?;
+        let brep = joined_runs(parts)?;
         if closed {
             // Back at the start, the section has to be the profile again (a whole number of its
             // symmetries of twist).
@@ -1829,9 +1949,8 @@ mod imp {
     /// A loft through `sections` (as [`loft`] takes them) guided by one or two `rails` (polylines
     /// from the first section to the last, through every section's curve), by the law
     /// [`crate::loft_rails::railed`] gives a loft's rails: between each two sections stations are
-    /// the plain loft there moved so that the points the rails guide land on the rails. Each
-    /// section curve has to pair with the others' (the same kind, so their control points pair
-    /// up).
+    /// the plain loft there moved so that the points the rails guide land on the rails. The
+    /// sections' curves are brought to one form there, so a line pairs with an arc (#12512).
     pub(crate) fn loft_rails(sections: &[(Plane, Vec<Piece>)], first: usize, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
         if rails.is_empty() || rails.len() > 2 {
             return Err(KernelError::Invalid("a loft takes one or two guide rails".into()));
@@ -1901,5 +2020,31 @@ mod imp {
         let body = body_of(brep, "screw sweep")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
         with_history(body, &roles, pieces)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod tests {
+    /// The corner pieces of a sweep along a path are joined in a balanced tree (#14451): every join
+    /// is of two neighbouring stretches, left first, and for 180 runs (a 181-point polyline) the
+    /// joins take in 180 · 8 = 1440 pieces' worth of operands at most, where joining each piece onto
+    /// the body so far takes in 2 + 3 + … + 180 = 16,289.
+    #[test]
+    fn corner_pieces_are_joined_neighbours_first_in_a_balanced_tree() {
+        let mut load = 0;
+        let mut joins = 0;
+        let whole = super::union_tree((0..180).map(|i| i..i + 1).collect(), |a: std::ops::Range<usize>, b: std::ops::Range<usize>| {
+            assert_eq!(a.end, b.start, "joined {a:?} with {b:?}, not its neighbour");
+            load += a.len() + b.len();
+            joins += 1;
+            Ok(a.start..b.end)
+        })
+        .unwrap();
+        assert_eq!(whole, Some(0..180));
+        assert_eq!(joins, 179);
+        assert!(load <= 180 * 8, "{load}");
+        assert_eq!(super::union_tree(Vec::<usize>::new(), |a, _| Ok(a)).unwrap(), None);
+        assert_eq!(super::union_tree(vec![7], |a, _| Ok(a)).unwrap(), Some(7));
     }
 }

@@ -116,13 +116,15 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              after a delete (undo rewinds the counters with the design), usable right away \
              in sketch.dimension, sketch.constraint.* and sketch.delete. Feature commands return the feature's id \
              and name, every body (bodies) and the bodies the feature created, changed and removed (created_bodies, changed_bodies, removed_bodies). \
-             view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot (read-only; docs/control-protocol.md). \
+             When connected to the running SolidCraft app, view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot. \
+             view.pick is unavailable in headless MCP, including with frame: \"model\". It is handled by the app and absent from list_commands and describe_command \
+             (read-only; docs/control-protocol.md). \
              `expect` {volume_mm3, tol, bodies, bbox} checks the design after the command (as `batch` does) and flags a mismatch.",
             object(
                 json!({
                     "command": string("Command id (see list_commands)"),
                     "params": {"type": "object", "description": "The command's parameters"},
-                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies. When a sketch command creates more points than its new curves have ends (spline poles), `created.points` becomes `created.point_count` (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies. When a sketch command creates more points than its new curves have ends (spline poles), `created.points` becomes `created.point_count`. A `created` list of more than 20 ids (a drawing of many curves) is left out and counted instead: `curve_count`, `constraint_count`, `dimension_count` (and `point_count`); `sketch.inspect` lists every id (default true)"},
                     "expect": expect_schema(),
                 }),
                 &["command"],
@@ -160,7 +162,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "coalesce_parameters": {"type": "boolean", "description": "Set each run of consecutive plain parameter edits (parameters.change or set_parameter with a name and a value, or changes) together, rebuilding the design once for the run instead of once per edit; a run that is refused goes step by step, naming the refused step. Other steps still see the design up to date. Each step keeps its own result; the run is one undo step (default false)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
                     "profile": {"type": "boolean", "description": "Like timings, and each step's `profile`: {boolean_ms, tessellate_ms, other_ms}, its time in kernel booleans, in tessellation and the rest (default false)"},
-                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created`, and `created.points` becomes `created.point_count` when there are more points than the new curves have ends (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created`, and `created.points` becomes `created.point_count` when there are more points than the new curves have ends; a `created` list of more than 20 ids is left out and counted instead (`curve_count` and the like); `sketch.inspect` lists every id (default true)"},
                     "expect": expect_schema(),
                 }),
                 &[],
@@ -316,14 +318,16 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
         tool(
             "export",
             "Export",
-            "Export bodies to STEP (.step/.stp), IGES (.iges/.igs), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla) or OBJ. The format \
+            "Export bodies to STEP (.step/.stp), IGES (.iges/.igs), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla), OBJ or GLB (.glb: binary glTF \
+             in metres with Y up, with each body's colours, metallic and roughness, and each occurrence a named node holding its part's bodies; \
+             transparent bodies are refused). The format \
              comes from the extension unless given. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
              next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/.",
             object(
                 json!({
                     "path": string("Output file"),
-                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "urdf"]},
+                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "urdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
                     "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
@@ -463,7 +467,7 @@ fn inspect_design_tool(opts: Options) -> Value {
                     "sketches": {"type": "boolean", "description": "Full sketch contents (default true; false = summary only)"},
                     "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
                     "timeline": timeline_arg(),
-                    "bodies": {"type": ["boolean", "string"], "enum": [true, false, "names"], "description": BODIES_ARG},
+                    "bodies": {"type": ["boolean", "string"], "description": BODIES_ARG},
                 }),
                 &[],
             ),
@@ -504,13 +508,26 @@ fn inspect_design_tool(opts: Options) -> Value {
     )
 }
 
-/// `inspect_design`'s `timeline` argument, as `document.inspect` takes it.
+/// `inspect_design`'s `timeline` argument, as `document.inspect` takes it. No `enum` beside the
+/// list of types: Moonshot refuses every tool when one argument has both (#15306), so
+/// [`inspect_words`] checks the word.
 fn timeline_arg() -> Value {
     json!({
         "type": ["boolean", "string"],
-        "enum": [true, false, "summary"],
         "description": "true (default): every feature with its state and timing; \"summary\": each feature as id, name and type, with error, warning, suppressed and rolled_back only when set; false: no timeline",
     })
+}
+
+/// `inspect_design`'s words, checked before anything is sent: `timeline` takes "summary", and
+/// `bodies` (when `bodies_word`) "names". Their schemas list no values (see [`timeline_arg`]).
+fn inspect_words(a: &Map<String, Value>, bodies_word: bool) -> Result<(), String> {
+    if a.get("timeline").and_then(Value::as_str).is_some_and(|w| w != "summary") {
+        return Err("inspect_design: `timeline` must be true, false or \"summary\"".into());
+    }
+    if bodies_word && a.get("bodies").and_then(Value::as_str).is_some_and(|w| w != "names") {
+        return Err("inspect_design: `bodies` must be true, false or \"names\"".into());
+    }
+    Ok(())
 }
 
 /// `inspect_design`'s `bodies` argument without compact output.
@@ -907,6 +924,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             Ok(if a.get("verbose").and_then(Value::as_bool).unwrap_or(true) { v } else { compact(v) })
         }
         "inspect_design" => {
+            inspect_words(a, true)?;
             let measure = a.get("measure").and_then(Value::as_bool).unwrap_or(true);
             let mut d = b.call("document.inspect", inspect_params(a, measure, &["timeline", "bodies"]))?;
             if a.get("sketches").and_then(Value::as_bool).unwrap_or(true) {
@@ -1226,6 +1244,7 @@ fn inspect_design_compact(b: &mut dyn Backend, a: &Map<String, Value>) -> Result
     {
         return Err("inspect_design: `bodies` must be a list of body names, true, false or \"names\"".into());
     }
+    inspect_words(a, false)?;
     let bodies: Option<Vec<String>> = match a.get("bodies").filter(|v| v.is_array()) {
         None => None,
         Some(v) => Some(
@@ -1879,9 +1898,14 @@ fn topology_cylinders(faces: &Value, edges: &Value) -> Value {
         .collect()
 }
 
+/// A `created` list longer than this (a drawing of hundreds of curves) is left out of a compact
+/// reply and counted instead (`curve_count` and the like, as `point_count`): the ids are no
+/// sequence an agent could derive, each kind of curve counts on its own. `sketch.inspect` has them.
+const COMPACT_LIST: usize = 20;
+
 /// A command's result without what the design already had (`execute` or `batch` with `verbose: false`): a
 /// feature's full body list (its created, changed and removed bodies stay), and the sketch ids
-/// a sketch command repeats outside `created`.
+/// a sketch command repeats outside `created`. Long `created` lists are counted instead of listed.
 fn compact(mut v: Value) -> Value {
     let Some(o) = v.as_object_mut() else { return v };
     if o.contains_key("created_bodies") {
@@ -1902,6 +1926,15 @@ fn compact(mut v: Value) -> Value {
         if curves > 0 && points > 2 * curves {
             created.remove("points");
             created.insert("point_count".into(), json!(points));
+        }
+    }
+    if let Some(created) = o.get_mut("created").and_then(Value::as_object_mut) {
+        for (k, count) in
+            [("points", "point_count"), ("curves", "curve_count"), ("constraints", "constraint_count"), ("dimensions", "dimension_count")]
+        {
+            let Some(n) = created.get(k).and_then(Value::as_array).map(Vec::len).filter(|n| *n > COMPACT_LIST) else { continue };
+            created.remove(k);
+            created.insert(count.into(), json!(n));
         }
     }
     v

@@ -17,7 +17,10 @@
 //! `MakeCornerTopology`, are returned as an [`Nx1GapCheck`] for the caller, which
 //! holds the corner table and solver store they need, to run before anything else.
 //! The end face at a tangent side is extended `CInfinity` and that side's cap edge is
-//! `OnExtendEdge` (WR-600, the fork's tangency-labs/smlib@856b54e). There is no recursion.
+//! `OnExtendEdge` (WR-600, the fork's tangency-labs/smlib@856b54e). At a multi-neighbour
+//! end face whose side edges are both cliff edges, the end face is the side face whose
+//! surface holds the other side edge; upstream takes the first side's, whatever its
+//! surface. There is no recursion.
 
 use std::collections::BTreeMap;
 
@@ -33,7 +36,9 @@ use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point3, EFF_ZERO};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::{BrepFaceServices, FaceCaches};
 use crate::surface::surface::Surface;
+use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, Vertex, VertexId};
@@ -46,6 +51,49 @@ fn invalid(reason: &'static str) -> SolidError {
 
 fn need<T>(value: Option<T>, reason: &'static str) -> Result<T> {
     value.ok_or_else(|| invalid(reason))
+}
+
+/// Whether the surface of `side`'s face holds the whole edge of `other` within `tol_3d`
+/// (the surface's coincidence check, as the gap check runs it on the end face's extension).
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an edge use without face, surface, edge or curve; those
+/// of the coincidence check.
+fn face_holds_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    side: EdgeuseId,
+    other: EdgeuseId,
+    tol_3d: f64,
+) -> Result<bool> {
+    let face = need(eu1::face(target, side)?, "side edge use without face")?;
+    let surface = need(
+        crate::topology::face::p2::surface(target, face)?,
+        "side face without surface",
+    )?
+    .clone_for_evaluation()?;
+    let other_edge = need(eu1::edge(target, other)?, "side edge use without edge")?;
+    let curve = need(edge::curve(target, other_edge)?, "side edge without curve")?
+        .clone_for_evaluation()?;
+    let interval = edge::interval(target, other_edge)?;
+    // the face's own surface: its trimmed-surface services come from the B-rep
+    let mut services = BrepFaceServices::with_caches(target, FaceCaches::new());
+    Ok(surface
+        .simple_coincidence_checker_with_context(
+            k,
+            &surface.natural_uv_domain_with_nurb(k)?,
+            &curve,
+            &interval,
+            tol_3d,
+            false,
+            [
+                Some(CacheObject::Curve(other_edge)),
+                Some(CacheObject::Surface(face)),
+            ],
+            None,
+            &mut services,
+        )?
+        .is_some())
 }
 
 /// `sm_FindSurfaceExtensionDistAtCorner`: an extension distance for the end surface of
@@ -239,8 +287,18 @@ impl FilletCorner {
                         (first, second)
                     } else if same[1] {
                         (second, first)
+                    } else if !face_holds_edge(k, target, first, second, self.approx_tol_3d)?
+                        && face_holds_edge(k, target, second, first, self.approx_tol_3d)?
+                    {
+                        // Both are cliff edges. The cap lies on the end face's surface
+                        // between the end rib and both side edges, so the end face is the
+                        // one whose surface holds the other side edge (the gap check asks
+                        // that of its extension). Upstream picks the first, which made an
+                        // End beside two faces meeting tangentially (a bore's flat wall
+                        // and its round bottom) depend on which of them came first round
+                        // the vertex: the mirror image built and the part did not (#15768).
+                        (second, first)
                     } else {
-                        // both are cliff edges, just pick one.
                         (first, second)
                     };
                     end_face = eu1::face(target, pick)?;
@@ -248,7 +306,10 @@ impl FilletCorner {
                     other_side_edgeuse = Some(other);
                 } else {
                     // Invalid brep topology
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the brep's topology at the corner is not valid",
+                    ));
                 }
             }
         }

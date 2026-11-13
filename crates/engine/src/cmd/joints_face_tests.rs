@@ -575,3 +575,23 @@ fn jointed_arms_stay_together_as_the_arm_changes() {
     }
     assert!(apart.is_empty(), "{} joints apart:\n{}", apart.len(), apart.join("\n"));
 }
+
+/// A planar face with a hole locates its joint origin outline centre from exact B-rep loops.
+#[test]
+fn planar_face_with_hole_locates_outline_centre_from_brep_loops() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -50], "p1": [50, 50]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 20], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Body"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(&mut s, "joint.origin", json!({"name": "CenterOrigin", "occurrence": "Plate:1", "face": [0, 0, 10]}));
+    assert!(r["error"].is_null(), "{r}");
+    let jo = s.doc.assembly.origins.iter().find(|o| o.name == "CenterOrigin").unwrap();
+    let frame = s.doc.origin_world(&s.model.state(), &jo.origin).unwrap();
+    let point = solidcraft_doc::apply_point(&frame, Vec3::ZERO);
+    // The plate outline is [-50, 50] in X and Y, centered at (0, 0), so outline centre is at (0, 0, 10).
+    assert!((point.x).abs() < 1e-4 && (point.y).abs() < 1e-4 && (point.z - 10.0).abs() < 1e-4, "expected (0, 0, 10), got {point:?}");
+}

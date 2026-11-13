@@ -75,6 +75,15 @@ pub struct SaveParams {
     /// design's own file. Default: false.
     #[serde(default)]
     pub overwrite: Option<bool>,
+    /// Sign the saved design with GnuPG, appending one record to its provenance. Default: false.
+    /// Accepted only from the app's own Save (the user chose the key); a script or agent is
+    /// refused.
+    #[serde(default)]
+    pub sign: Option<bool>,
+    /// The GnuPG key to sign with: a fingerprint or user id. Default, or a blank value: GnuPG's
+    /// default signing key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_key: Option<String>,
 }
 
 /// Write the design to a new file (a design file name, `.sc` as a rule) and make that file the
@@ -109,6 +118,27 @@ pub struct SaveAsParams {
     /// program or computer changed it. Default: false.
     #[serde(default)]
     pub overwrite: Option<bool>,
+    /// Sign the saved design with GnuPG, appending one record to its provenance. Default: false.
+    /// Accepted only from the app's own Save (the user chose the key); a script or agent is
+    /// refused.
+    #[serde(default)]
+    pub sign: Option<bool>,
+    /// The GnuPG key to sign with: a fingerprint or user id. Default, or a blank value: GnuPG's
+    /// default signing key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_key: Option<String>,
+}
+
+/// What a signed save put in the file.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SignedSave {
+    /// The signature scheme: `gpg` for an OpenPGP record made by GnuPG.
+    pub method: String,
+    /// The fingerprint of the (sub)key that signed, uppercase hex.
+    pub fingerprint: String,
+    /// The primary user id of the signing key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
 }
 
 /// What `file.save` and `file.save_as` return.
@@ -132,6 +162,9 @@ pub struct SaveResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+    /// With `sign: true`: who signed the file that was written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<SignedSave>,
 }
 
 #[cfg(test)]

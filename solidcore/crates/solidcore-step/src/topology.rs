@@ -1,5 +1,5 @@
 //! STEP topology (ISO 10303-42 topology and geometric model entities) into the kernel-neutral
-//! B-rep, schema 4 ([`solidcraft_geom::brep`], docs/native-brep.md). Written from the public
+//! B-rep, schema 4 ([`solidcore_record::brep`]). Written from the public
 //! ISO 10303-42 specification.
 //!
 //! Each MANIFOLD_SOLID_BREP, BREP_WITH_VOIDS and SHELL_BASED_SURFACE_MODEL becomes one
@@ -80,7 +80,7 @@ const MAX_SPLINE_DEGREE: usize = 16;
 /// Samples along a curve when projecting a vertex onto it.
 const MAX_SAMPLES: usize = 4096;
 /// The largest tolerance (mm) an edge or vertex is given: SMLib takes none larger (smlib.h's
-/// EDGE_TOLERANCE and VERTEX_TOLERANCE, `solidcraft_smlib::flat::MAX_TOLERANCE`). Geometry that
+/// EDGE_TOLERANCE and VERTEX_TOLERANCE). Geometry that
 /// would need more is refused, with how far off it lies.
 const MAX_TOLERANCE: f64 = 1.0;
 /// A vertex's tolerance over its largest gap from its curves and surfaces.
@@ -421,7 +421,7 @@ fn read_with<'a>(
         skipped |= any;
         shells.push(faces);
     }
-    b.finish(item, name, shells, if skipped { Kind::Open } else { kind })
+    b.finish(item, name, shells, if skipped { Kind::Open { voids: kind == Kind::Voids } } else { kind })
 }
 
 /// A face of a solid read on its own ([`read_faces_with`]).
@@ -468,8 +468,10 @@ fn model_shells(ex: &Exchange, shells: &[u64]) -> (Vec<u64>, Vec<u64>) {
 }
 
 /// The items a solid item is read as, each one body: the item itself, but for a surface model
-/// with both closed and open shells (a part with a sheet beside it) each closed shell on its own
-/// (a solid), then the model (its open shells, a sheet).
+/// with both closed and open shells (a part with a sheet beside a solid) each closed shell is a
+/// solid body of its own and each open shell a surface body of its own, so each sheet keeps its
+/// own body count. A model of open shells only keeps the model as its one body, and so does a model of
+/// closed shells only.
 pub fn items(ex: &Exchange, item: u64) -> Vec<u64> {
     let shells = match ex.get(item) {
         Some(e) if e.name() == "SHELL_BASED_SURFACE_MODEL" => {
@@ -479,9 +481,14 @@ pub fn items(ex: &Exchange, item: u64) -> Vec<u64> {
     };
     let (closed, open) = model_shells(ex, &shells);
     if closed.is_empty() || open.is_empty() {
+        // A model of open shells only (even one whose shell is geometrically closed) is the
+        // model's one body, as before; so is a model of closed shells only.
         return vec![item];
     }
-    closed.into_iter().chain([item]).collect()
+    // A closed shell beside open ones: each closed shell is a solid body and each open shell a
+    // surface body of its own. One open shell stays the model item,
+    // which carries the model's name and colour.
+    closed.into_iter().chain(if open.len() == 1 { vec![item] } else { open }).collect()
 }
 
 /// The shells of a solid item (the outer shell first, then its voids), and what kind it is.
@@ -550,8 +557,12 @@ enum Kind {
     Solid,
     Voids,
     Model,
-    /// A solid with faces left out ([`read_solid_without`]): its shells are sheets only.
-    Open,
+    /// A solid with faces left out ([`read_solid_without`]): its shells are sheets, but for a
+    /// shell still closed, which bounds a region of its own (a void's cavity, where `voids`: the
+    /// solid's shells after the first are its voids).
+    Open {
+        voids: bool,
+    },
 }
 
 /// A curve the edge can be read on, and how its parameter relates to its vertices.
@@ -1335,9 +1346,16 @@ impl<'b, 'a> Builder<'b, 'a> {
                     regions.push(Region { shells: vec![index(v)?], void: true });
                 }
             }
-            Kind::Open => {
+            Kind::Open { voids } => {
                 if let Some(r) = regions.first_mut() {
                     r.shells = (0..index(shells.len())?).collect();
+                }
+                // A closed shell bounds two regions: the cavity inside a void still whole, or
+                // the inside of an outer shell or a model's shell still whole.
+                for (k, c) in closed.iter().enumerate() {
+                    if *c {
+                        regions.push(Region { shells: vec![index(k)?], void: voids && k > 0 });
+                    }
                 }
             }
             Kind::Model => {
@@ -1351,7 +1369,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 }
             }
         }
-        let sheet = kind == Kind::Open || !closed.iter().any(|c| *c);
+        let sheet = matches!(kind, Kind::Open { .. }) || !closed.iter().any(|c| *c);
 
         // Canonical order: faces walking regions → shells → oriented faces.
         let nf = self.faces.len();
@@ -1548,21 +1566,32 @@ impl<'b, 'a> Builder<'b, 'a> {
         std::iter::once(outer).chain((0..face.loops.len()).filter(|l| *l != outer)).collect()
     }
 
-    /// A face's box on its label over its edge loops (`crate::kernel::form::extent`); `None` where the
-    /// boundary does not project onto it.
+    /// A face's box on its label over its edge loops (`crate::kernel::form::extent`), a boundary
+    /// point on a pole within the face's tolerance (the largest of its edges' and vertices': a
+    /// cone's apex or a sphere's pole a file places a few µm off); `None` where the boundary does
+    /// not project onto it.
     fn face_extent(&self, fi: usize) -> R<Option<[[f64; 2]; 2]>> {
         let face = self.faces.get(fi).ok_or("face reference")?;
-        let mut boundary = Vec::with_capacity(face.loops.len());
+        let vertex_tolerance = |v: u32| self.vertices.get(v as usize).map(|x| x.tolerance).ok_or("vertex reference");
+        let (mut boundary, mut reach) = (Vec::with_capacity(face.loops.len()), self.tol);
         for l in &face.loops {
-            let LoopB::Edges(es) = l else { continue };
+            let es = match l {
+                LoopB::Edges(es) => es,
+                LoopB::Vertex(v) => {
+                    reach = reach.max(vertex_tolerance(*v)?);
+                    continue;
+                }
+            };
             let mut b = Vec::with_capacity(es.len());
             for &(e, forward) in es {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let [v0, v1] = edge.vertices;
+                reach = reach.max(edge.tolerance).max(vertex_tolerance(v0)?).max(vertex_tolerance(v1)?);
                 b.push((&edge.curve, edge.interval, forward));
             }
             boundary.push(b);
         }
-        Ok(crate::kernel::form::extent(&face.surface, &boundary))
+        Ok(crate::kernel::form::extent(&face.surface, &boundary, reach))
     }
 
     /// The pcurves of a face's edge loops (in its edge-loop order), its domain, whether it was
@@ -1593,13 +1622,14 @@ impl<'b, 'a> Builder<'b, 'a> {
                     None => self.face_extent(fi)?,
                 };
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                Some(crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
+                let (f, d) = crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?;
+                Some((f, d, extent))
             }
             None => None,
         };
-        let (form, box_on_form) = match form {
-            Some((f, d)) => (Some(f), Some(d)),
-            None => (None, None),
+        let (form, box_on_form, extent) = match form {
+            Some((f, d, e)) => (Some(f), Some(d), Some(e)),
+            None => (None, None, None),
         };
         let surface = form.clone().unwrap_or_else(|| label.clone());
         // How far each edge lies off this surface, so its closed form is checked at that.
@@ -1618,8 +1648,14 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             _ => None,
         };
-        let pcs =
+        let mut pcs =
             pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
+        // A form ends on a quarter line its face's boundary runs past by up to the tolerance: the
+        // pcurves are put on its range, as the face's domain is ([`face_domain`]), and the edges'
+        // tolerances cover the move.
+        if let (Some(f), Some(e)) = (&form, extent) {
+            onto_form(f, &label, e, tol, &mut pcs);
+        }
         self.raise_edges(&surface, &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
@@ -1633,7 +1669,12 @@ impl<'b, 'a> Builder<'b, 'a> {
         // tolerance (a corner patch with one side shrunk to a few µm) is run along between them,
         // its boundary iso line. As the record check (`brep::geometry`) takes it.
         let poles = SurfaceEval::new(&surface).ok();
-        let at_pole = |uv: [f64; 2], reach: f64| poles.as_ref().is_some_and(|e| e.pole_within(uv, reach).iter().any(|p| *p));
+        let at_pole = |uv: [f64; 2], reach: f64| -> R<bool> {
+            Ok(match &poles {
+                Some(e) => e.pole_within(uv, reach)?.iter().any(|p| *p),
+                None => false,
+            })
+        };
         for (l, pc) in edge_loops.iter().zip(&pcs) {
             let mut ends = Vec::with_capacity(l.len());
             for (&(_, forward), c) in l.iter().zip(pc) {
@@ -1648,7 +1689,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 let v = self.edges.get(e as usize).ok_or("edge reference")?.vertices;
                 let v = if forward { v[0] } else { v[1] };
                 let reach = self.vertices.get(v as usize).ok_or("vertex reference")?.tolerance.max(tol);
-                if at_pole(*start, reach) || at_pole(*end, reach) {
+                if at_pole(*start, reach)? || at_pole(*end, reach)? {
                     continue;
                 }
                 for d in 0..2 {
@@ -1869,6 +1910,72 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
         magnitude += c.abs();
     }
     (area.abs() > 1e-9 * magnitude && magnitude > 0.0).then_some(0.5 * area)
+}
+
+/// The angles `tolerance` (mm) makes along the two directions of a face on `label` over the
+/// height `v`: on the widest circle of the face about the axis (a cylinder or cone), and on a
+/// sphere's meridian or a torus's tube. `form::surface_within` ends a face's form on a quarter
+/// line its domain ends within these angles of; zero along a direction that is no angle.
+fn form_reach(label: &BSurface, v: [f64; 2], tolerance: f64) -> [f64; 2] {
+    let reach = |radius: f64| if tolerance > 0.0 && radius > 0.0 && radius.is_finite() { tolerance / radius } else { 0.0 };
+    match label {
+        BSurface::Cylinder { radius, .. } => [reach(radius.abs()), 0.0],
+        BSurface::Cone { radius_at_origin, half_angle, .. } => {
+            let slope = half_angle.tan();
+            [reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), 0.0]
+        }
+        BSurface::Sphere { radius, .. } => [reach(radius.abs()), reach(radius.abs())],
+        BSurface::Torus { major_radius, minor_radius, .. } => [reach(major_radius.abs() + minor_radius.abs()), reach(minor_radius.abs())],
+        _ => [0.0, 0.0],
+    }
+}
+
+/// A face's pcurves on the form `form::surface_within` made for it (`form`, over `domain` on
+/// the label `label`), put on the form's range. Where the domain ends within `tolerance` of a
+/// quarter's end the form ends there, but the boundary still lies where its edges do, as much as
+/// `tolerance` past it: a pcurve control point past the form's end by no more than the form
+/// parameter of that angle (less than the angle: a quarter's parameter changes by at most 1/√2
+/// per radian, [`form_reach`]) is moved onto the end. A B-spline is a convex combination of its
+/// control points, so each pcurve then lies on the form, and the face's domain, which ends at
+/// the form's, holds it; the pcurve moves by no more than its points did, a gap the edges'
+/// tolerances are measured to cover (`raise_edges`). A point further out is left as it is, for
+/// the record check to refuse. The number of control point coordinates moved.
+fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2], tolerance: f64, pcs: &mut [Vec<Curve2>]) -> usize {
+    let reach = form_reach(label, domain[1], tolerance);
+    let ranges = solidcore_ops::label::surface_natural(form);
+    let mut moved = 0;
+    let mut onto = |p: &mut [f64; 2]| {
+        for (d, reach) in reach.iter().enumerate() {
+            let (Some(Natural::Range(a, b)), Some(x)) = (ranges.get(d), p.get_mut(d)) else { continue };
+            let end = if *x < *a {
+                *a
+            } else if *x > *b {
+                *b
+            } else {
+                continue;
+            };
+            if (*x - end).abs() <= *reach {
+                *x = end;
+                moved += 1;
+            }
+        }
+    };
+    for c in pcs.iter_mut().flatten() {
+        match c {
+            Curve2::Spline { points, .. } => points.iter_mut().for_each(&mut onto),
+            Curve2::RationalSpline { homogeneous, .. } => {
+                for h in homogeneous.iter_mut().filter(|h| h[2] > 0.0) {
+                    let mut p = [h[0] / h[2], h[1] / h[2]];
+                    let before = p;
+                    onto(&mut p);
+                    if p != before {
+                        (h[0], h[1]) = (p[0] * h[2], p[1] * h[2]);
+                    }
+                }
+            }
+        }
+    }
+    moved
 }
 
 /// The parameter box around every pcurve's control points, padded a little, within the

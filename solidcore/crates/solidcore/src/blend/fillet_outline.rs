@@ -597,8 +597,9 @@ pub fn outline_supports(
             if faces.contains(&f) {
                 continue;
             }
-            let surface = crate::topology::face::p2::surface(target, f)?
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let surface = crate::topology::face::p2::surface(target, f)?.ok_or_else(|| {
+                SolidError::blend_failed(OP, "a face at the vertex has no surface")
+            })?;
             if !surface.is_planar(k, tol)?.is_planar {
                 return Ok(None);
             }
@@ -628,7 +629,7 @@ pub fn outline_supports(
     let mut surfaces = Vec::with_capacity(2);
     for face in faces {
         let surface = crate::topology::face::p2::surface(target, face)?
-            .ok_or_else(|| SolidError::sm_err(OP))?
+            .ok_or_else(|| SolidError::blend_failed(OP, "a face of the edge has no surface"))?
             .clone_for_evaluation()?;
         // a plane or a cylinder, the only faces the section takes
         if !matches!(surface.kind(), SurfaceKind::Cone(_)) && !surface.is_planar(k, tol)?.is_planar
@@ -647,7 +648,7 @@ pub fn outline_supports(
         surfaces.push((surface, normal, quadric));
     }
     let [(s0, n0, q0), (s1, n1, q1)] = <[(Surface, Vec3, BlendQuadric); 2]>::try_from(surfaces)
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|_| SolidError::blend_failed(OP, "the edge does not have two faces"))?;
     let section = if let Some((_, vector)) = straight {
         let d = vector.unitize()?;
         let Ok(x) = across(n0, d).unitize() else {

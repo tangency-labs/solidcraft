@@ -647,7 +647,7 @@ fn closest(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 /// longer close: the values are moved from where they are toward `want` as far as they go. The
 /// `given` values (joint, index) are driven; in a closed loop the others follow. Returns the
 /// answer and the last solve.
-fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
+pub(super) fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
     drive_with_contact_within(s, want, given, false)
 }
 
@@ -1425,8 +1425,8 @@ fn centres(s: &Session) -> Vec<(u64, Vec3)> {
     for o in s.doc.occurrences.iter().filter(|o| o.parent == 0) {
         let mut bounds = Aabb3::EMPTY;
         for (_, b) in bodies.iter().filter(|(path, _)| path.first() == Some(&o.id)) {
-            if let Ok(m) = b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-2).max(1e-2))) {
-                bounds = bounds.union(&m.bounds());
+            if let Ok(bb) = b.exact_bounds() {
+                bounds = bounds.union(&bb);
             }
         }
         if !bounds.is_empty() {

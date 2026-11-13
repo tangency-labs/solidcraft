@@ -351,8 +351,11 @@ fn parallel_curved_import_keeps_face_colours_and_exact_display_meshes() {
     let bodies: Vec<_> = (0..8)
         .map(|i| {
             let body = cylinder(Vec3::new(i as f64 * 20.0, 0.0, 0.0), Vec3::Z, 5.0, 12.0).unwrap();
-            body.with_color(Some([0.2, 0.4, 0.6]))
-                .with_paint(Some(crate::Paint { opacity: 0.7, faces: vec![crate::FacePaint { face: 0, color: [0.8, 0.1, 0.3], opacity: 0.5 }] }))
+            body.with_color(Some([0.2, 0.4, 0.6])).with_paint(Some(crate::Paint {
+                opacity: 0.7,
+                faces: vec![crate::FacePaint { face: 0, color: [0.8, 0.1, 0.3], opacity: 0.5, name: None }],
+                name: None,
+            }))
         })
         .collect();
     let text = step_export(&bodies.iter().collect::<Vec<_>>(), "coloured cylinders").unwrap();
@@ -2120,6 +2123,44 @@ fn step_conformance_parts_read_back_their_exact_shape() {
     }
 }
 
+/// `tiny_rounds_coarse_tolerance` (tests/step-regressions): a pin's quarter round, a corner ball
+/// and a rim's quarter torus, each of radius 0.05 mm, in a file of 0.1 mm uncertainty. Every
+/// face comes in with its exact area (a quarter turn of the round 1 mm long, an eighth of the
+/// ball, a quarter of the torus's tube on a quarter of its ring). A collapse test that took a
+/// surface thinner than the tolerance for a pole refused all three ("a face whose boundary does
+/// not lie on its surface"); the step-conformance files all state 1e-6 mm or less and never met
+/// it.
+#[test]
+fn faces_smaller_than_a_coarse_tolerance_read() {
+    let text = include_str!("../../../../tests/step-regressions/tiny_rounds_coarse_tolerance.step");
+    let imp = step_import(text).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported")), "{:?}", imp.warnings);
+    assert_eq!(imp.bodies.len(), 1);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert_eq!(m.faces, 3);
+    let (r, ring) = (0.05, 2.0);
+    let half = std::f64::consts::FRAC_PI_2;
+    let area = half * r + 4.0 * std::f64::consts::PI * r * r / 8.0 + half * r * (ring * half + r);
+    assert!(rel(m.area, area) < 1e-3, "area {} vs {area}", m.area);
+}
+
+/// `cylinder_spline_rims` (tests/step-regressions): a cylinder of radius 10 and height 5 whose
+/// rims are closed rational cubic splines of two pieces, each an exact half circle, with no seam
+/// edge. A piece reaching half a turn about the axis was taken to reach every angle, so the wall
+/// had no angle left for its seam and was left out ("a band whose other loops leave its seam no
+/// angle"), the part coming in as two discs. It reads whole, with its exact volume.
+#[test]
+fn a_cylinder_whose_rims_are_splines_of_two_half_circles_keeps_its_wall() {
+    let text = include_str!("../../../../tests/step-regressions/cylinder_spline_rims.step");
+    let imp = step_import(text).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported") || w.contains("as surfaces")), "{:?}", imp.warnings);
+    assert_eq!(imp.bodies.len(), 1);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert_eq!(m.faces, 3);
+    let volume = std::f64::consts::PI * 10.0 * 10.0 * 5.0;
+    assert!(rel(m.volume, volume) < 1e-6, "volume {} vs {volume}", m.volume);
+}
+
 /// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {
@@ -2576,6 +2617,67 @@ fn a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read() {
     let back = crate::stitch(&[&can.body, &lid], 0.0).unwrap();
     assert!(!back.is_surface(), "closed");
     assert!(rel(measure(&back).unwrap().volume, 250.0 * pi) < 1e-6, "{}", measure(&back).unwrap().volume);
+}
+
+/// The can of [`can_with_its_lid_at`] with a cavity, a 1 mm ball at its middle, written as a
+/// BREP_WITH_VOIDS (the void's closed shell used through an ORIENTED_CLOSED_SHELL `.F.`).
+fn hollow_can_with_its_lid_at(lid_z: f64) -> String {
+    let renumber = |text: &str, by: u64| {
+        let mut out = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            out.push(c);
+            if c == '#' {
+                let mut n = String::new();
+                while let Some(d) = chars.next_if(char::is_ascii_digit) {
+                    n.push(d);
+                }
+                out += &(n.parse::<u64>().unwrap() + by).to_string();
+            }
+        }
+        out
+    };
+    let ball = seam_sphere_step(Vec3::new(0.0, 0.0, 5.0), 1.0, Vec3::Z, Vec3::X, 0.0, false, std::f64::consts::PI);
+    let ball = &ball[ball.find("#1=").unwrap()..ball.find("#21=").unwrap()];
+    let brep = "#22=MANIFOLD_SOLID_BREP('Can',#21);\n";
+    let can = can_with_its_lid_at(lid_z);
+    assert!(can.contains(brep));
+    let voids = format!("{}#1200=ORIENTED_CLOSED_SHELL('',*,#1020,.F.);\n#22=BREP_WITH_VOIDS('Can',#21,(#1200));\n", renumber(ball, 1000));
+    can.replacen(brep, &voids, 1)
+}
+
+/// A solid with a cavity no B-rep can be made of comes in as surfaces, as a solid without one
+/// does ([`a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read`]), never dropped:
+/// the hollow can whose lid lies 1.5 mm off its rim is its bottom, wall and cavity, the lid left
+/// out and named. An engine block and a cylinder head of an assembly, both written with voids,
+/// were lost whole on one face each.
+#[test]
+fn a_refused_solid_with_a_cavity_comes_in_as_surfaces() {
+    let pi = std::f64::consts::PI;
+    let whole = step_import(&hollow_can_with_its_lid_at(10.0)).unwrap();
+    assert_eq!(whole.bodies.len(), 1, "{:?}", whole.warnings);
+    assert!(whole.bodies[0].closed && whole.bodies[0].refused.is_none(), "{:?}", whole.warnings);
+    let want = 250.0 * pi - 4.0 / 3.0 * pi;
+    let v = measure(&whole.bodies[0].body).unwrap().volume;
+    assert!(rel(v, want) < 1e-3, "{v} vs {want}");
+
+    let imp = step_import(&hollow_can_with_its_lid_at(11.5)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let can = &imp.bodies[0];
+    assert!(!can.body.is_mesh() && can.body.is_surface() && !can.closed, "{:?}", imp.warnings);
+    let why = can.refused.as_deref().unwrap_or_default();
+    assert!(why.contains("face #45"), "{why}");
+    assert_eq!(can.file_faces, 4);
+    assert_eq!(can.body.face_count(), 3, "{:?}", imp.warnings);
+    assert!(!can.face_origin.contains(&45));
+    assert!(imp.warnings.iter().any(|w| w.contains("'Can': imported as surfaces: ")), "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("'Can': left out: ") && w.contains("face #45")), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("not imported")), "{:?}", imp.warnings);
+    // The bottom, the wall and the cavity's ball.
+    let mut kept = can.face_origin.clone();
+    kept.sort_unstable();
+    assert_eq!(kept[..2], [15, 20], "{kept:?}");
+    assert!(kept[2] > 1000, "the cavity's face: {kept:?}");
 }
 
 /// A sector of a cylinder (radius 5, height 10) about z, `sweep` radians from `start` on the
@@ -3094,6 +3196,104 @@ fn a_torus_face_round_most_of_its_tube_is_formed_within_one_turn_of_it() {
         assert!(rel(m.volume, volume) < 1e-6, "{tube:?}: volume {} vs {volume}", m.volume);
         assert!(rel(m.area, area) < 1e-6, "{tube:?}: area {} vs {area}", m.area);
     }
+}
+
+/// A colour comes in with its name in the file: `COLOUR_RGB`'s own, or a pre-defined colour's,
+/// decoded and made safe as a design keeps names (no control characters, at most 128
+/// characters); an empty or blank name is none. A face's over-riding style names the face's
+/// colour, a see-through style keeps its name, and an export writes the names back.
+#[test]
+fn colour_names_come_in_with_their_colours_and_go_out_again() {
+    let style = |id: u64, item: &str, colour: &str, extra: &str| {
+        format!(
+            "#{id}=STYLED_ITEM('',(#{}),{item});\n#{}=PRESENTATION_STYLE_ASSIGNMENT((#{}));\n#{}=SURFACE_STYLE_USAGE(.BOTH.,#{});\n#{}=SURFACE_SIDE_STYLE('',(#{}{extra}));\n#{}=SURFACE_STYLE_FILL_AREA(#{});\n#{}=FILL_AREA_STYLE('',(#{}));\n#{}=FILL_AREA_STYLE_COLOUR('',#{});\n#{}={colour};\n",
+            id + 1,
+            id + 1,
+            id + 2,
+            id + 2,
+            id + 3,
+            id + 3,
+            id + 4,
+            id + 4,
+            id + 5,
+            id + 5,
+            id + 6,
+            id + 6,
+            id + 7,
+            id + 7,
+        )
+    };
+    let import = |styles: &str| {
+        let mut t = String::from(HEAD);
+        t += &cube_entities();
+        t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+        t += styles;
+        t += TAIL;
+        let imp = step_import(&t).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        imp.bodies.into_iter().next().unwrap()
+    };
+    // An opaque colour without a name needs no paint; with one, the paint holds it.
+    let named = |name: &str| import(&style(70, "#101", &format!("COLOUR_RGB('{name}',1.,0.5,0.)"), "")).body.paint().and_then(|p| p.name.clone());
+    assert_eq!(named("Steel - Satin").as_deref(), Some("Steel - Satin"));
+    assert_eq!(named("Opaque(97,69,55)").as_deref(), Some("Opaque(97,69,55)"));
+    assert_eq!(named(""), None);
+    assert_eq!(named("   "), None);
+    assert_eq!(named("  Blue  ").as_deref(), Some("Blue"));
+    assert_eq!(named(r"Bl\X2\00E9\X0\").as_deref(), Some("Blé"), "escapes are decoded");
+    assert_eq!(named(r"a\X\0Ab\X\09c").as_deref(), Some("abc"), "control characters are dropped");
+    assert_eq!(named(&"x".repeat(300)).map(|n| n.chars().count()), Some(crate::COLOUR_NAME_MAX));
+    // A pre-defined colour is called by its name.
+    let red = import(&style(70, "#101", "DRAUGHTING_PRE_DEFINED_COLOUR('red')", ""));
+    assert_eq!((red.color, red.body.paint().unwrap().name.as_deref()), (Some([1.0, 0.0, 0.0]), Some("red")));
+    // A see-through colour keeps its name.
+    let glass = import(&(style(70, "#101", "COLOUR_RGB('Smoked',0.4,0.4,0.4)", ",#90") + "#90=SURFACE_STYLE_TRANSPARENT(0.5);\n"));
+    let paint = glass.body.paint().unwrap();
+    assert_eq!((paint.opacity, paint.name.as_deref()), (0.5, Some("Smoked")));
+    // A face over-ridden by a style of its own: its colour is named as the file names it.
+    let cube = cube_entities();
+    let face = cube.split('\n').find(|l| l.contains("=ADVANCED_FACE(")).and_then(|l| l.split('=').next()).unwrap().to_string();
+    let styles = style(70, "#101", "COLOUR_RGB('Body grey',0.5,0.5,0.5)", "") + &style(80, &face, "COLOUR_RGB('Accent',0.,0.,1.)", "");
+    let painted = import(&styles);
+    let paint = painted.body.paint().unwrap();
+    assert_eq!(paint.name.as_deref(), Some("Body grey"));
+    assert_eq!(paint.faces.iter().map(|f| (f.color, f.name.as_deref())).collect::<Vec<_>>(), [([0.0, 0.0, 1.0], Some("Accent"))]);
+    // Written out and read back, the names come back with their colours.
+    let text = step_export(&[&painted.body.clone().with_color(painted.color)], "named").unwrap();
+    assert!(text.contains("COLOUR_RGB('Body grey'") && text.contains("COLOUR_RGB('Accent'"), "{text}");
+    let back = step_import(&text).unwrap().bodies.remove(0);
+    let back_paint = back.body.paint().unwrap();
+    assert_eq!(back_paint.name.as_deref(), Some("Body grey"));
+    assert_eq!(back_paint.faces.iter().map(|f| f.name.as_deref()).collect::<Vec<_>>(), [Some("Accent")]);
+}
+
+/// A body an `INVISIBILITY` record names, through its styled item or its representation, is
+/// read hidden; the body is still there, so it can be shown again.
+#[test]
+fn an_invisibility_record_hides_its_styled_item_and_representation() {
+    let import = |extra: &str| {
+        let mut t = String::from(HEAD);
+        t += &cube_entities();
+        t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+        t += extra;
+        t += TAIL;
+        step_import(&t).unwrap()
+    };
+    // A styled item: the record names the item, not the solid it styles.
+    let styled = import("#70=STYLED_ITEM('',(),#101);\n#459=INVISIBILITY((#70));\n");
+    assert_eq!(styled.bodies.len(), 1, "{:?}", styled.warnings);
+    assert!(styled.bodies[0].hidden);
+    assert!(measure(&styled.bodies[0].body).unwrap().volume > 0.0, "the hidden body is still modelled");
+    // A representation: every item it lists is hidden.
+    let represented = import("#459=INVISIBILITY((#60));\n");
+    assert_eq!(represented.bodies.len(), 1, "{:?}", represented.warnings);
+    assert!(represented.bodies[0].hidden);
+    // A file with no INVISIBILITY record leaves the body shown.
+    let shown = import("");
+    assert_eq!(shown.bodies.len(), 1, "{:?}", shown.warnings);
+    assert!(!shown.bodies[0].hidden);
 }
 
 /// #12291: a part styled with a surface colour and, beside it, a curve style (its edges) is the

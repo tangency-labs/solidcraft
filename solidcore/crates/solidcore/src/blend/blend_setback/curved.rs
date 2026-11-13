@@ -116,7 +116,7 @@ fn circumcentre(a: Vec3, m: Vec3, b: Vec3) -> Option<Vec3> {
 }
 
 /// A net's four components as polynomials.
-fn comps(net: &Net) -> Result<[Tensor; 4]> {
+pub(super) fn comps(net: &Net) -> Result<[Tensor; 4]> {
     let mk = |c: usize| -> Result<Tensor> {
         let mut t = t_make(net.p, net.q);
         for (i, ti) in t.c.iter_mut().enumerate() {

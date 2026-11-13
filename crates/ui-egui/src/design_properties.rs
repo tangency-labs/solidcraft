@@ -100,7 +100,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let metadata = app.session.doc.metadata.clone();
     let title = solidcraft_ui_text::tr_label("Design Properties");
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
+    let window = ui_kit::Window::new(egui::Id::unique("sc_design_properties"), "settings", title).fields();
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
+    let window = window.placed(pivot, at);
+    let (closed, action) = window.show(ctx, true, |ui| {
         for (i, k) in keys(Owner::Design).enumerate() {
             let (key, label) = (k.name, solidcraft_ui_text::tr(k.label));
             let Some(field) = d.fields.get_mut(i) else { continue };

@@ -1416,14 +1416,26 @@ impl ExecutiveAccess<Handle> for Access {
 /// `-2`).
 const OP_P2: &str = "blend::fillet_executive::p2: ";
 
+/// The p2 module's operation: its null objects, typed, are `Missing` blend failures of it.
+const P2_OP: &str = "blend::fillet_executive::p2";
+
 /// The `SmStatus` of a Rust error.
 fn status_of(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream {
             operation, code, ..
         } if *code == SM_ERR_NULL_POINTER && operation.starts_with(OP_P2) => NULL_DEREF,
-        SolidError::Upstream { code, .. } => f64::from(*code),
-        _ => -9.0,
+        // the p2 module's own null objects, typed (#13790): a `Missing` blend failure of
+        // the module's operation
+        e if e.operation() == P2_OP
+            && matches!(
+                e.blend_failure(),
+                Some(solidcore::error::blend::BlendFailure::Missing(_))
+            ) =>
+        {
+            NULL_DEREF
+        }
+        e => crate::output::blend_status(e).map_or(-9.0, f64::from),
     }
 }
 

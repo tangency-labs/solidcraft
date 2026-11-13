@@ -462,10 +462,16 @@ impl SurfaceIntersector<'_> {
     fn check_in_domains(&self, next: TsectId, uv_tol: [f64; 2]) -> Result<()> {
         let p = self.point(next)?;
         if !self.uv_domains[0].contains_point(p.uv_pos(SrfIndex::First), uv_tol[0]) {
-            return Err(SolidError::sm_err(OP_TRACE));
+            return Err(SolidError::intersect_failed(
+                OP_TRACE,
+                "the traced point lies outside the first surface's domain",
+            ));
         }
         if !self.uv_domains[1].contains_point(p.uv_pos(SrfIndex::Second), uv_tol[1]) {
-            return Err(SolidError::sm_err(OP_TRACE));
+            return Err(SolidError::intersect_failed(
+                OP_TRACE,
+                "the traced point lies outside the second surface's domain",
+            ));
         }
         Ok(())
     }
@@ -647,7 +653,10 @@ impl SurfaceIntersector<'_> {
     pub fn find_interior_curves(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
         // The basic intersector does not allow self intersection testing.
         if self.doing_self_intersection {
-            return Err(SolidError::sm_err(OP_FIC));
+            return Err(SolidError::intersect_failed(
+                OP_FIC,
+                "the basic intersector does not test self intersection",
+            ));
         }
 
         // Find node pairs in the tree (SER: checked; surface::surface::p7, its leaf
@@ -698,7 +707,10 @@ impl SurfaceIntersector<'_> {
         out: &mut TsectCurves,
     ) -> Result<()> {
         if self.doing_self_intersection {
-            return Err(SolidError::sm_err(OP_FIC));
+            return Err(SolidError::intersect_failed(
+                OP_FIC,
+                "the basic intersector does not test self intersection",
+            ));
         }
         let mut curve_caches: Vec<Option<CurveCache<()>>> = Vec::new();
         for pair in pairs {
@@ -719,12 +731,14 @@ impl SurfaceIntersector<'_> {
                     None => slot.insert(match make_curve_cache::<()>(k, curve, None) {
                         Ok(c) => c,
                         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                        Err(_) => return Err(SolidError::null_pointer(OP_FIC)),
+                        Err(_) => {
+                            return Err(SolidError::intersect_missing(OP_FIC, "the curve's cache"))
+                        }
                     }),
                 };
-                let tree = cache
-                    .tree()
-                    .ok_or_else(|| SolidError::null_pointer(OP_FIC))?;
+                let tree = cache.tree().ok_or_else(|| {
+                    SolidError::intersect_missing(OP_FIC, "the curve cache's tree")
+                })?;
                 if tree.intersects_box(&int_bbox)? {
                     is_near_curve = true;
                     break;
@@ -865,7 +879,10 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     law_curve: &mut FilletLaw,
 ) -> Result<IntersectionCurve> {
     let [first, last] = points else {
-        return Err(SolidError::sm_err(OP_DLI));
+        return Err(SolidError::intersect_failed(
+            OP_DLI,
+            "the law intersection needs exactly two points",
+        ));
     };
     let (first, last) = (*first, *last);
 
@@ -876,10 +893,16 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
     // the offset surfaces
     if !is_offset_surface(v.intersector().surface(SrfIndex::First)) {
-        return Err(SolidError::null_pointer(OP_DLI));
+        return Err(SolidError::intersect_missing(
+            OP_DLI,
+            "the first surface's offset surface",
+        ));
     }
     if !is_offset_surface(v.intersector().surface(SrfIndex::Second)) {
-        return Err(SolidError::null_pointer(OP_DLI));
+        return Err(SolidError::intersect_missing(
+            OP_DLI,
+            "the second surface's offset surface",
+        ));
     }
 
     let normals = [
@@ -1401,7 +1424,7 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         point_count += 1;
         if point_count == 5000 {
             // the tolerance is too small or a surface is poorly defined
-            return Err(SolidError::sm_err(OP_TRACE));
+            return Err(SolidError::intersect_failed(OP_TRACE, "the trace reached 5000 points: the tolerance is too small or a surface is poorly defined"));
         }
     }
     Ok(())
@@ -1541,7 +1564,10 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
     // no work - no through points specified
     if points.is_empty() {
-        return Err(SolidError::sm_err(OP_DPI));
+        return Err(SolidError::intersect_failed(
+            OP_DPI,
+            "no through points were given",
+        ));
     }
 
     // Use supplied tolerances when given
@@ -1598,7 +1624,12 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         match r {
             Ok(()) => {}
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_DPI)),
+            Err(_) => {
+                return Err(SolidError::intersect_failed(
+                    OP_DPI,
+                    "the through point's values could not be computed",
+                ))
+            }
         }
 
         // the first points must be on both surfaces
@@ -1608,7 +1639,10 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                 tsp.srf_pos(SrfIndex::Second),
             )
         {
-            return Err(SolidError::sm_err(OP_DPI));
+            return Err(SolidError::intersect_failed(
+                OP_DPI,
+                "the first through point is not on both surfaces",
+            ));
         }
 
         if ii == 0 {
@@ -1651,7 +1685,7 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         .intersector_mut()
         .start_points
         .pop()
-        .ok_or_else(|| SolidError::null_pointer(OP_DPI))?;
+        .ok_or_else(|| SolidError::intersect_missing(OP_DPI, "a start point to trace from"))?;
     v.intersector_mut().curve_trace_direction = 1.0;
 
     // tracing beyond the end: clip the extension
@@ -2083,7 +2117,13 @@ mod tests {
         *p.uv_pos_mut(SrfIndex::Second) = Point2::new(0.5, 0.5);
         let id = si.alloc_point(p);
         let r = si.do_point_intersection(&k, &[id], &opts);
-        assert!(matches!(r, Err(SolidError::Upstream { .. })));
+        assert!(
+            r.as_ref()
+                .err()
+                .and_then(SolidError::upstream_status)
+                .is_some(),
+            "{r:?}"
+        );
         assert_eq!(si.point(id).unwrap().curve_parameter, -1.0);
     }
 
@@ -2113,20 +2153,25 @@ mod tests {
         let p = si.alloc_point(TsectPnt::new());
         let q = si.alloc_point(TsectPnt::new());
         let mut law = FilletLaw::new(crate::blend::fillet_standard_solver::p1::FilletLawKind::Base);
-        assert!(matches!(
-            si.do_law_intersection(k, &[p], &opts, &mut law),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR,
-                ..
-            })
-        ));
-        assert!(matches!(
-            si.do_law_intersection(k, &[p, q], &opts, &mut law),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let one = si
+            .do_law_intersection(k, &[p], &opts, &mut law)
+            .unwrap_err();
+        assert_eq!(one.upstream_status(), Some(crate::error::SM_ERR), "{one}");
+        assert_eq!(
+            one.intersect_failure(),
+            Some(&crate::error::intersect::IntersectFailure::Failed(
+                "the law intersection needs exactly two points"
+            ))
+        );
+        let two = si
+            .do_law_intersection(k, &[p, q], &opts, &mut law)
+            .unwrap_err();
+        assert_eq!(
+            two.upstream_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER),
+            "{two}"
+        );
+        assert_eq!(two.operation(), OP_DLI);
         assert_eq!(si.this_approx_tol_3d, 0.25);
     }
 
@@ -2214,7 +2259,7 @@ mod tests {
         };
         assert_eq!(
             si.find_interior_curves_from_node_pairs(&k, &[pair, far_pair], &mut out),
-            Err(SolidError::null_pointer(OP_FIC))
+            Err(SolidError::intersect_missing(OP_FIC, "the curve's cache"))
         );
 
         // Pair validation still precedes even the first curve-cache build.
@@ -2234,7 +2279,7 @@ mod tests {
         // No cache from the earlier call may survive replacing its output curve.
         assert_eq!(
             si.find_interior_curves_from_node_pairs(&k, &[pair], &mut out),
-            Err(SolidError::null_pointer(OP_FIC))
+            Err(SolidError::intersect_missing(OP_FIC, "the curve's cache"))
         );
     }
 }
