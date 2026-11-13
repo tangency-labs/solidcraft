@@ -7,7 +7,9 @@ use std::io::Read as _;
 use serde_json::Value;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
 use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
-use solidcore_ops::{make_box, make_sphere, session, Body, BooleanOp, CheckLevel, Error};
+use solidcore_ops::{
+    make_box, make_cone, make_sphere, session, Body, BooleanOp, CheckLevel, Error,
+};
 use solidcore_record::brep::Brep as Record;
 
 fn all_fixes() {
@@ -769,6 +771,79 @@ fn tanh_sinh(f: impl Fn(f64) -> f64, a: f64, b: f64, h: f64) -> f64 {
     sum * h * half
 }
 
+/// The r 6 ball about `center`, its seam meridian turned `turn` radians about its axis from +x.
+#[allow(clippy::disallowed_methods)] // the test's operand, not ops computing geometry
+fn ball(center: [f64; 3], turn: f64) -> Body {
+    let b = make_sphere([0.0; 3], 6.0).unwrap();
+    let (s, c) = turn.sin_cos();
+    let [x, y, z] = center;
+    b.transform(&[
+        [c, s, 0.0, 0.0],
+        [-s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [x, y, z, 1.0],
+    ])
+    .unwrap();
+    b
+}
+
+/// The volume of the r 6 ball about (0, `c`, 20) inside the radius `radius(z)` about the z axis:
+/// the integral over z of the lens areas of the ball's section (radius √(36 - (z-20)²), centred
+/// `c` from the axis) within that radius, by tanh-sinh quadrature over the pieces between the
+/// heights where a lens turns whole or empty (the section's radius is |radius(z) - c|, found by
+/// bisection). Asserts that steps 1/32 and 1/64 agree to 1e-13 relative.
+#[allow(clippy::disallowed_methods)] // the test's reference, not ops computing geometry
+fn ball_inside(radius: impl Fn(f64) -> f64, c: f64) -> f64 {
+    let section = |z: f64| (36.0 - (z - 20.0) * (z - 20.0)).max(0.0).sqrt();
+    let kink = |z: f64| section(z) - (radius(z) - c).abs();
+    let mut cuts = vec![14.0];
+    let n = 1200;
+    for i in 0..n {
+        let (mut a, mut b) = (
+            14.0 + 12.0 * f64::from(i) / f64::from(n),
+            14.0 + 12.0 * f64::from(i + 1) / f64::from(n),
+        );
+        if (kink(a) > 0.0) != (kink(b) > 0.0) {
+            for _ in 0..200 {
+                let m = (a + b) / 2.0;
+                if (kink(a) > 0.0) == (kink(m) > 0.0) {
+                    a = m;
+                } else {
+                    b = m;
+                }
+            }
+            cuts.push((a + b) / 2.0);
+        }
+    }
+    cuts.push(26.0);
+    let v = |h: f64| {
+        cuts.windows(2)
+            .map(|w| tanh_sinh(|z| lens(radius(z), section(z), c), w[0], w[1], h))
+            .sum::<f64>()
+    };
+    let (coarse, fine) = (v(1.0 / 32.0), v(1.0 / 64.0));
+    assert!(
+        (coarse - fine).abs() <= 1e-13 * fine.abs().max(1.0),
+        "{coarse} {fine}"
+    );
+    fine
+}
+
+/// `a` less `b` is one solid that checks valid at every level, of `want` mm³ within 1e-8
+/// relative (`what` names the case in the failure).
+fn cut_is_valid_solid(a: Body, b: Body, want: f64, what: &str) -> Option<String> {
+    match boolean(a, b, BooleanOp::Subtract) {
+        Ok(Some(r)) => {
+            let report = r.check(CheckLevel::All).unwrap();
+            let v = volume(&r);
+            let off = (v - want).abs() / want;
+            (!report.is_valid() || r.solid_count().unwrap() != 1 || off.is_nan() || off > 1e-8)
+                .then(|| format!("{what}: {v} mm³ ({off:e} off {want}), {}", report.text))
+        }
+        other => Some(format!("{what}: {other:?}")),
+    }
+}
+
 /// The half roll less the r 6 ball about (0, 50, 20) (SolidCraft's sheet metal, a ball cut
 /// centred on a roll's face): the ball's poles (0, 50, 14) and (0, 50, 26) lie on the roll's
 /// outside, and the line where the ball crosses that wall runs into each pole along the ball's
@@ -778,41 +853,118 @@ fn tanh_sinh(f: impl Fn(f64) -> f64, a: f64, b: f64, h: f64) -> f64 {
 /// on to the pole: stepped back 1 % of that, the pole's UV tangent and singular parameter were
 /// below the coordinates' precision, and 12 of the 16 frames gave trims with coincident control
 /// points, cusps, jumps across the seam or ends outside the face, refused as not a solid. Each
-/// frame is one valid solid of V = 3920π - V_ball, V_ball the ball between radii 48 and 50: the
-/// integral over z of the lens areas of the ball's section (radius √(36 - (z-20)²), centred 50
-/// from the axis) within each radius, by tanh-sinh quadrature converged to 1e-14 (h = 1/32 and
-/// 1/64 agree). The volume the kernel measures is 2.1e-9 to 2.5e-9 relative above it at every
-/// accuracy asked: the traced trims' deviation, inside the file's `near` bound.
+/// frame is one valid solid of V = 3920π less the ball between radii 48 and 50
+/// ([`ball_inside`]). The volume the kernel measures is 2.1e-9 to 2.5e-9 relative above it at
+/// every accuracy asked (the traced trims' deviation), inside the 1e-8 bound.
 #[test]
-#[allow(clippy::disallowed_methods)] // the test's reference, not ops computing geometry
 fn a_ball_centred_on_a_rolls_face_with_its_poles_on_the_face_is_cut_in_every_frame() {
     all_fixes();
-    let section = |z: f64| (36.0 - (z - 20.0) * (z - 20.0)).max(0.0).sqrt();
-    let ball_within =
-        |r: f64, z0: f64, z1: f64, h: f64| tanh_sinh(|z| lens(r, section(z), 50.0), z0, z1, h);
-    // the section reaches radius 48 where its radius is 2: z = 20 ± √32
-    let z48 = 32_f64.sqrt();
-    let v_ball =
-        |h| ball_within(50.0, 14.0, 26.0, h) - ball_within(48.0, 20.0 - z48, 20.0 + z48, h);
-    let (coarse, fine) = (v_ball(1.0 / 32.0), v_ball(1.0 / 64.0));
-    assert!((coarse - fine).abs() <= 1e-14 * fine, "{coarse} {fine}");
-    let want = 3920.0 * PI - fine;
+    let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
+    let failed: Vec<String> = (0..16)
+        .filter_map(|frame| {
+            let b = ball([0.0, 50.0, 20.0], 0.0);
+            cut_is_valid_solid(half_roll(frame), b, want, &format!("frame {frame}"))
+        })
+        .collect();
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Four frames of the cut above that failed, the ball's seam turned 1e-8, 1e-10 and -1e-8 rad
+/// off the meridian the line runs into the poles along: the trim's end is then that far off the
+/// corner of the ball's domain, and these were refused too. Each is one valid solid of the same
+/// volume as above (turning the ball about its axis moves no point of it).
+#[test]
+fn a_ball_with_its_poles_on_a_rolls_face_and_its_seam_turned_slightly_off_is_cut() {
+    all_fixes();
+    let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
     let mut failed = Vec::new();
-    for frame in 0..16 {
-        let ball = make_sphere([0.0, 50.0, 20.0], 6.0).unwrap();
-        match boolean(half_roll(frame), ball, BooleanOp::Subtract) {
-            Ok(Some(r)) => {
-                let report = r.check(CheckLevel::All).unwrap();
-                if !report.is_valid() || r.solid_count().unwrap() != 1 || !near(volume(&r), want) {
-                    failed.push(format!(
-                        "frame {frame}: {} mm³, {}",
-                        volume(&r),
-                        report.text
-                    ));
-                }
-            }
-            other => failed.push(format!("frame {frame}: {other:?}")),
+    for turn in [1e-8, 1e-10, -1e-8] {
+        for frame in [2, 5, 8, 14] {
+            let what = format!("turned {turn:e}, frame {frame}");
+            let b = ball([0.0, 50.0, 20.0], turn);
+            failed.extend(cut_is_valid_solid(half_roll(frame), b, want, &what));
         }
     }
-    assert!(failed.is_empty(), "closed form {want}: {failed:#?}");
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The ball's poles on a cylinder's seam and on a face's boundary edge, its own seam on the
+/// line's meridian there or square to it. A solid cylinder r 50, z 0..40, extruded from a whole
+/// circle starting at +x (its seam on +x), less the ball about (50, 0, 20): its poles are on
+/// that seam, V = π·50²·40 less the ball inside radius 50. The half roll (frame 0) less the
+/// same ball: its poles are on the edge between the roll's outside and its end at y = 0, and
+/// the ball is symmetric about that end's plane, so V = 3920π less half the ball between radii
+/// 48 and 50.
+#[test]
+fn a_ball_with_its_poles_on_a_cylinders_seam_or_on_a_faces_edge_is_cut() {
+    all_fixes();
+    let inside_50 = ball_inside(|_| 50.0, 50.0);
+    let between = inside_50 - ball_inside(|_| 48.0, 50.0);
+    let mut failed = Vec::new();
+    for turn in [0.0, PI / 2.0] {
+        let circle = [Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 50.0,
+            start: 0.0,
+            end: TAU,
+        }];
+        let cylinder = extrude(
+            &circle,
+            [0.0, 0.0, 1.0],
+            40.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        failed.extend(cut_is_valid_solid(
+            cylinder,
+            ball([50.0, 0.0, 20.0], turn),
+            PI * 2500.0 * 40.0 - inside_50,
+            &format!("cylinder's seam, turned {turn}"),
+        ));
+        failed.extend(cut_is_valid_solid(
+            half_roll(0),
+            ball([50.0, 0.0, 20.0], turn),
+            3920.0 * PI - between / 2.0,
+            &format!("roll's end edge, turned {turn}"),
+        ));
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The ball's poles on a plane and on a cone. A box on one side of the plane y = 0 (which holds
+/// the ball's seam meridian) or of x = 0 (square to it) less the ball about the origin: the
+/// plane cuts the ball in a great circle through both poles, V = 20·10·20 less half the ball,
+/// 2/3·π·6³. A frustum about +z, radius 60 at z = 0 to 40 at z = 40, less the ball about
+/// (0, 47, 20): its top pole (0, 47, 26) is on the cone (radius 60 - 26/2 = 47 there) and the
+/// line runs into it along the ball's seam meridian; V = π·40/3·(60² + 60·40 + 40²) less the
+/// ball inside radius 60 - z/2.
+#[test]
+fn a_ball_with_its_poles_on_a_plane_or_a_cone_is_cut() {
+    all_fixes();
+    let half_ball = 2.0 / 3.0 * PI * 216.0;
+    let mut failed = Vec::new();
+    failed.extend(cut_is_valid_solid(
+        make_box([-10.0, 0.0, -10.0], [20.0, 10.0, 20.0]).unwrap(),
+        ball([0.0; 3], 0.0),
+        4000.0 - half_ball,
+        "plane y = 0",
+    ));
+    failed.extend(cut_is_valid_solid(
+        make_box([0.0, -10.0, -10.0], [10.0, 20.0, 20.0]).unwrap(),
+        ball([0.0; 3], 0.0),
+        4000.0 - half_ball,
+        "plane x = 0",
+    ));
+    let frustum = PI * 40.0 / 3.0 * (3600.0 + 2400.0 + 1600.0);
+    failed.extend(cut_is_valid_solid(
+        make_cone([0.0; 3], 60.0, 40.0, 40.0).unwrap(),
+        ball([0.0, 47.0, 20.0], 0.0),
+        frustum - ball_inside(|z| 60.0 - z / 2.0, 47.0),
+        "cone",
+    ));
+    assert!(failed.is_empty(), "{failed:#?}");
 }

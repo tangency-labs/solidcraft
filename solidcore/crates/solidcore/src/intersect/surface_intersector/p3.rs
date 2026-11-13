@@ -123,6 +123,37 @@ const OP_UPDATE: &str =
     "intersect::surface_intersector::p3::SurfaceIntersector::update_tsect_point";
 const OP_TEST: &str = "intersect::surface_intersector::p3::SurfaceIntersector::test_point";
 
+/// The step to a pole of [`SurfaceIntersector::pole_corner_step`] (not upstream) and the
+/// degenerate boundary it reaches.
+#[derive(Debug, Clone, Copy)]
+struct PoleCorner {
+    /// The step along the UV tangents.
+    step: f64,
+    /// The surface with the pole.
+    srf: SrfIndex,
+    /// Whether the degenerate boundary is one of constant v (else of constant u).
+    on_v_boundary: bool,
+    /// The parameter of the degenerate boundary.
+    bound: f64,
+    /// The UV tolerance "on the boundary" is measured with.
+    uv_tol: f64,
+}
+
+impl PoleCorner {
+    /// Whether the refined UV points `uvs` are on the degenerate boundary: the curve
+    /// reaches the pole.
+    fn reached(&self, uvs: [Point2; 2]) -> bool {
+        let [uv0, uv1] = uvs;
+        let uv = if self.srf == SrfIndex::First {
+            uv0
+        } else {
+            uv1
+        };
+        let at = if self.on_v_boundary { uv.y } else { uv.x };
+        (at - self.bound).abs() <= self.uv_tol
+    }
+}
+
 /// The outputs of [`SurfaceIntersector::compute_next_point`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NextPoint {
@@ -966,12 +997,13 @@ impl SurfaceIntersector<'_> {
         // line goes on to a degenerate boundary (a pole), steps to the pole instead
         // (`pole_corner_step`)
         if res.clipped {
-            if let Some(corner_step) =
+            if let Some(pole) =
                 self.pole_corner_step(k, &prev_tsp, step_size, unclipped_step_size, next_uvs)?
             {
-                let corner = guesses(corner_step);
-                if let Some(uvs) = refine(corner, true)? {
-                    step_size = corner_step;
+                let corner = guesses(pole.step);
+                // taken only when the curve reaches the pole there
+                if let Some(uvs) = refine(corner, true)?.filter(|uvs| pole.reached(*uvs)) {
+                    step_size = pole.step;
                     [guess_uv0, guess_uv1] = corner;
                     next_uvs = uvs;
                 }
@@ -1079,8 +1111,10 @@ impl SurfaceIntersector<'_> {
     /// surface's other boundary within `unclipped_step_size`, and the surface is singular
     /// at that exit, collapsing along that boundary ([`Surface::is_singularity`] at
     /// `SM_EFF_ZERO`), the step to that exit, clipped to the other domain, is returned when
-    /// it is longer than `step_size`. "On a boundary" is within `SM_EFF_ZERO` scaled by
-    /// the domain, as `TraceCurve` scales its UV tolerance.
+    /// it is longer than `step_size`, with that boundary: the caller takes the step only
+    /// when its refined point is on it ([`PoleCorner::reached`]), so a curve that passes
+    /// near the pole without reaching it keeps the clipped step. "On a boundary" is within
+    /// `SM_EFF_ZERO` scaled by the domain, as `TraceCurve` scales its UV tolerance.
     ///
     /// # Errors
     ///
@@ -1092,7 +1126,7 @@ impl SurfaceIntersector<'_> {
         step_size: f64,
         unclipped_step_size: f64,
         next_uvs: [Point2; 2],
-    ) -> Result<Option<f64>> {
+    ) -> Result<Option<PoleCorner>> {
         let srfs = [SrfIndex::First, SrfIndex::Second];
         for ((s, dom), next) in srfs.into_iter().zip(self.uv_domains).zip(next_uvs) {
             let p = prev.uv_pos(s);
@@ -1112,12 +1146,13 @@ impl SurfaceIntersector<'_> {
             let uv_tol = EFF_ZERO * (1.0 + dom.max_dimension());
             let guess = dom.clamp_point(p + d * step_size);
             // the boundary this domain clipped the step at, and the exit through the other
-            let (clipped, reached, other_exit, collapse) = if exit_u <= exit_v {
+            let (clipped, reached, other_exit, collapse, pole_bound) = if exit_u <= exit_v {
                 (
                     (guess.x - bound_u).abs() <= uv_tol,
                     (next.x - bound_u).abs() <= uv_tol,
                     exit_v,
                     SurfParamType::U,
+                    bound_v,
                 )
             } else {
                 (
@@ -1125,6 +1160,7 @@ impl SurfaceIntersector<'_> {
                     (next.y - bound_v).abs() <= uv_tol,
                     exit_u,
                     SurfParamType::V,
+                    bound_u,
                 )
             };
             if !clipped || reached || !(other_exit > step_size && other_exit <= unclipped_step_size)
@@ -1147,7 +1183,13 @@ impl SurfaceIntersector<'_> {
                 }
             }
             if corner_step > step_size {
-                return Ok(Some(corner_step));
+                return Ok(Some(PoleCorner {
+                    step: corner_step,
+                    srf: s,
+                    on_v_boundary: collapse == SurfParamType::U,
+                    bound: pole_bound,
+                    uv_tol,
+                }));
             }
         }
         Ok(None)
