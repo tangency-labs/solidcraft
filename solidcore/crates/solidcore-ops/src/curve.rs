@@ -1753,6 +1753,112 @@ mod tests {
     }
 }
 
+/// The curves where the tube of `radius` round `curve` meets the one-face `sheet`: a chamfer's
+/// two boundaries on the sheet, each lying `radius` from the curve in space. The kernel's pipe of
+/// that radius swept along the curve
+/// ([`solidcore::sweep::api_brep::create_pipe_sweep`], uncapped), each of its walls intersected
+/// with the sheet's surface over the two faces' parameter boxes (the kernel's
+/// `Surface::global_surface_intersect`, traced to `tolerance`; a trimmed sheet is met over its
+/// whole box), and every curve found measured from the curve
+/// ([`solidcore::query::deviation::distance_deviation`] at [`OFFSET_STATIONS`] stations).
+///
+/// # Errors
+/// [`Error::Argument`] for a radius or a tolerance not finite and positive, a radius past the
+/// coordinate bound, a traced intersection curve, a curve the record or the kernel's
+/// constructors refuse, or a sheet that is not one face with a surface; [`Error::Unsupported`]
+/// for a curve whose kernel form runs past its record's range (a line); [`Error::Empty`] when
+/// the tube does not meet the sheet; [`Error::OffsetPastTolerance`] for a curve whose measured
+/// distance from `curve` strays past `tolerance`; [`Error::Record`] for a curve the record cannot
+/// hold; the kernel's refusals otherwise (a radius that reaches the centre of a bend: the pipe's
+/// wall would fold through itself); those of [`crate::Body::from_record`].
+pub fn tube_on_surface(
+    curve: &Curve,
+    sheet: &solidcore_record::brep::Brep,
+    radius: f64,
+    tolerance: f64,
+) -> Result<Vec<Curve>> {
+    use solidcore::query::deviation::distance_deviation;
+    use solidcore::sweep::api_brep::create_pipe_sweep;
+    let positive = |x: f64| x.is_finite() && x > 0.0;
+    if !positive(radius) || !coord_ok(&[radius]) || !positive(tolerance) {
+        return Err(Error::Argument);
+    }
+    if matches!(curve, Curve::SurfaceIntersection { .. })
+        || check_curve(curve, &mut Budget::input()).is_err()
+    {
+        return Err(Error::Argument);
+    }
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    let (body, _) = crate::Body::from_record(sheet, true)?;
+    crate::session::read_body("curve::tube_on_surface", &body, |k, b| {
+        let [f] = b.face_list() else {
+            return Ok(Err(Error::Argument));
+        };
+        let face = b.face(*f)?;
+        // copies, held by no face: the two surfaces belong to different bodies
+        let Some(surface) = face.surface.clone() else {
+            return Ok(Err(Error::Argument));
+        };
+        let domain = face.uv_domain;
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let natural = made.curve.natural_interval();
+        if natural.min() != made.interval.min() || natural.max() != made.interval.max() {
+            return Ok(Err(Error::Unsupported(
+                "a curve whose kernel form runs past its record's interval (a line: give it as a spline)",
+            )));
+        }
+        let path = made.curve;
+        let pipe = match create_pipe_sweep(k, radius, Some(&path), false) {
+            Ok(pipe) => pipe,
+            Err(e) => return Ok(Err(crate::error::status(e))),
+        };
+        let mut found = Vec::new();
+        for &wall in pipe.face_list() {
+            let wall_face = pipe.face(wall)?;
+            let Some(wall_surface) = wall_face.surface.clone() else {
+                continue;
+            };
+            let met = match wall_surface.global_surface_intersect(
+                k,
+                &wall_face.uv_domain,
+                &surface,
+                &domain,
+                [true, true],
+                Some(tolerance),
+                None,
+            ) {
+                Ok(met) => met,
+                Err(e) => return Ok(Err(crate::error::status(e))),
+            };
+            found.extend(met.curves_3d);
+        }
+        if found.is_empty() {
+            return Ok(Err(Error::Empty));
+        }
+        let mut out = Vec::new();
+        for c in &found {
+            let measured = distance_deviation(k, c, &path, radius, OFFSET_STATIONS)?;
+            if measured.worst > tolerance {
+                return Ok(Err(Error::OffsetPastTolerance {
+                    tolerance,
+                    worst: measured.worst,
+                }));
+            }
+            let held = solidcore::curve::from_parameters::record_of(k, c, &c.natural_interval())?;
+            match solidcore_convert::record_curve(held.curve) {
+                Ok(r) => out.push(r),
+                Err(Invalid(why)) => return Ok(Err(Error::Record(why.to_owned()))),
+            }
+        }
+        Ok(Ok(out))
+    })?
+}
+
 /// Which side of a planar curve an offset lies on, looking down the plane's normal
 /// ([`PlanarOffset::normal`]): left of the curve's direction of travel, or right of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
