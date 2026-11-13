@@ -432,11 +432,14 @@
   "case": "pocket-grazing-a-slanted-face",
   "expected": {
     "body_count": 1,
-    "method": "block: the 9-gon (x, z) = (26.716,-3.6805) (26.716,51.3195) (18.716,51.3195) (18.716,58.6204) (15.7793,59.9045) (-2.7312,42.786) (-11.6646,30.7364) (-28.284,0.3195) (-28.284,-3.6805), shoelace area 2323.91350335, extruded 60 along -y: 139434.810201. Pocket: y -6..-27, inside the block's y 0..-60, so it removes 21 x area(P intersect block profile), P = the pocket outline (three three-point arcs, circles from their points, and lines). Clipping P against the 9-gon with each arc as n chords gives 1130.363949767 (n 2000), 1130.363950899 (n 20000), 1130.363950910 (n 200000). V = 139434.810201 - 21 x 1130.36395091 = 115697.16723",
+    "method": "block: the 9-gon (x, z) = (26.716,-3.6805) (26.716,51.3195) (18.716,51.3195) (18.716,58.6204) (15.7793,59.9045) (-2.7312,42.786) (-11.6646,30.7364) (-28.284,0.3195) (-28.284,-3.6805), shoelace area 2323.91350335, extruded 60 along -y: 139434.810201. Pocket: y -6..-27, inside the block's y 0..-60, so it removes 21 x area(P intersect block profile), P = the pocket outline (three three-point arcs, circles from their points, and lines). Clipping P against the 9-gon with each arc as n chords gives 1130.363949767 (n 2000), 1130.363950899 (n 20000), 1130.363950910 (n 200000). V = 139434.810201 - 21 x 1130.36395091 = 115697.16723. Both the recording and this kernel measure 115696.57663 (5.1e-6 under), so the case is graded at 1e-5, a hundred times tighter than the default",
     "source": "analytic",
     "sources": [
       "tangency-labs/solidcraft#PR"
     ],
+    "tolerance": {
+      "rel": 1e-05
+    },
     "volume_mm3": 115697.16723,
     "what": "a prism with a pocket cut whose outline starts on a slanted outer face and leaves it at a shallow angle: one valid solid, not a refusal. The cut put a vertex 0.0056 mm from one edge's end; the tolerance update grew it to twice that, past 1000 times the B-rep's 0.00001 mm (SMLib Test #82), and the check refused the cut"
   },

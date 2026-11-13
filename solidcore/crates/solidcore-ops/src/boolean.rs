@@ -62,9 +62,10 @@ fn finished(k: &mut Kernel, r: Brep, expect: Expect) -> KernelResult<Done> {
 /// The tolerance update a boolean's result gets before the result contract checks it
 /// ([`update_tolerances_after_boolean`]): a vertex a grazing cut left wider than the check
 /// allows is centred on its edges' ends, then marginal edge/vertex, vertex/face and edge/face
-/// gaps are covered by growing tolerances. Tolerances only grow: a result that already passes
-/// is unchanged. Without it, the validity check of [`finished`] refuses a sound result for a
-/// sub-micron gap.
+/// gaps are covered by growing tolerances. Only a vertex wider than the check allows moves;
+/// elsewhere tolerances only grow. Without it, the validity check of [`finished`] refuses a
+/// sound result for a sub-micron gap. The update can itself fail with the kernel's error, which
+/// then comes back in place of the [`Error::NotSolid`] the check would have given.
 fn after_boolean(k: &mut Kernel, r: &mut Brep) -> KernelResult<()> {
     update_tolerances_after_boolean(k, r).map(|_| ())
 }
@@ -146,6 +147,8 @@ pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
 
 /// The union of `bodies`, pairwise level by level (an odd one carried to the next level as it
 /// is), each union `SmApiBoolean`'s, with solids touching along edges or at vertices allowed.
+/// Each pairwise result gets [`after_boolean`]'s update as it is made, as smlib's boolean gives
+/// it, so a later level unions repaired operands; a single body makes no union and is untouched.
 ///
 /// # Errors
 /// [`Error::Argument`] for no body; [`Error::Empty`] for an empty result; [`Error::NotSolid`];
@@ -166,17 +169,18 @@ pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
             let mut it = level.into_iter();
             while let Some(a) = it.next() {
                 match it.next() {
-                    Some(b) => next.push(sm::boolean(k, a, b, BooleanOperation::Union)?.result),
+                    Some(b) => {
+                        let mut r = sm::boolean(k, a, b, BooleanOperation::Union)?.result;
+                        after_boolean(k, &mut r)?;
+                        next.push(r);
+                    }
                     None => next.push(a),
                 }
             }
             level = next;
         }
         match level.pop() {
-            Some(mut r) => {
-                after_boolean(k, &mut r)?;
-                finished(k, r, expect)
-            }
+            Some(r) => finished(k, r, expect),
             None => Ok(Done::Empty),
         }
     })?;
@@ -305,6 +309,32 @@ mod tests {
         let u = union_all(vec![a, b]).unwrap();
         let v = u.volume(1e-8).unwrap();
         assert!((v - 3.0).abs() < 3.0 * 1e-9, "{v}");
+    }
+
+    /// Five overlapping boxes through `union_all`: three pairing levels, one operand carried
+    /// across a level unpaired. Each pairwise result gets the tolerance update as it is made,
+    /// as smlib's boolean does, so the next level unions repaired operands; the staircase keeps
+    /// its closed-form volume (five unit boxes, each overlapping the next by half).
+    #[test]
+    fn a_five_box_chain_union_all_measures_the_closed_form_with_the_update_per_pair() {
+        all_fixes();
+        let boxes = (0..5)
+            .map(|i| make_box([f64::from(i) * 0.5, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap())
+            .collect();
+        let u = union_all(boxes).unwrap();
+        let v = u.volume(1e-8).unwrap();
+        assert!((v - 3.0).abs() < 3.0 * 1e-9, "{v}");
+    }
+
+    /// One body through `union_all` makes no boolean, so the tolerance update does not touch it:
+    /// its volume comes back as it went in.
+    #[test]
+    fn a_single_body_union_all_is_not_repaired() {
+        all_fixes();
+        let a = make_box([0.0, 0.0, 0.0], [2.0, 1.0, 1.0]).unwrap();
+        let u = union_all(vec![a]).unwrap();
+        let v = u.volume(1e-8).unwrap();
+        assert!((v - 2.0).abs() < 2.0 * 1e-9, "{v}");
     }
 
     /// A boolean that fails hands the failure callback its operands as they came in, not the
