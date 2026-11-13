@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.plugin_dialog_other_design": "This dialog was opened on another design. Switch back to that design to run it, or open the entry again here."
+  },
+  "ar": {
+    "ui.plugin_dialog_other_design": "فُتح مربع الحوار هذا على تصميم آخر. عُد إلى ذلك التصميم لتشغيله، أو افتح نقطة الدخول مجددًا هنا."
+  },
+  "de": {
+    "ui.plugin_dialog_other_design": "Dieser Dialog wurde für einen anderen Entwurf geöffnet. Wechseln Sie zu diesem Entwurf zurück, um ihn auszuführen, oder öffnen Sie den Eintrag hier erneut."
+  },
+  "he": {
+    "ui.plugin_dialog_other_design": "תיבת הדו־שיח הזו נפתחה בתכנון אחר. חזרו לתכנון ההוא כדי להפעיל אותה, או פתחו את נקודת הכניסה שוב כאן."
+  },
+  "ja": {
+    "ui.plugin_dialog_other_design": "このダイアログは別の設計で開かれました。実行するにはその設計に戻るか、ここでエントリを開き直してください。"
+  },
+  "ko": {
+    "ui.plugin_dialog_other_design": "이 대화 상자는 다른 설계에서 열렸습니다. 실행하려면 그 설계로 돌아가거나 여기서 항목을 다시 여세요."
+  },
+  "vi": {
+    "ui.plugin_dialog_other_design": "Hộp thoại này được mở trên một thiết kế khác. Hãy quay lại thiết kế đó để chạy, hoặc mở lại mục này tại đây."
+  },
+  "zh": {
+    "ui.plugin_dialog_other_design": "此对话框是在另一个设计中打开的。请切换回该设计后运行，或在此处重新打开该入口。"
+  }
+}

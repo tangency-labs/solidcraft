@@ -207,7 +207,7 @@ sampled: a 6 × 6 grid of points dropped onto the other for whole surfaces, and 
 boundary curve of one meeting one of the other where the surfaces agree to second order, or the
 middle of one dropping onto the other. A sampled check is not a proof; deciding coincidence from the
 definitions (two quadrics by their coefficients, a definition against its own copy by identity, a
-B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is open work. Only the merge gate decides from definitions: `faces_coincide` (`merge/p1.rs`) decides cone (a cylinder is a cone of semi-angle 0), sphere and torus pairs by `Surface::same_analytic_surface`. Two planes, two different kinds (tangent, they can stay within the tolerance over a patch) and any pair with an offset, B-spline, extrusion or revolution keep the sector's answer.
+B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is open work. Only the merge gate decides from definitions: `faces_coincide` (`merge/p1.rs`) decides cone (a cylinder is a cone of semi-angle 0), sphere and torus pairs by `Surface::same_analytic_surface`. Two cones or two spheres that are not one surface (axes or centres apart) still count as one over the two faces' boxes when an enclosed bound keeps them within the tolerance there: the box is halved across the axes until a Lipschitz bound on their separation decides each part that can hold either surface (`revolved_within`, `surface/surface/p8.rs`; two arcs through the same corners about centres 8.4e-5 apart stay within 1e-10 over the sliver they share). The intersector's coincidence check is still the sampled one. Two planes, two different kinds (tangent, they can stay within the tolerance over a patch) and any pair with an offset, B-spline, extrusion or revolution keep the sector's answer.
 
 **Near-coincident strips.** Two planar faces crossing at a small angle θ meet in a line fixed only
 to tol / sin θ. Where one face has an edge lying on the other, parallel to and covering the crossing,
@@ -354,8 +354,9 @@ A reviewer can check each of these on a change to the boolean.
 - Point solves on S with ε-grown cache boxes (§4.3).
 - Definitions carried through face splits and copies (§7), tested on a round.
 - The ops entry points with the result contract (`solidcore-ops/src/boolean.rs`).
-- The rig: 124 boolean cases in `solidcore/tests/kernel_cases/booleans/`, none listed in
-  `known_failing.json`.
+- The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
+  `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
+  returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - Opt-in fixes for the cases in §5, §6 and §8: `boolean_coincident_strip_drops_crossing`,
   `boolean_union_refuses_solid_leak`, `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`,
   `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing`,

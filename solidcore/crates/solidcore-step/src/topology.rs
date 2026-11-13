@@ -468,8 +468,10 @@ fn model_shells(ex: &Exchange, shells: &[u64]) -> (Vec<u64>, Vec<u64>) {
 }
 
 /// The items a solid item is read as, each one body: the item itself, but for a surface model
-/// with both closed and open shells (a part with a sheet beside it) each closed shell on its own
-/// (a solid), then the model (its open shells, a sheet).
+/// with both closed and open shells (a part with a sheet beside a solid) each closed shell is a
+/// solid body of its own and each open shell a surface body of its own, so each sheet keeps its
+/// own body count. A model of open shells only keeps the model as its one body, and so does a model of
+/// closed shells only.
 pub fn items(ex: &Exchange, item: u64) -> Vec<u64> {
     let shells = match ex.get(item) {
         Some(e) if e.name() == "SHELL_BASED_SURFACE_MODEL" => {
@@ -479,9 +481,14 @@ pub fn items(ex: &Exchange, item: u64) -> Vec<u64> {
     };
     let (closed, open) = model_shells(ex, &shells);
     if closed.is_empty() || open.is_empty() {
+        // A model of open shells only (even one whose shell is geometrically closed) is the
+        // model's one body, as before; so is a model of closed shells only.
         return vec![item];
     }
-    closed.into_iter().chain([item]).collect()
+    // A closed shell beside open ones: each closed shell is a solid body and each open shell a
+    // surface body of its own. One open shell stays the model item,
+    // which carries the model's name and colour.
+    closed.into_iter().chain(if open.len() == 1 { vec![item] } else { open }).collect()
 }
 
 /// The shells of a solid item (the outer shell first, then its voids), and what kind it is.

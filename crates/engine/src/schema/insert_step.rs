@@ -201,6 +201,8 @@ pub struct StepInserted {
     pub warnings: Vec<String>,
     /// The program the file's header names as writing it.
     pub system: String,
+    /// The SHA-256 of the file's exact bytes, as lower-case hex.
+    pub content_sha256: String,
     /// The exporter the file names, and which way up its files are known to be (`y` or `z`). Only
     /// for a program whose files are known to need standing up.
     #[serde(default, skip_serializing_if = "Option::is_none")]

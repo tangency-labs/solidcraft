@@ -1573,6 +1573,34 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                     } else if local_op == SolverOperation::Signed3dDirectedMinimize {
                         ang_from_perp_rad =
                             passed_on(self.opt(0)?.angle_between(sol_vec), pass_on)?.unwrap_or(0.0);
+                    } else if matches!(
+                        local_op,
+                        SolverOperation::ProjectedMinimize | SolverOperation::ProjectedMaximize
+                    ) {
+                        // (not upstream, #13677, WR-779) The projected searches accept a point as a
+                        // root when their equation is below `EFF_ZERO_SQRT`, so every span
+                        // that ends close to a root reported its own end as one more
+                        // answer. At an end the curve passes through smoothly, the answer
+                        // belongs to the span the projected distance improves into: the next
+                        // span finds the root itself.
+                        let normal = self.opt(0)?;
+                        let offset = normal.cross(sol_vec).cross(normal);
+                        let outward = normal.cross(bndry_vec).cross(normal);
+                        let scale = offset.length() * outward.length();
+                        if scale.is_finite() && scale > 0.0 {
+                            // the cosine between the outward tangent and the direction to
+                            // the point: positive when the distance falls past the end
+                            let cosine = offset.dot(outward) / scale;
+                            let improves_outside = if local_op == SolverOperation::ProjectedMaximize
+                            {
+                                cosine < -EFF_ZERO
+                            } else {
+                                cosine > EFF_ZERO
+                            };
+                            if improves_outside {
+                                continue;
+                            }
+                        }
                     }
 
                     // skip solutions with tolerant angles that will get better in the
@@ -1580,6 +1608,61 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                     if !is_zero_to_tol(ang_from_perp_rad, EFF_ZERO_RAD) && outside_dir {
                         continue;
                     }
+                }
+            }
+
+            // (not upstream, #13677, WR-779) A search reports the point it stopped at, and a nearest
+            // point search can stop at a farthest point (and the reverse). With a wide
+            // tolerance, All then kept a minimum among the maxima. A point where the
+            // distance bends the wrong way is no answer. The exception is an end of the
+            // span where the curve stops or turns a corner, with the distance still
+            // changing there: that is an extremum because the curve ends, whatever the
+            // bend.
+            if found_solution
+                && matches!(
+                    op,
+                    SolverOperation::Minimize
+                        | SolverOperation::Maximize
+                        | SolverOperation::ProjectedMinimize
+                        | SolverOperation::ProjectedMaximize
+                )
+            {
+                let t = solution.start.parameters[0];
+                let at_start = is_zero(t - bez_ivl.min());
+                let at_end = is_zero(t - bez_ivl.max());
+                let open = |side: usize| {
+                    conts
+                        .get(side)
+                        .is_some_and(|c| (*c as i32) < (ContinuityType::G1 as i32))
+                };
+                let at_open_end = (at_start && open(0)) || (at_end && open(1));
+                let projected = matches!(
+                    op,
+                    SolverOperation::ProjectedMinimize | SolverOperation::ProjectedMaximize
+                );
+                let normal = if projected { Some(self.opt(0)?) } else { None };
+                let maximize = matches!(
+                    op,
+                    SolverOperation::Maximize | SolverOperation::ProjectedMaximize
+                );
+                // (at a knot: the derivatives of the span this leaf is part of)
+                match distance_bend(k, curve, t, !at_end, test_pnt, normal) {
+                    Ok(Some(bend)) => {
+                        let wrong_way = bend.second.is_some_and(|second| {
+                            if maximize {
+                                second > EFF_ZERO_SQRT
+                            } else {
+                                second < -EFF_ZERO_SQRT
+                            }
+                        });
+                        let stationary = bend.slope.abs() <= EFF_ZERO_RAD;
+                        if wrong_way && (stationary || !at_open_end) {
+                            continue;
+                        }
+                    }
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    // nothing to measure, or a curve without second derivatives: no verdict
+                    Ok(None) | Err(_) => {}
                 }
             }
 
@@ -2062,6 +2145,58 @@ fn end_is_projected_extremum(
     } else {
         cosine < -EFF_ZERO_RAD
     }
+}
+
+/// How the distance from a point to a curve changes at a parameter ([`distance_bend`]).
+struct DistanceBend {
+    /// The cosine between the tangent and the offset from the point: zero where the
+    /// distance is stationary.
+    slope: f64,
+    /// The second derivative of half the squared distance, over its largest possible
+    /// size: positive where the distance bends up (a minimum when stationary), negative
+    /// where it bends down, between -1 and 1. `None` where the tangent is too short
+    /// beside the other term to say.
+    second: Option<f64>,
+}
+
+/// The slope and bend at `t` of the distance from `test_point` to `curve`, seen along
+/// `normal` when given. Half the squared distance `g` has `g' = D.T` and
+/// `g'' = T.T + D.A` for the offset `D` from the point, the tangent `T` and the second
+/// derivative `A`. `starts_here` picks, at a knot, the span that starts there. `None`
+/// where there is nothing to measure: the point is on the curve within
+/// `EFF_ZERO_SQRT` (the direction of the offset is then rounding), or the curve has no
+/// tangent there (in the projection).
+fn distance_bend(
+    k: &Kernel,
+    curve: &Curve,
+    t: f64,
+    starts_here: bool,
+    test_point: Point3,
+    normal: Option<Vec3>,
+) -> Result<Option<DistanceBend>> {
+    let derivatives = curve.evaluate(k, t, 2, starts_here, false)?;
+    let [point, tangent, second, ..] = derivatives.as_slice() else {
+        return Ok(None);
+    };
+    let seen = |v: Vec3| match normal {
+        Some(n) => n.cross(v).cross(n),
+        None => v,
+    };
+    let (offset, tangent, second) = (seen(*point - test_point), seen(*tangent), seen(*second));
+    let lengths = offset.length() * tangent.length();
+    if !lengths.is_finite() || offset.length() <= EFF_ZERO_SQRT || tangent.length() <= 0.0 {
+        return Ok(None);
+    }
+    let speed = tangent.length_squared();
+    let pull = offset.length() * second.length();
+    // a tangent this short beside the curvature term is a cusp: the sign of `g''` there
+    // is the sign of rounding
+    let bend = (pull.is_finite() && speed > EFF_ZERO_SQRT * pull)
+        .then(|| (speed + offset.dot(second)) / (speed + pull));
+    Ok(Some(DistanceBend {
+        slope: offset.dot(tangent) / lengths,
+        second: bend,
+    }))
 }
 
 // ---- TessellateByBisection / Tessellate ---------------------------------------------
@@ -2844,6 +2979,109 @@ mod tests {
         )
         .unwrap();
         assert_eq!(nearest.len(), 1);
+    }
+
+    /// #13677: with a tolerance wide enough to hold every point of that curve, All
+    /// returns only the points where the distance is smallest (for nearest) or largest
+    /// (for farthest), plain and projected, on the spline and on its projected wrapper.
+    /// The one minimum is the knot at 0.5 (distance 1); the two maxima are the ends.
+    #[test]
+    fn all_with_a_wide_tolerance_keeps_only_minima_or_only_maxima() {
+        use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
+        use crate::nurbs::b_spline_curve::ProjectionType;
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::{CPoint, NOW};
+        use SolverOperation::{Maximize, Minimize, ProjectedMaximize, ProjectedMinimize};
+        let a = 1.0 / 1024.0;
+        let controls = vec![
+            CPoint::new(-a, 1.0, 0.0, NOW),
+            CPoint::new(0.0, 1.0, 0.0, NOW),
+            CPoint::new(a, 1.0, 0.0, NOW),
+        ];
+        let net = Net::new(controls, 1, vec![0.0, 0.0, 0.5, 2.0, 2.0]).unwrap();
+        let base = Curve::from(BSplineCurve::from_nurb(net, 3, false));
+        let wrapped = Curve::from(
+            ProjectedCurve::new(
+                base.clone(),
+                Some(Vec3::ZERO),
+                Some(Vec3::Z),
+                None,
+                ProjectionType::Parallel,
+                OwnsCurve::Yes,
+            )
+            .unwrap(),
+        );
+        let far = (1.0 + a * a).sqrt();
+        for (name, curve) in [("spline", &base), ("wrapper", &wrapped)] {
+            for op in [Minimize, ProjectedMinimize] {
+                let got = projected_answers(
+                    curve,
+                    (0.0, 2.0),
+                    op,
+                    Vec3::ZERO,
+                    1.0,
+                    SolutionRequested::All,
+                );
+                assert_eq!(got, vec![(0.5, 1.0)], "{name} {op:?}");
+            }
+            for op in [Maximize, ProjectedMaximize] {
+                let mut got = projected_answers(
+                    curve,
+                    (0.0, 2.0),
+                    op,
+                    Vec3::ZERO,
+                    1.0,
+                    SolutionRequested::All,
+                );
+                got.sort_by(|a, b| a.0.total_cmp(&b.0));
+                assert_eq!(got.len(), 2, "{name} {op:?}: {got:?}");
+                assert!(got[0].0 == 0.0 && got[1].0 == 2.0, "{name} {op:?}: {got:?}");
+                assert!(
+                    got.iter().all(|(_, v)| (v - far).abs() < 1e-12),
+                    "{name} {op:?}: {got:?}"
+                );
+            }
+        }
+    }
+
+    /// A corner that is the farthest point of a polyline stays an answer although the
+    /// distance bends up along both legs: (-1, 0) to (0, 1) to (1, 0), seen from (0, -1).
+    /// The corner at 0.5 is 2 away, the ends sqrt(2). Seen from (0, 3) the corner is the
+    /// nearest point, 2 away, and the ends are the farthest.
+    #[test]
+    fn a_corner_stays_the_farthest_or_nearest_point_of_a_polyline() {
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::{CPoint, NOW};
+        use SolutionRequested::{All, Single};
+        use SolverOperation::{Maximize, Minimize, ProjectedMaximize, ProjectedMinimize};
+        let controls = vec![
+            CPoint::new(-1.0, 0.0, 0.0, NOW),
+            CPoint::new(0.0, 1.0, 0.0, NOW),
+            CPoint::new(1.0, 0.0, 0.0, NOW),
+        ];
+        let net = Net::new(controls, 1, vec![0.0, 0.0, 0.5, 1.0, 1.0]).unwrap();
+        let roof = Curve::from(BSplineCurve::from_nurb(net, 3, false));
+        let whole = (0.0, 1.0);
+        for (tolerance, requested) in [(1e-6, Single), (1e-6, All), (0.1, All)] {
+            for op in [Maximize, ProjectedMaximize] {
+                let below = Vec3::new(0.0, -1.0, 0.0);
+                let got = projected_answers(&roof, whole, op, below, tolerance, requested);
+                assert_eq!(got.len(), 1, "{op:?} {tolerance} {requested:?}: {got:?}");
+                assert!(
+                    (got[0].0 - 0.5).abs() < 1e-9 && (got[0].1 - 2.0).abs() < 1e-9,
+                    "{op:?} {tolerance} {requested:?}: {got:?}"
+                );
+            }
+            for op in [Minimize, ProjectedMinimize] {
+                let above = Vec3::new(0.0, 3.0, 0.0);
+                let got = projected_answers(&roof, whole, op, above, tolerance, requested);
+                assert_eq!(got.len(), 1, "{op:?} {tolerance} {requested:?}: {got:?}");
+                assert!(
+                    (got[0].0 - 0.5).abs() < 1e-9 && (got[0].1 - 2.0).abs() < 1e-9,
+                    "{op:?} {tolerance} {requested:?}: {got:?}"
+                );
+            }
+        }
     }
 
     #[test]

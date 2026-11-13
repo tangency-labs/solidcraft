@@ -508,3 +508,83 @@ fn a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid() {
         );
     }
 }
+
+/// A 120 degree sector of height 119 with its apex at the origin, its legs ending at the
+/// sketch point (±74.0452, 42.75) (85.5 at 30 and 150 degrees, rounded to four decimals, so
+/// each leg turns 1.636e-7 rad outward), its arc about the origin, turned `turn` degrees
+/// about z.
+#[allow(clippy::disallowed_methods)] // the test's operands and closed form, not ops geometry
+fn sector_of_rounded_sketch(turn: f64) -> Body {
+    let (x, y) = (74.0452, 42.75);
+    let profile = [
+        Curve::Line {
+            start: [0.0; 3],
+            end: [x, y, 0.0],
+        },
+        Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: x.hypot(y),
+            start: y.atan2(x),
+            end: y.atan2(-x),
+        },
+        Curve::Line {
+            start: [-x, y, 0.0],
+            end: [0.0; 3],
+        },
+    ];
+    let b = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        119.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let (s, c) = turn.to_radians().sin_cos();
+    b.transform(&[
+        [c, -s, 0.0, 0.0],
+        [s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    b
+}
+
+/// Two copies of the sector of a sketch whose leg points were rounded, turned 120 degrees
+/// apart (SolidCraft, a case joined from three such sectors): the legs that should coincide
+/// cross at 3.3e-7 rad along the z axis, so the sectors overlap in a sliver, and the arc of
+/// one runs 2.8e-5 past the other's leg. The imprint splits that arc there; once the leg is
+/// gone the split vertex is redundant and its two arc pieces are joined back. The join kept
+/// the split as a knot, a span of 1.6e-7 of the arc whose control points coincide, and the
+/// cap faces' trim curves made from it failed the check (`SmBSplineCurve` test 15, the
+/// polar conversion test): the union was refused as not a solid. Joined into one span, the
+/// arc is the operand's again and the union is one valid solid of 6 faces, 12 edges and 8
+/// vertices, V = (2α - 2d)/2 · r² · 119 for the sector angle α = 120° + 2d and the overlap
+/// 2d, d = 30° - atan2(42.75, 74.0452).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn sectors_of_a_rounded_sketch_turned_120_degrees_union() {
+    session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    let r = 74.0452_f64.hypot(42.75);
+    let d = 30_f64.to_radians() - 42.75_f64.atan2(74.0452);
+    let alpha = 2.0 * PI / 3.0 + 2.0 * d;
+    let want = (2.0 * alpha - 2.0 * d) / 2.0 * r * r * 119.0;
+    let u = boolean(
+        sector_of_rounded_sketch(0.0),
+        sector_of_rounded_sketch(120.0),
+        BooleanOp::Union,
+    )
+    .unwrap()
+    .unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [6, 12, 8]);
+    let v = volume(&u);
+    let off = (v - want).abs() / want;
+    assert!(!(off.is_nan() || off > 1e-9), "{v}, closed form {want}");
+}

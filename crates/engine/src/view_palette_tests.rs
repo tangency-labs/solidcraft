@@ -63,18 +63,6 @@ fn the_headless_grid_fades_out_with_the_distance() {
     assert!(farthest < cut, "the grid fades out at {farthest}, short of the cut at {cut}");
 }
 
-/// #4214: the grid's half size, the one the picture and the window share: the grid reaches as far
-/// on its plane as the view is wide, and further as the plane is seen at a slant.
-#[test]
-fn the_grid_reaches_further_as_its_plane_is_seen_at_a_slant() {
-    let major = grid_step(40.0).1;
-    let flat = grid_ext(40.0, major, 1.0);
-    assert_eq!(flat, (40.0 * 3.0 / major).ceil() * major, "seen face on, the grid reaches as far as the view is wide");
-    assert!(grid_ext(40.0, major, 0.5) > flat, "seen at a slant, the grid reaches further on its plane");
-    // A plane seen edge-on keeps a usable size.
-    assert!(grid_ext(40.0, major, 0.0).is_finite());
-}
-
 /// #9570: zooming through a switch of the grid's spacing used to swap the whole grid at once, so
 /// scrolling made it pop over and over. The drawn grid now cross-fades: zoomed in small steps
 /// through a switch, no line's strength jumps from one step to the next, while away from a

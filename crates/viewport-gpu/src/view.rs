@@ -27,8 +27,16 @@ mod product_highlights;
 #[cfg(not(target_arch = "wasm32"))]
 pub use msaa_check::MsaaCheck;
 
-/// Triangle vertex: position (3 × f32), normal (3 × f32), palette index (u32).
-pub const TRI_SIZE: usize = 28;
+/// Triangle vertex: position (3 × f32), normal (3 × f32), palette index (u32) at
+/// [`TRI_COLOR_AT`], and a value at [`TRI_VALUE_AT`] (an `f32`'s bits, or [`NO_VALUE`]) that
+/// [`solidcraft_viewport::AnalysisMode::Values`] colours by.
+pub const TRI_SIZE: usize = 32;
+/// Where a triangle vertex keeps its palette index.
+pub const TRI_COLOR_AT: usize = 24;
+/// Where a triangle vertex keeps its value.
+pub const TRI_VALUE_AT: usize = 28;
+/// A triangle vertex's value word when it has no value (a NaN's bits no producer writes).
+pub const NO_VALUE: u32 = u32::MAX;
 pub const PBR_SIZE: usize = pbr::VERTEX_SIZE;
 /// Line instance: a, b (3 × f32 each), palette index (u32), width in pixels (f32).
 pub const LINE_SIZE: usize = 32;
@@ -78,18 +86,24 @@ pub struct Material {
     pub roughness: f32,
     pub ior: f32,
     pub pbr: bool,
+    /// Lit on both sides: where the eye sees the face's back, it is lit as its front (an open
+    /// sheet's back would otherwise be black). Off for solids, which never show their back.
+    pub two_sided: bool,
 }
 
 impl Material {
     /// The surface `s` as the shader takes it.
     pub fn of(s: &solidcraft_viewport::surface::OpaqueSurface) -> Material {
         let base = s.base_color().to_f32();
-        Material { base, metallic: s.metallic() as f32, roughness: s.roughness() as f32, ior: s.dielectric_ior() as f32, pbr: true }
+        Material { base, metallic: s.metallic() as f32, roughness: s.roughness() as f32, ior: s.dielectric_ior() as f32, pbr: true, two_sided: false }
     }
 
     /// Its two texels in the material texture: base and flag, then the optical parameters.
     fn texels(&self) -> [[f32; 4]; 2] {
-        [[self.base[0], self.base[1], self.base[2], if self.pbr { 1.0 } else { 0.0 }], [self.metallic, self.roughness, self.ior, 0.0]]
+        [
+            [self.base[0], self.base[1], self.base[2], if self.pbr { 1.0 } else { 0.0 }],
+            [self.metallic, self.roughness, self.ior, if self.two_sided { 1.0 } else { 0.0 }],
+        ]
     }
 }
 
@@ -524,6 +538,7 @@ impl InstancedMesh {
                     out.extend_from_slice(&x.to_le_bytes());
                 }
                 out.extend_from_slice(&index.to_le_bytes());
+                out.extend_from_slice(&NO_VALUE.to_le_bytes());
             }
         }
     }
@@ -647,6 +662,15 @@ impl GpuScene {
         let palette = std::mem::replace(&mut self.palette, palette);
         GpuScene { palette, tris: out.tris, trans: out.trans, glass: out.glass, lines: out.lines, hidden: out.hidden, ..self }
     }
+}
+
+/// One triangle vertex record ([`TRI_SIZE`]) onto `out`.
+fn push_tri(out: &mut Vec<u8>, p: [f32; 3], n: [f32; 3], c: PaletteIndex, value: u32) {
+    for v in p.iter().chain(&n) {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend_from_slice(&c.0.to_le_bytes());
+    out.extend_from_slice(&value.to_le_bytes());
 }
 
 /// A class's triangles as `TRI_SIZE` vertex records: its runs of the block's vertices, in order.
@@ -823,10 +847,20 @@ impl BlockBuilder {
 
     /// Add a triangle (three positions and normals, one palette index) under `class`.
     pub fn triangle(&mut self, p: [[f32; 3]; 3], n: [[f32; 3]; 3], c: PaletteIndex, class: TriClass) {
+        self.triangle_words(p, n, [NO_VALUE; 3], c, class);
+    }
+
+    /// [`BlockBuilder::triangle`] with a value at each vertex, interpolated across it: what
+    /// [`solidcraft_viewport::AnalysisMode::Values`] colours by.
+    pub fn triangle_values(&mut self, p: [[f32; 3]; 3], n: [[f32; 3]; 3], values: [f32; 3], c: PaletteIndex, class: TriClass) {
+        self.triangle_words(p, n, values.map(f32::to_bits), c, class);
+    }
+
+    fn triangle_words(&mut self, p: [[f32; 3]; 3], n: [[f32; 3]; 3], values: [u32; 3], c: PaletteIndex, class: TriClass) {
         let at = u32::try_from(self.vertices.len() / TRI_SIZE).unwrap_or(u32::MAX);
         let mut record = [0u8; 3 * TRI_SIZE];
-        for ((out, p), n) in record.as_chunks_mut::<TRI_SIZE>().0.iter_mut().zip(p).zip(n) {
-            let words = [p[0].to_bits(), p[1].to_bits(), p[2].to_bits(), n[0].to_bits(), n[1].to_bits(), n[2].to_bits(), c.0];
+        for (((out, p), n), value) in record.as_chunks_mut::<TRI_SIZE>().0.iter_mut().zip(p).zip(n).zip(values) {
+            let words = [p[0].to_bits(), p[1].to_bits(), p[2].to_bits(), n[0].to_bits(), n[1].to_bits(), n[2].to_bits(), c.0, value];
             for (w, slot) in words.iter().zip(out.as_chunks_mut::<4>().0) {
                 *slot = w.to_le_bytes();
             }
@@ -922,6 +956,19 @@ impl GpuScene {
             self.tris.extend_from_slice(&v.to_le_bytes());
         }
         self.tris.extend_from_slice(&c.0.to_le_bytes());
+        self.tris.extend_from_slice(&NO_VALUE.to_le_bytes());
+    }
+    /// [`GpuScene::tri`] with a value ([`TRI_VALUE_AT`]), for a mesh coloured by its values.
+    pub fn tri_value(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex, value: f32) {
+        push_tri(&mut self.tris, p, n, c, value.to_bits());
+    }
+    /// [`GpuScene::open_tri`] with a value.
+    pub fn open_tri_value(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex, value: f32) {
+        push_tri(&mut self.open_tris, p, n, c, value.to_bits());
+    }
+    /// [`GpuScene::glass_tri`] with a value.
+    pub fn glass_tri_value(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex, value: f32) {
+        push_tri(&mut self.glass, p, n, c, value.to_bits());
     }
     /// A vertex of an open body's opaque triangle (see [`GpuScene::open_tris`]).
     pub fn open_tri(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex) {
@@ -929,6 +976,7 @@ impl GpuScene {
             self.open_tris.extend_from_slice(&v.to_le_bytes());
         }
         self.open_tris.extend_from_slice(&c.0.to_le_bytes());
+        self.open_tris.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
     /// A vertex of the ground-plane shadow (see [`GpuScene::shadow`]).
     pub fn shadow_tri(&mut self, p: [f32; 3], c: PaletteIndex) {
@@ -936,12 +984,14 @@ impl GpuScene {
             self.shadow.extend_from_slice(&v.to_le_bytes());
         }
         self.shadow.extend_from_slice(&c.0.to_le_bytes());
+        self.shadow.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
     pub fn trans_tri(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex) {
         for v in p.iter().chain(&n) {
             self.trans.extend_from_slice(&v.to_le_bytes());
         }
         self.trans.extend_from_slice(&c.0.to_le_bytes());
+        self.trans.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
     /// A line shown only where the model hides it.
     pub fn hidden_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
@@ -959,18 +1009,21 @@ impl GpuScene {
             self.glass.extend_from_slice(&v.to_le_bytes());
         }
         self.glass.extend_from_slice(&c.0.to_le_bytes());
+        self.glass.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
     pub fn ghost_tri(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex) {
         for v in p.iter().chain(&n) {
             self.ghost.extend_from_slice(&v.to_le_bytes());
         }
         self.ghost.extend_from_slice(&c.0.to_le_bytes());
+        self.ghost.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
     pub fn xray_tri(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex) {
         for v in p.iter().chain(&n) {
             self.xray.extend_from_slice(&v.to_le_bytes());
         }
         self.xray.extend_from_slice(&c.0.to_le_bytes());
+        self.xray.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
     /// A line under everything (see [`GpuScene::under`]).
     pub fn under_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
@@ -986,6 +1039,7 @@ impl GpuScene {
             self.guide_trans.extend_from_slice(&v.to_le_bytes());
         }
         self.guide_trans.extend_from_slice(&c.0.to_le_bytes());
+        self.guide_trans.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
     /// A depth-tested line a section does not cut (see [`GpuScene::guide_lines`]).
     pub fn guide_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
@@ -1098,7 +1152,8 @@ pub struct Frame {
     /// Point clouds and their cells.
     pub clouds: Vec<GpuCloud>,
     /// Surface analysis: (mode: 0 none, 1 zebra, 2 draft, 3 curvature, 4 environment,
-    /// 5 accessibility; parameter; scale; size) and the pull / access direction.
+    /// 5 accessibility, 6 values; parameter; scale, the zebra's white share or the values'
+    /// high end; size) and the pull / access / zebra bar direction.
     pub analysis: [f32; 8],
     /// The analysis colours and the stripe flag ([`analysis_colors`]).
     pub analysis_colors: [f32; 36],
@@ -1238,10 +1293,13 @@ impl AccessMap {
 pub fn analysis_uniform(mode: Option<solidcraft_viewport::AnalysisMode>, access: Option<&AccessMap>) -> [f32; 8] {
     use solidcraft_viewport::AnalysisMode as A;
     match mode {
-        Some(A::Zebra { stripes }) => [1.0, stripes as f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+        Some(A::Zebra { stripes, direction, width }) => {
+            [1.0, stripes as f32, width.clamp(0.05, 0.95) as f32, 0.0, direction.x as f32, direction.y as f32, direction.z as f32, 0.0]
+        }
         Some(A::Draft { pull, angle }) => [2.0, angle as f32, 0.0, 0.0, pull.x as f32, pull.y as f32, pull.z as f32, 0.0],
         Some(A::Curvature { radius }) => [3.0, radius as f32, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         Some(A::Environment) => [4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+        Some(A::Values { low, high }) => [6.0, low as f32, high as f32, 0.0, 0.0, 0.0, 1.0, 0.0],
         Some(A::Access { dir }) => {
             let (scale, size, eps) = access.map(|m| (m.scale, m.size as f32, 1.5 / m.scale.max(1e-9))).unwrap_or((0.0, 0.0, 0.0));
             [5.0, eps, scale, size, dir.x as f32, dir.y as f32, dir.z as f32, 0.0]
@@ -2600,7 +2658,7 @@ fn access_texture(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bgl: &wgpu
 pub const SHADER: &str = include_str!("../shaders/viewport.wgsl");
 
 fn tri_layout() -> wgpu::VertexBufferLayout<'static> {
-    const A: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32];
+    const A: [wgpu::VertexAttribute; 4] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32, 3 => Uint32];
     wgpu::VertexBufferLayout { array_stride: TRI_SIZE as u64, step_mode: wgpu::VertexStepMode::Vertex, attributes: &A }
 }
 
@@ -2650,7 +2708,8 @@ impl TriSource {
         match self {
             TriSource::Instanced => "vs_tri_inst",
             TriSource::InstancedFlat => "vs_tri_inst_flat",
-            TriSource::Built | TriSource::Planned => "vs_tri",
+            TriSource::Built => "vs_tri",
+            TriSource::Planned => "vs_tri_planned",
         }
     }
 
@@ -5415,6 +5474,48 @@ mod glass_tests {
         assert_ne!(middle_pixel(scene(1.5, 0.0, true), false), Some(red), "no hidden marker where it is seen");
     }
 
+    /// A PBR triangle seen from its back: black with a one-sided material (no light reaches the
+    /// side its normal turns from), lit as its front with a two-sided one (an open sheet's back).
+    #[test]
+    fn a_two_sided_material_lights_the_back_of_a_face() {
+        let scene = |two_sided: bool| {
+            let mut b = BlockBuilder::default();
+            // In z = 0, its normal away from the eye at +Z.
+            b.triangle([[-20.0, -20.0, 0.0], [20.0, -20.0, 0.0], [0.0, 20.0, 0.0]], [[0.0, 0.0, -1.0]; 3], PaletteIndex(0), TriClass::Pbr);
+            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided };
+            GpuScene {
+                palette: Arc::new(Palette::with_stable(vec![[150, 150, 150, 255]]).with_materials(vec![material])),
+                blocks: vec![SceneBlock { key: 3, bytes: b.freeze() }],
+                ..GpuScene::default()
+            }
+        };
+        let Some(one_sided) = middle_pixel(scene(false), false) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let lit = |p: [u8; 4]| p[0].max(p[1]).max(p[2]);
+        assert!(lit(one_sided) < 8, "a one-sided back is unlit: {one_sided:?}");
+        let two_sided = middle_pixel(scene(true), false).unwrap_or_default();
+        assert!(lit(two_sided) > 40, "a two-sided back is lit as its front: {two_sided:?}");
+    }
+
+    /// A triangle with values writes them after its palette index, and one without writes
+    /// `NO_VALUE` there; the stride stays `TRI_SIZE`.
+    #[test]
+    fn a_triangle_keeps_its_values_after_its_colour() {
+        let mut b = BlockBuilder::default();
+        let p = [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        b.triangle_values(p, [[0.0, 0.0, 1.0]; 3], [-1.0, 0.0, 1.0], PaletteIndex(5), TriClass::Opaque);
+        b.triangle(p, [[0.0, 0.0, 1.0]; 3], PaletteIndex(6), TriClass::Opaque);
+        let bytes = b.freeze();
+        let v = &bytes.vertices;
+        assert_eq!(v.len(), 6 * TRI_SIZE);
+        let word = |vertex: usize, at: usize| u32::from_le_bytes(v[vertex * TRI_SIZE + at..vertex * TRI_SIZE + at + 4].try_into().unwrap());
+        assert_eq!((word(0, TRI_COLOR_AT), word(3, TRI_COLOR_AT)), (5, 6));
+        assert_eq!([0, 1, 2].map(|k| f32::from_bits(word(k, TRI_VALUE_AT))), [-1.0, 0.0, 1.0]);
+        assert_eq!([3, 4, 5].map(|k| word(k, TRI_VALUE_AT)), [NO_VALUE; 3]);
+    }
+
     /// A product scene whose PBR material changes (the same blocks, another material table)
     /// uploads the changed material rows and no geometry.
     #[test]
@@ -5426,7 +5527,7 @@ mod glass_tests {
         let mut b = BlockBuilder::default();
         b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Pbr);
         let bytes = b.freeze();
-        let material = |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true };
+        let material = |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false };
         let scene = |m: Material| GpuScene {
             palette: Arc::new(Palette::with_stable(vec![[180, 120, 70, 255]]).with_materials(vec![m])),
             blocks: vec![SceneBlock { key: 3, bytes: bytes.clone() }],

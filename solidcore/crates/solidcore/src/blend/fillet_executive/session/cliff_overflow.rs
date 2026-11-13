@@ -81,6 +81,7 @@ impl FilletSession<'_> {
         self.executive.error.code = refusal.code as i32;
         self.executive.error.comment = refusal.comment.into();
         self.executive.error.no_room = refusal.reason;
+        self.executive.error.no_room_without_site = true;
     }
 
     /// Note `note`'s refusal, if any, and pass `result` on.

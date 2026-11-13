@@ -1757,6 +1757,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 }
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
                 crate::browser::request_timeline_reveal(app, f);
+                let panel = if app.preferences.history_in_browser { "browser" } else { "history" };
+                crate::browser::reveal_shared_panel(app, panel);
             }
         }
         "ui.tangentChain" => tangent_chain(app),

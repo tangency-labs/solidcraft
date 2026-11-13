@@ -890,6 +890,13 @@ fn the_check_reads_the_occurrence_keys_as_the_handlers_do() {
         ["matrix must be 12 numbers (3x4, row by row) or 16 (4x4), flat or as rows"]
     );
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "translate": [1, 2]})), ["translate must contain three finite numbers"]);
+    // Length expressions in `translate` (#8192): read as the handler reads them.
+    assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "translate": ["0 mm", "dy", 0]})), none);
+    assert_eq!(
+        issues("occurrence.move", json!({"occurrence": 1, "translate": [true, "dy", 0]})),
+        ["translate entries must be numbers or length expressions"]
+    );
+    assert_eq!(issues("occurrence.copy", json!({"occurrence": 1, "translate": ["dy", 0, 0]})), ["translate must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "axis": null})), ["axis must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "origin": "x"})), ["origin must contain three finite numbers"]);
     assert_eq!(issues("occurrence.move", json!({"occurrence": 1, "angle": null})), ["angle must be a number or angle expression"]);

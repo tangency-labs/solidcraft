@@ -58,6 +58,9 @@ missing_errors_doc = "allow"
 module_name_repetitions = "allow"
 # - thousands of ported getters; #[must_use] is added deliberately where it matters
 must_use_candidate = "allow"
+# - (Rust 1.99) tests assert emptiness with `assert!(x.is_empty())`; `assert_eq!(x, [])` needs
+#   Debug + PartialEq on every element type and changes no behaviour
+assert_is_empty = "allow"
 
 # The goldens profile runs optimised (FP results are unchanged: Rust never contracts or
 # reassociates floating point; the goldens agree at opt-level 1 and 3) but keeps overflow

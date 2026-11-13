@@ -954,6 +954,29 @@ fn a_plate_with_a_through_hole() {
 }
 
 #[test]
+fn a_closed_shell_beside_open_shells_reads_each_open_shell_as_a_sheet() {
+    // A closed shell beside two open ones: the closed shell is a solid body and each open shell a
+    // surface body of its own.
+    let mut w = W::default();
+    let faces = box_faces(&mut w, [0.0; 3], [1.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    let closed = closed_shell(&mut w, &faces);
+    let mut faces = box_faces(&mut w, [2.0; 3], [3.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    faces.pop();
+    let open = w.add(format!("OPEN_SHELL('',({}))", list(&faces)));
+    let single = box_faces(&mut w, [5.0; 3], [6.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    let one = w.add(format!("OPEN_SHELL('',(#{}))", single[0]));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('sheet',(#{closed},#{open},#{one}))"));
+    let r = read_solids(&w.file(&[model]));
+    assert!(r.failures.is_empty(), "{:?}", r.failures);
+    assert_eq!(r.solids.len(), 3);
+    assert!(!r.solids[0].sheet);
+    assert_eq!(counts(&r.solids[0].brep), [2, 1, 6, 12, 8]);
+    assert!(r.solids[1].sheet && r.solids[2].sheet);
+    assert_eq!(counts(&r.solids[1].brep), [1, 1, 5, 12, 8]);
+    assert_eq!(counts(&r.solids[2].brep), [1, 1, 1, 4, 4]);
+}
+
+#[test]
 fn a_surface_model_of_open_shells_is_a_sheet() {
     let mut w = W::default();
     let mut faces = box_faces(&mut w, [0.0; 3], [1.0, 1.0, 1.0], BoxStyle::default(), &mut |_, _| Vec::new());
