@@ -22,6 +22,7 @@
 //! | [`CurveFailure::SingleLinearCurve`]  | `SM_ERR`                 |
 //! | [`CurveFailure::InfiniteTangent`], [`CurveFailure::ZeroTangent`], [`CurveFailure::PointOnCurveWhenMaximising`] | `SM_ERR` |
 //! | [`CurveFailure::StageFailed`]        | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
+//! | [`CurveFailure::PointSolveOptionMissing`] | `SM_ERR_NULL_POINTER` |
 //!
 //! **The record** (#15034). A check that refuses builds a typed cause with its numbers
 //! ([`CurveFailure::SingleLinearCurve`], [`CurveFailure::InfiniteTangent`], ...); a stage that
@@ -95,6 +96,13 @@ pub enum CurveFailure {
     /// reports (for the goldens only), where it was built, and the error of the call it made
     /// where it has one.
     StageFailed,
+    /// A ray solve ([`crate::curve::curve::SolverOperation::Rayfire`] or
+    /// `Signed3dDirectedMinimize`) was called without `option`, which it requires: the
+    /// caller's argument, so of kind [`ErrorKind::InvalidInput`], not a defect.
+    PointSolveOptionMissing {
+        /// The option left out.
+        option: PointSolveOption,
+    },
     /// A piece `[a, b]` of a length bracket lies outside the knot span
     /// `[span_start, span_end]` it is blossomed in: the bracket's rounding bound holds only
     /// for a piece within its span (a port invariant: the halving keeps every piece within).
@@ -108,6 +116,26 @@ pub enum CurveFailure {
         /// The knot span's end.
         span_end: f64,
     },
+}
+
+/// A required option of [`crate::curve::curve::p3::PointSolveOptions`] that a ray solve
+/// was called without ([`CurveFailure::PointSolveOptionMissing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PointSolveOption {
+    /// `distance_tolerance`, the largest ray / curve gap.
+    DistanceTolerance,
+    /// `vectors`, whose first entry is the ray's direction.
+    Vectors,
+}
+
+impl core::fmt::Display for PointSolveOption {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::DistanceTolerance => "distance tolerance",
+            Self::Vectors => "vectors",
+        })
+    }
 }
 
 impl CurveFailure {
@@ -125,7 +153,7 @@ impl CurveFailure {
             | Self::PointOnCurveWhenMaximising { .. }
             | Self::StageFailed
             | Self::PieceOutsideSpan { .. } => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::PointSolveOptionMissing { .. } => SM_ERR_NULL_POINTER,
             Self::ZeroDirection(_) => SM_ERR_INVALID_INPUT,
         }
     }
@@ -144,6 +172,7 @@ impl CurveFailure {
             }
             Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
             Self::StageFailed => ErrorKind::StageFailed,
+            Self::PointSolveOptionMissing { .. } => ErrorKind::InvalidInput,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::ZeroDirection(_)
@@ -174,7 +203,8 @@ impl CurveFailure {
             | Self::InfiniteTangent { .. }
             | Self::ZeroTangent { .. }
             | Self::PointOnCurveWhenMaximising { .. }
-            | Self::StageFailed => true,
+            | Self::StageFailed
+            | Self::PointSolveOptionMissing { .. } => true,
         }
     }
 }
@@ -221,6 +251,9 @@ impl core::fmt::Display for CurveFailure {
                 "the point lies on the curve at t = {t}, where a farthest-point solve finds no extremum"
             ),
             Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
+            Self::PointSolveOptionMissing { option } => {
+                write!(f, "the ray solve was called without its {option}")
+            }
         }
     }
 }

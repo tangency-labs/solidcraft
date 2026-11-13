@@ -54,7 +54,9 @@
 //!   `SmProjectedCurve`s of both curves and needs [`Curve`] operands: it is
 //!   [`Curve::local_curve_solve`]; the generic function returns `InvalidInput` for it.
 //!   Option vectors and values an operation dereferences without a `NULL` check are
-//!   `InvalidInput` when missing; upstream's `NER` checks stay `SM_ERR_NULL_POINTER`.
+//!   `InvalidInput` when missing; upstream's `NER` checks stay `SM_ERR_NULL_POINTER` (a ray
+//!   solve's missing options are [`CurveFailure::PointSolveOptionMissing`]: that status, the
+//!   caller's error, not a defect).
 //! - **Property solver.** `SmCurvePropertyGS::LocalSolve` reads the curve back from
 //!   the tree node's owner object; here the solver carries it
 //!   ([`CurvePropertyGs::curve`], `InvalidInput` when not set) and the solution
@@ -106,7 +108,7 @@ use crate::curve::curve::p4::{
 };
 use crate::curve::curve::p5::{find_additional_cp_guess, is_periodic, local_property_analysis};
 use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
-use crate::error::curve::CurveFailure;
+use crate::error::curve::{CurveFailure, PointSolveOption};
 use crate::error::{
     ignore_or_pass_on, ignored, ignored_or_pass_on, passed_on, Failure, Result, SolidError,
     SM_ERR_NULL_POINTER,
@@ -1176,6 +1178,13 @@ pub struct PointSolveOptions<'a> {
     pub vectors: Option<&'a [Vec3]>,
 }
 
+/// A ray solve called without a required option (upstream `NER` on it): the caller's
+/// error, with the status the C++ reports.
+#[track_caller]
+fn missing_ray_option(option: PointSolveOption) -> SolidError {
+    SolidError::curve(OP_POINT, CurveFailure::PointSolveOptionMissing { option })
+}
+
 impl Curve {
     /// The parameter in `interval` near `guess` solving `op` for `test_point`
     /// (`SmCurve::LocalPointSolve`): the closest / farthest point or a normal foot
@@ -1190,8 +1199,8 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for a ray without distance tolerance or vectors;
-    /// `InvalidInput` for an empty vector array or a missing target distance;
+    /// [`CurveFailure::PointSolveOptionMissing`] (status `SM_ERR_NULL_POINTER`, kind
+    /// `InvalidInput`) for a ray without distance tolerance or vectors; `InvalidInput` for an empty vector array or a missing target distance;
     /// `SM_ERR` when the at-distance solver fails; those of the evaluations and of
     /// `LocalPropertyAnalysis`. A failing Newton iteration of the other operations is no
     /// answer, as upstream.
@@ -1214,10 +1223,10 @@ impl Curve {
             // check inputs
             let dist_tol = opts
                 .distance_tolerance
-                .ok_or_else(|| SolidError::curve_stage_failed(OP_POINT, SM_ERR_NULL_POINTER))?;
+                .ok_or_else(|| missing_ray_option(PointSolveOption::DistanceTolerance))?;
             let vectors = opts
                 .vectors
-                .ok_or_else(|| SolidError::curve_stage_failed(OP_POINT, SM_ERR_NULL_POINTER))?;
+                .ok_or_else(|| missing_ray_option(PointSolveOption::Vectors))?;
             let vec0 = *vectors
                 .first()
                 .ok_or(SolidError::invalid_input(OP_POINT, "empty option vectors"))?;
@@ -2638,6 +2647,55 @@ mod tests {
             .unwrap();
         assert!(found);
         assert!((sol.start.parameters[0] - 0.5).abs() < 1e-8);
+    }
+
+    /// A ray solve without its distance tolerance or its vectors is the caller's error, naming
+    /// the option left out, with the C++'s `NER` status: never a stage failure (a defect).
+    #[test]
+    fn a_ray_solve_without_an_option_names_it_and_is_no_defect() {
+        let k = &Kernel::default();
+        let c = hermite(
+            [0.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [1.0, -1.0, 0.0],
+        );
+        let ivl = c.natural_interval();
+        let dir = [Vec3::new(0.0, -1.0, 0.0)];
+        for op in [
+            SolverOperation::Rayfire,
+            SolverOperation::Signed3dDirectedMinimize,
+        ] {
+            for (opts, option) in [
+                (
+                    PointSolveOptions {
+                        vectors: Some(&dir),
+                        ..PointSolveOptions::default()
+                    },
+                    PointSolveOption::DistanceTolerance,
+                ),
+                (
+                    PointSolveOptions {
+                        distance_tolerance: Some(1e-6),
+                        ..PointSolveOptions::default()
+                    },
+                    PointSolveOption::Vectors,
+                ),
+            ] {
+                let e = c
+                    .local_point_solve::<()>(k, &ivl, op, Vec3::new(1.0, 2.0, 0.0), &opts, 0.4)
+                    .unwrap_err();
+                assert_eq!(
+                    e.curve_failure(),
+                    Some(&CurveFailure::PointSolveOptionMissing { option }),
+                    "{op:?}"
+                );
+                assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{op:?}");
+                assert!(!e.is_defect(), "{op:?} {option:?}");
+                assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+                assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+            }
+        }
     }
 
     #[test]
