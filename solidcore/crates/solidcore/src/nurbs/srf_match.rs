@@ -581,7 +581,12 @@ fn measure(s: &Surface, stations: &[Station]) -> Result<SeamBounds> {
     let mut out = SeamBounds::default();
     for st in stations {
         let d = derivs(s, r.ul, st.g, v)?;
-        let (p, su, sv, suu) = (at2(&d, 0, 0)?, at2(&d, 1, 0)?, at2(&d, 0, 1)?, at2(&d, 2, 0)?);
+        let (p, su, sv, suu) = (
+            at2(&d, 0, 0)?,
+            at2(&d, 1, 0)?,
+            at2(&d, 0, 1)?,
+            at2(&d, 2, 0)?,
+        );
         out.gap = out.gap.max((p - st.point).length());
         let Ok(mut n) = su.cross(sv).unitize() else {
             return Err(invalid("the surface has no tangent plane at a station"));
@@ -628,7 +633,9 @@ fn set_moved(new: &mut [Vec<Vec3>], old: &[Vec<Vec3>], i: usize, to: Vec<Vec3>) 
     if row_of(old, i)?.len() != to.len() {
         return Err(invalid("a solved row of another length"));
     }
-    let slot = new.get_mut(i).ok_or_else(|| invalid("a row past the net"))?;
+    let slot = new
+        .get_mut(i)
+        .ok_or_else(|| invalid("a row past the net"))?;
     *slot = to;
     Ok(())
 }
@@ -653,7 +660,9 @@ fn spread(new: &mut [Vec<Vec3>], old: &[Vec<Vec3>], from: usize, how: MatchRows)
         let Some(prev) = i.checked_sub(1) else {
             continue;
         };
-        let shift = zip_with(row_of(new, prev)?, row_of(old, prev)?, |a, b| (a - b) * how.blend)?;
+        let shift = zip_with(row_of(new, prev)?, row_of(old, prev)?, |a, b| {
+            (a - b) * how.blend
+        })?;
         let moved = zip_with(row_of(old, i)?, &shift, |a, b| a + b)?;
         set_moved(new, old, i, moved)?;
     }
@@ -685,7 +694,9 @@ fn interp(values: &[Vec3], params: &[f64], knots: &[f64], q: usize) -> Result<Ve
 
 /// The first knot of `u`.
 fn u_lo(u: &[f64]) -> Result<f64> {
-    u.first().copied().ok_or_else(|| invalid("an empty knot vector"))
+    u.first()
+        .copied()
+        .ok_or_else(|| invalid("an empty knot vector"))
 }
 
 /// `u[i] - u[j]`, refused when not positive.

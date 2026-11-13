@@ -173,11 +173,29 @@ fn malformed_matches_are_refused() {
     let edge = edge_through(&sheet, [0.0, 5.0, 0.0]);
     let far = edge_through(&other, [10.0, 5.0, 0.0]);
     assert_eq!(
-        match_edge(&sheet, 99, &other, far, MatchOrder::G1, rows(2, 0.5), held()).err(),
+        match_edge(
+            &sheet,
+            99,
+            &other,
+            far,
+            MatchOrder::G1,
+            rows(2, 0.5),
+            held()
+        )
+        .err(),
         Some(Error::Argument)
     );
     assert_eq!(
-        match_edge(&sheet, edge, &other, far, MatchOrder::G2, rows(2, 0.5), held()).err(),
+        match_edge(
+            &sheet,
+            edge,
+            &other,
+            far,
+            MatchOrder::G2,
+            rows(2, 0.5),
+            held()
+        )
+        .err(),
         Some(Error::Argument)
     );
     let negative = SeamBounds {
@@ -185,7 +203,16 @@ fn malformed_matches_are_refused() {
         ..held()
     };
     assert_eq!(
-        match_edge(&sheet, edge, &other, far, MatchOrder::G0, rows(1, 0.5), negative).err(),
+        match_edge(
+            &sheet,
+            edge,
+            &other,
+            far,
+            MatchOrder::G0,
+            rows(1, 0.5),
+            negative
+        )
+        .err(),
         Some(Error::Argument)
     );
 }

@@ -5,6 +5,7 @@
 //! kernel's. Ops checks the record and converts.
 
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::crv_basic::Boundary;
 use solidcore::nurbs::crv_fit::p1::approx_knots;
 use solidcore::nurbs::geom::Rectangle;
 use solidcore::nurbs::knots::{clamped_uniform, KnotVector, Side};
@@ -12,7 +13,6 @@ use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::{
     falloff_weight as kernel_falloff, Direction, FalloffShape, Surface as NurbSurface,
 };
-use solidcore::nurbs::crv_basic::Boundary;
 use solidcore::nurbs::srf_deviation::certified_distance;
 use solidcore::nurbs::srf_match::match_boundary;
 pub use solidcore::nurbs::srf_match::{MatchOrder, MatchRows, SeamBounds};
