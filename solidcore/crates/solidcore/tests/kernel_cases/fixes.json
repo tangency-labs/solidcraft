@@ -54,6 +54,7 @@
   "stop_tracking_checks_own_callback",
   "cylinder_rebuild_mean_radius",
   "nurb_cylinder_inside_out_frame",
+  "plane_reparameterize_moves_origin",
   "curve_bounded_surface_read_uv_type_and_implicit_outer",
   "planar_path_profile_placement_statuses",
   "revolve_analytic_profile_faces",
@@ -186,5 +187,6 @@
   "fillet_overflow_trim_at_creases",
   "fillet_section_end_trim_at_creases",
   "fillet_overflow_crease_along_edge",
+  "plane_first_torus_section_exact",
   "keep_exact_pcurves"
 ]

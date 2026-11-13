@@ -235,6 +235,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_edges_keep_source_tolerance = true;
     f.volume_lift_third_derivative_terms = true;
     f.stop_tracking_checks_own_callback = true;
+    f.plane_reparameterize_moves_origin = true;
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
     f.knot_vector_valid_requires_span = true;
     f.volume_representational_end_continuities = true;
@@ -264,6 +265,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cone_unbounded_parameterized_as_nurb = true;
     f.fillet_round_as_definition = true;
     f.fillet_overflow_crease_along_edge = true;
+    f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
     f.planar_section_face_tolerance = true;
     f.face_swap_uv_transposes_trims = true;
