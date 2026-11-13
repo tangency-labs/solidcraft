@@ -7,7 +7,7 @@ use std::io::Read as _;
 use serde_json::Value;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
 use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
-use solidcore_ops::{make_box, make_sphere, session, Body, BooleanOp, CheckLevel, Error};
+use solidcore_ops::{make_box, make_cylinder, make_sphere, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::brep::Brep as Record;
 
 fn all_fixes() {
@@ -587,4 +587,56 @@ fn sectors_of_a_rounded_sketch_turned_120_degrees_union() {
     let v = volume(&u);
     let off = (v - want).abs() / want;
     assert!(!(off.is_nan() || off > 1e-9), "{v}, closed form {want}");
+}
+
+/// A tube revolved from a rectangle (bore radius 1.5, z -10..0) about z, turned `spin` about
+/// its own axis and moved `d` along x, so its bore runs `d` off the axis of a pin of the same
+/// radius (z -2..14).
+#[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
+fn tube_off_the_pin(spin: f64, d: f64) -> Body {
+    let p = |x: f64, z: f64| [x, 0.0, z];
+    let corners = [p(1.5, 0.0), p(4.0, 0.0), p(4.0, -10.0), p(1.5, -10.0)];
+    let profile: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: corners[i],
+            end: corners[(i + 1) % 4],
+        })
+        .collect();
+    let tube = revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap();
+    let (s, c) = spin.to_radians().sin_cos();
+    tube.transform(&[
+        [c, s, 0.0, 0.0],
+        [-s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [d, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    tube
+}
+
+/// The pin and the tube overlap only in the crescent between the pin and the bore, 2 mm long:
+/// about 2·r·d·2 mm³. With the bore turned 147° and 1e-4 off, the intersection was the whole
+/// first operand (the tube, 431.97 mm³, or the pin, 98.96 mm³), a valid solid. A result must be
+/// the crescent; a refusal is acceptable.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_pin_a_hair_off_its_bores_axis_meets_the_tube_in_a_sliver() {
+    all_fixes();
+    for (spin, d) in [(147.0, 1e-4), (180.0, 1e-4), (147.0, 3.8e-4), (147.0, 9.6e-4)] {
+        let crescent = 2.0 * 1.5 * d * 2.0;
+        for swap in [false, true] {
+            let tube = tube_off_the_pin(spin, d);
+            let pin = make_cylinder([0.0, 0.0, -2.0], 1.5, 14.0).unwrap();
+            let (a, b) = if swap { (pin, tube) } else { (tube, pin) };
+            let Ok(Some(r)) = boolean(a, b, BooleanOp::Intersect) else {
+                continue;
+            };
+            let v = volume(&r);
+            assert!(
+                (v - crescent).abs() <= 0.05 * crescent,
+                "spin {spin} d {d} swap {swap}: {v} mm³ {:?}, crescent {crescent}",
+                r.counts()
+            );
+        }
+    }
 }
