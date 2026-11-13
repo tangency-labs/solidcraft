@@ -1,0 +1,155 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b2"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  40.893409657898864,
+                  28.770280613008687,
+                  12.0
+                ],
+                [
+                  40.893409657898864,
+                  28.770280613008687,
+                  12.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              -40.89340965789883,
+              -28.77028061300873,
+              11.999999999999998
+            ]
+          ],
+          "tolerance": 5.8152427769207184
+        },
+        "kind": "round",
+        "sizes": [
+          1.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "16019-fillet-1-on-the-top-rim-of-a-cylinder-r50",
+  "expected": {
+    "body_count": 1,
+    "edges": 5,
+    "faces": 4,
+    "method": "cylinder r 50, h 12: V0 = pi r^2 h. A round rho = 1 on the convex 90 degree rim removes the spandrel of area (1 - pi/4) rho^2 whose centroid is rho (10 - 3 pi) / (12 - 3 pi) inside the rim, turned about the axis: V = pi r^2 h - 2 pi (r - 0.2233679 rho) (1 - pi/4) rho^2 = 94180.6616379175. The operand has 3 faces, 3 edges and 2 vertices; the round adds its face, the circle where it meets the side, its own seam line and that circle's vertex: 4 faces, 5 edges, 3 vertices, one closed solid",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#16019"
+    ],
+    "tolerance": {
+      "rel": 1e-06
+    },
+    "vertices": 3,
+    "volume_mm3": 94180.6616379175,
+    "what": "a round of radius 1 on the top rim of a cylinder r 50, h 12: narrower than about r / 40, it must build like a wider one"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "params": {
+    "edges": {
+      "kind": "edge",
+      "picked": [
+        {
+          "at": [
+            [
+              40.893409657898864,
+              28.770280613008687,
+              12.0
+            ],
+            [
+              40.893409657898864,
+              28.770280613008687,
+              12.0
+            ]
+          ],
+          "index": 2
+        }
+      ],
+      "points": [
+        [
+          -40.89340965789883,
+          -28.77028061300873,
+          11.999999999999998
+        ]
+      ],
+      "tolerance": 5.8152427769207184
+    },
+    "kind": "round",
+    "sizes": [
+      1.0
+    ],
+    "turn": "mitre"
+  },
+  "records": "16019-fillet-1-on-the-top-rim-of-a-cylinder-r50.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b5"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#16019"
+  ],
+  "ungraded": [],
+  "what": "a round of radius 1 on the top rim of a cylinder r 50, h 12: narrower than about r / 40, it must build like a wider one",
+  "why_not": []
+}
