@@ -331,6 +331,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         }
         out.radio = resp.clicked() && click_on == 3;
         out.radio_at = Some(radio_r.center());
+        solidcraft_ui_registry::publish_handle(&format!("radio:{handle}"), radio_r.center());
         x += 15.0;
     }
     if !row.icon.is_empty() && !(row.compact && row.swatch.is_some()) {
