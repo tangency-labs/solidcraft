@@ -453,7 +453,10 @@ fn a_radius_5_fillet_sits_in_the_quadrant_the_sides_choose() {
         let f = fillet_crossing(&a, &b, &crossing(sides, Section::Radius(5.0), false)).unwrap();
         assert_eq!(f.fillet.counts().unwrap()[0], 1, "{sides:?}");
         let area = f.fillet.area(1e-10).unwrap();
-        assert!((area - quarter_cylinder()).abs() <= 1e-4, "{sides:?}: {area}");
+        assert!(
+            (area - quarter_cylinder()).abs() <= 1e-4,
+            "{sides:?}: {area}"
+        );
         let x = [5.0, -5.0]
             .into_iter()
             .find(|&x| has_edge_through(&f.fillet, [x, 5.0, 0.0]));
@@ -501,20 +504,19 @@ fn a_fillet_runs_round_a_cylinder_crossing_a_sheet() {
     let (_, order) = solid.to_record().unwrap();
     // the caps are its flat faces: the kernel gives them a plane normal, the wall none
     let caps: Vec<usize> = (0..order.faces.len())
-        .filter(|&f| {
-            solid
-                .face_plane_normal(&order, f)
-                .unwrap()
-                .is_some()
-        })
+        .filter(|&f| solid.face_plane_normal(&order, f).unwrap().is_some())
         .collect();
     let wall = solidcore_ops::trim::remove_faces(&solid, &order, &caps).unwrap();
     let (plate, _) = sheet(
         line([-20.0, -20.0, 0.0], [-20.0, 20.0, 0.0]),
         line([20.0, -20.0, 0.0], [20.0, 20.0, 0.0]),
     );
-    let f = fillet_crossing(&wall, &plate, &crossing(SIDES[0], Section::Radius(2.0), false))
-        .unwrap();
+    let f = fillet_crossing(
+        &wall,
+        &plate,
+        &crossing(SIDES[0], Section::Radius(2.0), false),
+    )
+    .unwrap();
     assert!(f.fillet.counts().unwrap()[0] >= 1);
     assert!(!f.seams.is_empty());
     for seam in &f.seams {

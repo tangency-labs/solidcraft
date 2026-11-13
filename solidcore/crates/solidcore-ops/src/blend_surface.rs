@@ -595,7 +595,8 @@ fn half(cut: &Body, other: &Body, side: SheetSide, tol: f64) -> Result<Body> {
     let mut away = Vec::new();
     for (i, s) in sides.iter().enumerate() {
         match (s, side) {
-            (Some(FaceSide::Front), SheetSide::Front) | (Some(FaceSide::Back), SheetSide::Back) => {}
+            (Some(FaceSide::Front), SheetSide::Front) | (Some(FaceSide::Back), SheetSide::Back) => {
+            }
             (Some(FaceSide::Front | FaceSide::Back), _) => away.push(i),
             (Some(FaceSide::On) | None, _) => {
                 return Err(Error::Unsupported(
