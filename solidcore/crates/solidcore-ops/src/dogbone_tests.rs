@@ -383,6 +383,20 @@ fn a_curved_face_or_edge_is_skipped() {
 }
 
 #[test]
+fn a_picked_face_with_no_corner_is_skipped() {
+    // A round post's top: planar, but its rim is one circle with no straight edge at it.
+    let r = record(&make_cylinder([0.0; 3], 5.0, 10.0).unwrap());
+    let top = flat_face(&r, 10.0, [-5.0, -5.0], [5.0, 5.0]);
+    let p = plan(&r, &[], &[top], &options(Style::Normal)).unwrap();
+    assert_eq!(p.tools, []);
+    assert_eq!(p.skipped.len(), 1, "{:?}", p.skipped);
+    assert_eq!(
+        (p.skipped[0].face, p.skipped[0].why),
+        (Some(top), Why::NoCorners)
+    );
+}
+
+#[test]
 fn hostile_plans_are_refused() {
     let r = record(&pocketed());
     assert_eq!(
