@@ -188,6 +188,13 @@ B was copied into it, because B's faces all lie on its boundary, as when a union
 exactly) that a deleted face joins to another such region takes the class a deleted face has on both
 sides: solid for a union, void for an intersection or a difference (`deleted_face_sides`).
 
+**A cut the merge cannot classify.** When a cut's tool meets the faces an earlier cut left, or lies
+flush with the body, `SmMerge::MakeFaceuse` can fail in §4.2's radial-sector search ("no radial edge
+use classifies the face's edge use"). SolidCraft's evaluator retries only that failure: it splits the
+closed tool through the middle of its exact box and cuts the pieces in turn. The pieces partition
+the tool exactly, so the regularized result is the same; this is an application-level retry, not a
+kernel fix (#15247, #16237).
+
 ## 5. Coincident and near-coincident faces
 
 **Coincident faces.** Two faces on the same surface share a region, and its boundary is their
