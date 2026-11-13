@@ -9,11 +9,11 @@
     clippy::float_arithmetic
 )] // test helpers
 
-use solidcore_ops::surface::ruled;
 use solidcore_ops::Body;
-use solidcore_record::brep::{Brep, Curve};
+use solidcore_ops::surface::ruled;
 use solidcore_record::Vec3;
-use solidcore_tess::{plan, Mesh, MeshTolerance};
+use solidcore_record::brep::{Brep, Curve};
+use solidcore_tess::{Mesh, MeshTolerance, plan};
 
 /// A bumped sheet: the ruled sheet between two cubics.
 fn sheet() -> Brep {
