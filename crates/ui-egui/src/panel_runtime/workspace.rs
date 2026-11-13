@@ -2516,9 +2516,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             bounds,
                             HostChrome {
                                 label,
-                                icon: if matches!(target, HostPointerTarget::Menu { .. }) {
-                                    Some("dots")
-                                } else if matches!(target, HostPointerTarget::TabOverflow { .. }) {
+                                icon: if matches!(target, HostPointerTarget::Menu { .. } | HostPointerTarget::TabOverflow { .. }) {
                                     Some("dots")
                                 } else if matches!(target, HostPointerTarget::Close { .. }) {
                                     Some("close")
@@ -2974,7 +2972,7 @@ fn paint_drop_tabs(
     }
     if let Some(bounds) = overflow {
         let size = (bounds.width().min(bounds.height()).min(t.control_height) - 2.0 * t.form_icon_inset).max(0.0);
-        ui_kit::icons::paint_ink(ui.painter(), egui::Rect::from_center_size(bounds.center(), egui::vec2(size, size)), "chevron", t.form_ink);
+        ui_kit::icons::paint_ink(ui.painter(), egui::Rect::from_center_size(bounds.center(), egui::vec2(size, size)), "dots", t.form_ink);
     }
     for (id, bounds) in cells {
         let Some(presentation) = metadata.get(id) else { continue };

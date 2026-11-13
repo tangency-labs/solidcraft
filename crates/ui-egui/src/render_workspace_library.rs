@@ -1970,6 +1970,7 @@ mod studio_browser_tests {
         // Give the inspector room to expose the Save Maps button below its settings.
         h.call("ui.resize", json!({"width":1600,"height":1200}));
         h.frames(3);
+        h.step(&json!({"move":{"handle":"render:surface:save-maps"}})).unwrap();
         h.step(&json!({"click":{"handle":"render:surface:save-maps"}})).unwrap();
         assert!(h.app.render_workspace.view.library.review.is_some(), "the actual different-target button opens review");
         assert!(Arc::ptr_eq(&before, &h.app.session.doc));

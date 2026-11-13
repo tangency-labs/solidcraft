@@ -15376,7 +15376,7 @@ fn host_result_controls_shield_wheel_and_comparison_divider_keeps_capture() {
     assert_eq!(h.app.cam, product);
     assert_eq!(h.app.render_workspace.view.result_camera, image);
     let canvas = h.app.viewport.rect.unwrap();
-    let handle = crate::scenario::rect_of("render:compare:handle").unwrap();
+    let handle = crate::scenario::rect_of("render:compare:divider").unwrap();
     let start = [0.5, 0.25, 0.75]
         .into_iter()
         .map(|y| egui::pos2(handle.center().x, handle.top() + handle.height() * y))
