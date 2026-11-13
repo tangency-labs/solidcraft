@@ -136,26 +136,49 @@ pub enum Gesture {
 /// What the user did, for the host to run.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    Select { id: NodeId, how: How },
+    Select {
+        id: NodeId,
+        how: How,
+    },
     /// A plain click on a row that is no item.
     Click(NodeId),
     /// A double-click on the row, or Enter on it.
     Open(NodeId),
-    Fold { id: NodeId, open: bool },
+    Fold {
+        id: NodeId,
+        open: bool,
+    },
     /// One per row a click or an eye drag set.
-    Eye { id: NodeId, visible: bool },
+    Eye {
+        id: NodeId,
+        visible: bool,
+    },
     EyeGesture(Gesture),
     /// The row's radio.
     Activate(NodeId),
     /// The name editor kept `text` (Enter, or leaving it).
-    Rename { id: NodeId, text: String },
-    Move { ids: Vec<NodeId>, target: NodeId, zone: Zone },
+    Rename {
+        id: NodeId,
+        text: String,
+    },
+    Move {
+        ids: Vec<NodeId>,
+        target: NodeId,
+        zone: Zone,
+    },
     /// A trailing action (its target) or a menu entry (its id and parameters).
-    Action { id: NodeId, action: String, params: Option<serde_json::Value> },
+    Action {
+        id: NodeId,
+        action: String,
+        params: Option<serde_json::Value>,
+    },
     /// The button after the name ([`Row::action`]).
     NameAction(NodeId),
     /// A secondary click on a [`NodeMenu::Host`] row.
-    Menu { id: NodeId, at: Pos2 },
+    Menu {
+        id: NodeId,
+        at: Pos2,
+    },
     /// The row [`BrowserState::reveal`] asked for is in view.
     Revealed(NodeId),
 }
@@ -582,7 +605,8 @@ impl Rows<'_> {
     /// Draw one row.
     pub fn row(&mut self, node: Node<'_>) -> RowOut {
         let Node { id, key, row, name, select, rename, drag, drops, menu, click_folds } = node;
-        let (depth, label, secondary, fold, eye, selected, actions) = (row.depth, row.label, row.secondary, row.fold, row.eye, row.selected, row.actions);
+        let (depth, label, secondary, fold, eye, selected, actions) =
+            (row.depth, row.label, row.secondary, row.fold, row.eye, row.selected, row.actions);
         let handle = row.handle.unwrap_or(label);
         let name = name.unwrap_or(label);
         if let Selectable::Yes(class) = select {
@@ -685,14 +709,7 @@ impl Rows<'_> {
         if editing {
             self.editor(id, &out, handle);
         }
-        RowOut {
-            rect: out.rect,
-            label_rect: out.label_rect,
-            hovered: out.hovered,
-            fold_at: out.fold_at,
-            eye_at: out.eye_at,
-            radio_at: out.radio_at,
-        }
+        RowOut { rect: out.rect, label_rect: out.label_rect, hovered: out.hovered, fold_at: out.fold_at, eye_at: out.eye_at, radio_at: out.radio_at }
     }
 
     /// A row's actions run once a frame, however often egui lays the frame out.
@@ -775,9 +792,11 @@ impl Rows<'_> {
             Selectable::No => self.done.events.push(Event::Click(id)),
             Selectable::Yes(class) => {
                 let toggle = self.mods.command || self.mods.ctrl;
-                let range = self.state.anchor.filter(|_| self.mods.shift).and_then(|anchor| {
-                    span(&self.state.previous, anchor, id, class).or_else(|| span(&self.state.order, anchor, id, class))
-                });
+                let range = self
+                    .state
+                    .anchor
+                    .filter(|_| self.mods.shift)
+                    .and_then(|anchor| span(&self.state.previous, anchor, id, class).or_else(|| span(&self.state.order, anchor, id, class)));
                 let how = match range {
                     Some(range) if toggle => How::RangeAdd(range),
                     Some(range) => How::Range(range),

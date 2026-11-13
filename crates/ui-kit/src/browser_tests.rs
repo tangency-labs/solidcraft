@@ -71,7 +71,13 @@ impl Host {
             menu: NodeMenu::Items(&group_menu),
             ..Default::default()
         });
-        rows.row(Node { id: SETTINGS, key: "settings", row: Row { icon: "settings", label: "Settings", ..Default::default() }, menu: NodeMenu::Host, ..Default::default() });
+        rows.row(Node {
+            id: SETTINGS,
+            key: "settings",
+            row: Row { icon: "settings", label: "Settings", ..Default::default() },
+            menu: NodeMenu::Host,
+            ..Default::default()
+        });
     }
 
     fn apply(&mut self, events: &[Event]) {
