@@ -3066,3 +3066,68 @@ fn move_origin_and_matrix_apply_to_each_repeated_placement() {
         assert_eq!(s.undo.len(), undo + 1);
     }
 }
+
+/// A ball of radius 12.5 resting on the origin, revolved from a half disc sketched upright on
+/// the XZ plane, with a 10 wide slot cut from its top down to z = 15 right through it (walls at
+/// x = ±5). The ball's seam ends on the top of the x = +5 wall's arc, so that arc is two edges in
+/// the record and its mirror one (#16122).
+fn slotted_ball() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"name": "Sketch1", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 25]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, 0], "through": [12.5, 12.5], "end": [0, 25]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Sketch1", "axis": "Z", "angle": "360 deg", "operation": "new", "body_name": "Ball"}));
+    run(&mut s, "sketch.create", json!({"name": "Sketch2", "plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [5, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch2", "distance": 15, "operation": "cut"}));
+    s
+}
+
+/// The record edge passing nearest `p`, sampled along its exact curve.
+fn record_edge_near(body: &solidcraft_kernel::Body, p: solidcore_record::Vec3) -> usize {
+    let off = |e: &solidcore_record::brep::Edge| {
+        let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).unwrap();
+        let [t0, t1] = e.interval;
+        (0..=256).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 256.0)).map(|q| q.dist(p)).fold(f64::INFINITY, f64::min)
+    };
+    let (i, d) = body.record().edges.iter().map(off).enumerate().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+    assert!(d < 0.05, "no edge passes near {p:?} (nearest {i} at {d})");
+    i
+}
+
+/// The reporter's two picks on the slotted ball: one half of the seam-split x = +5 arc and the
+/// middle of the whole x = -5 arc. The half is one edge with its other half, the mirror arc
+/// alone; rounding either arc from one pick removes the same material.
+#[test]
+fn a_slot_arc_split_by_a_balls_seam_selects_and_rounds_like_its_mirror() {
+    use solidcore_record::Vec3;
+    let half_pick = Vec3::new(5.0, -7.16004021723299, 21.435908825062725);
+    let mirror_pick = Vec3::new(-5.0, 0.0, 23.956439237387144);
+    let s = slotted_ball();
+    let state = s.model.state();
+    let ball = state.body("Ball").unwrap();
+    let half = record_edge_near(&ball.body, half_pick);
+    let other_half = record_edge_near(&ball.body, Vec3::new(5.0, 7.16004021723299, 21.435908825062725));
+    assert_ne!(half, other_half, "the seam splits the x = +5 arc in the record");
+    let mut both = vec![half, other_half];
+    both.sort_unstable();
+    assert_eq!(ball.whole_edge(half), both);
+    assert_eq!(ball.whole_edge(other_half), both);
+    let mirror = record_edge_near(&ball.body, mirror_pick);
+    assert_eq!(ball.whole_edge(mirror), vec![mirror]);
+    // The rounds guard the leaving direction `whole_edge` now shares with the blend chain walk
+    // and the round running on across the seam vertex (#13752), not the grouping above.
+    let before = body_volume(&s, "Ball");
+    let removed = |pick: Vec3| {
+        let mut s = slotted_ball();
+        run(&mut s, "solid.fillet", json!({"edges": [[pick.x, pick.y, pick.z]], "radius": 2}));
+        let body = s.model.state().body("Ball").unwrap().body.clone();
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        before - body_volume(&s, "Ball")
+    };
+    let (plus, minus) = (removed(half_pick), removed(mirror_pick));
+    assert!((plus - 89.8218).abs() < 1e-2, "rounding the split arc removes {plus}");
+    assert!((plus - minus).abs() < 1e-3, "the split arc's round removes {plus}, its mirror's {minus}");
+}
