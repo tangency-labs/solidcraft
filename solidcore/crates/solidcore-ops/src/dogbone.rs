@@ -32,8 +32,8 @@ pub const MAX_PICKS: usize = 10_000;
 pub struct BodyOptions {
     /// The bit and the style.
     pub relief: Options,
-    /// The bit's axis: a picked edge not along it is skipped. `None`: any direction. A picked
-    /// face's corners are always along its normal.
+    /// The bit's axis: a picked edge not along it is skipped, unless a picked face takes it as a
+    /// corner. `None`: any direction. A picked face's corners are always along its normal.
     pub along: Option<[f64; 3]>,
 }
 
@@ -118,12 +118,25 @@ pub fn plan(body: &Brep, edges: &[usize], faces: &[usize], options: &BodyOptions
     let along = options.along.map(vec3);
     let mut out = Plan::default();
     let mut seen: Vec<usize> = Vec::new();
+    // Picked edges off the bit's axis: a picked face may still take one as a corner along its
+    // own normal, so they are left to the faces and reported only if no face takes them.
+    let mut off_axis: Vec<usize> = Vec::new();
     for e in edges {
-        if seen.contains(e) {
+        if seen.contains(e) || off_axis.contains(e) {
             continue;
         }
-        seen.push(*e);
+        let before = out.skipped.len();
         relieve(body, *e, along, &relief, &mut out)?;
+        if out
+            .skipped
+            .iter()
+            .skip(before)
+            .any(|s| s.why == Why::NotAlong)
+        {
+            off_axis.push(*e);
+        } else {
+            seen.push(*e);
+        }
     }
     for f in faces {
         let Some(axis) = face_outward(body, *f)? else {
@@ -152,6 +165,8 @@ pub fn plan(body: &Brep, edges: &[usize], faces: &[usize], options: &BodyOptions
             relieve(body, e, Some(axis), &relief, &mut out)?;
         }
     }
+    out.skipped
+        .retain(|s| !(s.why == Why::NotAlong && s.edge.is_some_and(|e| seen.contains(&e))));
     Ok(out)
 }
 

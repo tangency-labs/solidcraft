@@ -200,6 +200,31 @@ fn a_picked_floor_relieves_the_pockets_corners() {
 }
 
 #[test]
+fn a_picked_edge_off_the_axis_is_still_a_corner_of_a_picked_face() {
+    let body = pocketed();
+    let r = record(&body);
+    let floor = flat_face(&r, 4.0, [10.0, 8.0], [30.0, 22.0]);
+    let e = vertical_edges(&r, &POCKET)[0];
+    let mut sideways = options(Style::Normal);
+    sideways.along = Some([1.0, 0.0, 0.0]);
+    // Alone, the corner edge is off the axis.
+    let alone = plan(&r, &[e, e], &[], &sideways).unwrap();
+    assert!(alone.tools.is_empty());
+    assert_eq!(alone.skipped.len(), 1, "{:?}", alone.skipped);
+    assert_eq!(
+        (alone.skipped[0].edge, alone.skipped[0].why),
+        (Some(e), Why::NotAlong)
+    );
+    // With the floor picked too, the floor takes it along its normal: the same plan as the
+    // floor alone, with no skip.
+    let by_face = plan(&r, &[], &[floor], &sideways).unwrap();
+    let both = plan(&r, &[e], &[floor], &sideways).unwrap();
+    assert_eq!(by_face.tools.len(), 4);
+    assert!(by_face.skipped.is_empty(), "{:?}", by_face.skipped);
+    assert_eq!(both, by_face);
+}
+
+#[test]
 fn a_slot_through_the_plate_is_relieved_past_both_faces() {
     let body = slotted();
     let r = record(&body);
