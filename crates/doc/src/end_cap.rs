@@ -48,15 +48,12 @@ fn invalid(s: impl Into<String>) -> DocError {
 pub fn member(doc: &Document, st: &ModelState, plane: &PlaneRef) -> Result<Member> {
     let PlaneRef::Face { anchor: Some(anchor), .. } = plane else { return Err(invalid("an end cap needs a planar face picked on a frame member")) };
     let source = doc.feature(anchor.target.origin_feature).ok_or_else(|| invalid("the capped member's feature no longer exists"))?;
-    let FeatureKind::FrameMember { names, .. } = &source.kind else { return Err(invalid("the face is not on a frame member")) };
-    let ids = crate::frame::member_line_ids(st, &source.kind)?;
-    let line = if source.body_names.is_empty() {
-        ids.iter().find(|line| names.get(*line).is_some_and(|name| *name == anchor.target.body))
-    } else {
-        source.body_names.iter().position(|name| *name == anchor.target.body).and_then(|i| ids.get(i))
+    if !matches!(source.kind, FeatureKind::FrameMember { .. }) {
+        return Err(invalid("the face is not on a frame member"));
     }
-    .ok_or_else(|| invalid("the face is no longer on the member it was picked on"))?;
-    Ok(Member { feature: source.id.into(), line: line.clone() })
+    let line = crate::frame::member_of_body(st, source, &anchor.target.body)?
+        .ok_or_else(|| invalid("the face is no longer on the member it was picked on"))?;
+    Ok(Member { feature: source.id.into(), line })
 }
 
 fn length(v: f64, what: &str, min: f64) -> Result<f64> {

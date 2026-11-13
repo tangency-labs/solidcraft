@@ -207,6 +207,18 @@ pub fn member_line_ids(st: &ModelState, kind: &FeatureKind) -> Result<Vec<String
     Ok(ids)
 }
 
+/// The member (line or pair id) of Frame Member `f` whose body is `body`, if one is: by position
+/// when the feature names its bodies itself, else by its `names` entry.
+pub fn member_of_body(st: &ModelState, f: &Feature, body: &str) -> Result<Option<String>> {
+    let FeatureKind::FrameMember { names, .. } = &f.kind else { return Ok(None) };
+    let ids = member_line_ids(st, &f.kind)?;
+    Ok(if f.body_names.is_empty() {
+        ids.into_iter().find(|line| names.get(line).is_some_and(|name| name == body))
+    } else {
+        f.body_names.iter().position(|name| name == body).and_then(|i| ids.into_iter().nth(i))
+    })
+}
+
 /// Each pair's ends, found again as construction geometry finds its points: in this feature's
 /// component frame, where its lines are laid out, so both take the same "up". A pair whose point
 /// is gone, or whose ends now meet, fails the feature, naming the pair.
