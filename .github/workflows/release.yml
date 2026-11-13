@@ -76,7 +76,7 @@ env:
 
 jobs:
   version:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     outputs:
       build: ${{ steps.changed.outputs.build }}
       version: ${{ steps.v.outputs.version }}
@@ -119,7 +119,7 @@ jobs:
   icons:
     needs: version
     if: needs.version.outputs.build == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: blacksmith-8vcpu-ubuntu-2204
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -146,8 +146,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: ubuntu-22.04, deb: amd64 }
-          - { arch: aarch64, runner: ubuntu-22.04-arm, deb: arm64 }
+          - { arch: x86_64, runner: blacksmith-8vcpu-ubuntu-2204, deb: amd64 }
+          - { arch: aarch64, runner: blacksmith-8vcpu-ubuntu-2204-arm, deb: arm64 }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -203,8 +203,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: ubuntu-24.04 }
-          - { arch: aarch64, runner: ubuntu-24.04-arm }
+          - { arch: x86_64, runner: blacksmith-8vcpu-ubuntu-2404 }
+          - { arch: aarch64, runner: blacksmith-8vcpu-ubuntu-2404-arm }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -233,7 +233,7 @@ jobs:
     needs: [version, linux]
     if: needs.version.outputs.build == 'true'
     # makepkg only repackages the tarball's prebuilt binaries, so both architectures build here.
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     # A pre-release or nightly without an Arch package is still worth having; a stable release isn't.
     continue-on-error: ${{ contains(needs.version.outputs.version, '-') }}
     strategy:
@@ -303,8 +303,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, runner: ubuntu-24.04 }
-          - { arch: aarch64, runner: ubuntu-24.04-arm }
+          - { arch: x86_64, runner: blacksmith-8vcpu-ubuntu-2404 }
+          - { arch: aarch64, runner: blacksmith-8vcpu-ubuntu-2404-arm }
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -350,7 +350,7 @@ jobs:
     needs: version
     if: needs.version.outputs.build == 'true'
     # GitHub has no FreeBSD runners: build in a FreeBSD 14.3 VM.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 180
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
@@ -468,9 +468,9 @@ jobs:
     name: Windows ${{ matrix.arch }}
     needs: [version, icons]
     if: needs.version.outputs.build == 'true'
-    # Must stay a GitHub-hosted runner, like every job before it: SignPath's open-source policy
-    # only signs builds whose jobs all ran on GitHub-hosted runners.
-    runs-on: windows-latest
+    # Blacksmith, like every other job. SignPath only signs builds from GitHub-hosted runners, so
+    # its steps stay off (WINDOWS_SIGNING=off) until Azure Artifact Signing replaces it.
+    runs-on: blacksmith-8vcpu-windows-2025
     # actions: read lets the SignPath action read this job's details and fetch the uploaded
     # artifact with GITHUB_TOKEN (the workflow default above grants contents: read only).
     permissions:
@@ -630,7 +630,7 @@ jobs:
     name: Web (wasm)
     needs: version
     if: needs.version.outputs.build == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       TRUNK_VERSION: 0.21.14
@@ -659,7 +659,7 @@ jobs:
     needs: [version, linux, flatpak, arch, snap, freebsd, macos, windows, web]
     # Not for the release gate (packages_only): it builds and checks the packages, nothing more.
     if: needs.version.outputs.build == 'true' && !inputs.packages_only
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     permissions:
       contents: write
     env:
