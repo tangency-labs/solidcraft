@@ -232,7 +232,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.curve_tight_box_interval_knots = true;
-    k.fixes.cylinder_plane_tangent_within_tolerance = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
@@ -329,7 +328,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
-    k.fixes.torus_check_reads_v_interval = true;
     k.fixes.torus_check_spindle_apex = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
     k.fixes.torus_keeps_inside_out = true;
