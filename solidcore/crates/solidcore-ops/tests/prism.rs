@@ -13,8 +13,8 @@
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
-    extrude_planar_regions, loop_holds, planar_regions_boolean, prism_equivalent, prism_section,
-    region_area, PrismSection,
+    extrude_planar_regions, fitted_loop, loop_holds, planar_regions_boolean, prism_equivalent,
+    prism_section, region_area, PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, Error};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -861,4 +861,37 @@ fn loop_holds_a_point_on_an_edge_line_off_the_loop() {
     assert_eq!(loop_holds(&sq, v(11.0, 10.0)), Some(false));
     assert_eq!(loop_holds(&sq, v(5.0, 5.0)), Some(true));
     assert_eq!(loop_holds(&sq, v(5.0, 0.0)), None);
+}
+
+/// The section fit as Convert Mesh takes it (moved from SolidCraft's `mesh_convert.rs`
+/// `planar_boxes_are_exact_and_coarse_polygons_are_not_rounded`): a hexagon keeps its six sides,
+/// sixteen nodes too coarse for 0.001 keep sixteen, and within 0.2 they are the exact circle, one
+/// arc of one full turn round the centre at the radius.
+#[test]
+fn coarse_section_polygons_are_not_rounded_and_a_fine_one_is_the_exact_circle() {
+    let ring = |n: usize| -> Vec<Vec2> {
+        (0..n)
+            .map(|i| {
+                let angle = i as f64 * TAU / n as f64;
+                v(angle.cos() * 10., angle.sin() * 10.)
+            })
+            .collect()
+    };
+    assert_eq!(fitted_loop(&ring(6), 1., 1e-6).unwrap().segs.len(), 6);
+    assert_eq!(fitted_loop(&ring(16), 0.001, 1e-6).unwrap().segs.len(), 16);
+    let fitted = fitted_loop(&ring(16), 0.2, 1e-6).unwrap();
+    let [Seg2::Arc {
+        center,
+        radius,
+        sweep,
+        ..
+    }] = fitted.segs.as_slice()
+    else {
+        panic!("not one arc: {fitted:?}")
+    };
+    assert!(
+        center.x.hypot(center.y) < 1e-9 && (radius - 10.).abs() < 1e-9,
+        "centre {center:?}, radius {radius}"
+    );
+    assert!((sweep.abs() - TAU).abs() < 1e-9, "sweep {sweep}");
 }

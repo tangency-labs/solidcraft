@@ -102,8 +102,12 @@ pub fn fit_loop(points: &[Point2], tolerance: f64, epsilon: f64) -> Result<Fitte
                 let mut sweep = 0.;
                 let mut direction = 0f64;
                 let valid = (0..points.len()).all(|i| {
-                    let (Some(&a), Some(&b)) = (points.get(i), points.get((i + 1) % points.len()))
-                    else {
+                    let (Some(&a), Some(&b)) = (
+                        points.get(i),
+                        (i + 1)
+                            .checked_rem(points.len())
+                            .and_then(|j| points.get(j)),
+                    ) else {
                         return false;
                     };
                     let (a, b) = (sub(a, center), sub(b, center));
@@ -148,7 +152,12 @@ pub fn straight_runs_joined(points: &[Point2], epsilon: f64) -> Result<Vec<Point
     let allowance = epsilon * 3.;
     let bound = n.saturating_mul(n).saturating_add(n);
     let mut tests = 0usize;
-    let at = |i: usize| points.get(i % n).copied().unwrap_or_default();
+    let at = |i: usize| {
+        i.checked_rem(n)
+            .and_then(|i| points.get(i))
+            .copied()
+            .unwrap_or_default()
+    };
     // Whether every node strictly between `i` and `j` (going forward, `j` may pass `n`) lies
     // within the allowance of the side from node `i` to node `j`.
     let straight = |i: usize, j: usize, tests: &mut usize| -> Result<bool> {
@@ -178,12 +187,14 @@ pub fn straight_runs_joined(points: &[Point2], epsilon: f64) -> Result<Vec<Point
             j = i + 2;
         }
     }
+    // The first node is dropped too where it lies on the side through it.
+    let mut first = 0;
     if let (Some(&last), Some(&second)) = (kept.last(), kept.get(1)) {
         if kept.len() > 3 && straight(last, second + n, &mut tests)? {
-            kept.remove(0);
+            first = 1;
         }
     }
-    Ok(kept.iter().map(|&k| at(k)).collect())
+    Ok(kept.iter().skip(first).map(|&k| at(k)).collect())
 }
 
 #[cfg(test)]
