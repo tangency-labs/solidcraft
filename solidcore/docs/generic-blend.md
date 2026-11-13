@@ -230,7 +230,7 @@ root of a scalar or a small system along the trace, solved where it is well cond
 |---|---|---|
 | an end face's offset: the ball touches the end face E | End | the blend ends on E; its end curve is S ∩ E |
 | an end face tangent to F along a seam T | tangent end | the end curve built outward from P (§3.1) |
-| another spine | corner | Turn, Join, Ball or Setback (§3.2) |
+| another spine | corner | Turn, Join, Ball, Roll-over or Setback (§3.2) |
 | its face's boundary: the rail reaches a rim | overflow | the blend kept and trimmed at its crease (§3.4) |
 | a face that cannot hold the ball | fold or room | refused, naming the size that fits (§3.3, §3.5) |
 
@@ -276,7 +276,8 @@ never returns "no kind": a configuration the table does not name is a Setback.
 | **Turn** | two blends sharing a face, turning at a sharp unrounded side edge (a boss base, a pocket's floor or rim; also blends meeting G1 where a side edge between their faces is sharp, such as a ruled loft's side edge at its rim), or one closed blend meeting itself at an angle (a teardrop's tip) | **Mitre** (default) or **Swept** (option) |
 | **Ball** | three equal rounds of one convexity at a vertex of three faces, the vertex not set back | the corner ball's sphere |
 | **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
-| **Setback** | everything else: unequal radii, four or more blends, mixed convexity, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner beside a curved face, or one of rounds the Setback does not take, such as variable rounds or G1 rounds of mixed convexity, keeps the N x N corner's uncertified patch) | the setback hole and its certified fill: convex at a corner of one convexity, a saddle with a certified normal at a mixed one |
+| **Roll-over** | a convex round and a concave round sharing a face at the vertex, with no crossing to mitre on, every other edge at the vertex unblended | the convex round ends as it would alone; the concave round rolls over the convex round's surface and end face, and any overflow is trimmed at the crease (§3.4). The order is fixed by convexity, convex first, so the result does not depend on the order of selection. Every face is exact: the corner is a `Circle`-class torus where the convex round is a cylinder square to the end face, otherwise a procedural blend; the crease is certified with its pcurve (designed in SolidCraft #10876, built in SolidCraft #16286) |
+| **Setback** | every corner not named above: unequal radii, four or more blends, mixed convexity with every edge rounded, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner of rounds the Setback does not take, such as variable rounds or G1 rounds of mixed convexity, keeps the N x N corner's uncertified patch. A marked corner beside a curved face keeps that patch too until the curved Setback is the default; the design makes it a Setback, and SolidCraft #13832 step 4 implements that) | the setback hole and its certified fill: convex at a corner of one convexity, a saddle with a certified normal at a mixed one |
 
 ![Plan views of the four corner kinds: mitre crease, swept torus, ball sphere patch, setback hole.](generic-blend/corner-events.svg)
 
@@ -409,6 +410,10 @@ continued cliff face, so the rim moves down.*
 Keeping the edge instead (the ball rolling on the rim, the spine continuing as the other offset
 meeting the rim's pipe) is a possible future option, never the default.
 
+Concave overflow keeps the cliff edge instead: the added material is trimmed flush with the cliff
+faces continued, so it never passes the cliff, the default of T-FLEX on Parasolid [52]. This is the
+Roll-over's trim (§3.2; SolidCraft #16286). Convex overflow still moves the sharp edge.
+
 A round bigger than the wall it rolls on ends on the body's outline (#2541, opt-in
 `fillet_round_ends_on_outline`, WR-730). This applies where the round on the continued wall
 would pass inside the wall's rim, cutting into the material beyond the face it leaves. The
@@ -502,7 +507,13 @@ given.
 - **Mitre creases are graded G0.**
 - **Ball corners are one rational patch on the sphere**, box corners included.
 - **Overflow keeps the blend and moves the sharp edge**, matching the constant-radius overflow mode
-  common CAD practice offers; keeping the edge is a future option.
+  common CAD practice offers; keeping the edge is a future option. Concave overflow keeps the cliff
+  edge (§3.4).
+- **A convex and a concave round meeting with the other edges sharp roll over, convex first** (§3.2).
+  The two orders give different solids, because rounding is an opening and filleting a closing and
+  the two do not commute [37]; so the order is fixed by convexity, never by selection, and the other
+  order is never tried. Convex first is the documented default of NX and of T-FLEX, both on Parasolid
+  [49, 50], and Creo's round-only transitions wrap one round around another the same way [51].
 - **A boss or cut standing inside a round's band is kept** (its walls carried down to the round),
   as the "keep features" option of common practice; letting the round take it is a future option.
 - **A partly selected tangent chain** rounds exactly the selected edges and ends at the smooth vertex
@@ -541,7 +552,7 @@ certificate), `fillet_solver` (the trace and the §3.3 checks), `fillet_overflow
 |---|---|
 | [#2400](https://github.com/tangency-labs/solidcore/issues/2400) | delete the old corner hierarchy |
 | [#2361](https://github.com/tangency-labs/solidcore/issues/2361) | several concave rounds at one vertex; mixed corners with every edge blended |
-| [#2343](https://github.com/tangency-labs/solidcore/issues/2343) | the Setback beside curved faces |
+| [#2343](https://github.com/tangency-labs/solidcore/issues/2343) | the Setback beside curved faces. SolidCraft [#13832](https://github.com/tangency-labs/solidcraft/issues/13832) carries it in steps: [#16327](https://github.com/tangency-labs/solidcraft/pull/16327) (step 1), [#16331](https://github.com/tangency-labs/solidcraft/pull/16331) (step 2), [#16328](https://github.com/tangency-labs/solidcraft/pull/16328) (step 4), and the ledge corner's Roll-over [#16286](https://github.com/tangency-labs/solidcraft/pull/16286) (under [#10876](https://github.com/tangency-labs/solidcraft/issues/10876)); step 3 (the cylinder's free coefficient) and step 5 (four or more rounds, and the cone grown or placed) are queued |
 | [#2344](https://github.com/tangency-labs/solidcore/issues/2344) | the least certifying setback scale; streamed QP rows |
 | [#2345](https://github.com/tangency-labs/solidcore/issues/2345) | chamfers meeting at a vertex |
 | [#2346](https://github.com/tangency-labs/solidcore/issues/2346) | a G2 setback fill beside circular rounds |
@@ -691,3 +702,7 @@ Titles, pages or DOIs are given only where the project's reading notes record th
 46. J. Vida, R. R. Martin, T. Várady. A survey of blending methods that use parametric surfaces. *Computer-Aided Design* 26(5) (1994) 341–365. doi:10.1016/0010-4485(94)90023-X
 47. X. Ye, H. Nowacki. Ensuring compatibility of G²-continuous surface patches around a nodepoint. *Computer Aided Geometric Design* 13(9) (1996) 931–949.
 48. G. Farin. *Curves and Surfaces for CAGD: A Practical Guide*, 5th ed. Morgan Kaufmann (2002): rational Bézier patches, their convex hull and subdivision.
+49. Siemens. *NX Open .NET reference*, NX 12: `EdgeBlendBuilder` (blend order, roll-over and overflow options). https://docs.plm.automation.siemens.com/data_services/resources/nx/12/nx_api/custom/en_US/nxopen_net/class_n_x_open_1_1_features_1_1_edge_blend_builder.html; a recorded journal with the default settings: https://nxjournaling.com/node/1776
+50. Top Systems. *T-FLEX CAD 17 help*: edge blend order and blending at vertices. https://tflex.com/help/eng/T-FLEX%20CAD/17/14_edgeblend_additional_order.htm, https://tflex.com/help/eng/T-FLEX%20CAD/17/14_edgeblend_theory_order.htm
+51. PTC. *Creo Parametric 9.0 help*: round transition types. https://support.ptc.com/help/creo/creo_pma/r9.0/usascii/part_modeling/part_modeling/Round_Transition_Types.html
+52. Top Systems. *T-FLEX CAD 17 help*: overflow processing of edge blends. https://tflex.com/help/eng/T-FLEX%20CAD/17/blendedges_overflowprocessing.htm
