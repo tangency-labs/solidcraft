@@ -30,9 +30,10 @@
 //! and farther from it than the tolerance. Deciding the rule up front, from the planes and
 //! the bound edges, removes all three.
 //!
-//! The decision is a certificate, not a sample: each bound is a line segment, so its
-//! distance to the other plane is affine along it and its two end distances bound it
-//! (with their rounding counted); the side of each end and the direction its face extends
+//! The decision is a certificate, not a sample: each bound is straight (a line, or a
+//! B-spline whose control points all lie on the line through its ends), so its distance to
+//! the other plane is affine along it and its hull points' distances bound it (with their
+//! coordinate errors and rounding counted; tangency-labs/solidcraft#16146's enclosures); the side of each end and the direction its face extends
 //! are signs of distances to the other plane; and the crossing's extent is over-estimated
 //! by the projections of both faces onto the crossing's direction (from the end points of
 //! their line edges and the boxes of the others), so a bound that spans it spans the
@@ -42,8 +43,8 @@
 //! |------|----------|
 //! | `crossing_inside_coincident_pair` (crate) | none (own design) |
 //!
-//! Deviations: not upstream at all; always on. Planes only (two planar faces, bounds on
-//! lines); every other pair is intersected as upstream does.
+//! Deviations: not upstream at all; always on. Planes only (two planar faces, straight
+//! bounds); every other pair is intersected as upstream does.
 
 use crate::curve::curve::p2::CurveKind;
 use crate::error::Result;
@@ -189,28 +190,24 @@ fn bound_side<O: ClassObject>(
     let Some(ivl) = brep.edge_interval(edge) else {
         return Ok(None);
     };
-    let ends = {
-        let Some(curve) = brep.edge_curve(edge).flatten().and_then(|c| brep.curve(c)) else {
-            return Ok(None);
-        };
-        if !matches!(curve.kind(), CurveKind::Line(_)) {
-            return Ok(None);
-        }
-        [
-            curve.evaluate_point(k, ivl.min())?,
-            curve.evaluate_point(k, ivl.max())?,
-        ]
+    let Some(curve) = brep.edge_curve(edge).flatten().and_then(|c| brep.curve(c)) else {
+        return Ok(None);
+    };
+    let ends = [
+        curve.evaluate_point(k, ivl.min())?,
+        curve.evaluate_point(k, ivl.max())?,
+    ];
+    let Some(hull) = curve.hull_points_over(&ivl) else {
+        return Ok(None);
     };
     let tol = xsect_tol_3d_from_zones(k, object_zone_tol_3d(k, &*brep, Some(edge))?, other_zone);
-    let mut dist = [(0.0, 0.0); 2];
-    for (slot, &p) in dist.iter_mut().zip(&ends) {
-        let (g, rounding) = other.signed_distance(p);
-        let within = g.abs() + rounding < tol;
-        if !within {
-            return Ok(None);
-        }
-        *slot = (flip * g, rounding);
-    }
+    let Some(dist) = straight_band_bound(ends, &hull, other, tol) else {
+        return Ok(None);
+    };
+    let dist: Vec<(f64, f64)> = dist
+        .into_iter()
+        .map(|(g, slack)| (flip * g, slack))
+        .collect();
     let (s0, s1) = (ends[0].dot(along), ends[1].dot(along));
     let end_tol = tol + edge_end_tol(k, brep, edge)?;
     if !(s0.min(s1) <= extent.0 + end_tol && s0.max(s1) >= extent.1 - end_tol) {
@@ -233,6 +230,47 @@ fn bound_side<O: ClassObject>(
         }
     }
     Ok(None)
+}
+
+/// The signed distances from `plane` of the hull points of a bound (`hull`, each with its
+/// coordinate error), each with its slack (the point's error and the distance's rounding),
+/// when the bound is straight and lies in the band: every hull point lies on the line
+/// through the curve's `ends` to its error and rounding (a line's hull is its ends; a
+/// B-spline's control points all on that line make it straight, so its binormal on a planar
+/// face is constant), and within `tol` of the plane. The distance is affine in the point, so
+/// its bound over the hull bounds the whole curve; `None` otherwise (a bowed curve, or one
+/// leaving the band).
+fn straight_band_bound(
+    ends: [Point3; 2],
+    hull: &[(Point3, f64)],
+    plane: PlanePos,
+    tol: f64,
+) -> Option<Vec<(f64, f64)>> {
+    let [e0, e1] = ends;
+    let along = e1 - e0;
+    let length = along.length();
+    let usable = length > 0.0;
+    if !usable {
+        return None;
+    }
+    let mut out = Vec::new();
+    for &(q, e) in hull {
+        let w = q - e0;
+        let rounding =
+            gamma(16) * (q.length() + e0.length() + e1.length()) * (1.0 + w.length() / length);
+        let on_line = w.cross(along).length() / length <= e + rounding;
+        if !on_line {
+            return None;
+        }
+        let (g, g_rounding) = plane.signed_distance(q);
+        let slack = e + g_rounding;
+        let within = g.abs() + slack < tol;
+        if !within {
+            return None;
+        }
+        out.push((g, slack));
+    }
+    Some(out)
 }
 
 /// The projection of `face` onto the unit direction `along`, over-estimated: the end
@@ -341,4 +379,101 @@ fn edge_end_tol<O: ClassObject>(
         .and_then(|v| brep.topology_tolerance(v))
         .map_or(0.0, |t| zone_tol3d(k, t));
     Ok(t0.max(t1))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+    use crate::curve::curve::Curve;
+    use crate::curve::line::Line;
+    use crate::geom::extent1d::Extent1d;
+    use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+
+    const TOL: f64 = 1e-5;
+    const LEN: f64 = 10.0;
+    const OFF: f64 = 5e-6;
+
+    fn cubic(points: &[Point3; 4]) -> Curve {
+        Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 3,
+                control_points: points,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[4, 4],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        )
+    }
+
+    /// The bound of `curve` over `[0, 1]` against the plane y = 0.
+    fn bound_of(k: &Kernel, curve: &Curve) -> Option<Vec<(f64, f64)>> {
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let ends = [
+            curve.evaluate_point(k, 0.0).unwrap(),
+            curve.evaluate_point(k, 1.0).unwrap(),
+        ];
+        let plane = PlanePos {
+            origin: Point3::ZERO,
+            unit_normal: Vec3::Y,
+        };
+        straight_band_bound(ends, &curve.hull_points_over(&ivl)?, plane, TOL)
+    }
+
+    /// From tangency-labs/solidcraft#16146: a boundary whose start, midpoint and end lie in
+    /// the band but which bows far off it in between is no bound (the samples pass, the
+    /// enclosure does not), so the crossing is kept.
+    #[test]
+    fn a_bowed_boundary_is_no_bound() {
+        let k = Kernel::default();
+        let h = 100.0 * TOL;
+        let curve = cubic(&[
+            Point3::new(0.0, OFF, 0.0),
+            Point3::new(LEN / 3.0, OFF + h, 0.0),
+            Point3::new(2.0 * LEN / 3.0, OFF - h, 0.0),
+            Point3::new(LEN, OFF, 0.0),
+        ]);
+        for t in [0.0, 0.5, 1.0] {
+            let q = curve.evaluate_point(&k, t).unwrap();
+            assert!(q.y.abs() < TOL, "sample {t} is in the band");
+        }
+        let t = (3.0 - 3.0_f64.sqrt()) / 6.0;
+        let bulge = curve.evaluate_point(&k, t).unwrap().y - OFF;
+        assert!(bulge > 25.0 * TOL, "bulge {bulge}");
+        assert_eq!(bound_of(&k, &curve), None);
+    }
+
+    /// From tangency-labs/solidcraft#16146: a B-spline whose control points lie on one line in
+    /// the band, and a line segment, bound the strip, each hull point within the band.
+    #[test]
+    fn a_straight_spline_or_line_bounds_the_strip() {
+        let k = Kernel::default();
+        let straight = cubic(&[
+            Point3::new(0.0, OFF, 0.0),
+            Point3::new(LEN / 4.0, OFF, 0.0),
+            Point3::new(LEN / 2.0, OFF, 0.0),
+            Point3::new(LEN, OFF, 0.0),
+        ]);
+        let line = Curve::from(
+            Line::create_line_segment(
+                3,
+                Point3::new(0.0, OFF, 0.0),
+                Point3::new(LEN, OFF, 0.0),
+                None,
+            )
+            .unwrap(),
+        );
+        for curve in [straight, line] {
+            let bound = bound_of(&k, &curve).unwrap();
+            assert!(!bound.is_empty());
+            assert!(bound
+                .iter()
+                .all(|&(g, slack)| (g - OFF).abs() <= slack + 1e-15 && g.abs() + slack < TOL));
+        }
+    }
 }
