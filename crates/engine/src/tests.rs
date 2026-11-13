@@ -1169,6 +1169,8 @@ fn hostile_params_never_panic() {
         "anchor",
         "density",
         "names",
+        "pairs",
+        "next_pair",
         "references",
         "head",
         "head_gap",

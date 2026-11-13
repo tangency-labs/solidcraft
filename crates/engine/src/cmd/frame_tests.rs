@@ -1105,3 +1105,223 @@ fn a_member_feature_mirrors_and_patterns_and_follows_its_lines() {
     run(&mut s, "parameters.change", json!({"name": "L", "expression": "760 mm"}));
     check(&mut s, 760.0);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Members between pairs of points (#15705)
+
+/// A 600 × 400 × 400 box `Box` (feature `Box`) from the rectangle `Base` on XY: its corners are
+/// the points the pairs join.
+fn box_frame(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [600, 400]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 400, "name": "Box", "body_name": "Box"}));
+}
+
+/// The upright at the box's corner (600, 0), as `pairs` takes it.
+fn upright() -> Value {
+    json!({"a": {"vertex": [600, 0, 0]}, "b": {"vertex": [600, 0, 400]}})
+}
+
+/// The rail along the box's top front edge, as `pairs` takes it.
+fn top_rail() -> Value {
+    json!({"a": {"vertex": [0, 0, 400]}, "b": {"vertex": [600, 0, 400]}})
+}
+
+/// The bounding boxes of the bodies other than the box, by name.
+fn member_boxes(s: &mut Session) -> std::collections::BTreeMap<String, ([f64; 3], [f64; 3])> {
+    boxes(s).into_iter().filter(|(name, _)| name != "Box").collect()
+}
+
+fn has_box(boxes: &std::collections::BTreeMap<String, ([f64; 3], [f64; 3])>, lo: [f64; 3], hi: [f64; 3]) -> bool {
+    boxes.values().any(|(l, h)| near3(*l, lo) && near3(*h, hi))
+}
+
+/// The kind of the feature `id` (as a command's reply gives it).
+fn member_kind(s: &Session, id: &Value) -> solidcraft_doc::FeatureKind {
+    s.doc.feature(id.as_u64().unwrap()).unwrap().kind.clone()
+}
+
+#[test]
+fn members_between_point_pairs() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let r = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}));
+    let members = member_boxes(&mut s);
+    assert_eq!(members.len(), 2, "{members:?}");
+    // The upright: square to Z, the profile's x along world X.
+    assert!(has_box(&members, [580.0, -20.0, 0.0], [620.0, 20.0, 400.0]), "{members:?}");
+    // The rail along +X: the profile's x along +Y, its y up.
+    assert!(has_box(&members, [0.0, -20.0, 380.0], [600.0, 20.0, 420.0]), "{members:?}");
+    let solidcraft_doc::FeatureKind::FrameMember { path_sketch, pairs, next_pair, .. } = member_kind(&s, &r["feature"]) else { panic!() };
+    assert_eq!(path_sketch, None);
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair1", "pair2"]);
+    assert_eq!(next_pair, 3);
+}
+
+#[test]
+fn point_pairs_and_sketch_lines_in_one_frame_member() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let bottom = line_at_y(&s, "Base", 0.0);
+    let r = run(&mut s, "frame.member", json!({"sketch": "Base", "lines": [bottom], "profile": tube(), "pairs": [upright()]}));
+    let members = member_boxes(&mut s);
+    assert_eq!(members.len(), 2, "{members:?}");
+    assert!(has_box(&members, [0.0, -20.0, -20.0], [600.0, 20.0, 20.0]), "{members:?}");
+    assert!(has_box(&members, [580.0, -20.0, 0.0], [620.0, 20.0, 400.0]), "{members:?}");
+    let ids = solidcraft_doc::frame::member_line_ids(&s.model.state(), &member_kind(&s, &r["feature"])).unwrap();
+    assert_eq!(ids, [bottom, "pair1".to_string()]);
+}
+
+#[test]
+fn a_pair_member_follows_its_point() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright()]}));
+    run(&mut s, "timeline.edit", json!({"feature": "Box", "set": {"extent.distance": "500"}}));
+    let members = member_boxes(&mut s);
+    assert!(has_box(&members, [580.0, -20.0, 0.0], [620.0, 20.0, 500.0]), "the upright reaches the box's new top: {members:?}");
+}
+
+/// A pair on sketch points follows them when the sketch is edited.
+#[test]
+fn a_pair_member_follows_its_sketch_points() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.point", json!({"point": [0, -100], "id": "m1"}));
+    run(&mut s, "sketch.point", json!({"point": [600, -100], "id": "m2"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let pair = json!({"a": {"sketch": "Marks", "point": "m1"}, "b": {"sketch": "Marks", "point": "m2"}});
+    run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [pair]}));
+    let members = member_boxes(&mut s);
+    assert!(has_box(&members, [0.0, -120.0, -20.0], [600.0, -80.0, 20.0]), "{members:?}");
+    run(&mut s, "sketch.edit", json!({"sketch": "Marks"}));
+    run(&mut s, "sketch.move_point", json!({"point": "m2", "to": [800, -100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let members = member_boxes(&mut s);
+    assert!(has_box(&members, [0.0, -120.0, -20.0], [800.0, -80.0, 20.0]), "{members:?}");
+}
+
+#[test]
+fn a_pair_member_keeps_its_name_when_another_pair_goes() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    let solidcraft_doc::FeatureKind::FrameMember { names, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(names.keys().collect::<Vec<_>>(), ["pair1", "pair2"]);
+    let rail = member_boxes(&mut s).into_iter().find(|(_, (lo, _))| (lo[2] - 380.0).abs() < 1e-6).unwrap();
+    assert_eq!(names["pair2"], rail.0);
+    let mut kept = top_rail();
+    kept["id"] = json!("pair2");
+    let params = json!({"profile": tube(), "pairs": [kept], "next_pair": 3});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": params}));
+    let after = member_boxes(&mut s);
+    assert_eq!(after.len(), 1, "{after:?}");
+    assert_eq!(after.get(&rail.0), Some(&rail.1), "the rail keeps its name and place: {after:?}");
+    let solidcraft_doc::FeatureKind::FrameMember { pairs, next_pair, .. } = member_kind(&s, &fid) else { panic!() };
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair2"]);
+    assert_eq!(next_pair, 3);
+}
+
+#[test]
+fn an_end_cap_closes_a_pair_member() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": square_tube(), "pairs": [upright()], "body_name": "Post"}))["feature"].clone();
+    let top = face_pick(&s, "Post", [618.5, 0.0, 400.0], [0.0, 0.0, 1.0]);
+    let r = run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6}));
+    let cap = measured(&mut s, "Post End Cap");
+    assert!(near3(cap.2, [580.0, -20.0, 400.0]) && near3(cap.3, [620.0, 20.0, 406.0]), "{cap:?}");
+    let solidcraft_doc::FeatureKind::FrameEndCap { ends, .. } = member_kind(&s, &r["feature"]) else { panic!() };
+    assert_eq!(ends[0].member.line, "pair1");
+    assert_eq!(ends[0].member.feature.0, fid.as_u64().unwrap());
+}
+
+#[test]
+fn pairs_are_refused_when() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let same = json!({"a": {"vertex": [600, 0, 0]}, "b": {"vertex": [600, 0, 0]}});
+    let fixed = json!({"a": {"point": [0, 0, 0]}, "b": {"vertex": [600, 0, 400]}});
+    let edge = json!({"a": {"vertex": [600, 0, 0]}, "b": {"edge": [300, 0, 0]}});
+    let many: Vec<Value> = (0..=1000).map(|_| upright()).collect();
+    let with_id = |pair: Value, id: &str| {
+        let mut pair = pair;
+        pair["id"] = json!(id);
+        pair
+    };
+    for (p, why) in [
+        (json!({"profile": tube(), "pairs": [same]}), "no length"),
+        (json!({"profile": tube(), "pairs": [fixed]}), "`pairs[0].a` must be a point"),
+        (json!({"profile": tube(), "pairs": [upright(), edge]}), "`pairs[1].b` must be a point"),
+        (json!({"profile": tube(), "pairs": many}), "at most 1000"),
+        (json!({"profile": tube()}), "`sketch`"),
+        (json!({"profile": tube(), "pairs": []}), "`pairs`"),
+        (json!({"profile": tube(), "pairs": "pair1"}), "`pairs`"),
+        (json!({"profile": tube(), "pairs": [{"a": {"vertex": [600, 0, 0]}}]}), "`pairs[0].b`"),
+        (json!({"profile": tube(), "pairs": [with_id(upright(), "pair9")], "next_pair": 3}), "pair9"),
+        (json!({"profile": tube(), "pairs": [with_id(upright(), "pair1"), with_id(top_rail(), "pair1")], "next_pair": 3}), "pair1"),
+        (json!({"profile": tube(), "pairs": [with_id(upright(), "rail")]}), "rail"),
+        (json!({"profile": tube(), "pairs": [upright()], "next_pair": -1}), "`next_pair`"),
+    ] {
+        let err = s.execute("frame.member", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{why}: {err}");
+    }
+    assert!(member_boxes(&mut s).is_empty(), "nothing was made");
+}
+
+#[test]
+fn a_pair_whose_point_is_gone_fails_the_feature_naming_it() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.point", json!({"point": [600, 0], "id": "m1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let on_mark = json!({"a": {"sketch": "Marks", "point": "m1"}, "b": {"vertex": [600, 0, 400]}});
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [on_mark, top_rail()]}))["feature"].as_u64().unwrap();
+    let before = member_boxes(&mut s);
+    assert_eq!(before.len(), 2, "{before:?}");
+    run(&mut s, "sketch.edit", json!({"sketch": "Marks"}));
+    run(&mut s, "sketch.delete", json!({"entities": ["m1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let failing = s.model.result(fid).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(failing.contains("pair1"), "{failing}");
+    assert!(member_boxes(&mut s).is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(member_boxes(&mut s), before);
+}
+
+#[test]
+fn a_pair_member_in_a_rotated_component_turns_like_a_line_member() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Tilted", "grounded": false}))["component"].as_u64().unwrap();
+    let o = s.doc.occurrence_of(c).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "axis": [1, 0, 0], "angle": "30 deg", "capture": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let wire = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [600, 0, 0]]}))["created"]["wires"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let bar = json!({"kind": "bar", "width": 60, "height": 10});
+    run(&mut s, "frame.member", json!({"sketch": "Path", "profile": bar, "body_name": "Line"}));
+    let pair = json!({"a": {"sketch": "Path", "point": format!("{wire}:0")}, "b": {"sketch": "Path", "point": format!("{wire}:1")}});
+    run(&mut s, "frame.member", json!({"profile": bar, "pairs": [pair], "body_name": "Pair"}));
+    let (line, pair) = (measured(&mut s, "Line"), measured(&mut s, "Pair"));
+    // Tilted 30° about X with its component: the bar's 60 mm width rises 30 mm out of the XY plane.
+    assert!(line.3[2] - line.2[2] > 30.0, "{line:?}");
+    assert!(near3(line.2, pair.2) && near3(line.3, pair.3), "{line:?} vs {pair:?}");
+}
+
+#[test]
+fn a_pasted_frame_member_with_pairs_lands_with_its_source() {
+    let mut s = Session::default();
+    box_frame(&mut s);
+    let fid = run(&mut s, "frame.member", json!({"profile": tube(), "pairs": [upright(), top_rail()]}))["feature"].clone();
+    let source: Vec<_> = member_boxes(&mut s).into_values().collect();
+    run(&mut s, "timeline.copy", json!({"features": [fid]}));
+    run(&mut s, "timeline.paste", json!({}));
+    let all: Vec<_> = member_boxes(&mut s).into_values().collect();
+    assert_eq!(all.len(), 4, "{all:?}");
+    for (lo, hi) in &source {
+        assert_eq!(all.iter().filter(|(l, h)| near3(*l, *lo) && near3(*h, *hi)).count(), 2, "{all:?}");
+    }
+}
