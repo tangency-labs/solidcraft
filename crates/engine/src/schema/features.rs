@@ -952,14 +952,33 @@ pub struct FilletResult {
     pub radii_applied: Option<Vec<AppliedRadius>>,
 }
 
-/// `alignment`, with the handler's message.
-fn pattern_alignment<'de, D: Deserializer<'de>>(d: D) -> Result<Option<solidcraft_sketch::PatternAlignment>, D::Error> {
-    serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole("`alignment` must be left, center or right")))
+/// A pattern's alignment under `key`, as `cmd::alignment_param` reads it, with its message.
+/// `null` is refused, as the reader refuses it.
+fn alignment_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<solidcraft_sketch::PatternAlignment>, D::Error> {
+    serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole(format!("`{key}` must be left, center or right"))))
 }
 
-/// `reversed`, with the handler's message.
+/// A pattern's flip under `key`, as `cmd::reversed_param` reads it, with its message. `null` is
+/// refused, as the reader refuses it.
+fn reversed_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<bool>, D::Error> {
+    serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole(format!("`{key}` must be true or false"))))
+}
+
+// serde's `deserialize_with` takes a path, not a closure, so each key has its own reader.
+fn pattern_alignment<'de, D: Deserializer<'de>>(d: D) -> Result<Option<solidcraft_sketch::PatternAlignment>, D::Error> {
+    alignment_at(d, "alignment")
+}
+
+fn pattern_alignment2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<solidcraft_sketch::PatternAlignment>, D::Error> {
+    alignment_at(d, "alignment2")
+}
+
 fn pattern_reversed<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
-    serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole("`reversed` must be true or false")))
+    reversed_at(d, "reversed")
+}
+
+fn pattern_reversed2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    reversed_at(d, "reversed2")
 }
 
 /// Copy features, bodies or components evenly round an axis. Give one of `features`, `bodies` or
@@ -996,10 +1015,11 @@ pub struct PatternCircularParams {
     pub common: FeatureCommon,
 }
 
-/// What `solid.pattern.circular` returns.
+/// What the patterns return: `solid.pattern.rectangular`, `solid.pattern.circular` and
+/// `solid.pattern.path` all finish through `features::finish_pattern`.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
-pub enum PatternCircularResult {
+pub enum PatternResult {
     /// With `features` or `bodies`.
     Feature(Box<FeatureResult>),
     /// With `components`.
@@ -1088,6 +1108,214 @@ pub enum MoveResult {
         #[serde(skip_serializing_if = "Option::is_none")]
         bodies: Option<FeatureResult>,
     },
+}
+
+/// A pattern direction, as `features::pattern_rect` reads `dir1` and `dir2` (`params::vec3`):
+/// `[x, y, z]` or `{x, y, z}` of finite numbers, with the handler's message.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatternDir(pub solidcore_record::Vec3);
+
+impl<'de> Deserialize<'de> for PatternDir {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::params::vec3(&Value::deserialize(d)?).map(PatternDir).ok_or_else(|| D::Error::custom("must be [x, y, z]"))
+    }
+}
+
+impl JsonSchema for PatternDir {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PatternDir".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        // The bounds are `params::finite`'s.
+        let c = json!({"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9});
+        json_schema!({
+            "description": "A direction: [x, y, z] or {\"x\", \"y\", \"z\"}. Only its direction counts; the spacing sets the step.",
+            "anyOf": [
+                {"type": "array", "items": c, "minItems": 3, "maxItems": 3},
+                {"type": "object", "properties": {"x": c, "y": c, "z": c}, "required": ["x", "y", "z"]}
+            ]
+        })
+    }
+}
+
+fn rectangular_required(schema: &mut Schema) {
+    for key in ["dir1", "count1", "spacing1"] {
+        require(schema, key);
+    }
+}
+
+/// Copy features, bodies or components in a row, or a grid with a second direction. Give one of
+/// `features`, `bodies` or `components`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = rectangular_required)]
+pub struct PatternRectangularParams {
+    /// The features to copy, by name. Used when `bodies` and `components` are left out or empty.
+    #[serde(default)]
+    pub features: Option<NameList>,
+    /// The bodies to copy, by name. Used when `components` is left out or empty.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// The components to place more of, by id or name. The reply then lists the new occurrences.
+    #[serde(default)]
+    pub components: Option<NameList>,
+    // `dir1`, `count1` and `spacing1` are optional in the type and required in the schema: left
+    // out, the handler refuses the call with its own message ("`dir1` must be [x, y, z]"), which
+    // the check would otherwise replace with "`dir1` is required".
+    /// The first direction.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PatternDir")]
+    pub dir1: Option<PatternDir>,
+    /// How many along the first direction, the original included: a whole number or an
+    /// expression that gives one.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "NumberExpr")]
+    pub count1: Option<NumberExpr>,
+    /// The step between neighbours along the first direction.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "LengthExpr")]
+    pub spacing1: Option<LengthExpr>,
+    // The handler reads `dir2`, `count2` and `spacing2` leniently: one it can't read is left
+    // out, as `null` is. The contract refuses a value of the wrong form and lets `null` through.
+    /// A second direction, for a grid. Default: none, a single row.
+    #[serde(default)]
+    pub dir2: Option<PatternDir>,
+    /// How many along the second direction, the original included.
+    #[serde(default)]
+    pub count2: Option<NumberExpr>,
+    /// The step between neighbours along the second direction.
+    #[serde(default)]
+    pub spacing2: Option<LengthExpr>,
+    /// Where the original sits along the first direction. Default: right, the original at the
+    /// start.
+    #[serde(default, deserialize_with = "pattern_alignment", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
+    pub alignment: Option<solidcraft_sketch::PatternAlignment>,
+    /// Where the original sits along the second direction. Default: right.
+    #[serde(default, deserialize_with = "pattern_alignment2", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
+    pub alignment2: Option<solidcraft_sketch::PatternAlignment>,
+    /// Flip the first direction; for an even count centred, selects the extra side.
+    #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reversed: Option<bool>,
+    /// Flip the second direction.
+    #[serde(default, deserialize_with = "pattern_reversed2", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reversed2: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// The most curves a pattern path lists, as `features::pattern_path` reads it.
+const MAX_PATH_CURVES: usize = 1000;
+
+/// Pattern on Path's `path`: 1 to 1000 curve ids, read through `NameList` (as
+/// `params::string_list` reads them), with the handler's message for any other count, `null`
+/// (read as no curves) included.
+fn path_curves<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NameList>, D::Error> {
+    super::features_more::names_in(d, 1..=MAX_PATH_CURVES, "`path` must list 1…1000 curve ids")
+}
+
+fn path_curves_schema(_: &mut SchemaGenerator) -> Schema {
+    super::features_more::names_schema("The path's curve ids in the path sketch, in order along the path: 1 to 1000.", MAX_PATH_CURVES)
+}
+
+/// Pattern on Path's `sketch`, the other name of `path_sketch`: the handler reads it only when
+/// `path_sketch` is left out, and names `path_sketch` when it refuses it.
+fn path_sketch_alias<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SketchRef>, D::Error> {
+    SketchRef::deserialize(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole("`path_sketch` must be a sketch id or name")))
+}
+
+/// Pattern on Path's `orientation`, as `features::pattern_path` reads it: one of its words, in
+/// lower case, with its message; true when the copies turn with the path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PathOrientationParam(pub bool);
+
+// The words the handler takes, and whether each turns the copies with the path.
+const PATH_ORIENTATIONS: [(&str, bool); 4] = [("identical", false), ("path", true), ("path_direction", true), ("along_path", true)];
+
+impl<'de> Deserialize<'de> for PathOrientationParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(word) => PATH_ORIENTATIONS
+                .iter()
+                .find(|(w, _)| *w == word)
+                .map(|(_, along)| PathOrientationParam(*along))
+                .ok_or_else(|| D::Error::custom(whole(format!("unknown orientation `{word}` (identical or path)")))),
+            // The handler ignores a value that isn't text; the contract refuses it.
+            _ => Err(D::Error::custom("must be identical or path")),
+        }
+    }
+}
+
+impl JsonSchema for PathOrientationParam {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PathOrientation".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let words: Vec<&str> = PATH_ORIENTATIONS.iter().map(|(w, _)| *w).collect();
+        json_schema!({
+            "description": "How each copy is turned: identical (the default), as the original, or path, turned with the path's direction (path_direction and along_path are aliases). Lower case.",
+            "type": "string",
+            "enum": words
+        })
+    }
+}
+
+fn path_required(schema: &mut Schema) {
+    for key in ["path", "count"] {
+        require(schema, key);
+    }
+}
+
+/// Copy features, bodies or components along a chain of sketch curves. Give one of `features`,
+/// `bodies` or `components`, and `spacing` or `distance`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = path_required)]
+pub struct PatternPathParams {
+    /// The features to copy, by name. Used when `bodies` and `components` are left out or empty.
+    #[serde(default)]
+    pub features: Option<NameList>,
+    /// The bodies to copy, by name. Used when `components` is left out or empty.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// The components to place more of, by id or name. The reply then lists the new occurrences.
+    #[serde(default)]
+    pub components: Option<NameList>,
+    /// The sketch holding the path, by id or name. Required, unless given as `sketch`.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "SketchRef")]
+    pub path_sketch: Option<SketchRef>,
+    /// `path_sketch`'s other name, read only when `path_sketch` is left out.
+    #[serde(default, deserialize_with = "path_sketch_alias")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+    // Optional in the type, required in the schema: left out, `null` or empty, the handler
+    // refuses the call with its own message.
+    #[serde(default, deserialize_with = "path_curves")]
+    #[schemars(schema_with = "path_curves_schema")]
+    pub path: Option<NameList>,
+    // Optional in the type, required in the schema, for the handler's message (as `count1`).
+    /// How many, the original included: a whole number or an expression that gives one.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "NumberExpr")]
+    pub count: Option<NumberExpr>,
+    // The handler takes `spacing` when it can read it, else `distance`, and refuses the call
+    // when it can read neither; the contract refuses either given in the wrong form.
+    /// The step along the path between neighbours. Used before `distance`.
+    #[serde(default)]
+    pub spacing: Option<LengthExpr>,
+    /// The length along the path from the first copy to the last, instead of `spacing`.
+    #[serde(default)]
+    pub distance: Option<LengthExpr>,
+    /// How each copy is turned. Default: identical.
+    #[serde(default)]
+    pub orientation: Option<PathOrientationParam>,
+    /// Run along the path from its other end. Default: false.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
 }
 
 /// What a feature command returns.
