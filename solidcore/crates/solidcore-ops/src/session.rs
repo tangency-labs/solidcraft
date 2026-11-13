@@ -160,6 +160,14 @@ pub fn set_failure_hook(hook: Option<Hook>) {
     *HOOK.lock().unwrap_or_else(PoisonError::into_inner) = hook;
 }
 
+/// `f` of the session kernel's work counters (tests: what the kernel did inside the ops calls
+/// made so far, every thread's).
+#[cfg(test)]
+pub(crate) fn work_counters<T>(f: impl FnOnce(&solidcore::kernel::WorkCounters) -> T) -> T {
+    let mut guard = KERNEL.lock().unwrap_or_else(PoisonError::into_inner);
+    f(&guard.get_or_insert_with(fresh).work_counters)
+}
+
 /// A kernel of the session's configuration: the kernel's default options and the fixes the
 /// application named. The first kernel and every kernel after a panic are made here, so they
 /// are configured alike.
