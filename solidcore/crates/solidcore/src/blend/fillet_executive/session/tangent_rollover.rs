@@ -1,16 +1,16 @@
 //! A round rolls over a smooth far edge of its face, the whole length (not upstream;
 //! solidcore-native): before its trace, a round's solver rolls its ball on the face beyond on
 //! each side where the ball's contact lies past the face's smooth far edge all along the
-//! round's edge. A lone round between planes along a straight edge is decided in closed form
-//! ([`crate::blend::fillet_tangent_rollover::tangent_rollover_supports`]); any other round,
-//! lone or one of a chain, from its ball's sections along its edge
+//! round's edge. A lone round is decided in closed form, between planes along a straight edge
+//! only ([`crate::blend::fillet_tangent_rollover::tangent_rollover_supports`]); a round of a
+//! blend of several, such as one of a chain, from its ball's sections along its edge
 //! (`rails_wholly_past`, upstream's unimplemented tangent case of
 //! `SmFilletSolver::ProcessFullRollOver`).
 //!
 //! | Rust                                     | Upstream |
 //! |------------------------------------------|----------|
 //! | `FilletSession::roll_over_tangent_edges` | none     |
-//! | `rails_wholly_past` (private)            | none (the tangent case `ProcessFullRollOver` refuses as "Unimplemented Tangent Rollover Case") |
+//! | `rails_wholly_past`, `sides_wholly_off`, `carried` (private) | none (the tangent case `ProcessFullRollOver` refuses as "Unimplemented Tangent Rollover Case") |
 //!
 //! Deviations: none of upstream's; there is no recursion.
 
@@ -55,10 +55,10 @@ impl FilletSession<'_> {
     /// offset surface is replaced by one of the same offset (its sign following the faces'
     /// normals across the edge) on the face beyond's surface, owned by that face, in the solver
     /// and in its fillet geometries, so the rail is traced, classified and trimmed on the face it
-    /// lies on. A lone round between planes along a straight edge is decided in closed form
-    /// ([`tangent_rollover_supports`]); every other round of the blend, lone or one of a chain,
-    /// from its ball's sections ([`rails_wholly_past`]). A rail that lies past the edge only
-    /// partway is left to the rollover recovery after the trace (`ProcessRollOver`).
+    /// lies on. A lone round is decided in closed form, between planes along a straight edge
+    /// only ([`tangent_rollover_supports`]); each round of a blend of several, such as one of a
+    /// chain, from its ball's sections ([`rails_wholly_past`]). A rail that lies past the edge
+    /// only partway is left to the rollover recovery after the trace (`ProcessRollOver`).
     ///
     /// # Errors
     /// Those of the topology queries, of [`tangent_rollover_supports`] and of
@@ -78,28 +78,24 @@ impl FilletSession<'_> {
             let Some(inputs) = self.rollover_inputs(id)? else {
                 continue;
             };
-            let target = &mut *self.objects.target;
-            let mut rollovers = if lone {
+            let rollovers = if lone {
                 tangent_rollover_supports(
                     k,
-                    target,
+                    &mut *self.objects.target,
                     inputs.edge,
                     inputs.faces,
                     inputs.offsets,
                     inputs.tangency,
                 )?
             } else {
-                [None, None]
-            };
-            if rollovers.iter().all(Option::is_none) {
                 let solver = self
                     .objects
                     .solvers
                     .get_mut(id.0 as usize)
                     .and_then(Option::as_mut)
                     .ok_or_else(|| SolidError::blend_missing(OP, "the live solver"))?;
-                rollovers = rails_wholly_past(k, &mut *self.objects.target, solver, &inputs)?;
-            }
+                rails_wholly_past(k, &mut *self.objects.target, solver, &inputs)?
+            };
             for (rail, rollover) in rollovers.into_iter().enumerate() {
                 if let Some(rollover) = rollover {
                     self.roll_rail_over(k, id, rail, rollover)?;
@@ -308,6 +304,16 @@ fn off(class: PointClassType) -> bool {
     matches!(class, PointClassType::Unknown | PointClassType::Nothing)
 }
 
+/// A probe's result: a failure (a solve, a classification or a query that errs) finds nothing,
+/// and only [`SolidError::Unported`] and a cancellation are passed on.
+fn probe<T>(result: Result<T>) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
 /// The faces `solver`'s ball rolls onto across a smooth far edge of the face on each side, the
 /// whole length of its edge, or `None` on a side where it touches its own face.
 ///
@@ -315,15 +321,16 @@ fn off(class: PointClassType) -> bool {
 /// ([`ball_section_at`], on the faces' surfaces extended as the trace extends them). A side
 /// rolls over when its contact lies off its face (`inputs.faces`) at every one, and some edge of
 /// that face, tangent to the face beyond within `inputs.tangency`
-/// (`sm_TestManifoldTangentRollover`), has a face beyond that carries the ball at every one:
-/// solved with that side's offset surface on the face beyond's surface (its sign following the
-/// normals across the edge), the contact lies on that face, and the face's offset by the ball
-/// does not fold there ([`offset_folds`]). The first such edge in the face's edge order is taken.
-/// The ball is solved only while a side with a tangent edge may still roll over (none where
-/// neither face has one), and the solver is as before after.
+/// (`sm_TestManifoldTangentRollover`), has a face beyond that carries the ball at every one
+/// ([`carried`]). The first such edge in the face's edge order is taken. Where both sides roll
+/// over, the ball rolled on both faces beyond together must be carried too, or neither side
+/// rolls. The ball is solved only while a side with a tangent edge may still roll over (none
+/// where neither face has one), a probe that fails finds no rollover ([`probe`]), and the solver
+/// is as before after.
 ///
 /// # Errors
-/// Those of the section solves, the classifications, the topology queries and the tangency test.
+/// [`SolidError::Unported`] and a cancellation from the probes; those of restoring the solver
+/// after a trial.
 fn rails_wholly_past(
     k: &Kernel,
     target: &mut Brep,
@@ -331,16 +338,64 @@ fn rails_wholly_past(
     inputs: &Inputs,
 ) -> Result<[Option<Rollover>; 2]> {
     let none = [None, None];
-    let Some(curve) = edge::evaluation_curve(target, inputs.edge)? else {
+    let Some(Some(sides)) = probe(sides_wholly_off(k, target, solver, inputs))? else {
         return Ok(none);
+    };
+    let mut out = none;
+    for (rail, (slot, found)) in out.iter_mut().zip(&sides.candidates).enumerate() {
+        if sides.wholly_off.get(rail) != Some(&true) {
+            continue;
+        }
+        for &rollover in found {
+            let mut trial = none;
+            if let Some(side) = trial.get_mut(rail) {
+                *side = Some(rollover);
+            }
+            if carried(k, target, solver, inputs, &sides, trial)? {
+                *slot = Some(rollover);
+                break;
+            }
+        }
+    }
+    if out.iter().all(Option::is_some) && !carried(k, target, solver, inputs, &sides, out)? {
+        return Ok(none);
+    }
+    Ok(out)
+}
+
+/// The sides of a round whose ball's contact lies off its face at every section, with each
+/// side's candidate edges to roll over.
+struct Sides {
+    /// The filleted edge's curve.
+    curve: Curve,
+    /// The edge parameters of the sections.
+    ts: Vec<f64>,
+    /// Each side's edges of its face but the filleted one, tangent to the face beyond within
+    /// the tangency tolerance, in the face's edge order.
+    candidates: [Vec<Rollover>; 2],
+    /// Whether each side's contact lies off its face at every section.
+    wholly_off: [bool; 2],
+}
+
+/// [`rails_wholly_past`]'s first probe: each side's candidates, and whether its contact lies
+/// off its face at every section; `None` where no side with a candidate has it so (or the edge
+/// has no curve, or a section is not found).
+///
+/// # Errors
+/// Those of the section solves, the classifications and the topology queries.
+fn sides_wholly_off(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    inputs: &Inputs,
+) -> Result<Option<Sides>> {
+    let Some(curve) = edge::evaluation_curve(target, inputs.edge)? else {
+        return Ok(None);
     };
     let ivl = edge::interval(target, inputs.edge)?;
     let ts: Vec<f64> = (0..=SAMPLES)
         .map(|i| ivl.evaluate(f64::from(i) / f64::from(SAMPLES)))
         .collect();
-    // each side's candidates: the edges of its face but the filleted one, tangent to the face
-    // beyond within the tangency tolerance (`sm_TestManifoldTangentRollover`), in the face's
-    // edge order
     let mut candidates: [Vec<Rollover>; 2] = [Vec::new(), Vec::new()];
     for (found, &face) in candidates.iter_mut().zip(&inputs.faces) {
         for e in face_p4::edges(target, face, None, false, None)? {
@@ -363,16 +418,17 @@ fn rails_wholly_past(
         }
     }
     if candidates.iter().all(Vec::is_empty) {
-        return Ok(none);
+        return Ok(None);
     }
     let tolerance = target.tolerance();
     // the ball's own sections, solved one at a time while a side with candidates may still
     // have its contact off its face at every one
     let mut wholly_off = candidates.each_ref().map(|found| !found.is_empty());
-    let mut own: Vec<TsectPnt> = Vec::new();
+    let mut previous: Option<TsectPnt> = None;
     for &t in &ts {
-        let Some(section) = ball_section_at(k, target, solver, &curve, t, own.last())? else {
-            return Ok(none);
+        let Some(section) = ball_section_at(k, target, solver, &curve, t, previous.as_ref())?
+        else {
+            return Ok(None);
         };
         for (rail, (off_face, &face)) in wholly_off.iter_mut().zip(&inputs.faces).enumerate() {
             if *off_face {
@@ -386,65 +442,98 @@ fn rails_wholly_past(
             }
         }
         if wholly_off.iter().all(|&w| !w) {
-            return Ok(none);
+            return Ok(None);
         }
-        own.push(section);
+        previous = Some(section);
     }
-    let mut out = none;
-    for (rail, slot) in out.iter_mut().enumerate() {
-        let side = side_of(rail);
-        let (Some(&offset), Some(true), Some(found)) = (
-            inputs.offsets.get(rail),
-            wholly_off.get(rail).copied(),
-            candidates.get(rail),
-        ) else {
+    Ok(Some(Sides {
+        curve,
+        ts,
+        candidates,
+        wholly_off,
+    }))
+}
+
+/// Whether the faces beyond carry the ball rolled on them on the sides `rollovers` names, at
+/// every one of `sides`'s sections: solved with each such side's offset surface on its face
+/// beyond's surface (its sign following the normals across the edge), each such side's contact
+/// lies on that face, and that face's offset by the ball does not fold there ([`offset_folds`]).
+/// A trial that fails is not carried ([`probe`]). The solver is as before after.
+///
+/// # Errors
+/// [`SolidError::Unported`] and a cancellation from the trial; those of saving and restoring
+/// the solver's offset surfaces.
+fn carried(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    inputs: &Inputs,
+    sides: &Sides,
+    rollovers: [Option<Rollover>; 2],
+) -> Result<bool> {
+    let saved = solver.base().offsets_data()?;
+    let saved_rolled = solver.base().rolled_faces;
+    let trial = probe(carried_rolled(k, target, solver, inputs, sides, rollovers));
+    solver.base_mut().set_offsets_data(&saved)?;
+    solver.base_mut().rolled_faces = saved_rolled;
+    Ok(trial?.unwrap_or(false))
+}
+
+/// [`carried`]'s trial, which leaves the solver rolled on the faces beyond.
+///
+/// # Errors
+/// Those of the rolls, the section solves, the classifications, the evaluations and
+/// [`offset_folds`].
+fn carried_rolled(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    inputs: &Inputs,
+    sides: &Sides,
+    rollovers: [Option<Rollover>; 2],
+) -> Result<bool> {
+    let mut supports = [None, None];
+    for (rail, (rollover, support)) in rollovers.iter().zip(supports.iter_mut()).enumerate() {
+        let Some(rollover) = rollover else {
             continue;
         };
-        for &rollover in found {
-            let beyond = rollover.face;
-            let opposite_normals = rollover.opposite_normals;
-            let support = crate::topology::face::p2::surface(target, beyond)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
-                .clone_for_evaluation()?;
-            // the ball rolled on the face beyond, then the solver as it was
-            let saved = solver.base().offsets_data()?;
-            let saved_rolled = solver.base().rolled_faces;
-            roll_solver_surface(k, solver.base_mut(), rail, &support, rollover)?;
-            let rolled = sections(k, target, solver, &curve, &ts);
-            solver.base_mut().set_offsets_data(&saved)?;
-            solver.base_mut().rolled_faces = saved_rolled;
-            let Some(rolled) = rolled? else {
+        let surface = crate::topology::face::p2::surface(target, rollover.face)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
+            .clone_for_evaluation()?;
+        roll_solver_surface(k, solver.base_mut(), rail, &surface, *rollover)?;
+        *support = Some(surface);
+    }
+    let Some(rolled) = sections(k, target, solver, &sides.curve, &sides.ts)? else {
+        return Ok(false);
+    };
+    let tolerance = target.tolerance();
+    for (section, &t) in rolled.iter().zip(&sides.ts) {
+        let along = sides
+            .curve
+            .evaluate(k, t, 1, true, false)?
+            .get(1)
+            .copied()
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's tangent"))?;
+        for (rail, (rollover, support)) in rollovers.iter().zip(&supports).enumerate() {
+            let (Some(rollover), Some(support), Some(&offset)) =
+                (rollover, support, inputs.offsets.get(rail))
+            else {
                 continue;
             };
-            let offset_beyond = if opposite_normals { -offset } else { offset };
-            let mut carried = true;
-            for (section, &t) in rolled.iter().zip(&ts) {
-                if off(classify(
-                    k,
-                    target,
-                    beyond,
-                    section.uv_pos(side),
-                    tolerance,
-                )?) {
-                    carried = false;
-                    break;
-                }
-                let contact = support.evaluate_point(k, section.uv_pos(side))?;
-                let along = curve
-                    .evaluate(k, t, 1, true, false)?
-                    .get(1)
-                    .copied()
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge's tangent"))?;
-                if offset_folds(k, target, beyond, contact, along, offset_beyond)? {
-                    carried = false;
-                    break;
-                }
+            let uv = section.uv_pos(side_of(rail));
+            if off(classify(k, target, rollover.face, uv, tolerance)?) {
+                return Ok(false);
             }
-            if carried {
-                *slot = Some(rollover);
-                break;
+            let contact = support.evaluate_point(k, uv)?;
+            let offset_beyond = if rollover.opposite_normals {
+                -offset
+            } else {
+                offset
+            };
+            if offset_folds(k, target, rollover.face, contact, along, offset_beyond)? {
+                return Ok(false);
             }
         }
     }
-    Ok(out)
+    Ok(true)
 }

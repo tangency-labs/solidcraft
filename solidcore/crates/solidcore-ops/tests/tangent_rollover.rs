@@ -616,15 +616,26 @@ fn wholly_past(r4: f64, d: f64) -> bool {
 /// meets the contact circle. Its rail there lies about 1e-4 from the closed form, as before this
 /// rollover was added, and is not checked here.) No volume: the round's faces on the foot round
 /// bound no closed-form solid.
-fn assert_rim_round_builds(r4: f64, d: f64) {
+///
+/// The model is built with the corpus's fix set ([`fixes`]; its foot round fails without it),
+/// the rim's round with that set (`corpus`) or with none, solidcore's default. Without the
+/// corpus's fixes the corner's round's piece on the foot round, which the trace's own rollover
+/// traces again from the crossing (`ProcessRollOver`), lies up to about 1.2e-4 from the closed
+/// form (r4 10, d 2) and is not checked; the rail rolled before the trace along x = -36 is.
+fn assert_rim_round_builds(r4: f64, d: f64, corpus: bool) {
     use solidcore::query::api_queries::edge_closest_point;
     use std::f64::consts::{FRAC_PI_2, PI};
+    fixes();
     let b = arm_boss_and_foot_round(r4);
     let rim = top_rim(&b, r4);
-    blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled)
-        .unwrap_or_else(|err| panic!("r4 {r4} d {d}: {err:?}"));
+    if !corpus {
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    }
+    let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
+    fixes();
+    result.unwrap_or_else(|err| panic!("r4 {r4} d {d} corpus {corpus}: {err:?}"));
     let report = b.check(CheckLevel::All).unwrap();
-    assert!(report.is_valid(), "r4 {r4} d {d}: {report}");
+    assert!(report.is_valid(), "r4 {r4} d {d} corpus {corpus}: {report}");
     let (k, brep) = common::kernel_copy(&b);
     let tolerance = brep.tolerance();
     let on_rail = |p: [f64; 3], what: &str| {
@@ -641,7 +652,8 @@ fn assert_rim_round_builds(r4: f64, d: f64) {
             .fold(f64::INFINITY, f64::min);
         assert!(
             distance < tolerance,
-            "r4 {r4} d {d}: {what} {p:?} is {distance} from the nearest edge (tolerance {tolerance})"
+            "r4 {r4} d {d} corpus {corpus}: {what} {p:?} is {distance} from the nearest edge \
+             (tolerance {tolerance})"
         );
     };
     // along x = -36, from V to W
@@ -677,6 +689,10 @@ fn assert_rim_round_builds(r4: f64, d: f64) {
     if wholly_past(r4, d) {
         let (x, y) = along(cross, reach);
         on_rail([x, y, 5.0], "the crossing of the contact circle");
+    }
+    // the corner's round's piece on the foot round, traced in the trace's own rollover
+    // (`ProcessRollOver`): checked with the corpus's fixes only
+    if wholly_past(r4, d) && corpus {
         for f in [0.25, 0.5, 0.75] {
             let th = cross + (PI - cross) * f;
             let (x, y) = along(th, reach);
@@ -691,14 +707,17 @@ fn assert_rim_round_builds(r4: f64, d: f64) {
 /// #15767 case 2: where [`wholly_past`], the round's rail on the arm's top along x = -36 lies off
 /// the top the whole length, past the foot round's smooth edge; it is rolled over onto the foot
 /// round before the trace, and the corner's round's rail rolls onto the foot round where it
-/// meets the contact circle, joining it at V. Refused before as having no room
-/// ([`Error::NoRoom`]; SolidCraft reports the fit 1.476 at r4 = 9).
+/// meets the contact circle, joining it at V. Before, with the corpus's fixes, it was refused
+/// as having no room after the trace ([`Error::NoRoom`], or [`Error::TooLarge`] with its rail
+/// leaving its face; SolidCraft reports the fit 1.476 at r4 = 9), and without them it failed in
+/// the trace's rollover (upstream's unimplemented tangent case, status 1001).
 #[test]
 fn a_rim_round_whose_rail_lies_wholly_on_the_foot_round_rolls_onto_it() {
-    fixes();
     for (r4, d) in [(9.0, 1.6), (9.0, 2.0), (9.0, 2.5), (10.0, 1.4), (10.0, 2.0)] {
         assert!(wholly_past(r4, d), "r4 {r4} d {d}");
-        assert_rim_round_builds(r4, d);
+        for corpus in [true, false] {
+            assert_rim_round_builds(r4, d, corpus);
+        }
     }
 }
 
@@ -707,10 +726,11 @@ fn a_rim_round_whose_rail_lies_wholly_on_the_foot_round_rolls_onto_it() {
 /// before. (8, 2.5) is the limit: 15.5^2 + 17^2 = 529.25, a quarter over 23^2.
 #[test]
 fn a_rim_round_partly_on_the_top_rolls_onto_the_foot_round_partway() {
-    fixes();
     for (r4, d) in [(8.0, 2.0), (8.0, 2.5), (9.0, 1.4)] {
         assert!(!wholly_past(r4, d), "r4 {r4} d {d}");
-        assert_rim_round_builds(r4, d);
+        for corpus in [true, false] {
+            assert_rim_round_builds(r4, d, corpus);
+        }
     }
 }
 

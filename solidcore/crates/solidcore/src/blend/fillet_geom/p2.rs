@@ -2376,7 +2376,11 @@ impl FilletBrep {
         // mate, solved on the side edge's other use (its own face's), and the first blend's end
         // is solved as the second blend's always is. Both corners' sections then end the rails
         // on the vertices they are trimmed to; the first blend's rollover solves the vertex
-        // again, from its piece rolled over, at the same ball.
+        // again, from its piece rolled over, at the same ball. The guesses on the side edge stay
+        // those set up above from the side edge use the corner chose (`from_start` from its
+        // orientation on a closed edge) and the first blend's radius: they are parameters of
+        // the edge's curve, shared by both edge uses, and upstream's second blend below already
+        // searches its edge use with them.
         let (mut side_eu1, mut vu1) = (side_eu1, vu1);
         if let (None, Some(g1), Some(g2)) = (opt_fg, fillet_geom1, fillet_geom2) {
             if g1 != g2 {
