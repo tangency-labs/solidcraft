@@ -1,0 +1,137 @@
+{
+ "case": "10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5",
+ "area": "fillets",
+ "sources": [
+  "tangency-labs/solidcraft#15641",
+  "tangency-labs/solidcraft#10876"
+ ],
+ "what": "the right ledge's two edges at its corner (12, 30, 33) rounded r 0.5 together: the convex edge where the ledge top meets the bore's round bottom (it runs on tangentially into the smooth edge between the bore's round bottom and its flat wall) and the concave edge where the ledge top meets the arch's front face, a mixed-convexity corner beside a curved face",
+ "calls": [
+  {
+   "inputs": [
+    "b255"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b256"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b256"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b257"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b257"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b258"
+   ],
+   "params": {
+    "operand": 0
+   }
+  },
+  {
+   "inputs": [
+    "b258"
+   ],
+   "op": "blend_dropping",
+   "params": {
+    "edges": {
+     "kind": "edge",
+     "picked": [
+      {
+       "at": [
+        [
+         12.000000000005116,
+         30.0,
+         33.0
+        ],
+        [
+         12.000000000005123,
+         21.0,
+         33.0
+        ]
+       ],
+       "index": 52
+      },
+      {
+       "at": [
+        [
+         12.000000000005116,
+         30.0,
+         33.0
+        ],
+        [
+         18.0,
+         30.0,
+         33.0
+        ]
+       ],
+       "index": 54
+      }
+     ],
+     "points": [
+      [
+       12.00000000000512,
+       25.5,
+       33.0
+      ],
+      [
+       15.000000000002558,
+       30.0,
+       33.0
+      ]
+     ],
+     "tolerance": 4.905334817281545
+    },
+    "kind": "round",
+    "sizes": [
+     0.5,
+     0.5
+    ],
+    "turn": "mitre"
+   },
+   "outputs": [
+    "b174"
+   ]
+  }
+ ],
+ "bodies": {
+  "b255": {
+   "keeping_splines": false,
+   "trusted": true
+  }
+ },
+ "params": {},
+ "result": [
+  {
+   "made": "b174"
+  }
+ ],
+ "expected": {
+  "body_count": 1,
+  "source": "analytic",
+  "sources": [
+   "tangency-labs/solidcraft#15641",
+   "tangency-labs/solidcraft#10876"
+  ],
+  "tolerance": {
+   "rel": 1e-07
+  },
+  "what": "the right ledge's two edges at its corner (12, 30, 33) rounded r 0.5 together: the convex edge where the ledge top meets the bore's round bottom (it runs on tangentially into the smooth edge between the bore's round bottom and its flat wall) and the concave edge where the ledge top meets the arch's front face, a mixed-convexity corner beside a curved face",
+  "method": "test11.sc from tangency-labs/solidcraft#15641 (a practice part: a 36 x 48 plate with a round end, an upright with a front notch, an arch, and a stadium bore of radius 12 through the arch and down into the upright, leaving two ledges at z = 33) up to Extrude9. V0 = 15 (1728 + 162 pi) - 6 (15 * 48 + I(-7.5, 7.5; 18)) - 432 pi - 216 pi + 36 * 27 * 18 - 18 * 6 * 18 + 36 * 18 * 12 + 2916 pi - 18 (288 + 144 pi) - 3 * 72 pi - 6 * 2 I(9, 12; 12) = 43913.957931372, with I(a, b; R) the integral of sqrt(R^2 - x^2) from a to b: the plate and its round end, the bottom slot (15 wide, 6 high, through), the counterbore (r 12, 3 deep) and hole (r 6), the upright, its front notch, the arch block and its r 18 top, less the bore (its whole stadium through the arch, its lower half disc through the ledges behind the notch, and the parts of that half disc beside the notch). The corner's fill has no closed form; the case grades one closed body."
+ },
+ "operation_expressible": true,
+ "expressible": true,
+ "records": "10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5.bodies.json.gz",
+ "gallery_note": "Each edge builds alone. Together they meet at a mixed-convexity corner beside the bore's round bottom, a curved face: the Setback does not take it (docs/generic-blend.md section 3.2) and the old corner it keeps fails."
+}
