@@ -28,6 +28,7 @@
 
 use crate::eval::vec::VecExt as _;
 use crate::eval::Surface;
+use crate::geom::tol::ZONE_TOL_3D;
 use crate::math::{Point3, Vec3, EFF_ZERO};
 use crate::{Result, SolidError};
 
@@ -39,6 +40,11 @@ const MAX_SIZE: f64 = 1.0e6;
 /// Two unit directions closer to parallel than this (radians, or its sine) are in line: a turn
 /// this small is no corner.
 const STRAIGHT: f64 = 1.0e-9;
+
+/// Two lengths that differ by at most this times the longer are equal. Lengths measured between
+/// a record's points carry rounding of a few 10⁻¹⁶ of their size, far below this; a difference
+/// above it is a nanometre per metre or more, which a design means.
+const EQUAL_LENGTHS: f64 = 1.0e-9;
 
 /// Angular slack (radians) on the largest corner angle relieved, so a corner computed at 90°
 /// plus rounding is still a 90° corner.
@@ -125,7 +131,8 @@ pub enum Skip {
     /// A minimal relief whose gap is so large that the circle reaches neither wall.
     Unreached,
     /// A face at a blind end leans over the corner so far that no relief fits above it: the
-    /// relief would have to stop short of the end by the edge's whole length or more.
+    /// relief would have to stop short of the end by the edge's whole length or more, or leave no
+    /// more of it than the kernel's zone tolerance ([`ZONE_TOL_3D`]).
     Overhang,
     /// A face at an open end runs so nearly along the edge (within about `reach / 10⁶ mm` rad,
     /// `reach` how far the relief's section reaches from the edge line) that the relief would have
@@ -146,9 +153,8 @@ struct Wedge {
 /// a T-bone reads the lengths and the axis, to choose its side). The walls are those
 /// [`edge_corner`] gives a concave corner: neither in line nor folded back onto each other.
 ///
-/// Walls whose lengths differ by at most [`STRAIGHT`] times the longer are equally long: lengths
-/// measured between a record's points differ by rounding far below that, and a square pocket's
-/// walls are equal by design. Of two equally long walls a T-bone's `Longer` takes the one from
+/// Walls whose lengths are equal by [`EQUAL_LENGTHS`] are equally long, as a square pocket's
+/// walls are by design. Of two equally long walls a T-bone's `Longer` takes the one from
 /// which the void turns counter-clockwise (`(a × b) · up > 0` takes `a`), `up` being `axis` turned
 /// so that its largest component (the first of equal ones) is positive: the choice depends on
 /// neither the order of the faces nor the edge's direction in the record, and every corner of a
@@ -183,7 +189,7 @@ fn wedge_relief(
         Style::Normal => bisector * r,
         Style::Minimal { gap } => bisector * (r + gap),
         Style::TBone { side } => {
-            let longer_is_a = if (la - lb).abs() <= STRAIGHT * la.max(lb) {
+            let longer_is_a = if (la - lb).abs() <= EQUAL_LENGTHS * la.max(lb) {
                 a.cross(b).dot(up(axis)) > 0.0
             } else {
                 la > lb
@@ -407,7 +413,9 @@ pub fn edge_relief(
     let before = short_of(past_start, edge.end, edge.start, at_start)?;
     let after = short_of(past_end, edge.start, edge.end, at_end)?;
     let height = cylinder.height - before - after;
-    if height <= STRAIGHT * cylinder.height.max(1.0) {
+    // Within the kernel's zone tolerance the end discs are one: no room left, and a cylinder that
+    // short is a sliver, no cut to send to the boolean.
+    if height <= ZONE_TOL_3D {
         return Ok(EdgeRelief::Skipped(Skip::Overhang));
     }
     Ok(EdgeRelief::Relief(ReliefCylinder {

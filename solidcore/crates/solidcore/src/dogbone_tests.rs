@@ -801,6 +801,18 @@ fn a_relief_stops_short_of_a_tilted_blind_floor() {
         edge_relief(&up, &walls, [steep, top], &o).unwrap(),
         EdgeRelief::Skipped(Skip::Overhang)
     );
+    // A floor that leaves `left` of the relief's 6 + R: 2R·tan β = 6 + R − left. A millimetre
+    // left is cut; 10⁻⁷ mm, within the zone tolerance, is a sliver: skipped as an overhang.
+    let leaving = |left: f64| {
+        let n = Vec3::Z + lean * ((6.0 + R - left) / (2.0 * R));
+        let floor: &[Option<Vec3>] = &[Some(n)];
+        edge_relief(&up, &walls, [floor, top], &o).unwrap()
+    };
+    let EdgeRelief::Relief(c) = leaving(1e-3) else {
+        panic!("1e-3 left: no relief");
+    };
+    assert!(close(c.height, 1e-3, 1e-9), "{c:?}");
+    assert_eq!(leaving(1e-7), EdgeRelief::Skipped(Skip::Overhang));
     // A face along the edge at its end (a wall split there, say) does not stop the relief short.
     let split: &[Option<Vec3>] = &[Some(Vec3::Z), Some(Vec3::Y), Some(lean)];
     let EdgeRelief::Relief(c) = edge_relief(&up, &walls, [split, top], &o).unwrap() else {
