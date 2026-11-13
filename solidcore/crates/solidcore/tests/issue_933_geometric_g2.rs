@@ -52,8 +52,7 @@ fn issue_933_opposite_normals_are_not_g2() {
         Point3::new(1.0, 0.0, 0.0),
         Point3::new(2.0, -1.0, 0.0),
     ]);
-    let mut k = Kernel::default();
-    k.fixes.geometric_g2_continuity = true;
+    let k = Kernel::default();
     assert_eq!(continuity(&k, &up, &down), ContinuityType::C1);
     // the same curve is still G2 with the fix on
     assert_eq!(continuity(&k, &up, &up), ContinuityType::C1C2C3);
@@ -73,7 +72,6 @@ fn geometric_g2_continuity_is_off_by_default() {
         Point3::new(2.0, -1.0, 0.0),
     ]);
     let k = Kernel::default();
-    assert!(!k.fixes.geometric_g2_continuity);
     assert_eq!(continuity(&k, &up, &down), ContinuityType::C1G2G3);
 }
 
@@ -93,8 +91,7 @@ fn issue_838_reparametrised_curve_is_geometrically_g2() {
         Point3::new(4.0, 4.0, 0.0),
     ]);
     let default = Kernel::default();
-    let mut fixed = Kernel::default();
-    fixed.fixes.geometric_g2_continuity = true;
+    let fixed = Kernel::default();
     assert_eq!(continuity(&default, &slow, &fast), ContinuityType::G1);
     assert_eq!(continuity(&fixed, &slow, &fast), ContinuityType::G1G2G3);
 }

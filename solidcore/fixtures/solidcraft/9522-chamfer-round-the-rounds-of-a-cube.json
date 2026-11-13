@@ -64,9 +64,7 @@
   {
    "name": "chamfer_3_round_the_rounds",
    "note": "Chamfer 3 on the bottom loop (four lines and four arcs, the report's eight picks in its order): each arc's chamfer is a cone about its round's axis that meets the bottom face in an arc of radius 2, its apex on the axis 2 mm below the bottom face. On SolidCraft 0.29.0 (truck) this builds, with four cone faces.",
-   "fixes": [
-    "fillet_chamfer_cone_on_arc"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -172,9 +170,7 @@
   {
    "name": "chamfer_4_9_round_the_rounds",
    "note": "Chamfer 4.9 on the bottom loop: the cones meet the bottom face in arcs of radius 0.1, their apexes 0.1 mm below it. On SolidCraft 0.29.0 (truck) this builds, with four cone faces.",
-   "fixes": [
-    "fillet_chamfer_cone_on_arc"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -280,9 +276,7 @@
   {
    "name": "chamfer_4_99_just_short_of_the_rounds",
    "note": "Chamfer 4.99 on the bottom loop: the cones meet the bottom face in arcs of radius 0.01, their apexes 0.01 mm below it. On SolidCraft 0.29.0 (truck) this builds, with four cone faces. Here it failed with a bare status 1001 (tangency-labs/solidcore#2546): the corners' search for where the rails meet the rounds' seams starts from the closest point of the arc to the ball's centre, 0.01 from the arc's centre, which the point/curve Newton step did not find within about R / 100 of an arc's centre; the step is now Newton's there (WR-740).",
-   "fixes": [
-    "fillet_chamfer_cone_on_arc"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -388,9 +382,7 @@
   {
    "name": "chamfer_4_9999_within_the_resolution_is_refused",
    "note": "Chamfer 4.9999 on the bottom loop: the bottom face's corner arcs (the cones' rails there) would have radius 0.0001, their ends 1.414e-4 apart, within the part's resolution (two of the blend's approximation tolerances, 2 x 1.6e-4): their end vertices would be one. Refused before the corners (WR-739, tangency-labs/solidcore#2546), naming the largest size whose arcs the part resolves, 5 - 2 x 1.6e-4 / sqrt(2), and that exactly 5 builds; it failed with a bare 1001.",
-   "fixes": [
-    "fillet_chamfer_cone_on_arc"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -498,9 +490,7 @@
   {
    "name": "chamfer_4_999999_within_the_resolution_is_refused",
    "note": "Chamfer 4.999999 on the bottom loop: the corner arcs would have radius 1e-6. Refused as chamfer_4_9999_within_the_resolution_is_refused, naming the same limit.",
-   "fixes": [
-    "fillet_chamfer_cone_on_arc"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -608,9 +598,7 @@
   {
    "name": "chamfer_5_as_wide_as_the_rounds",
    "note": "The report's case: chamfer 5 on the bottom loop, as wide as the R5 rounds, so each arc's chamfer is a cone whose apex is on its round's axis, at a corner of the bottom face (now a 20 x 20 square). On SolidCraft 0.29.0 (truck) the four arcs' chamfers came out as spheres (a round's ball at each corner) and the volume 119.73 mm^3 too large (25214.12).",
-   "fixes": [
-    "fillet_chamfer_cone_on_arc"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",

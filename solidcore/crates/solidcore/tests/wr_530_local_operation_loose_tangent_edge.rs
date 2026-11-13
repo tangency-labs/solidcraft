@@ -67,9 +67,8 @@ fn wall(k: &Kernel, b: &Brep) -> Vec<FaceId> {
 }
 
 /// The boss's wall given the r11 cylinder: the wall's faces, and the operation's result.
-fn move_wall(fixed: bool) -> (Vec<FaceId>, solidcore::Result<()>) {
+fn move_wall(_fixed: bool) -> (Vec<FaceId>, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.local_operation_refuses_loose_tangent_edges = fixed;
     let mut b = part(&mut k);
     let faces = wall(&k, &b);
     assert!(!faces.is_empty(), "the boss's wall");

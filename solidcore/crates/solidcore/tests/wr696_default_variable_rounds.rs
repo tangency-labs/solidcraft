@@ -152,7 +152,6 @@ fn a_law_with_corners_is_its_balls_union_on_the_default_kernel() {
 #[test]
 fn folding_balls_are_refused_on_the_default_kernel() {
     let k = &mut Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
     let mut b = create_box(k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap();
     let cubic = |r: &[f64]| {
         law(

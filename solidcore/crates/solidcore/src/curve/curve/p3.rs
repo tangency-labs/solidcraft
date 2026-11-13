@@ -154,10 +154,7 @@ fn point_keep_or_pass_on<C: CurveEvaluate + ?Sized>(
     t: f64,
     prev: Point3,
 ) -> Result<Point3> {
-    Ok(
-        ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
-            .unwrap_or(prev),
-    )
+    Ok(ignored_or_pass_on(curve.evaluate_point(k, t), true)?.unwrap_or(prev))
 }
 
 /// [`point_keep_or_pass_on`] without the pass-on, or `None` when, with the opt-in
@@ -171,7 +168,7 @@ fn point_keep_or_none<C: CurveEvaluate + ?Sized>(
     prev: Point3,
 ) -> Result<Option<Point3>> {
     match ignored(curve.evaluate_point(k, t))? {
-        None if k.fixes.query_statuses_pass_on => Ok(None),
+        None if true => Ok(None),
         p => Ok(Some(p.unwrap_or(prev))),
     }
 }
@@ -369,10 +366,7 @@ pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
 
     // (status ignored: a zero normal becomes (0, 0, 1); with the opt-in fix a zero
     // normal is the call's status, tangency-labs/smlib 8311f8e)
-    if k.fixes.query_statuses_pass_on {
-        return normal.unitize();
-    }
-    Ok(normal.unitize_or_z())
+    return normal.unitize();
 }
 
 /// Twice the sampled polygon's oriented area, summed as a fan from its first
@@ -452,7 +446,7 @@ fn move_end_point(curve: &mut Curve, point: Point3, skip_failed: bool) -> Result
 /// [`SolidError::Unported`] from the evaluations.
 pub fn crvs_fix_gaps(k: &Kernel, curves: Vec<Curve>, tol: f64) -> Result<FixedGaps> {
     let mut fixed: u64 = 0;
-    let skip_failed = k.fixes.query_statuses_pass_on;
+    let skip_failed = true;
 
     // head-tail them into chains - remove duplicate curves
     let mut chained = fix_chain_curves_list(k, curves.into_iter().map(Some).collect(), tol, true)?;
@@ -636,7 +630,7 @@ impl Curve {
         // First, find the span containing dStartParam. (With the opt-in fix the
         // statuses of the knots, intervals and span lengths are passed on,
         // tangency-labs/smlib 8311f8e.)
-        let pass_on = k.fixes.query_statuses_pass_on;
+        let pass_on = true;
         let (knots, _) =
             knots_ignoring_status(passed_on(self.knots_with_status(k, None), pass_on)?)?;
         let num_knots = knots.len() as i64;
@@ -1099,7 +1093,7 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> EvalNFunctions
             // 8311f8e)
             if let Some(r) = ignored_or_pass_on(
                 CcTangentIntEnfo::static_evaluate(k, self.curve1, self.curve2, x, f, jacobian),
-                k.fixes.query_statuses_pass_on,
+                true,
             )? {
                 found = r;
             }
@@ -1271,7 +1265,7 @@ impl Curve {
                 EFF_ZERO_SQ, // currently not used
             );
             let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-            ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+            ls.set_skips_failed_evaluations(true);
 
             let guess_t = [guess, 0.1, 0.1, 0.1];
             let r = match ls.solve_it(&guess_t, EFF_ZERO) {
@@ -1385,7 +1379,7 @@ where
         opt_vectors,
     );
     let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+    ls.set_skips_failed_evaluations(true);
 
     ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
 
@@ -1453,10 +1447,7 @@ where
         let mut obj_fcns = [0.0; 2];
         // (status ignored; Not used by Evaluate; passed on with the opt-in fix,
         // tangency-labs/smlib 8311f8e)
-        ignore_or_pass_on(
-            ls.evaluator().evaluate(&r.x, &mut obj_fcns, None),
-            k.fixes.query_statuses_pass_on,
-        )?;
+        ignore_or_pass_on(ls.evaluator().evaluate(&r.x, &mut obj_fcns, None), true)?;
         solution.start.solution_value = obj_fcns[0].abs() + obj_fcns[1].abs();
 
         // For a legitimate crossing, this should be extremely precise.
@@ -1794,7 +1785,7 @@ where
     // create a newton raphson solver object containing a curve/curve evaluator.
     let mut eval = CcIntersectEnfo::new(k, this, other, EFF_ZERO * EFF_ZERO / 10000.0);
     let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-    ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+    ls.set_skips_failed_evaluations(true);
 
     // Pick up close solutions and then test them
     ls.set_desired_accuracy(EFF_ZERO / 10.0);
@@ -1846,7 +1837,7 @@ where
             // create a second NewtonRaphson Solver
             let mut eval2 = CcIntersectEnfo::new(k, this, other, EFF_ZERO * EFF_ZERO / 10000.0);
             let mut ls2 = LocalSolveNd::new(&mut eval2, Some(&intervals), Some(&periodicities));
-            ls2.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+            ls2.set_skips_failed_evaluations(true);
 
             // Pick up close solutions and then test them
             ls2.set_desired_accuracy(EFF_ZERO / 10.0);
@@ -1924,7 +1915,7 @@ where
         let guess_t2 = sol;
 
         let mut ls2 = LocalSolveNd::new(&mut eval2, Some(&intervals), Some(&periodicities2));
-        ls2.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+        ls2.set_skips_failed_evaluations(true);
 
         // Pick up close solutions and then test them
         ls2.set_desired_accuracy(EFF_ZERO_SQ); // very tight

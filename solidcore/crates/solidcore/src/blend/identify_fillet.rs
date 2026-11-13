@@ -609,7 +609,7 @@ fn fillet_radius_or_zero(
 ) -> Result<f64> {
     Ok(ignored_or_pass_on(
         calculate_fillet_radius(k, s, rail_dir, param, want_circular, None),
-        k.fixes.query_statuses_pass_on,
+        true,
     )?
     .map_or(0.0, |(r, _)| r))
 }
@@ -617,12 +617,9 @@ fn fillet_radius_or_zero(
 /// The extrema function at `t` with its status ignored: a failed evaluation leaves the
 /// zeros it starts with (passed on with the opt-in
 /// `Kernel::fixes.query_statuses_pass_on`, WR-663; tangency-labs/smlib 21dcf69).
-fn sample(k: &Kernel, efo: &mut FindCurveDistanceExtrema<'_>, t: f64) -> Result<FunctionValue> {
+fn sample(_k: &Kernel, efo: &mut FindCurveDistanceExtrema<'_>, t: f64) -> Result<FunctionValue> {
     let mut v = FunctionValue::default();
-    ignore_or_pass_on(
-        efo.evaluate(t, &mut v, true),
-        k.fixes.query_statuses_pass_on,
-    )?;
+    ignore_or_pass_on(efo.evaluate(t, &mut v, true), true)?;
     Ok(v)
 }
 

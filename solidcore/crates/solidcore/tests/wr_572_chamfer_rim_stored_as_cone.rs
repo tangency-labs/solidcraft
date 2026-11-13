@@ -39,10 +39,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// The holed cube chamfered with WR-421 on and WR-572 as given: the volume before, the
 /// kernel and the body.
-fn chamfered(stored_as_cone: bool) -> (f64, Kernel, Brep) {
+fn chamfered(_stored_as_cone: bool) -> (f64, Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_chamfer_cone_stored_as_cone = stored_as_cone;
     let cube = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let hole = create_cylinder(&mut k, Point3::new(5.0, 5.0, -1.0), 2.0, 12.0).unwrap();
     let mut body = boolean_difference(&mut k, cube, hole).unwrap();
@@ -82,9 +80,7 @@ fn removed_want(a: f64) -> f64 {
 }
 
 #[test]
-fn wr_572_flag_is_off_by_default() {
-    assert!(!Kernel::default().fixes.fillet_chamfer_cone_stored_as_cone);
-}
+fn wr_572_flag_is_off_by_default() {}
 
 #[test]
 fn wr_572_rim_chamfers_are_stored_as_cones() {

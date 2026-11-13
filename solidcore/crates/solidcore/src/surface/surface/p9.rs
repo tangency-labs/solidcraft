@@ -209,7 +209,7 @@ fn tessellate(
     // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
     Ok(ignored_or_pass_on(
         curve.tessellate_by_bisection(k, interval, chord, angle, max_side),
-        k.fixes.query_statuses_pass_on,
+        true,
     )?
     .map(|t| t.parameters)
     .unwrap_or_default())
@@ -847,7 +847,7 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
         }
         // with the opt-in fix a branch outside the domain or interval of interest has no
         // answers (WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         if !domain.is_contained_by(&self.uv_domain, EFF_ZERO) {
             domain = match domain.intersect(&self.uv_domain) {
                 Ok(d) => d,

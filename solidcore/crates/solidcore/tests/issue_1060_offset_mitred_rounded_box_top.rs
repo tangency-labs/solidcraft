@@ -119,7 +119,6 @@ fn mitred_rounds_follow_the_moved_top_with_every_fix() {
         fixes: solidcore::kernel::UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.geometric_g2_continuity = false;
     let r = 3.0_f64;
     let pi = core::f64::consts::PI;
     let want = 40.0 * 30.0 * 29.0 - (1.0 - pi / 4.0) * r * r * 140.0

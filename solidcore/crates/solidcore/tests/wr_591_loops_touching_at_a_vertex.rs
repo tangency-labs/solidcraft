@@ -113,8 +113,7 @@ fn sound(areas: &[f64]) -> bool {
 
 #[test]
 fn wr_591_on_every_order_closes_round_the_touching_vertex() {
-    let mut k = Kernel::default();
-    k.fixes.loops_go_on_round_the_vertex = true;
+    let k = Kernel::default();
     for (variant, turn, curves) in orders() {
         let areas = loop_areas(&k, &curves)
             .unwrap_or_else(|| panic!("variant {variant}, turn {turn}: no closed loops"));
@@ -149,8 +148,7 @@ fn wr_591_loops_apart_are_unchanged() {
         .map(|&(a, b)| Curve::from(create_line_segment(a, b).unwrap()))
         .collect();
     let off = order_curves_into_loops(&Kernel::default(), &curves, 1e-6).unwrap();
-    let mut k = Kernel::default();
-    k.fixes.loops_go_on_round_the_vertex = true;
+    let k = Kernel::default();
     let on = order_curves_into_loops(&k, &curves, 1e-6).unwrap();
     assert_eq!(on.ordered, off.ordered);
     assert_eq!(on.loop_counts, off.loop_counts);
@@ -192,8 +190,7 @@ fn squares_orders() -> Vec<(bool, bool, usize, Vec<Curve>)> {
 /// of area 2) in 12 of the 32 orders.
 #[test]
 fn wr_591_loops_touching_from_outside_close_apart() {
-    let mut k = Kernel::default();
-    k.fixes.loops_go_on_round_the_vertex = true;
+    let k = Kernel::default();
     let mut bad = Vec::new();
     for (clockwise, high_first, turn, curves) in squares_orders() {
         match loop_areas(&k, &curves) {

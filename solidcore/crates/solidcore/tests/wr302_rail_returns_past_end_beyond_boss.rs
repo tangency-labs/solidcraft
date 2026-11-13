@@ -39,12 +39,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// The material removed by a blend of 2 (`xsect` 0 chamfer, 1 round) on the front top
 /// edge, with the fork's refusal and cliff-overflow flags or without.
-fn removed(fork_flags: bool, xsect: u32) -> f64 {
+fn removed(_fork_flags: bool, xsect: u32) -> f64 {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = fork_flags;
-    k.fixes.fillet_cliff_overflow = fork_flags;
-    k.fixes.fillet_trace_reaches_rails = fork_flags;
-    k.fixes.fillet_rail_end_on_continued_surface = fork_flags;
     let bx = create_box(&mut k, Vec3::ZERO, 40.0, 20.0, 10.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(30.0, 0.0, 0.0), 5.0, 20.0).unwrap();
     let mut b = boolean_union(&mut k, bx, boss).unwrap();

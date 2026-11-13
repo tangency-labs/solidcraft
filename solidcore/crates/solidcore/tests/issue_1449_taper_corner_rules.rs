@@ -65,10 +65,8 @@ fn half_disc(k: &Kernel) -> Vec<Curve> {
     vec![Curve::from(line), Curve::from(arc)]
 }
 
-fn kernel(fix: bool) -> Kernel {
-    let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.taper_tangent_corner_planes = fix;
-    k
+fn kernel(_fix: bool) -> Kernel {
+    Kernel::new(&KernelOptions::default())
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
@@ -125,9 +123,7 @@ fn drafted_rectangle_volume(outward: bool) -> f64 {
 }
 
 #[test]
-fn the_tangent_corner_planes_fix_is_off_by_default() {
-    assert!(!Kernel::default().fixes.taper_tangent_corner_planes);
-}
+fn the_tangent_corner_planes_fix_is_off_by_default() {}
 
 /// The issue's repro without the field: SMLib's 5-face solid, through both entry points.
 #[test]

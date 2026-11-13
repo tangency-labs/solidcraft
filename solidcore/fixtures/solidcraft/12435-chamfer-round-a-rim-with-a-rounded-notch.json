@@ -41,10 +41,7 @@
      "formula": "pi*35^2*10 - 0.5*1^2*2*pi*(35 - 1/3) (Pappus: the chamfer's triangle, centroid 1/3 in from the wall); tol 0.004 mm^3"
     }
    },
-   "fixes": [
-    "fillet_chamfer_cone_on_arc",
-    "fillet_chamfer_cone_stored_as_cone"
-   ]
+   "fixes": []
   },
   {
    "name": "rounded_notch",
@@ -106,10 +103,7 @@
      "formula": "10 * the area inside the rim (Green's theorem over its four arcs: R35 about the origin, R5 about (28.523116, +-9.296872), R7.25 about (36.5, 0)); tol 0.002 mm^3"
     }
    },
-   "fixes": [
-    "fillet_chamfer_cone_on_arc",
-    "fillet_chamfer_cone_stored_as_cone"
-   ]
+   "fixes": []
   },
   {
    "name": "rounded_notch_rim_chamfer_1",
@@ -199,10 +193,7 @@
      "formula": "the rounded notch's volume - 110.011450137: 0.5*d^2*sum(angle_i*(r_i -+ d/3)) over the rim's arcs (Pappus, minus on the three convex arcs, plus on the concave notch; they meet tangentially, so their normal sections tile the band), d = 1; tol 0.005 mm^3"
     }
    },
-   "fixes": [
-    "fillet_chamfer_cone_on_arc",
-    "fillet_chamfer_cone_stored_as_cone"
-   ]
+   "fixes": []
   },
   {
    "name": "rounded_notch_rim_chamfer_0_5",
@@ -292,10 +283,7 @@
      "formula": "the rounded notch's volume - 27.633762228: 0.5*d^2*sum(angle_i*(r_i -+ d/3)) over the rim's arcs (Pappus, minus on the three convex arcs, plus on the concave notch; they meet tangentially, so their normal sections tile the band), d = 0.5; tol 0.004 mm^3"
     }
    },
-   "fixes": [
-    "fillet_chamfer_cone_on_arc",
-    "fillet_chamfer_cone_stored_as_cone"
-   ]
+   "fixes": []
   },
   {
    "name": "rounded_notch_rim_chamfer_0_2",
@@ -385,10 +373,7 @@
      "formula": "the rounded notch's volume - 4.433968327: 0.5*d^2*sum(angle_i*(r_i -+ d/3)) over the rim's arcs (Pappus, minus on the three convex arcs, plus on the concave notch; they meet tangentially, so their normal sections tile the band), d = 0.2; tol 0.003 mm^3"
     }
    },
-   "fixes": [
-    "fillet_chamfer_cone_on_arc",
-    "fillet_chamfer_cone_stored_as_cone"
-   ]
+   "fixes": []
   },
   {
    "name": "rounded_notch_rim_chamfer_0_05",
@@ -478,10 +463,7 @@
      "formula": "the rounded notch's volume - 0.277515720: 0.5*d^2*sum(angle_i*(r_i -+ d/3)) over the rim's arcs (Pappus, minus on the three convex arcs, plus on the concave notch; they meet tangentially, so their normal sections tile the band), d = 0.05; tol 0.002 mm^3"
     }
    },
-   "fixes": [
-    "fillet_chamfer_cone_on_arc",
-    "fillet_chamfer_cone_stored_as_cone"
-   ]
+   "fixes": []
   }
  ]
 }

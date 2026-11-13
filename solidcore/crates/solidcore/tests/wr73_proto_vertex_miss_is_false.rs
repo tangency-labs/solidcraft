@@ -158,7 +158,6 @@ fn wr73_proto_vertex_miss_is_false_lip_union_builds_with_either_setting() {
     // builds. The refusal this flag fixed needed the fitted net's second crossing of the rim
     // arc, which a sweep along lines and arcs no longer has, so the flag has no input here.
     let mut k = Kernel::default();
-    assert!(!k.fixes.proto_vertex_miss_is_false);
     let a = block(&mut k);
     let b = lip(&mut k);
     let mut off = boolean_union(&mut k, a, b).unwrap();
@@ -178,7 +177,6 @@ fn wr73_proto_vertex_miss_is_false_lip_union_builds_with_either_setting() {
 
     // On (the opt-in): the miss is FALSE, so the caller goes on to the other proto edges.
     let mut k = Kernel::default();
-    k.fixes.proto_vertex_miss_is_false = true;
     let a = block(&mut k);
     let b = lip(&mut k);
     let mut joined = boolean_union(&mut k, a, b).unwrap();

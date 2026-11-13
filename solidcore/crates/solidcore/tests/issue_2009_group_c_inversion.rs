@@ -15,10 +15,8 @@ use solidcore::surface::sphere::Sphere;
 use solidcore::surface::surface::Surface;
 use solidcore::Kernel;
 
-fn kernel(apart: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.analytic_inversion_answers_apart = apart;
-    k
+fn kernel(_apart: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn code<T: std::fmt::Debug>(r: &solidcore::Result<T>) -> i32 {

@@ -264,22 +264,20 @@ fn local_operation_on(
     // faces' edges are found by extending the neighbouring surfaces to meet them, by a
     // distance sized from this box: sized from the original body alone, a face moved
     // further than about its size away left the extended neighbours short of it.
-    if k.fixes.local_operation_box_holds_new_surfaces {
-        for (j, slot) in placed.iter().enumerate() {
-            let surface = match (given.get(j).and_then(Option::as_ref), slot) {
-                (Some(surface), _) => surface,
-                (None, Some(at)) => new_list
-                    .get(*at)
-                    .ok_or_else(|| null("the placed new surface"))?,
-                (None, None) => continue,
-            };
-            let domain = surface.natural_uv_domain_with_nurb(k)?;
-            let surf_box = surface
-                .calculate_bounding_box(k, &domain, [true, false, false], true)?
-                .normal_box
-                .ok_or_else(|| null("the new surface's bounding box"))?;
-            bbox = bbox.union(&surf_box);
-        }
+    for (j, slot) in placed.iter().enumerate() {
+        let surface = match (given.get(j).and_then(Option::as_ref), slot) {
+            (Some(surface), _) => surface,
+            (None, Some(at)) => new_list
+                .get(*at)
+                .ok_or_else(|| null("the placed new surface"))?,
+            (None, None) => continue,
+        };
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let surf_box = surface
+            .calculate_bounding_box(k, &domain, [true, false, false], true)?
+            .normal_box
+            .ok_or_else(|| null("the new surface's bounding box"))?;
+        bbox = bbox.union(&surf_box);
     }
     let radius = bbox.sphere_bound().radius;
     let tolerance = b.tolerance();
@@ -1705,7 +1703,6 @@ mod tests {
     #[test]
     fn moves_the_top_of_a_box_further_than_its_size() {
         let mut k = Kernel::default();
-        k.fixes.local_operation_box_holds_new_surfaces = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 80.0), Vec3::Z));
@@ -1725,7 +1722,6 @@ mod tests {
     fn a_raised_cylinder_top_mates_on_its_exact_circle_within_the_derived_reach() {
         use crate::primitive::api_primitives as ap;
         let mut k = Kernel::default();
-        k.fixes.offset_analytic_mate_edges = true;
         let mut b = ap::create_cylinder(&mut k, Point3::ZERO, 5.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 20.5), Vec3::Z));
@@ -1746,7 +1742,6 @@ mod tests {
     #[test]
     fn a_far_top_on_a_unit_square_plane_is_refused_as_not_sound() {
         let mut k = Kernel::default();
-        k.fixes.local_operation_box_holds_new_surfaces = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::new(

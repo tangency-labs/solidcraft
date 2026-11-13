@@ -27,9 +27,8 @@ fn result(outcome: Boolean2dOutcome) -> Brep {
 
 /// An `n` x `n` grid of r 2 holes, 10 apart, cut from a `10 n` square plate; the face
 /// areas of the result, ascending.
-fn holed_plate_areas(fixed: bool, n: u32) -> Vec<f64> {
+fn holed_plate_areas(_fixed: bool, n: u32) -> Vec<f64> {
     let mut k = Kernel::default();
-    k.fixes.boolean_skips_faces_apart = fixed;
     let mut disks = Vec::new();
     for i in 0..n {
         for j in 0..n {

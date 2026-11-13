@@ -64,9 +64,8 @@ fn axis_edges(b: &Brep) -> Vec<EdgeId> {
 
 /// Chamfers the axis edges `which` with first offset 1 and second offset `second`
 /// through `SetFilletParameters`' second radii; `Err` is the fillet error code.
-fn chamfer(per_fan: bool, which: &[usize], second: f64) -> Result<f64, i32> {
+fn chamfer(_per_fan: bool, which: &[usize], second: f64) -> Result<f64, i32> {
     let mut k = Kernel::default();
-    k.fixes.fillet_corner_per_vertex_fan = per_fan;
     let mut b = up_down_squares(&mut k);
     let all = axis_edges(&b);
     assert_eq!(all.len(), 2);
@@ -157,9 +156,7 @@ use solidcore::topology::edgeuse::p1 as eu1;
 
 /// The section generator and rounds (and chamfers) as their definitions.
 fn definition_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
-    k
+    Kernel::default()
 }
 
 /// The box [0, 20] x [0, 20] x [0, 10]'s top front edge, along x at y = 0, z = 10.

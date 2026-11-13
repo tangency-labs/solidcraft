@@ -488,7 +488,7 @@ impl Stitch<'_> {
                     // delete Face and its boundary edges and vertices from the Brep
                     ignore_status(crate::error::passed_on(
                         self.edit_delete_face(k, b, f, true, true, None, None),
-                        k.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)?;
                 }
             }
@@ -586,7 +586,7 @@ impl Stitch<'_> {
                 // get modified Brep Bounding box (status not checked)
                 let brep_bbox = ignored(crate::error::passed_on(
                     qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?
                 .unwrap_or_default();
 
@@ -1585,7 +1585,7 @@ impl Stitch<'_> {
                     // (status not checked)
                     ignore_status(crate::error::passed_on(
                         self.edit_glue_vertices(k, b, v, new_v, None),
-                        k.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)?;
                     out.processed.push(v);
                     set_none(verts, ii)?;
@@ -1603,7 +1603,7 @@ impl Stitch<'_> {
                             0.0,
                             false,
                         ),
-                        k.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)?;
                     ignore_status(crate::error::passed_on(
                         update_object_tolerance(
@@ -1614,7 +1614,7 @@ impl Stitch<'_> {
                             0.0,
                             false,
                         ),
-                        k.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)?;
                 } else if split.reason == SplitReason::FarFromGeom {
                     // Set min distance, if it didn't split due to being too far away
@@ -1638,7 +1638,7 @@ impl Stitch<'_> {
                             e_tol,
                             false,
                         ),
-                        k.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)?;
 
                     // Also add to main Edges list: might still need processing here.

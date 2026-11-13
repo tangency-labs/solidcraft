@@ -903,26 +903,9 @@ impl OffsetFacesExecutive {
         // The local operation takes the surfaces over, also when it fails.
         local_operation_simple(k, b, &faces, surfaces)?;
 
-        if k.fixes.local_operation_closes_walls_to_nothing {
-            return self.join_across_closed_walls(k, b, &targets, tol);
-        }
+        return self.join_across_closed_walls(k, b, &targets, tol);
 
         // Some face must lie on one of the surfaces, or the operation moved none.
-        let mut moved_any = false;
-        for f in crate::topology::brep::p1::faces(b, None)? {
-            if on_target(k, b, f, &targets, tol)? {
-                moved_any = true;
-                break;
-            }
-        }
-        if !moved_any {
-            return Err(self.refuse(
-                OffsetFacesRefusal::NoEffect,
-                "the local operation reported success but moved no face onto its new surface",
-                None,
-            ));
-        }
-        Ok(())
     }
 
     /// The end of step 4 with `Kernel::fixes.local_operation_closes_walls_to_nothing`

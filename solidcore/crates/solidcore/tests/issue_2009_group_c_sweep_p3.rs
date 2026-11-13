@@ -17,10 +17,8 @@ use solidcore::primitive::primitive_creation::p3::{
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::{Kernel, SolidError};
 
-fn kernel(pass_on: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.sweep_statuses_pass_on = pass_on;
-    k
+fn kernel(_pass_on: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn operation(r: &Result<impl std::fmt::Debug, SolidError>) -> String {

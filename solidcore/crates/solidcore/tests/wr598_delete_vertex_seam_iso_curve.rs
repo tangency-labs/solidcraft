@@ -84,7 +84,6 @@ fn assert_joined(k: &Kernel, b: &Brep, survivor: EdgeId) {
 fn wr598_seam_curve_deleted_joins_with_fix_and_stays_without() {
     for fixed in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.delete_vertex_joins_seam_iso_curve = fixed;
         let (mut b, e_line, e_seam, v) = line_and_seam(&mut k);
         let r = p5::delete_topological_vertex(&mut k, &mut b, true, Some(v), Some(e_seam));
         if fixed {
@@ -102,7 +101,6 @@ fn wr598_seam_curve_deleted_joins_with_fix_and_stays_without() {
 fn wr598_line_deleted_into_seam_curve_joins_with_fix_and_stays_without() {
     for fixed in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.delete_vertex_joins_seam_iso_curve = fixed;
         let (mut b, e_line, e_seam, v) = line_and_seam(&mut k);
         let r = p5::delete_topological_vertex(&mut k, &mut b, true, Some(v), Some(e_line));
         if fixed {

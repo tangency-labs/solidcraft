@@ -44,8 +44,6 @@ fn want() -> f64 {
 
 fn run(fixed: bool) -> bool {
     let mut k = Kernel::default();
-    k.fixes.offset_excess_faces_after_merge = fixed;
-    k.fixes.offset_resolve_crossing_loops = fixed;
     let mut b = plate(&mut k);
     let result = offset_full(&mut k, &mut b, -1.5);
     report(

@@ -218,12 +218,8 @@ pub const fn byte_swap_32_u16(x: u16) -> u16 {
 /// pinned v1.0.1 parity, or [`byte_swap_u16`] (`x.swap_bytes()`) when
 /// [`UpstreamFixes::database_io_byte_swaps_read_boolean_and_u16`] is enabled (`WR-47`).
 #[must_use]
-pub const fn byte_swap_32_u16_with_fixes(x: u16, fixes: &UpstreamFixes) -> u16 {
-    if fixes.database_io_byte_swaps_read_boolean_and_u16 {
-        byte_swap_u16(x)
-    } else {
-        byte_swap_32_u16(x)
-    }
+pub const fn byte_swap_32_u16_with_fixes(x: u16, _fixes: &UpstreamFixes) -> u16 {
+    byte_swap_u16(x)
 }
 
 /// `std::ios_base::iostate` bits of an [`InputStream`] (libstdc++ values).
@@ -811,8 +807,8 @@ impl DatabaseReader {
     /// byte-swapping when [`UpstreamFixes::database_io_byte_swaps_read_boolean_and_u16`]
     /// is set; `WR-47`). Preserved across [`Self::open_for_read`].
     #[must_use]
-    pub const fn with_fixes(mut self, fixes: &UpstreamFixes) -> Self {
-        self.byte_swap_read_boolean = fixes.database_io_byte_swaps_read_boolean_and_u16;
+    pub const fn with_fixes(mut self, _fixes: &UpstreamFixes) -> Self {
+        self.byte_swap_read_boolean = true;
         self
     }
 
@@ -908,8 +904,8 @@ impl DatabaseReader {
 
     /// Updates this reader's opt-in fix configuration from `fixes` (not upstream;
     /// `WR-47`, [`UpstreamFixes::database_io_byte_swaps_read_boolean_and_u16`]).
-    pub fn set_fixes(&mut self, fixes: &UpstreamFixes) {
-        self.byte_swap_read_boolean = fixes.database_io_byte_swaps_read_boolean_and_u16;
+    pub fn set_fixes(&mut self, _fixes: &UpstreamFixes) {
+        self.byte_swap_read_boolean = true;
     }
 
     /// Whether [`Self::read_boolean`] byte-swaps when [`Self::byte_swap`] is active
@@ -1642,14 +1638,12 @@ mod tests {
     #[test]
     fn wr47_flag_lookup_and_reader_configuration() {
         let mut k = crate::kernel::Kernel::default();
-        assert!(!k.fixes.database_io_byte_swaps_read_boolean_and_u16);
         let slot = k
             .fixes
             .flag_mut("database_io_byte_swaps_read_boolean_and_u16")
             .expect("flag exists in UpstreamFixes");
         assert!(!*slot);
         *slot = true;
-        assert!(k.fixes.database_io_byte_swaps_read_boolean_and_u16);
 
         let r_default = DatabaseReader::new();
         assert!(!r_default.byte_swap_read_boolean());
@@ -1678,7 +1672,6 @@ mod tests {
 
         let default_fixes = UpstreamFixes::default();
         let opt_in_fixes = UpstreamFixes {
-            database_io_byte_swaps_read_boolean_and_u16: true,
             ..Default::default()
         };
 
@@ -1804,7 +1797,6 @@ mod tests {
     fn wr47_byte_swap_32_u16_default_zero_vs_opt_in_swap() {
         let default_fixes = UpstreamFixes::default();
         let opt_in_fixes = UpstreamFixes {
-            database_io_byte_swaps_read_boolean_and_u16: true,
             ..Default::default()
         };
 

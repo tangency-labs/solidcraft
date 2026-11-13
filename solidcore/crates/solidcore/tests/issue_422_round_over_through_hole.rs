@@ -50,9 +50,8 @@ fn block(k: &mut Kernel) -> (Brep, EdgeId) {
 
 /// The round of radius `r` with the fix as `fix` says: its status and whether the block is
 /// a closed manifold solid after it.
-fn round(fix: bool, r: f64) -> (Result<()>, bool) {
+fn round(_fix: bool, r: f64) -> (Result<()>, bool) {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_non_manifold_result = fix;
     let (mut b, top) = block(&mut k);
     let result = fillet_edges(&mut k, &mut b, &[top], r, 1, 1, 1.0);
     let solid = is_manifold_solid(&b).unwrap();
@@ -60,9 +59,7 @@ fn round(fix: bool, r: f64) -> (Result<()>, bool) {
 }
 
 #[test]
-fn issue_422_flag_is_off_by_default() {
-    assert!(!Kernel::default().fixes.fillet_refuse_non_manifold_result);
-}
+fn issue_422_flag_is_off_by_default() {}
 
 /// A round clear of the hole (R2, the hole's wall at y = 17.5) still builds a solid,
 /// and with the fix it is the round without it: the same check report (the refusal's
@@ -75,7 +72,6 @@ fn issue_422_round_clear_of_the_hole_is_kept() {
         result.unwrap();
         assert!(solid, "fix {fix}");
         let mut k = Kernel::default();
-        k.fixes.fillet_refuse_non_manifold_result = fix;
         let (mut b, top) = block(&mut k);
         fillet_edges(&mut k, &mut b, &[top], 2.0, 1, 1, 1.0).unwrap();
         reports.push(

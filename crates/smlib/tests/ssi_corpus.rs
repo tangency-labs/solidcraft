@@ -619,8 +619,8 @@ fn global_intersect_scores() -> Vec<Score> {
 
 /// solidcore passes exactly the cases [`GSI_1E6_PASS`] lists: a case that starts passing is
 /// added there, one that stops is a regression. The self-crossing curves (Viviani's figure eight,
-/// the crossing loops) are split at their crossings since solidcore's
-/// `ssi_split_curves_at_singular_points` (tangency-labs/solidcore#2110).
+/// the crossing loops) are split at their crossings since solidcore's singular-point
+/// split (tangency-labs/solidcore#2110).
 #[test]
 fn solidcore_global_intersect_at_1e_6() {
     let scores = global_intersect_scores();

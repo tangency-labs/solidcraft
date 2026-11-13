@@ -827,7 +827,7 @@ pub fn is_degenerate(k: &Kernel, b: &Brep, tol_3d: f64) -> Result<bool> {
     ))? {
         Some(bbox) => bbox,
         // fork 60a8a51: without a box there is no evidence the B-rep is a point
-        None if k.fixes.brep_edit_statuses_pass_on => return Ok(false),
+        None if true => return Ok(false),
         None => crate::geom::extent3d::Extent3d::default(),
     };
     Ok(bbox.is_point_sized(tol_3d))
@@ -895,10 +895,7 @@ pub fn reset_infinite_region(
                 Err(e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
                     return Err(e)
                 }
-                r => ignore_status(crate::error::passed_on(
-                    r,
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?,
+                r => ignore_status(crate::error::passed_on(r, true)?)?,
             }
         }
         SetRegionVoidType::InfiniteRegionOnly => {
@@ -974,7 +971,7 @@ pub fn set_region_is_void_flags_for_nested_solids(k: &mut Kernel, b: &mut Brep) 
         // (status ignored upstream: a failed call is read as no mated shells)
         for mated in ignored(crate::error::passed_on(
             shell_mated_shells(k, b, shell),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or_default()
         {
@@ -1483,7 +1480,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
         .ok_or_else(|| null("sm_CheckUVTrimCurve: edge without curve"))?;
     let edge_3d_start = ignored(crate::error::passed_on(
         curve.evaluate_point(k, edge_ivl.evaluate(0.0)),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?
     .unwrap_or(Point3::UNDEF);
 
@@ -1506,7 +1503,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
         .ok_or_else(|| null("sm_CheckUVTrimCurve: face without surface"))?;
     let face_3d_start = ignored(crate::error::passed_on(
         surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y)),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?
     .unwrap_or(Point3::UNDEF);
 
@@ -1532,7 +1529,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     // Now the other end:
     let edge_3d_end = ignored(crate::error::passed_on(
         curve.evaluate_point(k, edge_ivl.evaluate(1.0)),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?
     .unwrap_or(Point3::UNDEF);
     let end_vtx = if reverse {
@@ -1543,7 +1540,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     let vrtx_3d_end = vertex::point(b, end_vtx)?;
     let face_3d_end = ignored(crate::error::passed_on(
         surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y)),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?
     .unwrap_or(Point3::UNDEF);
     vrtx_tol = vertex::tolerance(b, end_vtx)?; // have to update this to End vtx.
@@ -1718,7 +1715,7 @@ fn evaluate_binormal_status_ignored(
     eu: EdgeuseId,
     parameter: f64,
 ) -> Result<BinormalEval> {
-    let undefined = BinormalEval {
+    let _undefined = BinormalEval {
         point: Vec3::UNDEF,
         binormal: Vec3::UNDEF,
         tangent: Vec3::UNDEF,
@@ -1726,29 +1723,7 @@ fn evaluate_binormal_status_ignored(
         uv: Point2::UNDEF,
     };
     // fork 60a8a51 passes the status on (`SER`)
-    if k.fixes.brep_edit_statuses_pass_on {
-        return evaluate_binormal(k, b, eu, parameter, true);
-    }
-    if !eu1::is_loop_edgeuse(b, eu)? {
-        return Ok(undefined); // SER(SM_ERR_INVALID_INPUT) before the outputs are set
-    }
-    match evaluate_binormal(k, b, eu, parameter, true) {
-        Ok(eval) => Ok(eval),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(
-            e @ SolidError::InvalidInput {
-                operation: "topology::edgeuse::p3",
-                ..
-            },
-        ) => Err(e),
-        // a status after "Init outputs": point, tangent and normal set to zero
-        Err(_) => Ok(BinormalEval {
-            point: Vec3::new(0.0, 0.0, 0.0),
-            tangent: Vec3::new(0.0, 0.0, 0.0),
-            face_normal: Vec3::new(0.0, 0.0, 0.0),
-            ..undefined
-        }),
-    }
+    return evaluate_binormal(k, b, eu, parameter, true);
 }
 
 // ---- curve side (sm_FindSideOfCurve) ----------------------------------------------------
@@ -2203,7 +2178,7 @@ pub fn update_vertex_edge_intervals(
                     ))?;
                     // (fork 60a8a51 passes this status on: `SER`)
                     let status = get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-                    crate::error::status_passed_on(status, k.fixes.brep_edit_statuses_pass_on)?;
+                    crate::error::status_passed_on(status, true)?;
                 }
             }
         }
@@ -2243,7 +2218,7 @@ pub fn redistribute_seam_uv_trim_curves(
     let eus = b.edge(new_edge)?.edgeuses.clone();
     // fork 60a8a51: without its four edge uses, their trim curves and their end points
     // there is nothing to compare, so nothing is swapped.
-    let soft = k.fixes.brep_edit_statuses_pass_on;
+    let soft = true;
     if soft && eus.len() != 4 {
         return Ok(false);
     }
@@ -2826,12 +2801,12 @@ pub fn make_vertex_split_uv_trim_curve(
     // (the SetMinMax statuses are not checked upstream)
     ignored(crate::error::passed_on(
         ivl1.set_min_max(ivl1.min(), edge_split_parameter_uv),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     let ivl1_3d = Extent1d::from_min_max(ivl1.min(), edge_split_parameter);
     ignored(crate::error::passed_on(
         ivl2.set_min_max(edge_split_parameter_uv, ivl2.max()),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     let ivl2_3d = Extent1d::from_min_max(edge_split_parameter, ivl2.max());
 
@@ -3449,14 +3424,14 @@ pub fn create_edge_edge_blend(
                 rail1_pos.push(
                     ignored(crate::error::passed_on(
                         rail1.evaluate_point(ivl1.evaluate(t)),
-                        k.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)?
                     .unwrap_or(Point3::UNDEF),
                 );
                 rail2_pos.push(
                     ignored(crate::error::passed_on(
                         rail2.evaluate_point(ivl2.evaluate(t)),
-                        k.fixes.brep_edit_statuses_pass_on,
+                        true,
                     )?)?
                     .unwrap_or(Point3::UNDEF),
                 );
@@ -3532,7 +3507,7 @@ pub fn create_edge_edge_blend(
         // (status not checked upstream; the interval is left as is on failure)
         ivl2 = ignored(crate::error::passed_on(
             rail2.reverse_parameterization(&ivl2),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or(ivl2);
         in_from_the_left = !in_from_the_left;
@@ -3550,11 +3525,11 @@ pub fn create_edge_edge_blend(
             // (neither status is checked upstream)
             ignored(crate::error::passed_on(
                 new_ivl.set_min_max(nat.min() * scale + offset, nat.max() * scale + offset),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             ignored(crate::error::passed_on(
                 rail2.edit_parameterization(&new_ivl),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             *ivl2 = ivl1;
         }
@@ -3580,7 +3555,7 @@ pub fn create_edge_edge_blend(
     if !same_dir_curves {
         ivl2 = ignored(crate::error::passed_on(
             rail2.reverse_parameterization(&ivl2),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or(ivl2);
     }
@@ -3865,7 +3840,7 @@ pub fn heal_brep(
             },
             make_uv_trim_curves,
         ),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     Ok(())
 }

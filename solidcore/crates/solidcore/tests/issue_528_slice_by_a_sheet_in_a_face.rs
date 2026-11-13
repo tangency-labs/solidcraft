@@ -36,7 +36,6 @@ fn slab_and_tower_sliced(k: &mut Kernel) -> Brep {
 #[test]
 fn issue_528_slice_in_a_face_keeps_a_manifold_part() {
     let mut k = Kernel::default();
-    k.fixes.slice_coincident_faces_sheet_side = true;
     let part = slab_and_tower_sliced(&mut k);
     assert_eq!(num_faces(&part), 6);
     assert!(is_manifold_solid(&part).unwrap());
@@ -57,7 +56,6 @@ fn issue_528_slice_in_a_face_keeps_the_coincident_face_by_default() {
 fn issue_528_box_sliced_by_its_top_face() {
     for fix in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.slice_coincident_faces_sheet_side = fix;
         let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
         let sheet = create_plane(&mut k, Point3::new(-5.0, -5.0, 10.0), 20.0, 20.0).unwrap();
         let part = boolean(&mut k, b, sheet, BooleanOperation::Slice)

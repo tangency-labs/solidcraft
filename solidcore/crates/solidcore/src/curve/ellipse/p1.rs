@@ -1237,8 +1237,7 @@ impl Ellipse {
     }
 
     /// [`Ellipse::assert_valid`] of a UV trim on `trim_surface`, its face's surface:
-    /// the `SmBSplineCurve` checks measure the trim on it with
-    /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560, see
+    /// the `SmBSplineCurve` checks measure the trim on it (WR-560, see
     /// [`BSplineCurve::assert_valid_on`]).
     ///
     /// # Errors
@@ -2015,7 +2014,7 @@ impl Ellipse {
             ));
         }
 
-        if k.fixes.ellipse_step_interval_checks && new_interval.length() < 0.0 {
+        if new_interval.length() < 0.0 {
             return Err(SolidError::invalid_input(
                 OP_ADJUST,
                 "STEP interval must have nonnegative length",
@@ -2044,11 +2043,10 @@ impl Ellipse {
         // install that zero-length interval with the opt-in: the next edit divides
         // by its length and creates NaN interior knots (#428 / WR-211).
         // The default preserves the pinned C++ result, including legacy probes.
-        if k.fixes.ellipse_step_interval_checks
-            && (!nurbs_t0.is_finite()
-                || !nurbs_t1.is_finite()
-                || !new_nurbs_ivl.length().is_finite()
-                || new_nurbs_ivl.length() <= 0.0)
+        if (!nurbs_t0.is_finite()
+            || !nurbs_t1.is_finite()
+            || !new_nurbs_ivl.length().is_finite()
+            || new_nurbs_ivl.length() <= 0.0)
         {
             return Err(SolidError::invalid_input(
                 OP_ADJUST,
@@ -2458,8 +2456,7 @@ mod tests {
     /// mapping (#1846).
     #[test]
     fn step_interval_checks_allow_turn_preserving_mapping() {
-        let mut k = kernel();
-        k.fixes.ellipse_step_interval_checks = true;
+        let k = kernel();
         let past = Extent1d::from_min_max(360.0, 540.0);
         for end in [360.0, 180.0] {
             let mut c = circle(&k, 0.0, end, 2.0);
@@ -2484,8 +2481,7 @@ mod tests {
 
     #[test]
     fn invalid_step_interval_is_rejected_before_an_ellipse_edit() {
-        let mut k = kernel();
-        k.fixes.ellipse_step_interval_checks = true;
+        let k = kernel();
         // An equal-angle request is not retained as a point arc: MakeNurb
         // expands it to a full turn, while the old converter still gives a
         // zero-length NURBS interval. Reject it rather than creating that pair.

@@ -374,7 +374,7 @@ impl SurfaceIntersector<'_> {
 
             // add the intervals of the iso curves (statuses ignored, passed on with
             // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-            let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+            let pass = true;
             for (ii, ivl) in intervals.iter_mut().enumerate() {
                 if ii % 2 == 1 {
                     let _ = passed_on(ivl.set_min_max(domain.min().x, domain.max().x), pass)?;
@@ -601,10 +601,7 @@ impl SurfaceIntersector<'_> {
         // Add the surface-edge crossings last (statuses ignored)
         for p in core::mem::take(&mut work.edge_crossings) {
             let id = self.alloc_point(p);
-            ignored(passed_on(
-                self.add_start_point(k, id),
-                k.fixes.ssi_proto_topology_statuses_pass_on,
-            )?)?;
+            ignored(passed_on(self.add_start_point(k, id), true)?)?;
         }
 
         // make degenerate curves of the touching points
@@ -615,7 +612,7 @@ impl SurfaceIntersector<'_> {
             // skip points that are on a curve or a start point already
             let starts = self.start_points().to_vec();
             if self.is_point_on_curve(k, degenerate_point, &out.curves_3d, None)?
-                || self.is_point_on_start_point(k, tsp, &starts, None)?
+                || self.is_point_on_start_point(tsp, &starts, None)?
             {
                 continue;
             }
@@ -658,7 +655,7 @@ impl SurfaceIntersector<'_> {
         // boundary curve point (status ignored: an uninitialised point)
         let pt = ignored(passed_on(
             tgt.evaluate(k, par(&sol.start, 0), 1, true, true),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
+            true,
         )?)?
         .and_then(|v| v.first().copied())
         .unwrap_or(Vec3::UNDEF);
@@ -666,7 +663,7 @@ impl SurfaceIntersector<'_> {
         // Set bIsDegenerate = TRUE: a degenerate point xsect curve (status ignored)
         let is_degenerate = ignored(passed_on(
             self.classify_boundary_start_point_intersection(k, &tsp),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or(false);
 
@@ -692,10 +689,7 @@ impl SurfaceIntersector<'_> {
             } else {
                 // add the point to the list of start points (status ignored)
                 let id = self.alloc_point(tsp);
-                ignored(passed_on(
-                    self.add_start_point(k, id),
-                    k.fixes.ssi_proto_topology_statuses_pass_on,
-                )?)?;
+                ignored(passed_on(self.add_start_point(k, id), true)?)?;
             }
         }
         Ok(())

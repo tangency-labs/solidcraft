@@ -91,7 +91,7 @@ pub(super) fn split_profiles(k: &Kernel, curves: &mut Vec<BSplineCurve>) -> Resu
         // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
         let pieces = ignored(passed_on(
             curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5),
-            k.fixes.sweep_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or_default();
         if pieces.len() > 1 {
@@ -211,7 +211,7 @@ pub fn prepare_curve_sweep(
     let mut path_to_origin = Axis2Placement::IDENTITY;
     path_to_origin.translate(-start);
     // fork c8f6a31 (WR-662): the statuses below are passed on (`SER`).
-    let p = k.fixes.sweep_statuses_pass_on;
+    let p = true;
     ignore_status(passed_on(path.transform(&path_to_origin, None), p)?)?;
     let mut reference = Vec3::ZERO;
     if options.profile_at_path_start {

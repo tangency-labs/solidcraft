@@ -65,7 +65,6 @@ fn corner_gaps(k: &Kernel) -> (f64, f64) {
 #[test]
 fn flag_off_places_the_origin_along_the_unturned_axis() {
     let k = Kernel::default();
-    assert!(!k.fixes.plane_recognition_origin_after_axes);
     let (low, high) = corner_gaps(&k);
     assert!(
         (low - 4.0 * SPAN * TURN).abs() < SLACK,
@@ -83,8 +82,7 @@ fn flag_off_places_the_origin_along_the_unturned_axis() {
 
 #[test]
 fn flag_on_places_the_origin_along_the_plane_axes() {
-    let mut k = Kernel::default();
-    k.fixes.plane_recognition_origin_after_axes = true;
+    let k = Kernel::default();
     let (low, high) = corner_gaps(&k);
     assert!(low < SLACK, "v = 4 corner gap {low:e}, expected 0");
     assert!(

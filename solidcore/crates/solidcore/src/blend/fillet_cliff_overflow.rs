@@ -4,7 +4,7 @@
 //!
 //! Not upstream: the SolidCraft fork's `source/SMLib/src/SmFilletCliffOverflow.cpp`
 //! (tangency-labs/smlib `8ba4667` and `ae2a6de`, rev `68fb9162`; `eddf0ed` and `bba9914`,
-//! branch `replay/1.0.1`), behind `fixes.fillet_cliff_overflow` (WR-631, WR-638, WR-635,
+//! branch `replay/1.0.1`), behind `true` (WR-631, WR-638, WR-635,
 //! WR-636). The executive computes the fillet on the
 //! support faces' surfaces (`m_bCliffOverflow`): its fillet B-rep is the sheet of fillet and
 //! corner faces, its boundary on the surfaces of the faces the blends roll on and end on.
@@ -1899,7 +1899,7 @@ fn on_section_plane(p: Point3, at: Point3, normal: Vec3, tol: f64) -> bool {
     (p - at).dot(normal).abs() <= tol
 }
 
-/// Not the fork's (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`,
+/// Not the fork's (WR-674, `true`,
 /// tangency-labs/solidcore#2176): close the sheet `region` of one round, cut off at both
 /// ends by its sections (`ends`, the two vertices of the filleted edge `fil_edge`), into the
 /// region the round removes. The sheet's boundary is a rail on each face of the filleted
@@ -2064,7 +2064,7 @@ pub fn close_section_ended_round(
 }
 
 /// The section's flat face of a round cut off at `end` (WR-674, [`close_section_ended_round`];
-/// with `fixes.fillet_section_end_trim_at_creases`, WR-706, the trim's): on the section's
+/// with `true`, WR-706, the trim's): on the section's
 /// plane, bounded by the lamina edge `section` of `region` (the round's section) and the lines
 /// from its ends to the end's vertex (a line shorter than `on_tol` left out), added to
 /// `region`.

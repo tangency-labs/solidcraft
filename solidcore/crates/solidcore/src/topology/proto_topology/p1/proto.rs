@@ -315,7 +315,7 @@ fn eval_point(k: &Kernel, curve: &Curve, t: f64) -> Result<Point3> {
 fn eval_point_or_no(k: &Kernel, curve: &Curve, t: f64) -> Result<Option<Point3>> {
     match ignored(curve.evaluate_point(k, t))? {
         Some(p) => Ok(Some(p)),
-        None if k.fixes.ssi_proto_topology_statuses_pass_on => Ok(None),
+        None if true => Ok(None),
         None => Ok(Some(Vec3::UNDEF)),
     }
 }
@@ -324,11 +324,7 @@ fn eval_point_or_no(k: &Kernel, curve: &Curve, t: f64) -> Result<Option<Point3>>
 /// `ssi_proto_topology_statuses_pass_on` its error is returned, without it the unset
 /// point as upstream.
 fn eval_point_passed(k: &Kernel, curve: &Curve, t: f64) -> Result<Point3> {
-    if k.fixes.ssi_proto_topology_statuses_pass_on {
-        curve.evaluate_point(k, t)
-    } else {
-        eval_point(k, curve, t)
-    }
+    curve.evaluate_point(k, t)
 }
 
 // ---- static helpers ------------------------------------------------------------------
@@ -1184,7 +1180,7 @@ impl<O: ClassObject> VertexDefinition<O> {
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,
     ) -> Result<()> {
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         ignore_or_pass_on(
             self.pc1
                 .compute_point_parameters(k, geometry, self.position),
@@ -1548,7 +1544,7 @@ impl<O: ClassObject> EdgeDefinition<O> {
         max: f64,
     ) -> Result<()> {
         // fork bcc6f01: returns the reversal's and the interval's statuses
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         if min <= max {
             ignore_status(passed_on(self.xsect_interval.set_min_max(min, max), pass)?)?;
         } else {
@@ -1574,10 +1570,7 @@ impl<O: ClassObject> EdgeDefinition<O> {
         reverse: bool,
     ) -> Result<()> {
         if reverse {
-            ignore_soft(passed_on(
-                self.reverse_orientation(k, geometry),
-                k.fixes.ssi_proto_topology_statuses_pass_on,
-            )?)?;
+            ignore_soft(passed_on(self.reverse_orientation(k, geometry), true)?)?;
         }
 
         if new_domain.are_same(&self.xsect_interval) {
@@ -1630,7 +1623,7 @@ impl<O: ClassObject> EdgeDefinition<O> {
         };
         let mut param = guess;
 
-        let end_pos = if k.fixes.ssi_proto_topology_statuses_pass_on {
+        let end_pos = if true {
             // fork bcc6f01: no end position, no evidence
             let param = if at_start {
                 self.xsect_interval.min()
@@ -1688,7 +1681,7 @@ impl<O: ClassObject> EdgeDefinition<O> {
             Ok((Some(p), _)) => p,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // fork bcc6f01: no value, no evidence
-            Err(_) if k.fixes.ssi_proto_topology_statuses_pass_on => return Ok((false, param)),
+            Err(_) if true => return Ok((false, param)),
             _ => Vec3::UNDEF,
         };
         let dist = edge_pt.distance(end_pos);
@@ -2729,7 +2722,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let dist2 = v.pc2.gap_3d(k, geometry, None)?;
 
         // passed on with `ssi_proto_topology_statuses_pass_on` (fork bcc6f01)
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         let (pt1, pt2) = if pass {
             (
                 v.pc1.find_obj_point_3d(k, geometry)?,
@@ -3374,11 +3367,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// `ssi_proto_topology_statuses_pass_on` (fork bcc6f01), the removals' `SM_ERR`.
     pub fn remove_vertex_definition(
         &mut self,
-        k: &Kernel,
+        _k: &Kernel,
         vd: VertexDefId,
         remove_owner_if_empty: bool,
     ) -> Result<()> {
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         let owner = self
             .vd(vd)?
             .proto_vertex
@@ -3420,8 +3413,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// `SM_ERR` when `pe` is not listed; [`SolidError::InvalidInput`] for deleted
     /// objects; with `ssi_proto_topology_statuses_pass_on` (fork bcc6f01), the end
     /// proto vertices' `SM_ERR` when `pe` is not listed there.
-    pub fn remove_proto_edge(&mut self, k: &Kernel, pe: ProtoEdgeId) -> Result<()> {
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+    pub fn remove_proto_edge(&mut self, _k: &Kernel, pe: ProtoEdgeId) -> Result<()> {
+        let pass = true;
         match self.pes.iter().position(|&x| x == pe) {
             Some(i) => {
                 self.pes.remove(i);
@@ -3595,18 +3588,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let is_edge = |t: O| t.class_kind() == ClassObjectKind::Edge;
         if is_edge(t11) && is_edge(t12) && is_edge(t21) && is_edge(t22) {
             if t11 != t21 && t12 == t22 {
-                let n = degen_face_choice(passed_on(
-                    find_ed_on_degen_face(geometry, t11, t21),
-                    k.fixes.ssi_proto_topology_statuses_pass_on,
-                )?)?;
+                let n =
+                    degen_face_choice(passed_on(find_ed_on_degen_face(geometry, t11, t21), true)?)?;
                 if n != 0 {
                     return Ok(n);
                 }
             } else if t11 == t21 && t12 != t22 {
-                let n = degen_face_choice(passed_on(
-                    find_ed_on_degen_face(geometry, t12, t22),
-                    k.fixes.ssi_proto_topology_statuses_pass_on,
-                )?)?;
+                let n =
+                    degen_face_choice(passed_on(find_ed_on_degen_face(geometry, t12, t22), true)?)?;
                 if n != 0 {
                     return Ok(n);
                 }
@@ -3672,7 +3661,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // upstream returns SM_SUCCESS here, which reads as TRUE (the proto vertex is
         // not removed): plan/upstream-issues.md WR-73; FALSE with the opt-in
         // `Kernel::fixes.proto_vertex_miss_is_false` (tangency-labs/solidcore#848)
-        let missed = !k.fixes.proto_vertex_miss_is_false;
+        let missed = false;
         let Some(sols) = sols else {
             return Ok(missed);
         };
@@ -3684,7 +3673,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         if p.proto_edges.is_empty() {
             let removed = self.remove_proto_vertex(pv);
             // fork bcc6f01: a vertex it could not remove was not removed
-            if removed.is_err() && k.fixes.ssi_proto_topology_statuses_pass_on {
+            if removed.is_err() {
                 return Ok(false);
             }
             return Ok(true);
@@ -3730,7 +3719,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     | SolidError::PortInvariant { .. }),
                 ) => return Err(e),
                 // fork bcc6f01: no value, no evidence
-                Err(_) if k.fixes.ssi_proto_topology_statuses_pass_on => return Ok(None),
+                Err(_) if true => return Ok(None),
                 _ => Vec3::UNDEF,
             };
 

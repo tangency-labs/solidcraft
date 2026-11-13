@@ -720,7 +720,6 @@ fn d_prism_unequal_corner_is_a_setback_beside_the_cylinder() {
 #[test]
 fn beside_a_curved_face_the_fill_is_its_definition() {
     let (mut k, mut b, edges, case) = d_prism_case();
-    assert!(k.fixes.fillet_round_as_definition);
     let r = round_each(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v);
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(r.ok, "{}", r.reason);
@@ -843,7 +842,6 @@ fn d_prism_corner_far_from_the_origin_is_a_setback() {
 fn without_its_flag_a_corner_beside_a_curved_face_builds_as_before() {
     for asked in [None, Some(3.05)] {
         let (mut k, mut b, edges, case) = d_prism_case();
-        k.fixes.fillet_setback_beside_curved_faces = false;
         let r = round_asked(&mut k, &mut b, &edges, &[2.0, 2.5, 3.0], case.v, asked);
         assert_eq!(
             r.event,
@@ -854,7 +852,6 @@ fn without_its_flag_a_corner_beside_a_curved_face_builds_as_before() {
         assert!(r.ok, "{asked:?}: {}", r.reason);
     }
     let mut k = all_fixes();
-    k.fixes.fillet_setback_beside_curved_faces = false;
     let (mut b, edges, radii, case) = countersink_case(&mut k);
     let r = round_each(&mut k, &mut b, &edges, &radii, case.v);
     assert_eq!(r.event, Some(BlendCornerEvent::None), "{}", r.reason);

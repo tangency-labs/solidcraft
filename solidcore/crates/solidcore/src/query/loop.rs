@@ -166,9 +166,9 @@ fn drop_on_edge(
 /// The value of a call whose failure the port returns, or `None` when, with the opt-in
 /// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], the point is not classified
 /// (`SM_POC_UNKNOWN`, tangency-labs/smlib 7a35f33). [`SolidError::Unported`] propagates.
-fn or_unknown<T>(k: &Kernel, r: Result<T>) -> Result<Option<T>> {
+fn or_unknown<T>(_k: &Kernel, r: Result<T>) -> Result<Option<T>> {
     match r {
-        Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled() => Ok(None),
+        Err(e) if !e.is_unported_or_cancelled() => Ok(None),
         r => r.map(Some),
     }
 }
@@ -268,7 +268,7 @@ fn local_minimize(
     {
         Ok((true, sol)) => Ok(Ok(Some(sol))),
         Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
-        Err(_) if k.fixes.query_statuses_pass_on => Ok(Err(())),
+        Err(_) if true => Ok(Err(())),
         Ok((false, _)) | Err(_) => Ok(Ok(None)),
     }
 }
@@ -290,7 +290,7 @@ fn eval_with_tangent(
                 *slot = v;
             }
         }
-        Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() || true => return Err(e),
         // status ignored upstream: sPtDer keeps its values
         Err(_) => {}
     }
@@ -487,7 +487,7 @@ pub(crate) fn contains_uv_point_with_topology(
         match last_trim.evaluate_point(k, last_end_param) {
             Ok(p) => p,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) if k.fixes.query_statuses_pass_on => {
+            Err(_) if true => {
                 return Ok(UvContainment::of(PointContainment::Unknown));
             }
             Err(_) => Vec3::UNDEF,
@@ -1317,8 +1317,7 @@ mod tests {
         assert_eq!(tan, Vec3::new(0.0, -1.0, 0.0));
         assert_eq!(len, 2.0);
         // with the opt-in the failure is returned (SM_POC_UNKNOWN at the caller)
-        let mut k = Kernel::default();
-        k.fixes.query_statuses_pass_on = true;
+        let k = Kernel::default();
         assert!(eval_with_tangent(&k, &trim, 0.0, OrientType::Same, &mut pt_der).is_err());
     }
 
@@ -1448,8 +1447,7 @@ mod tests {
             .unwrap()
             .uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
         assert!(contains(&mut b.clone_standing_for_self().unwrap(), [0.0, 0.0]).is_ok());
-        let mut k = Kernel::default();
-        k.fixes.query_statuses_pass_on = true;
+        let k = Kernel::default();
         let r = contains_uv_point(
             &k,
             &mut b,

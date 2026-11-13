@@ -1,7 +1,7 @@
 //! The cliff overflow's subtraction on the live session (not upstream): the fork's
 //! `SmFilletExecutive::SubtractRemovalRegion` and `sm_HoldsItsLaw`
 //! (`source/SMLib/src/SmFilletCliffOverflow.cpp`, tangency-labs/smlib `8ba4667`, `ae2a6de`,
-//! rev `68fb9162`; `fixes.fillet_cliff_overflow`, WR-631, WR-638). The construction steps
+//! rev `68fb9162`; `true`, WR-631, WR-638). The construction steps
 //! are in [`crate::blend::fillet_cliff_overflow`].
 //!
 //! | Rust                                       | Fork                                      |
@@ -10,7 +10,7 @@
 //! | `FilletSession::holds_its_law` (private)   | `sm_HoldsItsLaw`                          |
 //!
 //! Deviations:
-//! - **Section ends (not the fork's).** With `fixes.fillet_round_ends_at_tangent_continuation`
+//! - **Section ends (not the fork's).** With `true`
 //!   (WR-674, #2176) an open end noted as a section is cut by the plane through its vertex
 //!   normal to the filleted edge, and a round whose two ends are both such ends is closed by
 //!   `close_section_ended_round` instead of `close_removal_region`; any other combination

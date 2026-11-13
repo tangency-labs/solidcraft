@@ -66,7 +66,7 @@ pub fn ruled_surface_from_offset(
     options: OffsetRuleOptions,
 ) -> Result<(BSplineSurface, Option<OffsetMapAttribute>)> {
     // fork c8f6a31 (WR-662): the statuses below are passed on (`SER`).
-    let p = k.fixes.sweep_statuses_pass_on;
+    let p = true;
     ignore_status(passed_on(
         offset_curve.degree_reduction(options.tolerance, true),
         p,

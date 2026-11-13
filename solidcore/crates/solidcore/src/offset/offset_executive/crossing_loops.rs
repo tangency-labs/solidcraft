@@ -540,61 +540,23 @@ impl OffsetExecutive {
         // per edge use: (parameter, crossing)
         let mut cuts: Vec<Vec<(f64, i64)>> = vec![Vec::new(); edgeuses.len()];
         let mut num_crossings: i64 = 0;
-        if kernel.fixes.offset_walls_touch_refused {
-            // Fork a759622: every contact is looked at before any crossing is resolved
-            // or refused.
-            num_crossings = cut_at_crossings_refusing_touch(
-                kernel,
-                b,
-                f,
-                &CrossingInputs {
-                    loop_edgeuses: &loop_edgeuses,
-                    loop_of: &loop_of,
-                    edgeuses: &edgeuses,
-                    uvs: &uvs,
-                    first_of_loop: &first_of_loop,
-                    tol_3d,
-                    uv_tol,
-                },
-                &mut cuts,
-            )?;
-        } else {
-            for aa in 0..edgeuses.len() {
-                let first_b = *at(&first_of_loop, *at(&loop_of, aa)? + 1)?;
-                for bb in first_b..edgeuses.len() {
-                    let (uv_a, uv_b) = (at(&uvs, aa)?, at(&uvs, bb)?);
-                    let solutions = uv_a.global_curve_intersect(
-                        kernel,
-                        &uv_a.natural_interval(),
-                        uv_b,
-                        &uv_b.natural_interval(),
-                        uv_tol,
-                        &CurveIntersectOptions::<NoObject>::default(),
-                    )?;
-                    for solution in solutions.as_slice() {
-                        if solution.solution_type != SolutionType::SingleValue {
-                            return Err(unresolved(LoopCrossing::RunAlong));
-                        }
-                        let t_a = solution.start.param(0)?;
-                        let t_b = solution.start.param(1)?;
-                        let e_a = edge_of(b, *at(&edgeuses, aa)?)?;
-                        let e_b = edge_of(b, *at(&edgeuses, bb)?)?;
-                        let p_a = edge_curve(b, e_a)?.evaluate_point(kernel, t_a)?;
-                        let p_b = edge_curve(b, e_b)?.evaluate_point(kernel, t_b)?;
-                        if p_a.distance(vertex_point(b, edge::start_vertex(b, e_a)?)?) <= tol_3d
-                            || p_a.distance(vertex_point(b, edge::end_vertex(b, e_a)?)?) <= tol_3d
-                            || p_b.distance(vertex_point(b, edge::start_vertex(b, e_b)?)?) <= tol_3d
-                            || p_b.distance(vertex_point(b, edge::end_vertex(b, e_b)?)?) <= tol_3d
-                        {
-                            return Err(unresolved(LoopCrossing::MeetAtLoopVertex));
-                        }
-                        at_mut(&mut cuts, aa)?.push((t_a, num_crossings));
-                        at_mut(&mut cuts, bb)?.push((t_b, num_crossings));
-                        num_crossings += 1;
-                    }
-                }
-            }
-        }
+        // Fork a759622: every contact is looked at before any crossing is resolved
+        // or refused.
+        num_crossings = cut_at_crossings_refusing_touch(
+            kernel,
+            b,
+            f,
+            &CrossingInputs {
+                loop_edgeuses: &loop_edgeuses,
+                loop_of: &loop_of,
+                edgeuses: &edgeuses,
+                uvs: &uvs,
+                first_of_loop: &first_of_loop,
+                tol_3d,
+                uv_tol,
+            },
+            &mut cuts,
+        )?;
         if num_crossings == 0 {
             return Ok(());
         }

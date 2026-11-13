@@ -530,21 +530,19 @@ impl OffsetExecutive {
                     // only where a face closes to nothing with it, which `close_loop_gaps`
                     // checks once every gap is closed. The edge is squeezed out, its two
                     // vertices one, and noted with the original face across it.
-                    if kernel.fixes.local_operation_closes_walls_to_nothing
-                        && self.squeeze_closed_edge(
-                            kernel,
-                            original,
-                            b,
-                            f,
-                            u,
-                            e,
-                            at_start,
-                            vertex_point,
-                            tol,
-                            notifications,
-                            closed_edges,
-                        )?
-                    {
+                    if self.squeeze_closed_edge(
+                        kernel,
+                        original,
+                        b,
+                        f,
+                        u,
+                        e,
+                        at_start,
+                        vertex_point,
+                        tol,
+                        notifications,
+                        closed_edges,
+                    )? {
                         return Ok(());
                     }
                     // (fork 34318f4) elsewhere the vertex moved past the edge's end: the edge

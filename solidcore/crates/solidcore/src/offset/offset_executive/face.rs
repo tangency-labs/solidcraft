@@ -468,9 +468,8 @@ mod tests {
             (Surface::from(sphere), -1.9, -2.1),
             (Surface::from(torus), -0.4, -0.6),
         ];
-        for fixes in [false, true] {
-            let mut kernel = Kernel::default();
-            kernel.fixes.offset_missing_surface_fails = fixes;
+        for _fixes in [false, true] {
+            let kernel = Kernel::default();
             for (surface, short, past) in &cases {
                 let (original, _, faceuse) = source(surface.clone(), OrientType::Same);
                 for (d, collapses) in [(*short, false), (*past, true)] {

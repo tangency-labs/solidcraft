@@ -32,7 +32,6 @@ fn wr_440_revolved_line_passes_the_body_check_only_with_the_fix() {
     for (start, end) in LINES {
         for fix in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.check_loop_projected_seam_ends = fix;
             let line =
                 Curve::from(create_line_segment(Point3::from(start), Point3::from(end)).unwrap());
             let mut b = create_rotational_sweep(

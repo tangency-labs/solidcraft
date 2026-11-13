@@ -829,7 +829,6 @@ fn the_boss_root_s_chord_is_exact_only_with_the_cone_on_the_arc() {
     assert!((g.off - 3.07e-5).abs() <= 0.01 * 3.07e-5, "{g:?}");
     assert_eq!(g.problems.len(), 1, "{g:?}");
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = true;
     assert_passes(&case, &mut k);
 }
 
@@ -1290,7 +1289,6 @@ fn holds_case() -> Case {
 fn the_progressive_cubic_variable_round_lies_on_its_balls_union_and_is_g1() {
     let case = holds_case();
     let mut k = Kernel::default();
-    k.fixes.fillet_variable_span_follows_fillet = true;
     assert_passes(&case, &mut k);
     assert_passes(&case, &mut solidcraft_kernel());
 }

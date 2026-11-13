@@ -275,9 +275,7 @@
   {
    "name": "round_well_past_the_end_face_is_refused",
    "note": "r 3.5 on the four vertical edges. With the default flags the pinned SMLib returns success with a non-manifold body and all of the bar's volume gone (WR-460); fillet_refuse_overlapping_bands refuses it.",
-   "fixes": [
-    "fillet_refuse_overlapping_bands"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -332,9 +330,7 @@
   {
    "name": "round_3_001_refused_with_its_fit",
    "note": "r 3.001 on the four vertical edges with the generic blend's fold and room checks: refused, and the largest radius that builds, 3 (half the 6 mm end face), comes back on the refusal (WR-696, tangency-labs/solidcore#2278).",
-   "fixes": [
-    "fillet_refuse_overlapping_bands"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",
@@ -394,9 +390,7 @@
   {
    "name": "round_3_5_refused_with_its_fit",
    "note": "r 3.5 on the four vertical edges with the generic blend's fold and room checks: refused, and the largest radius that builds, 3 (half the 6 mm end face), comes back on the refusal (WR-696, tangency-labs/solidcore#2278).",
-   "fixes": [
-    "fillet_refuse_overlapping_bands"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",

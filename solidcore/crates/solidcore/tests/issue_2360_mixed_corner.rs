@@ -130,9 +130,8 @@ fn blended(r: f64, xsect: u32) -> (Kernel, Brep, solidcore::Result<()>) {
 }
 
 /// [`blended`], with `definition` (`fillet_round_as_definition`, #2488) set.
-fn blended_kept(definition: bool, r: f64, xsect: u32) -> (Kernel, Brep, solidcore::Result<()>) {
+fn blended_kept(_definition: bool, r: f64, xsect: u32) -> (Kernel, Brep, solidcore::Result<()>) {
     let mut k = kernel();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = read(&mut k);
     let es: Vec<EdgeId> = [[20.0, 0.0, 10.0], [32.0, 8.0, 10.0]]
         .iter()

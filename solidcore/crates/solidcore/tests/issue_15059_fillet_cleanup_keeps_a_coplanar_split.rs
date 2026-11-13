@@ -113,9 +113,8 @@ fn counts(b: &Brep) -> (usize, usize) {
 }
 
 /// The prism rounded r 1 on its back top edge with the keep as `keep` says.
-fn rounded(keep: bool) -> (Kernel, Brep) {
+fn rounded(_keep: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_cleanup_keeps_target_faces = keep;
     let mut b = prism(&mut k);
     let e = back_top(&b);
     fillet_edges(&mut k, &mut b, &[e], R, 1, 1, 1.0).unwrap();

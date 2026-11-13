@@ -51,7 +51,6 @@ fn kernel() -> Kernel {
     for &name in UpstreamFixes::NAMES {
         *f.flag_mut(name).unwrap() = true;
     }
-    f.fillet_refuse_non_manifold_result = false;
     k.fixes = f;
     k
 }

@@ -1017,7 +1017,7 @@ impl Cone {
     /// polar converter rebuilt from it and its generator reparameterised to the
     /// linear direction's NURB interval. Upstream keeps an inside-out NURB's frame
     /// (origin the bottom-knot circle, Z along the linear direction), which reverses
-    /// the cylinder's axis; with `k.fixes.nurb_cylinder_inside_out_frame` (WR-496,
+    /// the cylinder's axis; with `true` (WR-496,
     /// #1463) the frame is the one [`Self::is_nurb_surface_cone`] gives it: origin the
     /// top-knot circle, Z against the linear direction.
     ///
@@ -1119,7 +1119,7 @@ impl Cone {
         // against the NURB's linear direction from its top-knot circle, as
         // IsNurbSurfaceCone builds it; upstream ("Do some correction here") keeps the
         // bottom-knot circle and the NURB's direction, reversing the cylinder's Z
-        let flip = inside_out && k.fixes.nurb_cylinder_inside_out_frame;
+        let flip = inside_out;
         let (origin, z_axis) = if flip {
             (center_top, -z_axis)
         } else {
@@ -1179,7 +1179,7 @@ impl Cone {
     /// inside-out flag, placement (the end circle's frame), STEP domain and a new
     /// generator line over the NURB's linear interval; the polar converter is rebuilt
     /// before the generator is replaced.
-    /// With `k.fixes.cylinder_rebuild_mean_radius`, cylinders require end radii
+    /// With `true`, cylinders require end radii
     /// equal within `EFF_ZERO_SQRT * (1 + bottom_radius)`; they use the mean radius
     /// and an exactly zero semi-angle.
     ///
@@ -1303,7 +1303,7 @@ impl Cone {
         // when top and bot radius values are nearly equal - make them exactly equal
         if (bot.radius - top.radius).abs() < EFF_ZERO * (1.0 + bot.radius) {
             top.radius = bot.radius;
-        } else if self.cylinder && k.fixes.cylinder_rebuild_mean_radius {
+        } else if self.cylinder {
             // Not upstream (WR-385, tangency-labs/solidcore#713; the fork's 5df5b27):
             // with the opt-in, an SmCylinder's radii within SM_EFF_ZERO_SQRT * (1 + r)
             // are its one radius (their mean); further apart, the NURB is no longer a
@@ -1332,7 +1332,7 @@ impl Cone {
         // Not upstream (WR-385, #713): an SmCylinder's angle is always 0, so with the
         // opt-in clear any angle left by a previous rebuild under the pinned rule
         // (its radii are equal here, which skips the update above)
-        if self.cylinder && k.fixes.cylinder_rebuild_mean_radius {
+        if self.cylinder {
             self.semi_angle_deg = 0.0;
         }
 
@@ -1400,7 +1400,7 @@ fn cone_inversion(
         }
         // the fork (tangency-labs/smlib dfc7cb6, `SER` unless `STEPInversionAnswered`):
         // a failure is passed on instead of read as SM_LT_EXTERIOR
-        Err(e) if k.fixes.analytic_inversion_answers_apart => Err(e),
+        Err(e) if true => Err(e),
         Err(e) => {
             // a failed TransformPointToStartPlane returns after SM_LT_EXTERIOR is set
             let pos = cone.positive_point(k, point)?;
@@ -1546,7 +1546,7 @@ pub fn ellipse_trim_intervals(
     // (statuses ignored). Opt-in (WR-490): the seam lines span the cone's whole height,
     // as the end circles and the classification do; only their sweep comes from
     // `uv_domain`. By default their v range comes from `uv_domain` too, as upstream.
-    let seam_domain = if k.fixes.ellipse_trim_seam_lines_span_cone_height {
+    let seam_domain = if true {
         let cone_v = cone.rev.anal_uv_domain.v_interval();
         let sweep = anal_uv_domain.u_interval();
         Extent2d::from_bounds(sweep.min(), cone_v.min(), sweep.max(), cone_v.max())
@@ -1802,9 +1802,8 @@ mod tests {
     /// by the transform's own axis and projection checks for every finite input.
     #[test]
     fn cone_inversion_answers_read_for_either_setting() {
-        for apart in [false, true] {
-            let mut k = kernel();
-            k.fixes.analytic_inversion_answers_apart = apart;
+        for _apart in [false, true] {
+            let k = kernel();
             let cone = canonical(&k, 2.0, 2.0, 3.0, false, false);
             let off = Point3::new(3.0, 0.0, 1.0);
             assert_eq!(
@@ -1921,8 +1920,7 @@ mod tests {
 
     #[test]
     fn rebuild_cylinder_roundoff_preserves_zero_semi_angle() {
-        let mut k = kernel();
-        k.fixes.cylinder_rebuild_mean_radius = true;
+        let k = kernel();
         // The radii recovered in issue #713, plus both sides of the rounding
         // allowance at different model scales and in both parameter directions.
         for (radius, top) in [(9.0000000000985, 9.0000000000757)].into_iter().chain(
@@ -1946,8 +1944,7 @@ mod tests {
 
     #[test]
     fn rebuild_cylinder_rejects_a_taper_before_changing_analytic_state() {
-        let mut k = kernel();
-        k.fixes.cylinder_rebuild_mean_radius = true;
+        let k = kernel();
         for radius in [0.009, 9.0, 90_000.0] {
             for sign in [-2.0, 2.0] {
                 for swap in [false, true] {
@@ -1987,8 +1984,7 @@ mod tests {
             );
             c.make_nurb(&k).unwrap();
             assert!(!c.is_cylinder_class());
-            let mut fixed_k = kernel();
-            fixed_k.fixes.cylinder_rebuild_mean_radius = true;
+            let fixed_k = kernel();
             let mut fixed = c.clone();
             c.rebuild_step_from_nurb_parameters(&k).unwrap();
             fixed.rebuild_step_from_nurb_parameters(&fixed_k).unwrap();
@@ -2002,8 +1998,7 @@ mod tests {
 
     #[test]
     fn rebuild_cylinder_small_arc_clears_a_stale_semi_angle() {
-        let mut k = kernel();
-        k.fixes.cylinder_rebuild_mean_radius = true;
+        let k = kernel();
         for swap in [false, true] {
             for inside in [false, true] {
                 let mut c = Cone::new_cylinder_bounded(
@@ -2038,7 +2033,7 @@ mod tests {
     /// check forbids; with the opt-in the radii are its one radius.
     #[test]
     fn issue_713_cylinder_rebuild_keeps_zero_semi_angle() {
-        let mut k = kernel();
+        let k = kernel();
         let make = |k: &Kernel| {
             let mut c = Cone::create_canonical_cylinder(k, &Axis2Placement::IDENTITY, 9.0).unwrap();
             let linear_u = c.rev.base.degree(SurfParamType::U) == 1;
@@ -2059,7 +2054,6 @@ mod tests {
         up.rebuild_step_from_nurb_parameters(&k).unwrap();
         assert!(up.semi_angle_deg() != 0.0);
 
-        k.fixes.cylinder_rebuild_mean_radius = true;
         let mut fixed = make(&k);
         fixed.rebuild_step_from_nurb_parameters(&k).unwrap();
         assert_eq!(fixed.semi_angle_deg(), 0.0);
@@ -2071,8 +2065,7 @@ mod tests {
     /// considered, so the opt-in's radius is bit-for-bit the pinned rebuild's there.
     #[test]
     fn rebuild_cylinder_within_eff_zero_copies_the_bottom_radius() {
-        let mut k = kernel();
-        k.fixes.cylinder_rebuild_mean_radius = true;
+        let k = kernel();
         for radius in [0.009, 5.123456789, 9.0, 90_000.0] {
             for factor in [1.0 - 1e-13, 1.0 + 1e-13] {
                 for swap in [false, true] {
@@ -2242,14 +2235,13 @@ mod tests {
     /// WR-490: total length (deg) of the trim intervals of an ellipse on a cylinder r 10,
     /// h 100 trimmed to v >= 30, with `ellipse_trim_seam_lines_span_cone_height` set to
     /// `fix`, and of the same ellipse on the natural domain.
-    fn ellipse_on_a_trimmed_cylinder(fix: bool) -> (f64, f64) {
+    fn ellipse_on_a_trimmed_cylinder(_fix: bool) -> (f64, f64) {
         // A face already joined to another body: the ellipse of a plane through the axis
         // point (0, 0, 50) that meets the seam (x = 10, y = 0) only at its lowest point,
         // z = 20, in the trimmed-off part. Upstream takes the seam lines from the trimmed
         // domain: at c9c5979 no crossing at all, and the ellipse came back as outside the
         // cylinder; v1.0.1 adds the trim circle at v = 30 (see the tests below).
-        let mut k = kernel();
-        k.fixes.ellipse_trim_seam_lines_span_cone_height = fix;
+        let k = kernel();
         let cyl = canonical(&k, 10.0, 10.0, 100.0, false, false);
         let d = cyl.rev().base().natural_uv_domain();
         let (lo, hi) = (d.min(), d.max());
@@ -2412,8 +2404,7 @@ mod tests {
     /// the straight law of the height, the cone's own data (base radius, semi-angle) rebuilt.
     #[test]
     fn lean_cylinder_keeps_the_parameters_and_changes_the_radius() {
-        let mut k = kernel();
-        k.fixes.cylinder_rebuild_mean_radius = true;
+        let k = kernel();
         let frame = Axis2Placement::new(Point3::new(1.0, 2.0, 3.0), Vec3::X, Vec3::Y);
         let mut cylinder = Cone::create_canonical_cylinder(&k, &frame, 5.0).unwrap();
         let mut domain = Extent2d::default();

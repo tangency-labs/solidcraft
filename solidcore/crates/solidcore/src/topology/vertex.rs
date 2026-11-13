@@ -974,7 +974,7 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
         // `query_statuses_pass_on` the curves are not shown to meet G1 without it, so the
         // vertex stays (tangency-labs/smlib 7a35f33)
         match t1.angle_between(t2) {
-            Err(_) if k.fixes.query_statuses_pass_on => return Ok(false),
+            Err(_) if true => return Ok(false),
             r => r.unwrap_or(0.0),
         }
     } else {
@@ -1898,9 +1898,8 @@ mod tests {
         let e0 = b.edge_mut(e[0]).unwrap();
         e0.curve = Some(Curve::from(CompositeCurve::new(3)));
         e0.interval = Extent1d::from_min_max(-1.0, 0.0);
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         assert!(is_topological_vertex(&k, &mut b, v[1]).unwrap());
-        k.fixes.query_statuses_pass_on = true;
         assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
     }
 
@@ -2260,8 +2259,7 @@ mod tests {
         let e0 = b.edge_mut(e[0]).unwrap();
         e0.curve = Some(Curve::from(CompositeCurve::new(3)));
         e0.interval = Extent1d::from_min_max(-1.0, 0.0);
-        let mut k_both = Kernel::default();
-        k_both.fixes.query_statuses_pass_on = true;
+        let k_both = Kernel::default();
         assert!(!is_topological_vertex(&k_both, &mut b, v[1]).unwrap());
     }
 }

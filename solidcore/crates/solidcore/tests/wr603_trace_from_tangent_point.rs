@@ -65,7 +65,6 @@ fn peg() -> (f64, usize) {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.geometric_g2_continuity = false;
     let bar = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 16.0, 10.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(40.0, 8.0, 0.0), 8.0, 20.0).unwrap();
     let mut b = boolean_union(&mut k, bar, boss).unwrap();

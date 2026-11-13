@@ -67,7 +67,6 @@ fn issue_1511_disc_touching_the_axis_errs_or_builds_a_sound_body() {
     let want = PI / 2.0 * PI * 25.0 * 5.0;
     for fix in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = fix;
         match revolve_touching_disc(&mut k) {
             Err(e) => eprintln!("fix {fix}: no body: {e}"),
             Ok(mut b) => {
@@ -110,7 +109,6 @@ fn wr_505_quarter_horn_torus_passes_the_body_check_only_with_the_fix() {
     let ring = PI / 2.0 * PI * 25.0 * 8.0;
     for fix in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.internal_pole_row_through_knot = fix;
 
         let mut b = revolve_disc(&mut k, 5.0).unwrap();
         assert_eq!(b.face_list().len(), 3, "fix {fix}");

@@ -9,7 +9,7 @@
 //! | [`FilletExecutive::set_fillet_parameters`], [`FilletParameters`] | `SmFilletExecutive::SetFilletParameters` (edge pointers, per-edge parameters; the fork's `pOptSecondRadii`, `f653ac9`) |
 //! | `reset_parameter_state` (crate-private) | `SmFilletExecutive::SetFilletParameters` reset block |
 //! | `check_edges_are_in_brep` (private) | `SmFilletExecutive::CheckEdgesAreInBrep` |
-//! | [`FilletParametersAccess::parameters_split_blended_vertex_fans`] | the fork's `SmFilletExecutive::SplitBlendedVertexFans` (`e418750`, WR-665; with `fixes.fillet_corner_per_vertex_fan`) |
+//! | [`FilletParametersAccess::parameters_split_blended_vertex_fans`] | the fork's `SmFilletExecutive::SplitBlendedVertexFans` (`e418750`, WR-665; with `true`) |
 //! | [`surface_surface_fillet`], [`SurfaceFilletOptions`] | `SmFilletExecutive::SurfaceSurfaceFillet` |
 //! | [`FilletExecutive::do_surface_filleting`] | `SmFilletExecutive::DoSurfaceFilleting` |
 //! | [`FilletExecutive::set_fillet_brep_edge_map`] | `SmFilletExecutive::SetFilletBrepEdgeMap` |
@@ -467,7 +467,7 @@ pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
     /// Object resolution failures.
     fn parameters_edge_is_live(&self, brep: O, edge: O) -> Result<bool>;
     /// The fork's `SplitBlendedVertexFans` (tangency-labs/smlib `e418750`, WR-665; run only
-    /// with `fixes.fillet_corner_per_vertex_fan`): each filleted edge's start and end
+    /// with `true`): each filleted edge's start and end
     /// vertex, once each and not one made here, split into one vertex per fan of faces
     /// (`SmBrep::SplitVertexByFans`); the points of the vertices split, in order, for
     /// `JoinBlendedVertexFans`. Only an adapter over a live target can split; the default
@@ -661,11 +661,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
         self.check_edges_are_in_brep(access, params.brep, params.edges)?;
         // the fork's SplitBlendedVertexFans (WR-665, tangency-labs/smlib@e418750)
-        if k.fixes.fillet_corner_per_vertex_fan {
-            let brep = params.brep.ok_or_else(|| null!("the B-rep"))?;
-            let points = access.parameters_split_blended_vertex_fans(k, brep, params.edges)?;
-            self.fan_split_points.extend(points);
-        }
+        let brep = params.brep.ok_or_else(|| null!("the B-rep"))?;
+        let points = access.parameters_split_blended_vertex_fans(k, brep, params.edges)?;
+        self.fan_split_points.extend(points);
 
         let single_xsect_type = single(params.xsect_types.len(), num_filleted_edges);
         let single_radius_type = single(params.radius_types.len(), num_filleted_edges);
@@ -1322,7 +1320,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if let Some(edge) = start_edge {
                 // fork 873c7c9 (SolidCraft change): GetFilletSolverOfEdge returns NULL
                 // when GetEdgeuses fails
-                let pass_on = k.fixes.fillet_statuses_pass_on;
+                let pass_on = true;
                 fs = self
                     .fillet_solver_of_edge_with(edge, |e| match access.smooth_edge_edgeuses(e) {
                         Err(err) if pass_on && !err.is_unported_or_cancelled() => Ok(Vec::new()),
@@ -1651,7 +1649,7 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
         fs: O,
         rail_index: usize,
         side_eu: O,
-        fixes: &crate::kernel::UpstreamFixes,
+        _fixes: &crate::kernel::UpstreamFixes,
     ) -> Result<Self>
     where
         A: ExecutiveAccess<O> + ?Sized,
@@ -1666,12 +1664,8 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
         };
         // fork 873c7c9 SERs inside SetUp (its constructor still cannot report, so the
         // status reaches the caller only with temporary_radius_setup_errors)
-        let setup = change.set_up_with(access, fixes.fillet_statuses_pass_on);
-        if fixes.temporary_radius_setup_errors {
-            setup?;
-        } else {
-            ignored(setup)?;
-        }
+        let setup = change.set_up_with(access, true);
+        setup?;
         Ok(change)
     }
 

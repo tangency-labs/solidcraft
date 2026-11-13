@@ -727,9 +727,6 @@ fn corner_faces(
     }
     // beside a curved face only with its own flag: without it such a corner is the corner it
     // was before (#2343)
-    if !k.fixes.fillet_setback_beside_curved_faces {
-        return Ok(None);
-    }
     Ok(corner_quadrics(k, b, vtx, all_eus, solvers, tol, convex)?.map(|q| (q, true)))
 }
 
@@ -2646,7 +2643,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
         Vec::new()
     };
     let definition = match worst {
-        Some(worst) if k.fixes.fillet_round_as_definition => Some(keep_definition(
+        Some(worst) if true => Some(keep_definition(
             k,
             &planes.planes,
             &rounds,

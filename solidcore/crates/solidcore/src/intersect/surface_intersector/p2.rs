@@ -400,7 +400,7 @@ impl SurfaceIntersector<'_> {
                             // fork bcc6f01)
                             ignored(passed_on(
                                 bsc.trim(k, &mut trim_ivl1, TrimMode::Notify),
-                                k.fixes.ssi_proto_topology_statuses_pass_on,
+                                true,
                             )?)?;
 
                             // get SurfacePoints for each interval endPoint
@@ -432,11 +432,11 @@ impl SurfaceIntersector<'_> {
                             let mut end_pnt = TsectPnt::new();
                             ignored(passed_on(
                                 self.compute_point_values(k, [s0, s1], &mut start_pnt, None, None),
-                                k.fixes.ssi_proto_topology_statuses_pass_on,
+                                true,
                             )?)?;
                             ignored(passed_on(
                                 self.compute_point_values(k, [e0, e1], &mut end_pnt, None, None),
-                                k.fixes.ssi_proto_topology_statuses_pass_on,
+                                true,
                             )?)?;
 
                             // classify IntersectionCurve from its endPoint classifications
@@ -637,7 +637,6 @@ impl SurfaceIntersector<'_> {
                             uv_values,
                             point,
                             previous.map(TsectPnt::crv_deriv),
-                            k.fixes.dupin_bottom_hyperbola_axis,
                         ) {
                             Ok(()) => {}
                             Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -1203,7 +1202,7 @@ impl SurfaceIntersector<'_> {
             {
                 // this surface's natural boundary point (status ignored, passed on with
                 // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-                let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+                let pass = true;
                 if let Some(p) = ignored(passed_on(self.surface(s).evaluate_point(k, uv0), pass)?)?
                 {
                     set3(&mut w.curve_point, tgt, p);
@@ -1640,7 +1639,7 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
         // the plane and delta plane to intersect (statuses ignored; passed on with
         // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         let delta_param = parameter + delta_step;
         let mut pv = [Vec3::UNDEF; 2];
         let mut pv_delta = [Vec3::UNDEF; 2];

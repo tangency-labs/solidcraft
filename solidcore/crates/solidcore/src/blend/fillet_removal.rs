@@ -1872,12 +1872,10 @@ pub fn delete_fillet_face(
         Some(t) => t,
         None => crate::topology::face::p2::tolerance(b, fillet_face)?,
     };
-    // Not upstream (WR-605, `fixes.fillet_removal_takes_ring_fillets`; SolidCraft change,
+    // Not upstream (WR-605, `true`; SolidCraft change,
     // tangency-labs/smlib 52bfef0): a ring fillet (closed rails, no ends) has its own
     // removal.
-    if k.fixes.fillet_removal_takes_ring_fillets
-        && ring::RingFilletRemoval::is_ring(k, b, Some(fillet_face), 2.0)?
-    {
+    if ring::RingFilletRemoval::is_ring(k, b, Some(fillet_face), 2.0)? {
         let mut removal = ring::RingFilletRemoval::new(fillet_face, tol_3d);
         let r = removal.remove_face(k, b);
         // (not upstream: the port's cached topology fields, true again for the caller)

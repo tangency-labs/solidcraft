@@ -777,7 +777,7 @@ fn initial_setup(
     // fork 66b02de passes this on (SER)
     ignore_status(crate::error::passed_on(
         domain1.set_min_max(min, max),
-        k.fixes.fillet_statuses_pass_on,
+        true,
     )?)?;
     let size2: Vec2 = fs.solver.surface_extension_factor * domain2.size();
     let min = Point2::new(domain2.min().x - size2.x, domain2.min().y - size2.y);
@@ -785,7 +785,7 @@ fn initial_setup(
     // fork 66b02de passes this on (SER)
     ignore_status(crate::error::passed_on(
         domain2.set_min_max(min, max),
-        k.fixes.fillet_statuses_pass_on,
+        true,
     )?)?;
 
     Ok(InitialSetup {
@@ -1410,16 +1410,15 @@ impl EiffelTowerCrossSectionFsg {
                 // fork 66b02de passes this on (SER)
                 ignore_status(crate::error::passed_on(
                     surf.adjust_step_uv_domain(k, &Extent2d::from_points(uv_min, uv_max)),
-                    k.fixes.fillet_statuses_pass_on,
+                    true,
                 )?)?;
                 *slot = Some(surf);
             }
             // (statuses ignored upstream)
             // fork 66b02de passes this on (SER)
-            let knots_local =
-                crate::error::passed_on(rail1.knots(None), k.fixes.fillet_statuses_pass_on)?
-                    .map(|r| r.0)
-                    .unwrap_or_default();
+            let knots_local = crate::error::passed_on(rail1.knots(None), true)?
+                .map(|r| r.0)
+                .unwrap_or_default();
             let knot = |i: usize| {
                 knots_local
                     .get(i)
@@ -1434,23 +1433,23 @@ impl EiffelTowerCrossSectionFsg {
             // fork 66b02de passes this on (SER)
             ignore_status(crate::error::passed_on(
                 rail1.insert_one_knot(start_knot_mid, 1),
-                k.fixes.fillet_statuses_pass_on,
+                true,
             )?)?;
             // fork 66b02de passes this on (SER)
             ignore_status(crate::error::passed_on(
                 rail2.insert_one_knot(start_knot_mid, 1),
-                k.fixes.fillet_statuses_pass_on,
+                true,
             )?)?;
             let end_knot_mid = (knot(n - 2)? + knot(n - 1)?) / 2.0;
             // fork 66b02de passes this on (SER)
             ignore_status(crate::error::passed_on(
                 rail1.insert_one_knot(end_knot_mid, 1),
-                k.fixes.fillet_statuses_pass_on,
+                true,
             )?)?;
             // fork 66b02de passes this on (SER)
             ignore_status(crate::error::passed_on(
                 rail2.insert_one_knot(end_knot_mid, 1),
-                k.fixes.fillet_statuses_pass_on,
+                true,
             )?)?;
         }
         let [d0, d1] = &deriv_surfs;

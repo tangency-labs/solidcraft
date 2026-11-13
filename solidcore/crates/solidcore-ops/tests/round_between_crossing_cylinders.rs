@@ -147,12 +147,7 @@ fn check(b: &Body, expected: f64, what: &str) {
 #[test]
 fn a_round_between_crossing_cylinders_is_the_ball_of_its_own_crossing() {
     let _reset = ResetFixes;
-    session::set_fixes([
-        "linear_sweep_arc_is_cylinder",
-        "offset_extension_from_base",
-        "offset_extension_as_itself",
-    ])
-    .unwrap();
+    session::set_fixes([]).unwrap();
     let area = profile_area();
     check(&body(), area * HEIGHT, "the extrusion");
     let at = |b: &Body, x: [f64; 2]| edge_at(b, [x[0], x[1], HEIGHT / 2.0]);

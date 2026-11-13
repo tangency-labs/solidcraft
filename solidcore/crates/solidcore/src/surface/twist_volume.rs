@@ -413,12 +413,7 @@ impl TwistVolume {
                 };
                 let next_derivs = next.map(position, n, &map_opts)?;
                 // Concatenate Evaluate(ParamPoint) = Next(Mid(ParamPoint))
-                concat_evals_opt_in(
-                    n,
-                    &d,
-                    &next_derivs,
-                    opts.fixes.volume_lift_third_derivative_terms,
-                )
+                concat_evals_opt_in(n, &d, &next_derivs, true)
             }
             _ => Ok(d),
         }

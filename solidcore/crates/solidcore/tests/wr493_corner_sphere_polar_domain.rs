@@ -1,4 +1,4 @@
-//! `fixes.found_torus_sphere_keep_tested_nurb` (WR-493) on a small round's corner sphere:
+//! `true` (WR-493) on a small round's corner sphere:
 //! the kept NURB's rebuild takes the sweep interval from one iso circle and the polar
 //! curve from another, so they differ by more than `check_brep` allows, up to 7.8e-9
 //! degrees at R 0.02 (`SmSurfOfRevolution` tests #6 and #7). The sphere is on its
@@ -52,7 +52,6 @@ fn small_corner_spheres_pass_the_check_with_the_tested_nurb_kept() {
     for deg in [45.0, 90.0, 120.0, 140.0, 155.0] {
         for r in [0.02, 0.07, 0.15] {
             let mut k = Kernel::default();
-            k.fixes.found_torus_sphere_keep_tested_nurb = true;
             let mut b = rounded_wedge(&mut k, deg, r);
             let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
             let lines = check.lines();

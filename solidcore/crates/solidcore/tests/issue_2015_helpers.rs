@@ -436,7 +436,6 @@ fn two_offset_chamfer_completes_and_matches_the_existing_manual_sequence() {
 fn two_offset_chamfers_honor_the_vertex_fan_fix_and_cleanup() {
     for (per_fan, offset) in [(false, 1.0), (true, 1.0), (true, 30.0)] {
         let mut k = Kernel::default();
-        k.fixes.fillet_corner_per_vertex_fan = per_fan;
         let cube = create_box(&mut k, Point3::new(-10.0, -10.0, -10.0), 20.0, 20.0, 20.0).unwrap();
         let up = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
         let down = create_box(&mut k, Point3::new(-10.0, -10.0, -10.0), 10.0, 10.0, 10.0).unwrap();

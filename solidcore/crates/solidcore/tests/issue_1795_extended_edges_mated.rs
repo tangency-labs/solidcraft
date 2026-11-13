@@ -59,7 +59,6 @@ fn drilled(k: &mut Kernel) -> Brep {
 #[test]
 fn shell_with_an_unmated_edge_closes_under_wr344() {
     let mut k = Kernel::default();
-    k.fixes.offset_extended_edges_mated = true;
     let mut b = drilled(&mut k);
     let open = planar_faces_at(&k, &b, 2, 27.5);
     assert_eq!(open.len(), 1, "the top face");

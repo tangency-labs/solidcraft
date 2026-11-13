@@ -61,10 +61,8 @@ fn screw_groove(k: &mut Kernel, p: f64, z0: f64, turns: f64, prof: &[(f64, f64)]
         .brep
 }
 
-fn kernel(extend: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.imprint_extends_edge_to_proto_vertex = extend;
-    k
+fn kernel(_extend: bool) -> Kernel {
+    Kernel::default()
 }
 
 /// An external thread: a shaft of radius `r` and length `len` minus a groove of pitch `p`,

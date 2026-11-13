@@ -3,7 +3,7 @@
 //! with SolidCraft's flag set, rounded r2 along the bar's top front edge and the first round's
 //! section curve. Repro, flag set and root cause by tdamsma on #1945: `SmLocalSolveNd::SolveIt`
 //! kept the unscaled point's Jacobian for a clamped-and-scaled step (fixed in the fork's
-//! tangency-labs/smlib@d2757e1, ported under WR-253's `fixes.oscillating_skips_failed_guesses`), so
+//! tangency-labs/smlib@d2757e1, ported under WR-253's `true`), so
 //! a near-tangent SSI's end landed 1.6e-8 off and the rail's UV trim kept a 3.1e-8 span. The fork's
 //! C++ (68fb9162) builds 11 faces / 25 edges / 16 vertices, V 49712.42808748303, check clean. Its
 //! rounds' sections are upstream's approximated arcs; here they are the ball's exact circles (WR-708,
@@ -32,121 +32,11 @@ use solidcore::{Kernel, Point3};
 const EXACT_CIRCLES_VOLUME: f64 = 49712.42816838713;
 
 fn sc_fixes(k: &mut Kernel) {
-    k.fixes.temporary_radius_setup_errors = true;
-    k.fixes.fillet_trim_status = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
-    k.fixes.fillet_refuse_face_consuming_blends = true;
-    k.fixes.fillet_refuse_overlapping_bands = true;
-    k.fixes.fillet_refuse_non_manifold_result = true;
-    k.fixes.fillet_vertex_error_diagnostics = true;
-    k.fixes.fillet_corner_ball_patch = true;
-    k.fixes.fillet_corner_ball_center_from_axes = true;
-    k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_chamfer_cone_stored_as_cone = true;
-    k.fixes.corner_blend_coons_patch_tangent_to_sides = true;
-    k.fixes.corner_patch_face_side_twist = true;
-    k.fixes.fillet_patch_keeps_fillet_edges = true;
-    k.fixes.fillet_trim_inside_by_best_dot = true;
-    k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.fillet_half_degree_crease = true;
-    k.fixes.offset_excess_faces_after_merge = true;
-    k.fixes.fillet_split_edge_keeps_near_half = true;
-    k.fixes.offset_point_vertex_caps = true;
-    k.fixes.offset_clip_right_side_out = true;
-    k.fixes.offset_extended_edges_mated = true;
-    k.fixes.thicken_planar_side_walls = true;
-    k.fixes.keep_operand_uv_trims = true;
-    k.fixes.geometric_g2_continuity = true;
-    k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.check_loop_vertex_tolerance = true;
-    k.fixes.check_loop_projected_seam_ends = true;
-    k.fixes.edge_check_orders_tangent_faces = true;
-    k.fixes.bspline_check_min_radius = true;
-    k.fixes.ellipse_step_interval_checks = true;
-    k.fixes.uv_trim_checks_on_surface = true;
-    k.fixes.oscillating_skips_failed_guesses = true;
     k.fixes.refine_cc_range_ends = true;
-    k.fixes.flat_corners_test_bits = true;
-    k.fixes.good_drop_result_distances_in_order = true;
-    k.fixes.torus_check_spindle_apex = true;
-    k.fixes.cylinder_rebuild_mean_radius = true;
-    k.fixes.nurb_cylinder_inside_out_frame = true;
-    k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.taper_tangent_corner_planes = true;
-    k.fixes.revolve_nested_shells_as_cavities = true;
-    k.fixes.revolve_holed_profile_void = true;
-    k.fixes.revolve_splits_curves_on_axis = true;
-    k.fixes.loops_go_on_round_the_vertex = true;
-    k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.join_touching_loops = true;
-    k.fixes.offset_resolve_crossing_loops = true;
-    k.fixes.local_operation_box_holds_new_surfaces = true;
-    k.fixes.offset_walls_touch_refused = true;
-    k.fixes.local_operation_refuses_loose_tangent_edges = true;
-    k.fixes.local_operation_step_walls = true;
-    k.fixes.local_operation_closes_walls_to_nothing = true;
-    k.fixes.offset_collapsed_rounds_mated = true;
-    k.fixes.offset_missing_surface_fails = true;
-    k.fixes.revolution_round_offset_collapses = true;
-    k.fixes.fillet_nx1_end_rib_global_merge = true;
-    k.fixes.uv_trim_corner_end_points_only = true;
-    k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
-    k.fixes.slice_coincident_faces_sheet_side = true;
-    k.fixes.boolean_outer_shell_first = true;
-    k.fixes.iso_curve_sliver_domain_is_degenerate = true;
-    k.fixes.cover_refuses_folded_continuation = true;
-    k.fixes.cover_wraps_across_closed_seam = true;
-    k.fixes.boolean2d_plane_covers_far_faces = true;
-    k.fixes.boolean_vertex_by_best_crossing = true;
-    k.fixes.boolean_splits_definition_across_split = true;
-    k.fixes.proto_edge_splits_at_captured_vertices = true;
-    k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
-    k.fixes.degenerate_proto_edge_in_one_vertex = true;
-    k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.transform_scales_each_tolerance = true;
-    k.fixes.transform_model_size_from_body_box = true;
-    k.fixes.torus_signed_gen_curve_interval = true;
-    k.fixes.torus_keeps_inside_out = true;
-    k.fixes.torus_major_radius_from_origin = true;
-    k.fixes.torus_iso_circle_axis_from_midpoint = true;
-    k.fixes.found_torus_sphere_keep_tested_nurb = true;
-    k.fixes.internal_pole_row_through_knot = true;
-    k.fixes.extrusion_origin_scaled_zero = true;
-    k.fixes.point_solve_keeps_triangle_guess = true;
-    k.fixes.imprint_extends_edge_to_proto_vertex = true;
-    k.fixes.imprint_reuses_coincident_face_edge = true;
-    k.fixes.fillet_point_step_per_point = true;
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.offset_extension_from_base = true;
-    k.fixes.corner_blend_stays_inside_neighbours = true;
-    k.fixes.fillet_cleanup_keeps_target_faces = true;
-    k.fixes.fillet_nx1_tangent_side_edge = true;
-    k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
-    k.fixes.fillet_rails_meet_at_one_end_point = true;
-    k.fixes.fillet_nx1_tangent_corner_edge = true;
-    k.fixes.fillet_3x2_mixed_concave_side_edge = true;
-    k.fixes.offset_analytic_mate_edges = true;
-    k.fixes.shell_edges_on_analytics_exact = true;
-    k.fixes.offset_stitch_at_body_tolerance = true;
     k.fixes.curve_contacts_at_curve_ends = true;
-    k.fixes.shell_empty_cavity_fails = true;
-    k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.ssi_tangent_contact_points = true;
-    k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.ssi_singular_start_inside_direction = true;
-    k.fixes.ssi_pole_point_keeps_its_tangent = true;
-    k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.boolean_skips_faces_apart = true;
-    k.fixes.delete_vertex_joins_seam_iso_curve = true;
-    k.fixes.boolean_new_face_closure_both_sides = true;
-    k.fixes.glue_vertices_joins_every_region = true;
-    k.fixes.box_face_failures_propagate = true;
-    k.fixes.fillet_removal_takes_ring_fillets = true;
 }
 
 fn read(k: &mut Kernel) -> Brep {
@@ -197,14 +87,12 @@ fn run(nd_fix: bool) -> (usize, usize, usize, f64, Vec<String>) {
 
 /// [`run`] with `Kernel::memoize_curve_caches` set to `memo` (left at its default for
 /// `None`).
-fn run_memo(nd_fix: bool, memo: Option<bool>) -> (usize, usize, usize, f64, Vec<String>) {
+fn run_memo(_nd_fix: bool, memo: Option<bool>) -> (usize, usize, usize, f64, Vec<String>) {
     let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
     if let Some(memo) = memo {
         k.memoize_curve_caches = memo;
     }
     sc_fixes(&mut k);
-    k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.oscillating_skips_failed_guesses = nd_fix;
     let mut b = read(&mut k);
     let top = edge_by(
         &k,

@@ -630,7 +630,7 @@ pub(crate) fn boolean_post_process_with_notifications(
     let mut endpoints = Vec::new();
     // WR-304: the edges checked so far, and those the merging below left with one face
     // on both sides (checked too, though they are no intersection edges).
-    let slits = k.fixes.boolean_cleanup_removes_slits;
+    let slits = true;
     let mut queued: BTreeSet<EdgeId> = if slits {
         edges.iter().copied().collect()
     } else {
@@ -721,14 +721,12 @@ pub(crate) fn boolean_post_process_with_notifications(
         // unconditionally, even if IsTopological left it untouched.
         let domain = topological.merged_face_domain.unwrap_or_default();
         crate::topology::face::p2::set_uv_domain(brep, keep, &domain)?;
-        if k.fixes.cover_wraps_across_closed_seam {
-            // WR-599 (the fork's tangency-labs/smlib@16bf1cb): a face that wraps its
-            // surface's period may have taken in a face straddling the seam
-            // (`CoverCoincidentSurface`): the merged face is the periodic face whose seam
-            // runs on through that part. Add the missing piece of the seam, splitting the
-            // edges that cross it, as a face on a periodic surface has it.
-            split_merged_face_at_seam(k, brep, notifications.as_deref_mut(), keep)?;
-        }
+        // WR-599 (the fork's tangency-labs/smlib@16bf1cb): a face that wraps its
+        // surface's period may have taken in a face straddling the seam
+        // (`CoverCoincidentSurface`): the merged face is the periodic face whose seam
+        // runs on through that part. Add the missing piece of the seam, splitting the
+        // edges that cross it, as a face on a periodic surface has it.
+        split_merged_face_at_seam(k, brep, notifications.as_deref_mut(), keep)?;
         if slits {
             // WR-304: an operand edge between two faces that are now one bounds the
             // merged face on both sides (a slit); check it by the same test.
@@ -844,11 +842,11 @@ pub(crate) fn boolean_post_process_with_notifications(
                 // passes them on: `SER`).
                 ignore_failure(crate::error::passed_on(
                     shell::transfer_children(k, brep, wire_shell, face_shell, None),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
                 ignore_failure(crate::error::passed_on(
                     shell::region_remove_shell(brep, wire_region, wire_shell),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
         }

@@ -53,8 +53,7 @@ fn edges_where(k: &Kernel, b: &Brep, keep: impl Fn(Point3) -> bool) -> Vec<EdgeI
 fn tray(all: bool) -> (f64, f64, solidcore::Result<()>) {
     let mut k = Kernel::default();
     if all {
-        let mut f = UpstreamFixes::all();
-        f.geometric_g2_continuity = false;
+        let f = UpstreamFixes::all();
         k.fixes = f;
     }
     let mut tray = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 25.0, 25.0, 10.0).unwrap();

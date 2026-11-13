@@ -726,7 +726,7 @@ pub(crate) fn exact_nurbs_surface<'a>(
         return Ok(None);
     }
     if let SurfaceKind::Cone(c) = s.kind_with_nurb(k)? {
-        if !c.rev.is_bounded()? && c.inside_out && !k.fixes.cone_unbounded_parameterized_as_nurb {
+        if !c.rev.is_bounded()? && c.inside_out && false {
             let step_ivl = c.rev.anal_uv_domain.v_interval();
             let nurb_dom = c.rev.base().natural_uv_domain();
             let nurb_ivl = if c.rev.swap_uv {
@@ -2702,8 +2702,7 @@ mod tests {
         use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
         use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
 
-        let mut k = Kernel::default();
-        k.fixes.fillet_round_as_definition = true;
+        let k = Kernel::default();
 
         let (l, r) = (10.0, 2.0);
         let o = Point3::new(0.0, 0.0, 0.0);
@@ -2865,8 +2864,7 @@ mod tests {
                 .unwrap(),
         );
         assert!(exact_nurbs_surface(&k, &cone_srf).unwrap().is_none());
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.cone_unbounded_parameterized_as_nurb = true;
+        let k_fixed = Kernel::default();
         let cone_fixed = Surface::from(
             Cone::new_unbounded(
                 &k_fixed,

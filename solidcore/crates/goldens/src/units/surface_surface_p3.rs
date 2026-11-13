@@ -333,7 +333,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
                 &mut p1,
                 *tol,
                 *ang,
-                k.fixes.query_statuses_pass_on,
+                true,
             ))? {
                 Ok(m) => o.extend([0.0, b(m)]),
                 Err(c) => o.push(c),

@@ -92,7 +92,7 @@ fn unit_normal(normal: Vec3) -> Result<Vec3> {
 fn box_and_length(k: &Kernel, brep: &Brep) -> Result<(Extent3d, f64)> {
     let bbox = ignored(crate::error::passed_on(
         qbrep::calculate_bounding_box(k, brep, BoundingBoxOptions::default()),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?
     .unwrap_or_else(Extent3d::new);
     let diagonal = bbox.size();
@@ -178,9 +178,7 @@ pub fn project_brep_onto_plane(
     let mut plane = Axis2Placement::default();
     // (status ignored upstream; fork 4803d6d passes it on: `SER`)
     let set = plane.set_canonical(plane_origin, y, z);
-    if k.fixes.brep_edit_statuses_pass_on {
-        set?;
-    }
+    set?;
 
     let invert_plane = plane.invert();
 

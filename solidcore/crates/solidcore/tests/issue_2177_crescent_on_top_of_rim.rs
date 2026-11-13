@@ -56,9 +56,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> solidcore::Result<f64> {
 }
 
 /// The union of the cylinder and the crescent prism on its top rim.
-fn union(fixed: bool) -> (Kernel, Brep) {
+fn union(_fixed: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.close_loop_relates_only_coincident_edges = fixed;
     let y = (R * R - 8.2 * 8.2).sqrt();
     let big = y.atan2(8.2).to_degrees();
     let small = y.atan2(8.2 - R).to_degrees();

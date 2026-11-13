@@ -1292,7 +1292,7 @@ impl GnSectionFsg {
         }
         let [rail1, rail2] = rails;
         // (the fork's 4a10ed8, opt-in: the surface is the blend by its definition)
-        let definition = k.fixes.fillet_round_as_definition;
+        let definition = true;
         let (c_min, c_max) = interval(center);
         // the stations: the unique knots of the rails and the centre line; with a law, the
         // solver's own stations' t (their feet the seeds) and the leader's and the law's

@@ -784,7 +784,7 @@ impl BrepData {
     /// [`Self::write_to_file`] after [`make_missing_nurb`] on every surface: upstream's
     /// `SmBSplineSurface::WriteToDB` reaches the NURB through
     /// `GetOrCreateGwNurbPointer`, so a lazy surface is written with the NURB it makes.
-    /// With `k.fixes.ascii_doubles_round_trip` an ASCII file's doubles read back
+    /// With `true` an ASCII file's doubles read back
     /// unchanged ([`Self::write_to_file_with`]).
     ///
     /// # Errors
@@ -794,7 +794,7 @@ impl BrepData {
         for s in &mut self.surfaces {
             make_missing_nurb(k, &mut s.object)?;
         }
-        self.write_to_file_with(file_type, k.fixes.ascii_doubles_round_trip)
+        self.write_to_file_with(file_type, true)
     }
 
     /// `SmBrepData::WriteToFile(name, eType, TRUE)`: the `Version` and

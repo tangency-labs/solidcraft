@@ -277,7 +277,6 @@ fn torus_box_sections(k: &mut Kernel, through_axis: bool) -> [Vec<(bool, f64)>; 
 #[test]
 fn a_plane_meets_a_torus_in_its_exact_circles_in_either_order() {
     let mut k = Kernel::default();
-    k.fixes.plane_first_torus_section_exact = true;
     for through_axis in [false, true] {
         for (order, edges) in torus_box_sections(&mut k, through_axis).iter().enumerate() {
             eprintln!("flag on, through axis {through_axis}, order {order}: {edges:?}");
@@ -374,7 +373,6 @@ fn a_draft_cone_wall_keeps_its_exact_seam_pcurves() {
     let (tan, cos) = (10.0f64.to_radians().tan(), 10.0f64.to_radians().cos());
     for keep in [true, false] {
         let mut k = Kernel::default();
-        k.fixes.keep_exact_pcurves = keep;
         let p = |x: f64, y: f64| Vec3::new(x, y, 0.0);
         let line = Line::create_line_segment(3, p(-20.0, 0.0), p(20.0, 0.0), None).unwrap();
         let arc =
@@ -460,7 +458,6 @@ fn an_opposite_face_keeps_the_pcurves_it_is_given() {
     use solidcore::topology::brep_cache::{arena_identity, CacheObject};
     for keep in [true, false] {
         let mut k = Kernel::default();
-        k.fixes.keep_exact_pcurves = keep;
         let surface = Surface::from(
             create_cylinder_surface(&k, Point3::new(1.0, 2.0, 3.0), 4.0, 10.0).unwrap(),
         );
@@ -605,9 +602,8 @@ fn a_drop_from_a_guess_does_not_take_a_stalled_local_solve() {
     );
     assert!(along > 100.0 * tight && along < 1e-4, "{along:e}");
 
-    let drop = |flag: bool| {
-        let mut k = Kernel::default();
-        k.fixes.good_drop_result_distances_in_order = flag;
+    let drop = |_flag: bool| {
+        let k = Kernel::default();
         let opts = DropPointOptions {
             guess_uv: Some(guess),
             ..DropPointOptions::default()

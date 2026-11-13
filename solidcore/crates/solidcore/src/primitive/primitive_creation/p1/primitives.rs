@@ -507,7 +507,7 @@ impl PrimitiveCreation {
         brep.set_editing_enabled(true);
         // (WR-596, opt-in: the fork's `AddBoxFace`, every status returned; editing is
         // turned off again on every way out)
-        let propagate = k.fixes.box_face_failures_propagate;
+        let propagate = true;
         let result = box_faces(k, brep, [length, width, height], frame, propagate);
         if propagate || result.is_ok() {
             brep.set_editing_enabled(false);
@@ -540,7 +540,7 @@ impl PrimitiveCreation {
             ));
         }
         // fork c8f6a31 (WR-662): every dropped status of CreateCylindricalBox is SER.
-        let p = k.fixes.sweep_statuses_pass_on;
+        let p = true;
         brep.set_editing_enabled(true);
         let radians = core::f64::consts::PI / 180.0;
         let start_vec =
@@ -828,7 +828,7 @@ impl PrimitiveCreation {
         other_key_of: Option<&dyn Fn(crate::error::EntityRef) -> crate::geom::object::ObjectRef>,
     ) -> Result<()> {
         // fork c8f6a31 (WR-662): Boolean2D's smgu_PlanePointDistance is SER.
-        let p = k.fixes.sweep_statuses_pass_on;
+        let p = true;
         let previous = k.context.doing_boolean();
         let edit_a = a.editing_enabled();
         let edit_b = b.editing_enabled();
@@ -925,7 +925,7 @@ impl PrimitiveCreation {
                     // Not upstream (WR-536, opt-in): b's faces are rebuilt on copies of
                     // the first surface below: one it does not cover would carry edges
                     // far off its surface
-                    if k.fixes.boolean2d_plane_covers_far_faces && !covered {
+                    if !covered {
                         return Err(SolidError::primitive(
                             op,
                             crate::error::primitive::PrimitiveFailure::PlaneCannotCover,
@@ -948,7 +948,7 @@ impl PrimitiveCreation {
                     let covered =
                         cover_face_surface(k, brep, *face, &first_surface, tolerance * 2.0, None)?;
                     // (WR-536, opt-in) a plane that cannot be grown to cover the first face
-                    if k.fixes.boolean2d_plane_covers_far_faces && !covered {
+                    if !covered {
                         return Err(SolidError::primitive(
                             op,
                             crate::error::primitive::PrimitiveFailure::PlaneCannotCover,
@@ -1036,13 +1036,13 @@ fn cover_face_surface(
         // WR-663, tangency-labs/smlib 21dcf69)
         ignore_or_pass_on(
             crate::topology::face::p1::remove_uv_trim_curves(brep, face),
-            k.fixes.query_statuses_pass_on,
+            true,
         )?;
     }
     Ok(r.success)
 }
 
-/// Not upstream (WR-565, #1477, `fixes.linear_sweep_arc_is_cylinder`): the cylinder of
+/// Not upstream (WR-565, #1477, `true`): the cylinder of
 /// the circular arc of `frame` and `radius` from `start` to `end` degrees, swept square
 /// to its plane over `distance` along the unit `sweep_dir`. The frame is turned about
 /// its Z axis to the arc's start or, for a sweep against the arc's normal, to its end
@@ -1075,7 +1075,7 @@ fn arc_sweep_cylinder(
         return Ok(None);
     };
     // fork c8f6a31 (WR-662): the cylinder's AdjustSTEPUVDomain is SER.
-    let p = k.fixes.sweep_statuses_pass_on;
+    let p = true;
     ignore_or_pass_on(
         cylinder.adjust_step_uv_domain(k, &Extent2d::from_bounds(0.0, 0.0, end - start, distance)),
         p,
@@ -1100,7 +1100,7 @@ impl PrimitiveCreation {
     /// The curve overload of `CreateLinearSweep`. It consumes the curves, chooses
     /// a rectangular plane for an orthogonal line, a cylinder for a full circle
     /// swept along its axis, and an extrusion otherwise. Topology edits defer.
-    /// With `k.fixes.linear_sweep_arc_is_cylinder` (not upstream, WR-565) an arc
+    /// With `true` (not upstream, WR-565) an arc
     /// short of a full circle swept along its axis is a cylinder too.
     /// The arc test is to the cylinder check's zero (`arc_zero`, not upstream, WR-576),
     /// not the B-rep's tolerance.
@@ -1116,7 +1116,7 @@ impl PrimitiveCreation {
         use crate::geom::vector2d::Vec2;
         use crate::surface::surf_of_extrusion::p1::SurfOfExtrusion;
         // fork c8f6a31 (WR-662): CreateLinearSweep's dropped statuses are SER.
-        let p = k.fixes.sweep_statuses_pass_on;
+        let p = true;
         let previous = k.context.doing_boolean();
         k.context.set_doing_boolean(true);
         let result = (|| {
@@ -1190,8 +1190,7 @@ impl PrimitiveCreation {
                     }
                     // Not upstream (WR-565, #1477): with the fix, an arc short of a
                     // whole turn swept square to its plane is a cylinder too.
-                    if k.fixes.linear_sweep_arc_is_cylinder
-                        && angle > 0.0
+                    if angle > 0.0
                         && angle <= 360.0 - brep.tolerance()
                         && distance * frame.z_axis().cross(sweep_dir).length() <= brep.tolerance()
                     {
@@ -1263,7 +1262,7 @@ impl PrimitiveCreation {
         use crate::topology::face::p2::FaceCurves;
         let op = "primitive::primitive_creation::p1::create_sphere_no_pole";
         // fork c8f6a31 (WR-662): DropCurve, MakeFaceWithCurves and Transform are SER.
-        let p = k.fixes.sweep_statuses_pass_on;
+        let p = true;
         let start = -((0.8_f64 / 0.6).atan() * (180.0 / core::f64::consts::PI));
         let mut arc = circ_arc(
             &Arc {
@@ -1423,7 +1422,7 @@ impl PrimitiveCreation {
             .curve;
         let interval = front.natural_interval();
         // fork c8f6a31 (WR-662): SER(pFrontEllipse->ReverseParameterization(..)).
-        let p = k.fixes.sweep_statuses_pass_on;
+        let p = true;
         ignore_or_pass_on(front.reverse_parameterization(&interval), p)?;
         planar_face(
             k,
@@ -1481,7 +1480,7 @@ pub fn analytic_rotational_sweep(
     let op = "primitive::primitive_creation::p1::analytic_rotational_sweep";
     // fork c8f6a31 (WR-662): AdjustSTEPUVDomain, GlobalCurveIntersect and
     // ComputeCrvsNormal are SER.
-    let p = k.fixes.sweep_statuses_pass_on;
+    let p = true;
     let tol = brep.tolerance();
     let ends = curve.ends(k)?;
     let (start_distance, _) = line_point_distance(axis_base, axis, ends.start);

@@ -63,8 +63,8 @@ pub fn check_sweep_repetitions(repetitions: u64) -> Result<()> {
 }
 
 /// `Kernel::fixes.sweep_statuses_pass_on` of `brep`'s kernel (fork c8f6a31, WR-662).
-fn pass_on(a: &impl SweepAccess, brep: crate::topology::BrepId) -> Result<bool> {
-    Ok(a.kernel(brep)?.fixes.sweep_statuses_pass_on)
+fn pass_on(_a: &impl SweepAccess, _brep: crate::topology::BrepId) -> Result<bool> {
+    Ok(true)
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {

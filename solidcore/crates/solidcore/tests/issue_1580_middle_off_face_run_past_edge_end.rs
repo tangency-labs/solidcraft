@@ -110,9 +110,8 @@ enum Outcome {
 }
 
 /// The front top edge of the body `make` builds rounded 2.
-fn round_front_edge(refuse_rails_leaving_faces: bool, make: fn(&mut Kernel) -> Brep) -> Outcome {
+fn round_front_edge(_refuse_rails_leaving_faces: bool, make: fn(&mut Kernel) -> Brep) -> Outcome {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = refuse_rails_leaving_faces;
     let mut b = make(&mut k);
     let before = volume(&k, &mut b);
     let e = front_top_edge(&k, &b);

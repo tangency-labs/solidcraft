@@ -108,9 +108,7 @@
      "formula": "14*(25*19 + pi*9.5^2) - 6*pi*9.5^2/2 - 6*(4 - pi)"
     }
    },
-   "fixes": [
-    "fillet_nx1_tangent_side_edge"
-   ]
+   "fixes": []
   },
   {
    "name": "control_edge_off_seam",

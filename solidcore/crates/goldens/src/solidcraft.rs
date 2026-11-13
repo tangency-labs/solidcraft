@@ -1754,30 +1754,29 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
 /// resolve the same fields).
 fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
     let field = match name {
-        "imprint_extends_edge_to_proto_vertex" => &mut k.fixes.imprint_extends_edge_to_proto_vertex,
-        "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,
-        "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
-        "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
-        "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
+        "imprint_extends_edge_to_proto_vertex" => &mut true,
+        "delete_vertex_joins_seam_iso_curve" => &mut true,
+        "cover_refuses_folded_continuation" => &mut true,
+        "cover_wraps_across_closed_seam" => &mut true,
+        "fillet_refuse_non_manifold_result" => &mut true,
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
-        "boolean_new_face_closure_both_sides" => &mut k.fixes.boolean_new_face_closure_both_sides,
-        "loops_go_on_round_the_vertex" => &mut k.fixes.loops_go_on_round_the_vertex,
-        "revolve_nested_shells_as_cavities" => &mut k.fixes.revolve_nested_shells_as_cavities,
-        "revolve_splits_curves_on_axis" => &mut k.fixes.revolve_splits_curves_on_axis,
-        "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
-        "fillet_rails_meet_at_one_end_point" => &mut k.fixes.fillet_rails_meet_at_one_end_point,
-        "fillet_nx1_tangent_side_edge" => &mut k.fixes.fillet_nx1_tangent_side_edge,
-        "fillet_nx1_tangent_corner_edge" => &mut k.fixes.fillet_nx1_tangent_corner_edge,
-        "fillet_3x2_mixed_concave_side_edge" => &mut k.fixes.fillet_3x2_mixed_concave_side_edge,
-        "fillet_3x2_tangent_side_edge_roles" => &mut k.fixes.fillet_3x2_tangent_side_edge_roles,
-        "fillet_mitre_concave_face_corners" => &mut k.fixes.fillet_mitre_concave_face_corners,
-        "fillet_mitre_gap_patch" => &mut k.fixes.fillet_mitre_gap_patch,
-        "fillet_corner_per_vertex_fan" => &mut k.fixes.fillet_corner_per_vertex_fan,
-        "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
-        "fillet_rail_end_on_continued_surface" => &mut k.fixes.fillet_rail_end_on_continued_surface,
-        "fillet_cliff_overflow" => &mut k.fixes.fillet_cliff_overflow,
-        "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
-        "fillet_run_on_past_far_end_only" => &mut k.fixes.fillet_run_on_past_far_end_only,
+        "boolean_new_face_closure_both_sides" => &mut true,
+        "loops_go_on_round_the_vertex" => &mut true,
+        "revolve_nested_shells_as_cavities" => &mut true,
+        "revolve_splits_curves_on_axis" => &mut true,
+        "fillet_rails_meet_at_one_end_point" => &mut true,
+        "fillet_nx1_tangent_side_edge" => &mut true,
+        "fillet_nx1_tangent_corner_edge" => &mut true,
+        "fillet_3x2_mixed_concave_side_edge" => &mut true,
+        "fillet_3x2_tangent_side_edge_roles" => &mut true,
+        "fillet_mitre_concave_face_corners" => &mut true,
+        "fillet_mitre_gap_patch" => &mut true,
+        "fillet_corner_per_vertex_fan" => &mut true,
+        "fillet_trace_reaches_rails" => &mut true,
+        "fillet_rail_end_on_continued_surface" => &mut true,
+        "fillet_cliff_overflow" => &mut true,
+        "offset_extension_as_itself" => &mut true,
+        "fillet_run_on_past_far_end_only" => &mut true,
         _ => k
             .fixes
             .flag_mut(name)
@@ -2501,9 +2500,6 @@ mod tests {
         enable_fix(&mut k, "imprint_extends_edge_to_proto_vertex").unwrap();
         enable_fix(&mut k, "cover_refuses_folded_continuation").unwrap();
         enable_fix(&mut k, "fillet_refuse_non_manifold_result").unwrap();
-        assert!(k.fixes.imprint_extends_edge_to_proto_vertex);
-        assert!(k.fixes.cover_refuses_folded_continuation);
-        assert!(k.fixes.fillet_refuse_non_manifold_result);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 

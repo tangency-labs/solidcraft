@@ -278,10 +278,7 @@ fn refine<O: SolutionObject>(
     sols: &mut SolutionArray<O>,
     named: &Named<'_, O>,
 ) -> Result<()> {
-    ignore_or_pass_on(
-        refine_cc_solutions(k, sols, |o| named.curve_of(o)),
-        k.fixes.query_statuses_pass_on,
-    )
+    ignore_or_pass_on(refine_cc_solutions(k, sols, |o| named.curve_of(o)), true)
 }
 
 /// The analytic curve of a cache (`GetAnalyticCurve`), copied out of the cache.
@@ -879,10 +876,7 @@ impl Curve {
             // when solution starts at ivl1.min and stops short of ivl1.max
             if are_same(ivl1.min(), s0) && e0 < ivl1.max() {
                 // trim ivl1 to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl1.set_min_max(e0, ivl1.max()),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                ignore_or_pass_on(ivl1.set_min_max(e0, ivl1.max()), true)?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl1.length().abs() < EFF_ZERO {
@@ -894,10 +888,7 @@ impl Curve {
             // when solution ends at ivl1.max and starts after ivl1.min
             if are_same(ivl1.max(), e0) && ivl1.min() < s0 {
                 // trim ivl1 to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl1.set_min_max(ivl1.min(), s0),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                ignore_or_pass_on(ivl1.set_min_max(ivl1.min(), s0), true)?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl1.length().abs() < EFF_ZERO {
@@ -913,10 +904,7 @@ impl Curve {
             // when solution starts at ivl2.min and stops short of ivl2.max
             if are_same(ivl2.min(), ivl_tmp.min()) && ivl_tmp.max() < ivl2.max() {
                 // trim ivl2 to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl2.set_min_max(ivl_tmp.max(), ivl2.max()),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                ignore_or_pass_on(ivl2.set_min_max(ivl_tmp.max(), ivl2.max()), true)?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl2.length().abs() < EFF_ZERO {
@@ -928,10 +916,7 @@ impl Curve {
             // when solution ends at ivl2.max and starts after ivl2.min
             if are_same(ivl2.max(), ivl_tmp.max()) && ivl2.min() < ivl_tmp.min() {
                 // trim (upstream: sIvl1) to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl1.set_min_max(ivl2.min(), ivl_tmp.min()),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                ignore_or_pass_on(ivl1.set_min_max(ivl2.min(), ivl_tmp.min()), true)?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl2.length().abs() < EFF_ZERO {
@@ -1137,9 +1122,7 @@ impl Curve {
         // within tolerance; the port leaves that out. The fork passes on the statuses
         // of those evaluations (tangency-labs/smlib 8311f8e), so with the opt-in fix
         // they are made and a failure is returned.
-        if k.fixes.query_statuses_pass_on {
-            self.consistency_evaluations(k, &sols, other)?;
-        }
+        self.consistency_evaluations(k, &sols, other)?;
 
         // Check adjacent point solutions: a 'precise' solution with a not-so-good
         // solution very close may be an artifact of the local intersector; when the
@@ -1792,7 +1775,7 @@ impl Curve {
                 // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
                 let (deg, point) = ignored_or_pass_on(
                     self.classify_intersecting_range_solution(k, other, &curr),
-                    k.fixes.query_statuses_pass_on,
+                    true,
                 )?
                 .unwrap_or((false, None));
                 is_degenerate = deg;

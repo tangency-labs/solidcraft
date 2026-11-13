@@ -276,7 +276,7 @@ pub fn calculate_tight_bounding_box<'a>(
         // (CalculateBoundingBox initialises the box first)
         let mut edge_bbox = ignored(crate::error::passed_on(
             qe::calculate_bounding_box(k, b, e, NORMAL_BOX, false),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .and_then(|boxes| boxes.normal)
         .unwrap_or_default();
@@ -286,7 +286,7 @@ pub fn calculate_tight_bounding_box<'a>(
         // (an edge without curve, or a failure, leaves the loose box)
         if let Some(Some(tight)) = ignored(crate::error::passed_on(
             qe::calculate_tight_bounding_box(k, b, e),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)? {
             edge_bbox = tight;
         }
@@ -300,7 +300,7 @@ pub fn calculate_tight_bounding_box<'a>(
         k.check_cancelled(OP_TIGHT_BOX)?;
         if let Some(loose) = ignored(crate::error::passed_on(
             qf1::calculate_bounding_box(k, lb.get(), f, false),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)? {
             face_bbox = loose;
         }
@@ -309,7 +309,7 @@ pub fn calculate_tight_bounding_box<'a>(
         }
         ignore_status(crate::error::passed_on(
             qf3::calculate_tight_bounding_box_into(k, &mut lb, f, &mut face_bbox),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         brep_bbox = brep_bbox.union(&face_bbox);
     }

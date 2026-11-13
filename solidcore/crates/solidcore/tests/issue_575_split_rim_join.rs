@@ -121,12 +121,10 @@ struct Joined {
 
 /// Body1 of the sketch with `chords`, built with the strut clean-up `body_fix`, joined
 /// with Body2 with the clean-up `join_fix`.
-fn join(chords: &[f64], body_fix: bool, join_fix: bool) -> Joined {
+fn join(chords: &[f64], _body_fix: bool, _join_fix: bool) -> Joined {
     let mut k = Kernel::default();
-    k.fixes.boolean_cleanup_removes_slits = body_fix;
     let b1 = body1(&mut k, chords);
     let b2 = body2(&mut k);
-    k.fixes.boolean_cleanup_removes_slits = join_fix;
     let mut joined = boolean_union(&mut k, b1, b2).unwrap();
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {

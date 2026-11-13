@@ -29,7 +29,7 @@
 //! need an unported corner kind returns `Unported` from the session. The
 //! whole-operation wrappers here drop their session and return only the later fillet
 //! failure, so the executive's own error info is not in their `Result`: a caller that
-//! needs the retained missing-corner note (`fixes.fillet_vertex_error_diagnostics`)
+//! needs the retained missing-corner note (`true`)
 //! drives [`FilletSession`] directly and reads
 //! [`FilletSession::error_info`].
 //! [`circular_fillet`] and [`chamfer_fillet`] ignore `LoadFilletSolver`'s status
@@ -83,7 +83,7 @@ const OP: &str = "blend::fillet_executive::api";
 /// any error, and on a panic, the body is put back as it was before the call
 /// ([`Brep::with_rollback`]), so a refused or failed round leaves a body the caller can
 /// still use. A refusal of a result that is not a closed manifold solid
-/// (`fixes.fillet_refuse_non_manifold_result`, WR-212) names no entity, as the refused
+/// (`true`, WR-212) names no entity, as the refused
 /// result's edge is gone with it. A kept result is `fillet`'s own: the snapshot shares
 /// nothing with `brep`, so `fillet` edits the caller's own objects (curve owners
 /// included). The snapshot fails, before anything is changed, only where
@@ -134,7 +134,7 @@ fn invalid_input() -> SolidError {
 ///
 /// The executive's own error info is not returned here: this wrapper drops its session
 /// and returns only the later fillet failure. A caller that needs the retained
-/// missing-corner note (`fixes.fillet_vertex_error_diagnostics`) drives
+/// missing-corner note (`true`) drives
 /// [`FilletSession`] directly and reads [`FilletSession::error_info`].
 ///
 /// # Errors
@@ -322,7 +322,7 @@ fn fillet_all_edges(
         // fork 66b02de passes this on (SER)
         ignored(crate::error::passed_on(
             session.load_solver(k, solver),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )?)?;
     }
 

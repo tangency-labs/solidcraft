@@ -83,9 +83,8 @@ fn wall(k: &mut Kernel, turn: (Vec3, f64), radius: f64, start: f64, end: f64) ->
 }
 
 /// The two walls joined, with `cover_refuses_folded_continuation` (WR-407's cover half) `fixed`.
-fn joined(fixed: bool) -> (Kernel, Brep) {
+fn joined(_fixed: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.cover_refuses_folded_continuation = fixed;
     // XZ is XY turned 90 degrees about X; YZ is XY turned 120 degrees about (1, 1, 1).
     let a = wall(&mut k, (Vec3::X, 90.0), 50.0, 0.0, 180.0);
     let b = wall(&mut k, (Vec3::new(1.0, 1.0, 1.0), 120.0), 58.0, 90.0, 270.0);

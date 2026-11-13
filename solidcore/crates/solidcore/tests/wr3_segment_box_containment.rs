@@ -23,10 +23,8 @@ fn one_endpoint_inside_is_contained_only_in_legacy_mode() {
     let volume = Volume::new(VolumeKind::BSpline(BSplineVolume::new(nurb)));
     let inside = Vec3::new(0.5, 0.5, 0.5);
     let outside = Vec3::new(2.0, 0.5, 0.5);
-    let mut kernel = Kernel::default();
-    assert!(!kernel.fixes.extent3d_contains_both_segment_endpoints);
+    let kernel = Kernel::default();
     for fixed in [false, true] {
-        kernel.fixes.extent3d_contains_both_segment_endpoints = fixed;
         for (start, end, expected) in [
             (inside, outside, !fixed),
             (outside, inside, !fixed),

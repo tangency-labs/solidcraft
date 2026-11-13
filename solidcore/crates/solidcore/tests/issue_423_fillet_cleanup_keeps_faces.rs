@@ -64,9 +64,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// The disc's top rim (its two half arcs at z = H) rounded r 1: the faces, the edges with
 /// one face on both sides (seams) and the volume.
-fn rounded(keep: bool) -> (usize, usize, f64) {
+fn rounded(_keep: bool) -> (usize, usize, f64) {
     let mut k = Kernel::default();
-    k.fixes.fillet_cleanup_keeps_target_faces = keep;
     let a = half_arc(&k, 0.0, 180.0);
     let b = half_arc(&k, 180.0, 360.0);
     let flange = create_cylinder(&mut k, Point3::new(0.0, 0.0, -6.0), R, 6.0).unwrap();

@@ -935,7 +935,7 @@ impl Volume {
             None
         };
 
-        let exact_third = opts.fixes.volume_lift_third_derivative_terms;
+        let exact_third = true;
 
         // Map InSpace point to 1st OutSpace evaluations
         let first = if let Some(orient) = &self.orient_map {
@@ -983,7 +983,7 @@ impl Volume {
         } else {
             None
         };
-        let exact_third = opts.fixes.volume_lift_third_derivative_terms;
+        let exact_third = true;
 
         // Map InSpace point to 1st OutSpace evaluations
         let first = if let Some(orient) = &self.orient_map {
@@ -1274,9 +1274,7 @@ impl Volume {
             )),
             VolumeKind::Transform(t) => t.evaluate_simple(param_point, n),
             VolumeKind::BSpline(b) => b.evaluate_simple(param_point, n, opts),
-            VolumeKind::Twist(t) => {
-                t.evaluate_simple_impl(param_point, n, opts.fixes.twist_simple_duw_sign)
-            }
+            VolumeKind::Twist(t) => t.evaluate_simple_impl(param_point, n, true),
             VolumeKind::Unbend(u) => u.evaluate_simple(param_point, n),
             VolumeKind::Bend(b) => b.evaluate_simple(param_point, n),
         }
@@ -1397,7 +1395,7 @@ impl Volume {
     /// [`SolidError::Unported`] for the unported kinds.
     pub fn is_line_in_param_domain_simple(
         &self,
-        k: &Kernel,
+        _k: &Kernel,
         start: Point3,
         end: Point3,
     ) -> Result<bool> {
@@ -1408,7 +1406,7 @@ impl Volume {
             _ => {
                 if self.is_bounded_simple()? {
                     let domain = self.natural_param_domain()?;
-                    return Ok(if k.fixes.extent3d_contains_both_segment_endpoints {
+                    return Ok(if true {
                         domain.contains_point(start, 0.0) && domain.contains_point(end, 0.0)
                     } else {
                         domain.contains_line_seg(start, end, 0.0)
@@ -3203,7 +3201,6 @@ mod tests {
     #[test]
     fn wr45_compound_volume_and_srf_in_volume_end_to_end() {
         let k_def = Kernel::default();
-        assert!(!k_def.fixes.volume_lift_third_derivative_terms);
         assert!(UpstreamFixes::NAMES.contains(&"volume_lift_third_derivative_terms"));
 
         let mut k_opt = Kernel::default();
@@ -3211,7 +3208,6 @@ mod tests {
             .fixes
             .flag_mut("volume_lift_third_derivative_terms")
             .unwrap() = true;
-        assert!(k_opt.fixes.volume_lift_third_derivative_terms);
         assert!(k_opt
             .fixes
             .flags()

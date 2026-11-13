@@ -318,7 +318,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         // sm_FindPositionFromPCs, status ignored; the position stays SM_UNDEF on failure
         // (passed on with `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         let position = ignore_soft(passed_on(
             find_position_from_pcs(k, geometry, pc1, pc2),
             pass,
@@ -372,7 +372,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         // DD3: Check for overlapping PEs; the status is ignored (passed on with
         // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01).
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         let overlapping: Vec<Option<ProtoEdgeId>> = ignore_soft(passed_on(
             self.check_overlapping_proto_edges(k, geometry, classification1, ci1, ci2),
             pass,
@@ -407,7 +407,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             ))?
             .and_then(|r| r.0);
             // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
-            if let (Some(pv), true) = (start_pv, k.fixes.boolean_vertex_by_best_crossing) {
+            if let (Some(pv), true) = (start_pv, true) {
                 let sine = crossing_sine(
                     k,
                     &*geometry,
@@ -429,7 +429,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             ))?
             .and_then(|r| r.0);
             // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
-            if let (Some(pv), true) = (end_pv, k.fixes.boolean_vertex_by_best_crossing) {
+            if let (Some(pv), true) = (end_pv, true) {
                 let sine = crossing_sine(
                     k,
                     &*geometry,
@@ -566,7 +566,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // Takes reversal into account; status ignored.
         let crv_pt = ignore_soft(passed_on(
             d.evaluate(k, &*geometry, param_pe, true, false),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
+            true,
         )?)?
         .and_then(|r| r.0)
         .unwrap_or(Vec3::UNDEF);
@@ -597,13 +597,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let tol_3d = zone_tol3d(k, tol);
         if let Some(pc) = ignore_soft(passed_on(
             geometry.brep_point_3d_classify(k, brep1, crv_pt, tol_3d, true),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
+            true,
         )?)? {
             pc1 = pc;
         }
         if let Some(pc) = ignore_soft(passed_on(
             geometry.brep_point_3d_classify(k, brep2, crv_pt, tol_3d, true),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
+            true,
         )?)? {
             pc2 = pc;
         }
@@ -611,7 +611,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let mid_pv = mid_pv.ok_or(dangling("mid proto vertex is null"))?;
         let (new_vd, created) = ignore_soft(passed_on(
             self.add_vertex_definition_from_pcs(k, &*geometry, mid_pv, &mut pc1, &mut pc2),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
+            true,
         )?)?
         .map_or((None, false), |(vd, created)| (Some(vd), created));
         let new_vd = new_vd.ok_or_else(|| {
@@ -640,19 +640,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             .edge_def(ed)
             .ok_or(dangling("edge definition is deleted"))?
             .xsect_interval();
-        ignore_soft(passed_on(
-            this_ivl.set_max(param_pe),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?;
+        ignore_soft(passed_on(this_ivl.set_max(param_pe), true)?)?;
         self.set_ed_interval(ed, this_ivl)?;
         let mut new_ivl = self
             .edge_def(new_ed)
             .ok_or(dangling("edge definition is deleted"))?
             .xsect_interval();
-        ignore_soft(passed_on(
-            new_ivl.set_min(param_pe),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?;
+        ignore_soft(passed_on(new_ivl.set_min(param_pe), true)?)?;
         self.set_ed_interval(new_ed, new_ivl)?;
 
         let top = top_pe.ok_or(dangling("top proto edge is null"))?;
@@ -674,7 +668,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
         ignore_soft(passed_on(
             self.add_edge_definition(k, &mut *geometry, top, new_ed),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
+            true,
         )?)?;
         Ok((Some(new_vd), Some(new_ed)))
     }
@@ -757,10 +751,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let crv = curve
             .and_then(|c| geometry.curve_mut(c))
             .ok_or(dangling("curve handle is null or unknown"))?;
-        ignore_soft(passed_on(
-            crv.trim(k, &mut ivl, TrimMode::Notify),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?;
+        ignore_soft(passed_on(crv.trim(k, &mut ivl, TrimMode::Notify), true)?)?;
         self.set_ed_interval(ed, ivl)
     }
 
@@ -798,7 +789,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         let crv_pt = ignore_soft(passed_on(
             self.proto_edge_evaluate(k, &*geometry, pe, dt, true, false),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
+            true,
         )?)?
         .and_then(|r| r.0)
         .unwrap_or(Vec3::UNDEF);
@@ -838,10 +829,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // WR-101: upstream reads this maximum after clamping it, giving the upper child
         // `[dT, dT]`; the opt-in keeps the old maximum (`[dT, old_max]`).
         let old_max = lower.max();
-        ignore_soft(passed_on(
-            lower.set_min_max(lower.min(), dt),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?;
+        ignore_soft(passed_on(lower.set_min_max(lower.min(), dt), true)?)?;
         self.proto_edge_mut(pe)
             .ok_or(dangling("proto edge is deleted"))?
             .set_xsect_interval(lower);
@@ -849,15 +837,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             .proto_edge(new_pe)
             .ok_or(dangling("proto edge is deleted"))?
             .xsect_interval();
-        let upper_max = if k.fixes.proto_edge_split_upper_keeps_the_old_max {
-            old_max
-        } else {
-            lower.max()
-        };
-        ignore_soft(passed_on(
-            upper.set_min_max(dt, upper_max),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?;
+        let upper_max = if true { old_max } else { lower.max() };
+        ignore_soft(passed_on(upper.set_min_max(dt, upper_max), true)?)?;
         self.proto_edge_mut(new_pe)
             .ok_or(dangling("proto edge is deleted"))?
             .set_xsect_interval(upper);
@@ -894,10 +875,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 .proto_vertex_mut(end)
                 .ok_or(dangling("proto vertex is deleted"))?;
             v.add_proto_edge(new_pe);
-            ignore_soft(passed_on(
-                v.remove_proto_edge(pe),
-                k.fixes.ssi_proto_topology_statuses_pass_on,
-            )?)?;
+            ignore_soft(passed_on(v.remove_proto_edge(pe), true)?)?;
         }
 
         // Add the new ProtoEdge to the ProtoTopoMgr ProtoTopo list
@@ -918,7 +896,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         for ed in eds {
             ignore_soft(passed_on(
                 self.edge_definition_split(k, geometry, ed, dt, Some(new_pv), Some(new_pe)),
-                k.fixes.ssi_proto_topology_statuses_pass_on,
+                true,
             )?)?;
         }
 
@@ -954,7 +932,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let mut deleted: Vec<O> = Vec::new();
         // fork bcc6f01 (`SplitIntersectingProtoEdges`): the splits, combines and
         // removals pass on their statuses.
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         let e1 = self
             .proto_edge(pe1)
             .ok_or(dangling("proto edge is deleted"))?;
@@ -1162,7 +1140,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ) -> Result<Vec<O>> {
         // statuses SMLib drops, passed on with `ssi_proto_topology_statuses_pass_on`
         // (fork bcc6f01)
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         let mut deleted_curves: Vec<O> = Vec::new();
         let pvs: Vec<ProtoVertexId> = self.proto_vertices().to_vec();
 
@@ -1547,7 +1525,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ) -> Result<Vec<O>> {
         // statuses SMLib drops, passed on with `ssi_proto_topology_statuses_pass_on`
         // (fork bcc6f01)
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let pass = true;
         let mut deleted_curves: Vec<O> = Vec::new();
         let tol = self.raw_tolerance();
 

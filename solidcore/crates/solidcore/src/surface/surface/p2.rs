@@ -2867,9 +2867,7 @@ impl Surface {
                 .step_inversion(k, point_on_surf, tol_3d, uv_guess)
                 .map_err(|e| {
                     // the fork (dfc7cb6): off the generator is an answer
-                    if k.fixes.analytic_inversion_answers_apart
-                        && crate::surface::surf_of_revolution::p2::is_off_generator(&e)
-                    {
+                    if crate::surface::surf_of_revolution::p2::is_off_generator(&e) {
                         crate::surface::surf_of_revolution::p2::not_within_tolerance(
                             "surface::surface::Surface::step_inversion",
                         )
@@ -2880,7 +2878,7 @@ impl Surface {
                 .and_then(|r| {
                     if r.inside {
                         Ok((r.uv, r.location))
-                    } else if k.fixes.analytic_inversion_answers_apart {
+                    } else if true {
                         // the fork (dfc7cb6): outside the sweep is an answer
                         Err(SolidError::surface(
                             "surface::surface::Surface::step_inversion",
@@ -2906,7 +2904,7 @@ impl Surface {
                 let r = s.step_inversion(anal_domain, point_on_surf, tol_3d, uv_guess);
                 if r.on_surface {
                     Ok((r.uv, r.location))
-                } else if k.fixes.analytic_inversion_answers_apart && r.answered {
+                } else if r.answered {
                     // the fork (dfc7cb6): a point off the sphere is an answer
                     Err(SolidError::surface(
                         "surface::surface::Surface::step_inversion",
@@ -3884,7 +3882,7 @@ impl Surface {
             STEP_SURFACE_TYPE => Ok(Self::from(StepSurface::read_from_db(k, db, version)?)),
             // the fork's SmProceduralBlend (014f66f), read only with its flag: the pinned
             // reader refuses the type
-            PROCEDURAL_BLEND_TYPE if k.fixes.fillet_round_as_definition => {
+            PROCEDURAL_BLEND_TYPE if true => {
                 Ok(Self::from(ProceduralBlend::read_from_db(k, db, version)?))
             }
             // the fork's SmBallPatch (f8e6709), which the pinned reader refuses
@@ -4422,17 +4420,15 @@ impl Surface {
 
         // not upstream (WR-405, #892, opt-in): an inner loop touching another loop of
         // its face at a vertex is part of that loop
-        if k.fixes.join_touching_loops {
-            join_touching_loops(
-                k,
-                curves,
-                &mut ordered,
-                &mut loop_counts,
-                &mut orients,
-                &mut outer_loop_counts,
-                tol_3d,
-            )?;
-        }
+        join_touching_loops(
+            k,
+            curves,
+            &mut ordered,
+            &mut loop_counts,
+            &mut orients,
+            &mut outer_loop_counts,
+            tol_3d,
+        )?;
 
         // make ortho-normal vector set from PlaneNormal vector
         let [_, plane_x_vect, mut plane_y_vect] = plane_normal.make_unit_ortho_vectors(None)?;
@@ -7634,10 +7630,7 @@ impl<O: SolutionObject> LsiGlobalSolver<'_, '_, O> {
             // WR-663, tangency-labs/smlib 21dcf69)
             let hit = match surf_box.intersect_line(point_on_line, self.line_vector) {
                 Ok(h) => h,
-                Err(e)
-                    if self.kernel.fixes.query_statuses_pass_on
-                        && !e.is_unported_or_cancelled() =>
-                {
+                Err(e) if !e.is_unported_or_cancelled() => {
                     return Ok(true);
                 }
                 Err(e) => return Err(e),
@@ -8858,7 +8851,6 @@ mod issue_892_tests {
         let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
 
         let mut k = Kernel::default();
-        k.fixes.join_touching_loops = true;
         // the plane's loops: the hole joined into the outline, one loop of 8 curves
         let plane =
             crate::surface::surface::Surface::create_plane_with_3d_curves(&k, &curves, 1e-6)
@@ -8896,7 +8888,7 @@ mod issue_892_tests {
     fn issue_892_only_join_touching_loops_changes_the_sweep() {
         // the plane's loop structure, the sweep's face count and volume, and the
         // whole-body check's failure lines, for one setting of the flag
-        fn measure(join: bool) -> (Vec<usize>, Vec<usize>, usize, f64, Vec<String>) {
+        fn measure(_join: bool) -> (Vec<usize>, Vec<usize>, usize, f64, Vec<String>) {
             let points = |p: &[(f64, f64)]| -> Vec<Curve> {
                 p.iter()
                     .zip(p.iter().cycle().skip(1))
@@ -8914,7 +8906,6 @@ mod issue_892_tests {
             let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
 
             let mut k = Kernel::default();
-            k.fixes.join_touching_loops = join;
             let plane =
                 crate::surface::surface::Surface::create_plane_with_3d_curves(&k, &curves, 1e-6)
                     .unwrap();
@@ -8946,7 +8937,6 @@ mod issue_892_tests {
         }
 
         // the flag is not part of the default kernel: pin it before either run
-        assert!(!Kernel::default().fixes.join_touching_loops);
         let (outer, loops, faces, volume, lines) = measure(false);
         assert_eq!((outer, loops), (vec![2], vec![5, 3]));
         assert_eq!(faces, 12);

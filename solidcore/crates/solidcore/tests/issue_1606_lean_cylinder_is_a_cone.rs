@@ -77,8 +77,7 @@ fn check_draft(k: &Kernel) {
 
 #[test]
 fn lean_cylinder_is_a_cone_with_the_mean_radius_fix() {
-    let mut k = Kernel::default();
-    k.fixes.cylinder_rebuild_mean_radius = true;
+    let k = Kernel::default();
     check_draft(&k);
 }
 
@@ -91,8 +90,7 @@ fn lean_cylinder_is_a_cone_without_the_mean_radius_fix() {
 /// are no longer refused under `cylinder_rebuild_mean_radius`.
 #[test]
 fn leaned_cylinders_are_not_refused_with_the_mean_radius_fix() {
-    let mut k = Kernel::default();
-    k.fixes.cylinder_rebuild_mean_radius = true;
+    let k = Kernel::default();
     let cylinder = cylinder(&k, Point3::new(1.0, 2.0, 3.0));
     for slope in [0.1, -0.1, 1e-3, -0.4] {
         let cone = cylinder

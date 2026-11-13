@@ -1323,8 +1323,7 @@ mod tests {
         let cases = fixtures["cases"].as_array().unwrap();
         assert_eq!(cases.len(), 24);
         for enabled in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.cylinder_rebuild_mean_radius = enabled;
+            let k = Kernel::default();
             for case in cases {
                 let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
                 let name = case["name"].as_str().unwrap();

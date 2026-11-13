@@ -98,7 +98,6 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// solid whose check is clean, else what went wrong.
 fn join(fixed: bool) -> Result<f64, String> {
     let mut k = Kernel::default();
-    k.fixes.proto_edge_splits_at_captured_vertices = fixed;
     let (t, s) = (top(&mut k), seat(&mut k));
     let mut r = boolean_union(&mut k, t, s).map_err(|e| format!("union: {e:?}"))?;
     if !is_manifold_solid(&r).unwrap() {
@@ -147,12 +146,11 @@ fn labels(lines: &[String]) -> Vec<String> {
 /// top tube's start. The fixes are the default kernel's, or every one when `all`, with
 /// WR-575's `bspline_trim_keeps_rational_end_spans` set to `keeps`; returns the check's
 /// labels.
-fn join_with_gap(gap: f64, all: bool, keeps: bool) -> Vec<String> {
+fn join_with_gap(gap: f64, all: bool, _keeps: bool) -> Vec<String> {
     let mut k = Kernel::default();
     if all {
         k.fixes = UpstreamFixes::all();
     }
-    k.fixes.bspline_trim_keeps_rational_end_spans = keeps;
     let full = (150.0_f64 * 150.0 + 520.0 * 520.0).sqrt();
     let t = top(&mut k);
     let s = tube(

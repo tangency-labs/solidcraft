@@ -87,7 +87,6 @@ fn shelled(
     want: Option<f64>,
 ) -> Shelled {
     let mut k = Kernel::default();
-    k.fixes.offset_analytic_mate_edges = fixed;
     let part = part(&mut k);
     let open = planar_faces_at(&k, &part, 2, open_z);
     assert_eq!(open.len(), 1, "one open face");

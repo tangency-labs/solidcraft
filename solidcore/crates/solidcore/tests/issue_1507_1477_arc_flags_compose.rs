@@ -85,9 +85,8 @@ fn profile(k: &Kernel, curve: &dyn Fn(&Kernel) -> Curve) -> Vec<Curve> {
 }
 
 /// The profile of `curve` extruded 2 along +z and capped, with WR-565's `partial_arcs`.
-fn sweep(curve: &dyn Fn(&Kernel) -> Curve, partial_arcs: bool) -> &'static str {
+fn sweep(curve: &dyn Fn(&Kernel) -> Curve, _partial_arcs: bool) -> &'static str {
     let mut k = Kernel::default();
-    k.fixes.linear_sweep_arc_is_cylinder = partial_arcs;
     let curves = profile(&k, curve);
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let b = create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 2.0, true).unwrap();

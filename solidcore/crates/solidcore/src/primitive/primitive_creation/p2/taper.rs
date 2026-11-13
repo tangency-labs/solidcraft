@@ -24,7 +24,7 @@
 //! its extraneous-face loop (#2756); results are unchanged. SolidCraft changes
 //! (tangency-labs/smlib 54148db, e8f23e0, in `taper_walls`):
 //! [`OffsetCornerType::CurveExtension`] and, under opt-in
-//! `fixes.taper_tangent_corner_planes` (WR-521), linear-extension corners of a profile
+//! `true` (WR-521), linear-extension corners of a profile
 //! of lines and arcs build their walls exactly and may refuse a corner; the refusal
 //! is a return value, not out-params.
 
@@ -159,7 +159,7 @@ impl PrimitiveCreation {
     /// intersection fallback finds no offsets; those of the chaining, merge and
     /// topology steps that upstream does not ignore; `InvalidInput` for a corner
     /// refused under [`OffsetCornerType::CurveExtension`] or
-    /// `fixes.taper_tangent_corner_planes` (see
+    /// `true` (see
     /// [`Self::create_taper_extrude_with_refusal`]).
     pub fn create_taper_extrude(
         &mut self,
@@ -191,7 +191,7 @@ impl PrimitiveCreation {
     /// is the fork's `SM_ERR_INVALID_INPUT` with `pOptRefusal` and
     /// `pOptRefusedCorner` set (SolidCraft change, tangency-labs/smlib 54148db): with
     /// [`OffsetCornerType::CurveExtension`], or linear-extension corners under
-    /// `fixes.taper_tangent_corner_planes` (WR-521), a profile of lines and circular
+    /// `true` (WR-521), a profile of lines and circular
     /// arcs with a sharp corner gets walls that continue as themselves (or as their
     /// tangent planes) to meet along their exact seams, and a corner they cannot
     /// close is refused, the target left as it was. `CurveExtension` on a profile
@@ -265,7 +265,7 @@ fn taper(
     let same_point_tol = 10.0 * approx_tol;
     a.set_brep_tolerance(scratch, brep_tol)?;
     // fork c8f6a31 (WR-662): the SER sites of CreateTaperExtrude.
-    let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+    let p = true;
 
     // Enforce head-tail order for input curves
     let mut input = fix_chain_curves_list(
@@ -390,11 +390,10 @@ fn taper(
     // SolidCraft change (tangency-labs/smlib 54148db, e8f23e0): walls that keep their
     // curvature at the corners. Without a sharp corner the three corner rules give the
     // same walls, which the offset method builds. The tangent rule too, for lines and
-    // arcs (opt-in `fixes.taper_tangent_corner_planes`, WR-521): their walls continue
+    // arcs (opt-in `true`, WR-521): their walls continue
     // exactly as their tangent planes. Other curves keep the offset method.
     let mut corner = corner;
-    let tangent_rule = a.kernel(brep)?.fixes.taper_tangent_corner_planes
-        && corner == OffsetCornerType::LinearExtension;
+    let tangent_rule = corner == OffsetCornerType::LinearExtension;
     let has_corner = (corner == OffsetCornerType::CurveExtension || tangent_rule)
         && has_corner(a.kernel(brep)?, &composite, *normal);
     let mut exact = false;
@@ -616,7 +615,7 @@ fn surface_intersection_method(
 
     // offset the composite curve without trimming
     // fork c8f6a31 (WR-662): the SER sites of CreateTaperExtrude's fallback.
-    let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+    let p = true;
     sync_generators(composite, &state.generators);
     let untrimmed = ignored(passed_on(
         composite.create_trimmed_offsets(

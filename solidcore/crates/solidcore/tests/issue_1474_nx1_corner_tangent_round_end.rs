@@ -67,10 +67,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-9, &attrs).unwrap()
 }
 
-fn round(tangent_side_edge: bool, continuation: bool) -> (Brep, Kernel, solidcore::Result<()>) {
+fn round(_tangent_side_edge: bool, _continuation: bool) -> (Brep, Kernel, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_nx1_tangent_side_edge = tangent_side_edge;
-    k.fixes.fillet_nx1_opposite_continuation_side_edge = continuation;
     let mut body = block_with_overhanging_cylinder(&mut k);
     let arc = junction_arc(&k, &body);
     assert_eq!(arc.len(), 1);

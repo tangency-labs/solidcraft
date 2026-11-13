@@ -49,7 +49,7 @@ fn trimmed_edge_curve(
     let mut copy = curve.copy(k)?;
     let mut interval = crate::topology::edge::interval(source, edge.1)?;
     // fork c8f6a31 (WR-662): SER(pCrv->Trim(sInterval, FALSE)).
-    let p = k.fixes.sweep_statuses_pass_on;
+    let p = true;
     ignore_status(passed_on(copy.trim(k, &mut interval, TrimMode::Silent), p)?)?;
     Ok(copy)
 }
@@ -189,7 +189,7 @@ impl PrimitiveCreation {
         let domain = Extent1d::from_min_max(0.0, 360.0);
         // fork c8f6a31 (WR-662): SER(SmCircle::CreateCanonical(..)) and
         // SER(pPathCurve->CalculateBoundingBox(..)).
-        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
+        let p = true;
         let circle = ignored(passed_on(
             Ellipse::create_canonical_circle(a.kernel(brep)?, &place, radius, Some(&domain), None),
             p,

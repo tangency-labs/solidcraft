@@ -13,10 +13,8 @@ use solidcore::primitive::api_primitives::create_box;
 use solidcore::sweep::api_brep::{create_linear_sweep, non_manifold_sweep, SweepSelection};
 use solidcore::Kernel;
 
-fn kernel(pass_on: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.sweep_statuses_pass_on = pass_on;
-    k
+fn kernel(_pass_on: bool) -> Kernel {
+    Kernel::default()
 }
 
 /// fork c8f6a31 (`SmPrimitiveCreation::CreateLinearSweep`,

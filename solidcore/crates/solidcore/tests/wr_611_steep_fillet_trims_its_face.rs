@@ -100,10 +100,8 @@ fn removed(d: f64) -> f64 {
 
 /// The knife edge of the part (mirrored when `s` is -1) chamfered `d`: its volume, or why
 /// it failed (the chamfer's error, or a body that is not a solid).
-fn chamfer(best_dot: bool, s: f64, d: f64) -> Result<f64, String> {
+fn chamfer(_best_dot: bool, s: f64, d: f64) -> Result<f64, String> {
     let mut k = Kernel::default();
-    k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.fillet_trim_inside_by_best_dot = best_dot;
     let mut b = part(&mut k, s);
     let e = knife_edge(&k, &b, s);
     // the linear section (`xsect_type` 0) on the ball of radius d

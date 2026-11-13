@@ -982,9 +982,7 @@ pub fn make_faceuse_attempt_with(
 
     // Not upstream (tangency-labs/solidcore#488; opt-in): MakeFace does not take the
     // other face's UV trims over; carry the exact ones across
-    if ctx.kernel().fixes.keep_operand_uv_trims {
-        copy_uv_trim_curves_of_other_face(ctx.kernel(), brep, other, faceuse, new_face, relations)?;
-    }
+    copy_uv_trim_curves_of_other_face(ctx.kernel(), brep, other, faceuse, new_face, relations)?;
     let (source, dest) = (
         (copy.face_source_key)(face_to_make),
         (copy.face_destination_key)(new_face),
@@ -1635,19 +1633,17 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
             (&added_faces, &added_edges, &added_verts, &mut this_box),
         ] {
             for &f in faces {
-                if let Some(b) = ignore_soft(crate::error::passed_on(
-                    brep.face_bounding_box(k, f),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)? {
+                if let Some(b) =
+                    ignore_soft(crate::error::passed_on(brep.face_bounding_box(k, f), true)?)?
+                {
                     temp_box = b;
                 }
                 *bx = bx.union(&temp_box);
             }
             for &e in edges {
-                if let Some(b) = ignore_soft(crate::error::passed_on(
-                    brep.edge_bounding_box(k, e),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)? {
+                if let Some(b) =
+                    ignore_soft(crate::error::passed_on(brep.edge_bounding_box(k, e), true)?)?
+                {
                     temp_box = b;
                 }
                 *bx = bx.union(&temp_box);
@@ -1679,10 +1675,9 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
         let added_verts = cull_verts(brep, added_verts, &master_box)?;
         let mut added_e = Vec::new();
         for e in added_edges {
-            if let Some(b) = ignore_soft(crate::error::passed_on(
-                brep.edge_bounding_box(k, e),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)? {
+            if let Some(b) =
+                ignore_soft(crate::error::passed_on(brep.edge_bounding_box(k, e), true)?)?
+            {
                 bbox = b;
             }
             if !master_box.are_disjoint(&bbox, tolerance_of(brep, e)?) {
@@ -1691,10 +1686,9 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
         }
         let mut kept = Vec::new();
         for f in added_faces {
-            if let Some(b) = ignore_soft(crate::error::passed_on(
-                brep.face_bounding_box(k, f),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)? {
+            if let Some(b) =
+                ignore_soft(crate::error::passed_on(brep.face_bounding_box(k, f), true)?)?
+            {
                 bbox = b;
             }
             if !master_box.are_disjoint(&bbox, tolerance_of(brep, f)?) {
@@ -1705,10 +1699,9 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
         let master_verts = cull_verts(brep, master_verts, &this_box)?;
         let mut master_e = Vec::new();
         for e in master_edges {
-            if let Some(b) = ignore_soft(crate::error::passed_on(
-                brep.edge_bounding_box(k, e),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)? {
+            if let Some(b) =
+                ignore_soft(crate::error::passed_on(brep.edge_bounding_box(k, e), true)?)?
+            {
                 bbox = b;
             }
             if !this_box.are_disjoint(&bbox, tolerance_of(brep, e)?) {
@@ -1717,10 +1710,9 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
         }
         let mut kept = Vec::new();
         for f in master_faces {
-            if let Some(b) = ignore_soft(crate::error::passed_on(
-                brep.face_bounding_box(k, f),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)? {
+            if let Some(b) =
+                ignore_soft(crate::error::passed_on(brep.face_bounding_box(k, f), true)?)?
+            {
                 bbox = b;
             }
             if !this_box.are_disjoint(&bbox, tolerance_of(brep, f)?) {
@@ -1748,7 +1740,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
         };
         let pairs = ignore_soft(crate::error::passed_on(
             brep.stitch_vertex_pairs(k, master, &stitch, &mut master_v, &mut added_v),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or_else(StitchedVertices::initial);
         out.max_vert_gap = pairs.max_vertex_gap;
@@ -1766,7 +1758,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                 ignore_soft(crate::error::passed_on(
                     self.intersector
                         .remove_relationship(Some(del), Some(this_v)),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
                 let survivor = *pairs
                     .processed
@@ -1775,7 +1767,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                 ignore_soft(crate::error::passed_on(
                     self.intersector
                         .relate(k, brep, Some(survivor), Some(this_v)),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
         }
@@ -1785,7 +1777,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
         stitch.stitch_tol_3d = small_tol;
         let split = ignore_soft(crate::error::passed_on(
             brep.split_edges_with_vertices(k, master, &stitch, &mut added_v, &mut master_e),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or_else(SplitEdges::initial);
         out.max_vert_gap = max2(out.max_vert_gap, split.max_vertex_gap);
@@ -1797,7 +1789,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
         // to the edge list in the routine).
         let split = ignore_soft(crate::error::passed_on(
             brep.split_edges_with_vertices(k, master, &stitch, &mut master_v, &mut added_e),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or_else(SplitEdges::initial);
         out.max_vert_gap = max2(out.max_vert_gap, split.max_vertex_gap);
@@ -1810,7 +1802,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
         stitch.stitch_tol_3d = big_tol;
         let glued = ignore_soft(crate::error::passed_on(
             brep.stitch_edges_of_vertices(k, master, &stitch, &processed_verts),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or_else(StitchedEdges::initial);
         out.max_edge_gap = max2(out.max_edge_gap, glued.max_edge_gap);
@@ -1829,12 +1821,12 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                 ignore_soft(crate::error::passed_on(
                     self.intersector
                         .remove_relationship(Some(del), Some(this_e)),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
                 ignore_soft(crate::error::passed_on(
                     self.intersector
                         .relate(k, brep, Some(survivor), Some(this_e)),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
             null_first(&mut master_e, del);
@@ -1858,7 +1850,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                     options.making_manifold_solid,
                     options.ignore_problems,
                 ),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)? {
                 Some(vf) => (
                     vf.max_vertex_gap,
@@ -1885,7 +1877,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                 options.making_manifold_solid,
                 options.ignore_problems,
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or(EdgeEdgeIntersect {
             split_edges1: Vec::new(),
@@ -1915,7 +1907,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                 options.making_manifold_solid,
                 options.ignore_problems,
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         let (gap, min_unstitched, new_verts, new_edges) = match ef {
             Some(ef) => (
@@ -1942,7 +1934,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                 options.making_manifold_solid,
                 options.ignore_problems,
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         let (gap, min_unstitched, new_verts, new_edges) = match ef {
             Some(ef) => (
@@ -1973,7 +1965,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                 options.ignore_problems,
                 options.do_region_nesting,
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .unwrap_or(EdgeFaceCoincidence {
             imprinted_edges: Vec::new(),
@@ -2016,7 +2008,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                 options.ignore_problems,
                 options.do_region_nesting,
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         let (gap, min_unstitched, mut processed_faces, new_faces, new_edges) = match ff {
             Some(ff) => (
@@ -2048,7 +2040,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                 options.ignore_problems,
                 options.do_region_nesting,
             ),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         let (gap, min_unstitched, surviving, deleted) = match fc {
             Some(fc) => (
@@ -2083,12 +2075,12 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
                 ignore_soft(crate::error::passed_on(
                     self.intersector
                         .remove_relationship(Some(del), Some(this_f)),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
                 ignore_soft(crate::error::passed_on(
                     self.intersector
                         .relate(k, brep, Some(survivor), Some(this_f)),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
             // Also while we're here, add to ProcessedFace list.
@@ -2104,20 +2096,20 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
             if brep.faceuse_shell(fu1)? == brep.faceuse_shell(fu2)? {
                 ignore_soft(crate::error::passed_on(
                     brep.test_closure_split_region(k, master, true, fu1),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)?;
             }
         }
         ignore_soft(crate::error::passed_on(
             brep.find_and_set_infinite_region(k, master),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
 
         // If the resulting Brep is Manifold, orient its faces.
         if brep.is_manifold_solid(master)? {
             ignore_soft(crate::error::passed_on(
                 brep.orient_trimmed_surfaces(k, master, true, true),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
         }
 

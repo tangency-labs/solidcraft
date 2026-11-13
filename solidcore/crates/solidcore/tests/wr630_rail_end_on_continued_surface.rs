@@ -22,10 +22,8 @@ use solidcore::topology::{edge, vertex};
 use solidcore::Kernel;
 
 /// The lowest z of the fillet's corner vertices on the front face (y = 0).
-fn lowest_rail_end(fix: bool) -> f64 {
+fn lowest_rail_end(_fix: bool) -> f64 {
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = fix;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 20.0, 10.0).unwrap();
     let e = b
         .edges()

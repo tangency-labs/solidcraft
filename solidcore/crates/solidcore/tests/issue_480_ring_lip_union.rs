@@ -96,7 +96,6 @@ fn issue_480_ring_lip_union_with_the_seam_at_the_crossing() {
     let mut report = Vec::new();
     for e in SEAM_WINDOW {
         let mut k = Kernel::default();
-        k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
         let got = ring_and_lip_body(&mut k, e, 90.0).and_then(|mut b| {
             let solid = is_manifold_solid(&b)?;
             Ok((solid, volume(&k, &mut b)?))

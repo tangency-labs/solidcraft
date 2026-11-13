@@ -585,7 +585,7 @@ fn assert_test_surface4(k: &Kernel, s: &Surface) -> Result<bool> {
     // leaves the minimum it had reached)
     // (with the opt-in fix continuities that cannot be computed fail the test, WR-663,
     // tangency-labs/smlib 21dcf69: `None`)
-    let fails = k.fixes.query_statuses_pass_on;
+    let fails = true;
     let cont = |dir| -> Result<Option<ContinuityType>> {
         let mut reached = None;
         match s.calculate_continuities_reached(k, dir, &mut reached) {
@@ -652,7 +652,7 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
         // (a failed CreateIsoBoundaries leaves the curves uninitialised upstream)
         // (with the opt-in fix boundaries that cannot be built or compared fail the
         // test, WR-663, tangency-labs/smlib 21dcf69)
-        let fails = k.fixes.query_statuses_pass_on;
+        let fails = true;
         let (crv1, crv2) = match s.create_iso_boundaries(k, dir, a_tol) {
             Ok(Some(c)) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -925,7 +925,7 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
         let row_cnt_u = degree_u - (mult(&mults_u, ii)? - 1);
         // upstream moves one row further for each repeated copy of the knot; with the opt-in
         // the row through the knot (WR-505, #1515; tangency-labs/smlib#41)
-        let cp_index_u = if k.fixes.internal_pole_row_through_knot {
+        let cp_index_u = if true {
             knt_cnt_u - 1 - degree_u
         } else {
             knt_cnt_u - row_cnt_u - 1
@@ -983,7 +983,7 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
 
         let row_cnt_v = degree_v - (mult(&mults_v, ii)? - 1);
         // as the U walk: the row through the knot with the opt-in (WR-505, #1515)
-        let cp_index_v = if k.fixes.internal_pole_row_through_knot {
+        let cp_index_v = if true {
             knt_cnt_v - 1 - degree_v
         } else {
             knt_cnt_v - row_cnt_v - 1
@@ -2102,7 +2102,7 @@ fn surf_of_extrusion_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>)
     // 4. check that m_vOrigin is a point on m_pGenCurve
     let gen_ivl = gen.natural_interval();
     let origin = ext.origin();
-    let origin_tol = if k.fixes.extrusion_origin_scaled_zero {
+    let origin_tol = if true {
         EFF_ZERO * (1.0 + origin.max_dimension())
     } else {
         EFF_ZERO
@@ -2464,39 +2464,31 @@ fn torus_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<b
 
     let anal = t.base().step_uv_domain();
     if major < minor {
-        if k.fixes.torus_check_spindle_apex {
-            /*  5 */
-            // Not upstream (WR-539, the fork's tangency-labs/smlib@daba678): a spindle
-            // torus's minor circles cross the axis where R + r cos(V) = 0, at the apexes
-            // V = +-(90 + asin(R/r)) degrees; like a sphere's poles (its tests 4 and 5),
-            // an apex may bound the V domain but not lie inside it.
-            let apex_deg = 90.0 + sm_asin(major / minor) * 180.0 / PI;
-            let apex_ivl_v = anal.v_interval();
-            for apex in [apex_deg, -apex_deg] {
-                let c = apex_ivl_v.contains_periodic_value(apex, 360.0, EFF_ZERO_DEG);
-                // (test 5 is the fork's: labelled from the extended table, so the
-                // class's `SM_GetAssertLabelList` table stays upstream's)
-                let class_string = r.class_string;
-                rtn &= r.report_from(
-                    TORUS_WITH_SPINDLE_APEX,
-                    CLASS,
-                    CLASS,
-                    class_string,
-                    5,
-                    0,
-                    !c.contained
-                        || is_zero_to_tol(c.dist_to_min, EFF_ZERO_DEG)
-                        || is_zero_to_tol(c.dist_to_max, EFF_ZERO_DEG),
-                    EFF_ZERO_DEG,
-                    min2(c.dist_to_min, c.dist_to_max),
-                )?;
-            }
-        } else {
-            let angle_limit_deg = 90.0 + sm_acos(major / minor) * 180.0 / PI;
-            let self_intersect = Extent1d::from_min_max(angle_limit_deg, 360.0 - angle_limit_deg);
-            if !self_intersect.are_disjoint_periodic(&anal.u_interval(), 360.0, -1.0) {
-                rtn &= false;
-            }
+        /*  5 */
+        // Not upstream (WR-539, the fork's tangency-labs/smlib@daba678): a spindle
+        // torus's minor circles cross the axis where R + r cos(V) = 0, at the apexes
+        // V = +-(90 + asin(R/r)) degrees; like a sphere's poles (its tests 4 and 5),
+        // an apex may bound the V domain but not lie inside it.
+        let apex_deg = 90.0 + sm_asin(major / minor) * 180.0 / PI;
+        let apex_ivl_v = anal.v_interval();
+        for apex in [apex_deg, -apex_deg] {
+            let c = apex_ivl_v.contains_periodic_value(apex, 360.0, EFF_ZERO_DEG);
+            // (test 5 is the fork's: labelled from the extended table, so the
+            // class's `SM_GetAssertLabelList` table stays upstream's)
+            let class_string = r.class_string;
+            rtn &= r.report_from(
+                TORUS_WITH_SPINDLE_APEX,
+                CLASS,
+                CLASS,
+                class_string,
+                5,
+                0,
+                !c.contained
+                    || is_zero_to_tol(c.dist_to_min, EFF_ZERO_DEG)
+                    || is_zero_to_tol(c.dist_to_max, EFF_ZERO_DEG),
+                EFF_ZERO_DEG,
+                min2(c.dist_to_min, c.dist_to_max),
+            )?;
         }
     }
 
@@ -2801,13 +2793,12 @@ mod tests {
     fn wr_539_spindle_torus_reports_an_apex_inside() {
         let whole = torus_over(0.0, 360.0, 1.0, 2.0);
         let outer = torus_over(-120.0, 120.0, 1.0, 2.0);
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         for s in [&whole, &outer] {
             let (ok, upstream) = failed_tests(&k, s);
             assert!(!ok);
             assert!(!upstream.contains(&(TORUS_TYPE, 5)), "{upstream:?}");
         }
-        k.fixes.torus_check_spindle_apex = true;
         let (ok, fixed) = failed_tests(&k, &whole);
         assert!(!ok);
         assert!(fixed.contains(&(TORUS_TYPE, 5)), "{fixed:?}");
@@ -2842,9 +2833,8 @@ mod tests {
             has_internal_pole(k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
         };
 
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         assert!(horn(&k), "upstream reports a pole on the horn torus");
-        k.fixes.internal_pole_row_through_knot = true;
         assert!(!horn(&k), "no internal pole on the horn torus");
     }
 
@@ -2869,9 +2859,8 @@ mod tests {
             &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             &pts,
         );
-        let pole = |flag: bool| {
-            let mut k = Kernel::default();
-            k.fixes.internal_pole_row_through_knot = flag;
+        let pole = |_flag: bool| {
+            let k = Kernel::default();
             let part = make_nurb(&k, &s).unwrap().unwrap();
             has_internal_pole(&k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
         };

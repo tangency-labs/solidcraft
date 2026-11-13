@@ -3,8 +3,8 @@
 //! -Z onto a sphere of radius 20 about the origin, at tolerance 4e-5. The projection
 //! runs through both poles. `StepBackFromSingularity` copied the previous point's
 //! tangent over the pole's exact one and the span into the pole came out 2.02e-4 off
-//! the sphere; with `ssi_pole_point_keeps_its_tangent` every curve stays on the sphere
-//! within the tolerance.
+//! the sphere; keeping the pole's own tangent, every curve stays on the sphere within the
+//! tolerance.
 //!
 //! In the port both settings stay within 4e-5 (upstream 2.3e-5, fixed 9.5e-6 off the
 //! sphere), so the measurable is pinned at a tolerance of 1e-5, where upstream's span
@@ -25,10 +25,9 @@ use solidcore::surface::surface::Surface;
 use solidcore::Kernel;
 
 /// The largest distance from the sphere of the line along X at z = 40 projected along
-/// -Z through the sphere's poles at tolerance `tol`, with WR-550's `fixed`.
-fn worst_off_sphere(fixed: bool, tol: f64) -> f64 {
-    let mut k = Kernel::default();
-    k.fixes.ssi_pole_point_keeps_its_tangent = fixed;
+/// -Z through the sphere's poles at tolerance `tol`.
+fn worst_off_sphere(tol: f64) -> f64 {
+    let k = Kernel::default();
     let sphere =
         Surface::from(Sphere::create_canonical(&k, &Axis2Placement::default(), 20.0).unwrap());
     let line = BSplineCurve::create_canonical(&CanonicalData {
@@ -72,7 +71,7 @@ fn worst_off_sphere(fixed: bool, tol: f64) -> f64 {
 #[test]
 fn wr_550_line_projected_through_sphere_poles_stays_on_the_sphere() {
     let tol = 4e-5;
-    let worst = worst_off_sphere(true, tol);
+    let worst = worst_off_sphere(tol);
     assert!(worst <= tol, "a projected curve is {worst} off the sphere");
 }
 
@@ -83,6 +82,6 @@ fn wr_550_line_projected_through_sphere_poles_stays_on_the_sphere() {
 #[test]
 fn wr_550_pole_tangent_keeps_the_projection_within_a_tight_tolerance() {
     let tol = 1e-5;
-    let fixed = worst_off_sphere(true, tol);
+    let fixed = worst_off_sphere(tol);
     assert!(fixed <= tol, "with the fix: {fixed:e} off the sphere");
 }

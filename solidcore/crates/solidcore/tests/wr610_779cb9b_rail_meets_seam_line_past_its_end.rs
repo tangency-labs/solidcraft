@@ -25,16 +25,8 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-fn kernel(cliff: bool, cone_run_on: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
-    k.fixes.fillet_trace_reaches_rails = cone_run_on;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_run_on_bspline_trims = true;
-    k.fixes.offset_extension_from_base = true;
-    k.fixes.offset_extension_as_itself = true;
-    k.fixes.fillet_cliff_overflow = cliff;
-    k
+fn kernel(_cliff: bool, _cone_run_on: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {

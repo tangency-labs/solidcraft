@@ -90,9 +90,8 @@ enum Outcome {
 }
 
 /// The front top edge of the spur prism rounded 2.
-fn round_front_edge(refuse_rails_leaving_faces: bool, tip: f64) -> Outcome {
+fn round_front_edge(_refuse_rails_leaving_faces: bool, tip: f64) -> Outcome {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = refuse_rails_leaving_faces;
     let mut b = spur_prism(&mut k, tip);
     let before = volume(&k, &mut b);
     let e = front_top_edge(&k, &b);

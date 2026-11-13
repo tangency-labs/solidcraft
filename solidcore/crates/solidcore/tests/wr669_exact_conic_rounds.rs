@@ -1,4 +1,4 @@
-//! WR-669 (`fixes.fillet_exact_round_classes`), the SolidCraft fork's tangency-labs/smlib@0061c41
+//! WR-669 (`true`), the SolidCraft fork's tangency-labs/smlib@0061c41
 //! and 1b5f1e7: a constant round whose spine is a plane conic is the exact rational surface
 //! of the ball's arcs, where upstream (and the flag before these commits) traces and fits it.
 //!
@@ -241,10 +241,11 @@ fn plate_and_peg(exact: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
 }
 
 /// [`plate_and_peg`] with `definition` (`fillet_round_as_definition`, #2485) set.
-fn plate_and_peg_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
+fn plate_and_peg_kept(
+    _exact: bool,
+    _definition: bool,
+) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let plate = create_box(&mut k, Point3::new(-20.0, -20.0, -20.0), 40.0, 40.0, 20.0).unwrap();
     let mut peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, -10.0), R, 25.0).unwrap();
     tilt(&mut k, &mut peg, 30f64.to_radians());
@@ -353,10 +354,11 @@ fn pole_and_cone(exact: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
 }
 
 /// [`pole_and_cone`] with `definition` (`fillet_round_as_definition`, #2485) set.
-fn pole_and_cone_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
+fn pole_and_cone_kept(
+    _exact: bool,
+    _definition: bool,
+) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let alpha = 45f64.to_radians();
     let d = R / alpha.sin();
     let pole = create_cylinder(&mut k, Point3::new(0.0, 0.0, -12.0), R, 20.0).unwrap();
@@ -581,8 +583,6 @@ fn a_round_on_a_boss_tilted_a_few_degrees_is_its_definition() {
     for deg in [0.25_f64, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0] {
         let tau = deg.to_radians();
         let mut k = Kernel::default();
-        k.fixes.fillet_exact_round_classes = true;
-        k.fixes.fillet_round_as_definition = true;
         let block = create_box(&mut k, Point3::new(-20.0, -20.0, -10.0), 40.0, 40.0, 10.0).unwrap();
         let mut peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, -5.0), boss, 15.0).unwrap();
         tilt(&mut k, &mut peg, tau);

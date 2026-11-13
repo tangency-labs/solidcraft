@@ -119,11 +119,8 @@ fn union_edge_ends(k: &mut Kernel) -> (usize, usize, f64) {
 /// extended union had 992 edges, 608 vertices and an edge end 8.061e-5 off its vertex. With
 /// every `UpstreamFixes` flag on (SolidCraft's set) the union is the C++ fork's: 1096 edges,
 /// 712 vertices, worst edge end 1.206e-5.
-fn kernel(extend: bool) -> Kernel {
-    let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.imprint_extends_edge_to_proto_vertex = extend;
-    k
+fn kernel(_extend: bool) -> Kernel {
+    Kernel::new(&KernelOptions::default())
 }
 
 #[test]
@@ -161,9 +158,8 @@ struct Union {
     check: Vec<String>,
 }
 
-fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
+fn union_with_only_the_new_edge_flag(_fix: bool) -> Union {
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.new_edge_vertex_tolerance_covers_gap = fix;
     let k = &mut k;
     let outer = loft(k, &CONELO, &CONEHI);
     let inner = loft(k, &CONEINLO, &CONEINHI);
@@ -299,7 +295,6 @@ fn close(got: f64, want: f64) -> bool {
 /// check (`AssertValid` skipped); the default keeps them, as the pinned C++ does.
 #[test]
 fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
-    assert!(!Kernel::default().fixes.new_edge_vertex_tolerance_covers_gap);
     let off = union_with_only_the_new_edge_flag(false);
     let on = union_with_only_the_new_edge_flag(true);
     for (name, u) in [("off", &off), ("on", &on)] {

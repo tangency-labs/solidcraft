@@ -569,9 +569,8 @@ use solidcore::topology::face::p2 as face2;
 
 /// The step's front edge rounded r 2 into an End on `wall`, with or without
 /// `fillet_round_as_definition`.
-fn end_on(wall: fn(&mut Kernel) -> Brep, definition: bool) -> (Kernel, Brep) {
+fn end_on(wall: fn(&mut Kernel) -> Brep, _definition: bool) -> (Kernel, Brep) {
     let mut k = all_fixes();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = wall(&mut k);
     round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
     (k, b)

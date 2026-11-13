@@ -104,7 +104,6 @@ fn bar(k: &mut Kernel, alpha: f64, beta: f64) -> Brep {
 
 fn run(alpha: f64, beta: f64, fix: bool) {
     let mut k = Kernel::default();
-    k.fixes.boolean_vertex_by_best_crossing = fix;
     let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let b = bar(&mut k, alpha, beta);
     let label = format!("alpha={alpha} beta={beta} fix={fix}");
@@ -144,9 +143,8 @@ fn issue_1059_grazing_edge_crossing_probe() {
 fn issue_1059_what_the_flag_moves_probe() {
     for alpha in [-1.0, -0.1] {
         let mut out = Vec::new();
-        for fix in [false, true] {
+        for _fix in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.boolean_vertex_by_best_crossing = fix;
             let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
             let b = bar(&mut k, alpha, 30.0);
             let u = boolean_union(&mut k, a, b).unwrap();
@@ -208,9 +206,8 @@ fn issue_1059_parameter_sweep_probe() {
         for beta in [10.0, 30.0, 60.0, 85.0] {
             for roll in [0.0, 30.0] {
                 let mut res = Vec::new();
-                for fix in [false, true] {
+                for _fix in [false, true] {
                     let mut k = Kernel::default();
-                    k.fixes.boolean_vertex_by_best_crossing = fix;
                     let a =
                         create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
                     let b = roll_bar(&mut k, alpha, beta, roll);

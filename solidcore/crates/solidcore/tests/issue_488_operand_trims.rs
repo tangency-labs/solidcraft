@@ -45,9 +45,8 @@ fn side_trims(k: &Kernel, b: &Brep) -> Vec<Option<String>> {
 /// A 10 cube less an r 2 cylinder standing inside it (z 3..7): a closed void whose faces
 /// are the cylinder's, taken over whole. Returns the cylinder's seam-face trims and the
 /// result's.
-fn void_cut(keep: bool) -> (Vec<Option<String>>, Vec<Option<String>>) {
+fn void_cut(_keep: bool) -> (Vec<Option<String>>, Vec<Option<String>>) {
     let mut k = Kernel::default();
-    k.fixes.keep_operand_uv_trims = keep;
     let cube = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let tool = create_cylinder(&mut k, Point3::new(5.0, 5.0, 3.0), 2.0, 4.0).unwrap();
     let before = side_trims(&k, &tool);

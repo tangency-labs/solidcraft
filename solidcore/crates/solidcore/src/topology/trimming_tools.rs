@@ -1728,7 +1728,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
 
     // Not upstream (WR-591, opt-in; tangency-labs/smlib b0ee3f9): the normal the loops
     // turn about where several curve ends meet, one for the whole call
-    let turn_normal = if k.fixes.loops_go_on_round_the_vertex {
+    let turn_normal = if true {
         loops_turn_normal(k, curves, out.curves_box.sphere_bound().center)?
     } else {
         Vec3::new(0.0, 0.0, 0.0)
@@ -1815,7 +1815,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
             // Not upstream (WR-591, opt-in): where more curve ends meet at this vertex
             // (loops touching there), the loop goes on along the curve next round the
             // vertex from the one it arrives by, so it never crosses itself
-            let found_index = if k.fixes.loops_go_on_round_the_vertex {
+            let found_index = if true {
                 next_round_the_vertex(
                     k,
                     curves,
@@ -2498,9 +2498,6 @@ fn loop_junction_tolerance(
         edge_zone_tol(k, b, eu1::edge(b, current)?)?,
         edge_zone_tol(k, b, eu1::edge(b, previous)?)?,
     );
-    if !k.fixes.check_loop_vertex_tolerance {
-        return Ok(edge_limit);
-    }
     let Some(start_use) = eu1::vertexuse(b, current)? else {
         return Ok(edge_limit);
     };
@@ -2601,9 +2598,7 @@ pub fn check_loop(
             let mut gap_start = current_start;
             let mut gap_end = previous_end;
             // WR-440 (#530), opt-in: upstream compares the raw representatives.
-            if k.fixes.check_loop_projected_seam_ends
-                && (current_uv.start_weight.is_none() || previous_uv.end_weight.is_none())
-            {
+            if (current_uv.start_weight.is_none() || previous_uv.end_weight.is_none()) {
                 for (start, end, period, direction) in [
                     (
                         &mut gap_start.x,
@@ -2755,13 +2750,9 @@ pub fn mirror_curve(
         if let Ok(c) = p.component_mut(coord) {
             *c = high - (v - low);
         }
-        if let Some(&w) = canon.weights.get(ii) {
+        if let Some(&_w) = canon.weights.get(ii) {
             // Upstream divides the Euclidean points `GetCanonical` returns by their
             // weights again (WR-98); the opt-in fix keeps them as they are.
-            if !k.fixes.mirror_curve_keeps_euclidean_control_points {
-                // operator/(v, d): plain division (`/=` guards tiny divisors)
-                *p = Vec3::new(p.x / w, p.y / w, p.z / w);
-            }
         }
     }
     let data = CanonicalData {
@@ -3340,8 +3331,7 @@ mod tests {
     }
 
     fn fixed_kernel() -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes.check_loop_vertex_tolerance = true;
+        let k = Kernel::default();
         k
     }
 
@@ -3379,7 +3369,6 @@ mod tests {
     fn issue_476_default_keeps_the_edge_only_gap_limit() {
         // Default (SMLib): a gap the widened shared vertex would cover is closure 3.
         let k = Kernel::default();
-        assert!(!k.fixes.check_loop_vertex_tolerance);
         let surface = Surface::from(crate::surface::plane::Plane::from_normal(
             Vec3::ZERO,
             Vec3::Z,
@@ -3455,7 +3444,6 @@ mod tests {
             ([1.0, 0.0, 0.0], [2.0, 0.0, 3.0]),
         ] {
             let mut k = Kernel::default();
-            k.fixes.check_loop_projected_seam_ends = true;
             let mut b =
                 crate::topology::brep::p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT)
                     .unwrap();
@@ -3469,7 +3457,6 @@ mod tests {
             .unwrap();
             let loops: Vec<_> = b.loops().iter().map(|(id, _)| id).collect();
             assert!(!loops.is_empty());
-            let mut mixed_seam_off = None;
             for l in loops {
                 let eus = loop_edgeuses(&b, l).unwrap();
                 assert!(!eus.is_empty());
@@ -3506,14 +3493,6 @@ mod tests {
                         0,
                         "mixed seam {eu:?}, profile {start:?} -> {end:?}"
                     );
-                    // Off (the default), the raw one-period jump is upstream's.
-                    if mixed_seam_off.is_none() {
-                        let mut off = k.fixes;
-                        off.check_loop_projected_seam_ends = false;
-                        let on = core::mem::replace(&mut k.fixes, off);
-                        mixed_seam_off = Some(check_loop(&k, &mut b, &surface, l, 1e-5, None));
-                        k.fixes = on;
-                    }
                     // A short physical gap must still fail after lifting the U
                     // representative (including at a clamped surface boundary).
                     a.y += 0.001;
@@ -3551,11 +3530,6 @@ mod tests {
                 let eu = eus[0];
                 b.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(uv_line([u1, v1], [u1, v0]));
                 assert!(check_loop(&k, &mut b, &surface, l, 1e-5, None).is_err());
-            }
-            // With the fix off the cylinder's mixed seam is upstream's SM_ERR (1001).
-            let off = mixed_seam_off.expect("a mixed seam was checked");
-            if start[0] == end[0] {
-                assert!(off.is_err(), "profile {start:?} -> {end:?}: {off:?}");
             }
         }
     }
@@ -3607,11 +3581,8 @@ mod tests {
             a.y += 0.001;
             z.y += 0.001;
             b.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(uv_line([a.x, a.y], [z.x, z.y]));
-            let mut run = |vertex: bool, seam: bool| {
-                k.fixes.check_loop_vertex_tolerance = vertex;
-                k.fixes.check_loop_projected_seam_ends = seam;
-                check_loop(&k, &mut b, &surface, l, 1e-5, None)
-            };
+            let mut run =
+                |_vertex: bool, _seam: bool| check_loop(&k, &mut b, &surface, l, 1e-5, None);
             assert_eq!(run(true, true).unwrap(), 0, "both fixes");
             assert_eq!(run(false, true).unwrap(), 3, "seam fix only: 3D gap");
             assert!(run(true, false).is_err(), "vertex fix only: raw seam jump");
@@ -3651,8 +3622,7 @@ mod tests {
 
     #[test]
     fn mirror_rational_keeps_euclidean_control_points() {
-        let mut k = Kernel::default();
-        k.fixes.mirror_curve_keeps_euclidean_control_points = true;
+        let k = Kernel::default();
         for side in [SurfParamType::U, SurfParamType::V] {
             for (low, high) in [(0.0, 2.0), (-1.5, 0.75)] {
                 let mut fixture = mirror_rational_fixture_curve();
@@ -3705,8 +3675,7 @@ mod tests {
 
     #[test]
     fn mirror_rational_twice_is_the_identity() {
-        let mut k = Kernel::default();
-        k.fixes.mirror_curve_keeps_euclidean_control_points = true;
+        let k = Kernel::default();
         let mut c = mirror_rational_fixture_curve();
         let ts = [0.0, 0.25, 0.5, 0.75, 1.0];
         let original: Vec<Point3> = ts
@@ -3731,8 +3700,7 @@ mod tests {
     #[test]
     fn mirror_non_rational_geometry_unchanged_by_fix() {
         let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.mirror_curve_keeps_euclidean_control_points = true;
+        let on = Kernel::default();
         let mut a = uv_line([0.1, 0.2], [0.9, 0.8]);
         let mut b = uv_line([0.1, 0.2], [0.9, 0.8]);
         mirror_curve(&off, &mut a, SurfParamType::V, -0.5, 1.5, 0.0).unwrap();

@@ -419,7 +419,7 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
                         0,
                         None,
                     ),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)? {
                     max_to_surface = Some(g.max_distance);
                 }
@@ -450,7 +450,7 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
                         0,
                         Some(e1_to_e2_faces),
                     ),
-                    k.fixes.brep_edit_statuses_pass_on,
+                    true,
                 )?)? {
                     max_to_surface = Some(g.max_distance);
                 }
@@ -491,12 +491,12 @@ pub fn select_topology_to_keep<C: StitchCallback + ?Sized>(
         // knot counts (statuses ignored: a failing call leaves its list empty)
         let knots1 = ignored(crate::error::passed_on(
             curve_of(b, edge1)?.knots(k, None),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .map_or(0, |(k1, _)| k1.len());
         let knots2 = ignored(crate::error::passed_on(
             curve_of(b, edge2)?.knots(k, None),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?
         .map_or(0, |(k2, _)| k2.len());
 
@@ -657,7 +657,7 @@ fn test_and_split_edge_with(
     // Check on the interior (status ignored: a failure reports not interior).
     let interior = ignored(crate::error::passed_on(
         check_interior_edge(k, b, e, dropped.parameter, this_tol),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?
     .unwrap_or(false);
     if !interior {
@@ -1438,7 +1438,7 @@ impl<'c> Stitch<'c> {
         // FacesToDelete (increments unlocked mark value; status ignored)
         ignore_status(crate::error::passed_on(
             self.edit_remove_faces(k, b, faces_to_delete),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
 
         // now follow the procedure that is used in DoStitching for stitching vertex
@@ -1664,7 +1664,7 @@ impl<'c> Stitch<'c> {
             // upstream (a failure leaves the default-initialised box)
             let brep_bbox = ignored(crate::error::passed_on(
                 qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?
             .unwrap_or_default();
 
@@ -1725,7 +1725,7 @@ impl<'c> Stitch<'c> {
                         // default SM_UNDEF_DOUBLE, here UNDEF.
                         let (pnt, dir) = ignored(crate::error::passed_on(
                             normalized_evaluate(k, b, eu, param, false, true, true),
-                            k.fixes.brep_edit_statuses_pass_on,
+                            true,
                         )?)?
                         .map_or((Point3::UNDEF, Vec3::UNDEF), |(p, d)| {
                             (p, d.unwrap_or(Vec3::UNDEF))
@@ -1762,7 +1762,7 @@ impl<'c> Stitch<'c> {
                             let norm_param = match ivl.inversion(dropped.parameter).parameter {
                                 Some(t) => t,
                                 // (fork e7ebc8d passes the failed inversion on: `SER`)
-                                None if k.fixes.brep_edit_statuses_pass_on => {
+                                None if true => {
                                     return Err(SolidError::heal_failed(
                                         OP,
                                         "the dropped point's parameter could not be inverted",
@@ -1783,7 +1783,7 @@ impl<'c> Stitch<'c> {
                             // status ignored: a failure leaves the angle 0
                             let angle_rad = ignored(crate::error::passed_on(
                                 tangent(&pv)?.angle_between(dir),
-                                k.fixes.brep_edit_statuses_pass_on,
+                                true,
                             )?)?
                             .unwrap_or(0.0);
                             let angle_deg = angle_rad * 180.0 / PI;
@@ -2139,7 +2139,7 @@ impl<'c> Stitch<'c> {
                     old_tol,
                     check_gaps,
                 ),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             out.max_vertex_gap = smos_max(out.max_vertex_gap, min_dist);
 
@@ -2356,7 +2356,7 @@ impl<'c> Stitch<'c> {
                                     old_tol,
                                     false,
                                 ),
-                                k.fixes.brep_edit_statuses_pass_on,
+                                true,
                             )?)?;
                             set_none(&mut v_edges, kk)?; // per notes above
                             if !self.making_manifold_solid {
@@ -2754,7 +2754,7 @@ pub fn api_stitch(k: &mut Kernel, b: Option<&mut Brep>) -> Result<()> {
     // StitchAndOrient() with its header defaults
     ignore_status(crate::error::passed_on(
         stitch_and_orient(k, b, -0.1, false, None, None),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     // Check manifold?
     Ok(())

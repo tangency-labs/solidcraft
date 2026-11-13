@@ -262,7 +262,7 @@ pub fn calculate_bounding_box_base(
     let mut pt_der = [Vec3::UNDEF, Vec3::UNDEF];
     // (the statuses below are ignored upstream and passed on with the opt-in fix,
     // tangency-labs/smlib 8311f8e)
-    let pass_on = k.fixes.query_statuses_pass_on;
+    let pass_on = true;
     let sample = |t: f64, pt_der: &mut [Vec3; 2]| -> Result<()> {
         // nonZeroTangent values (status ignored)
         let r = curve.evaluate(k, t, num_derivs, false, true);
@@ -599,7 +599,7 @@ impl Curve {
         };
         let boxes = ignored_or_soft(
             self.calculate_bounding_box(k, &self.natural_interval(), req, true),
-            k.fixes.query_statuses_pass_on,
+            true,
         )?;
         // with the opt-in fix a curve that cannot be boxed is not shown planar; its
         // outputs are not written (tangency-labs/smlib 8311f8e)
@@ -1059,7 +1059,7 @@ impl Curve {
             do_precise = true;
             // (statuses ignored; passed on with the opt-in fix, tangency-labs/smlib
             // 8311f8e)
-            let pass_on = k.fixes.query_statuses_pass_on;
+            let pass_on = true;
             let knots =
                 knots_ignoring_status(passed_on(self.knots_with_status(k, None), pass_on)?)?
                     .0
@@ -2337,7 +2337,7 @@ impl Curve {
                     // (status ignored; with the opt-in fix a failed drop is passed on
                     // and a target that does not drop onto the surface has no UV
                     // point, SM_ERR, tangency-labs/smlib 8311f8e)
-                    let pass_on = k.fixes.query_statuses_pass_on;
+                    let pass_on = true;
                     let dropped = ignored_or_pass_on(
                         surface.drop_point::<crate::surface::surface::p4::NoObject>(
                             k, target, &domain, &options,
@@ -2383,10 +2383,7 @@ impl Curve {
                     // (status ignored; passed on with the opt-in fix before the UV
                     // curve is replaced, so a failure leaves it as it was,
                     // tangency-labs/smlib 8311f8e)
-                    ignore_or_pass_on(
-                        replacement.convert_to_2d(k),
-                        k.fixes.query_statuses_pass_on,
-                    )?;
+                    ignore_or_pass_on(replacement.convert_to_2d(k), true)?;
                     curve.set_uv_curve(replacement)?;
                 }
                 return Ok(None);
@@ -2543,8 +2540,7 @@ mod tests {
         // Discriminating.
         let c = Curve::from(BSplineCurve::new(3));
         let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
+        let on = Kernel::default();
         assert!(c.is_planar(&off, EFF_ZERO).unwrap().is_planar);
         assert!(!c.is_planar(&on, EFF_ZERO).unwrap().is_planar);
     }

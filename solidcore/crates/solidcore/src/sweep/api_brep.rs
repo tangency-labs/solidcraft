@@ -676,7 +676,7 @@ pub fn create_curve_sweep_from_edges(
 /// # Errors
 ///
 /// `InvalidInput` for no curves or a `None` curve, or for a corner refused under
-/// `fixes.taper_tangent_corner_planes` (WR-521; [`create_taper_extrude_with_corner`]
+/// `true` (WR-521; [`create_taper_extrude_with_corner`]
 /// reports why and where); the error of a failing curve copy; [`SolidError::Unported`]
 /// otherwise (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_taper_extrude(
@@ -705,7 +705,7 @@ pub fn create_taper_extrude(
 /// `SmApiCreateTaperExtrude(..., eCorner, rpResult, pOptRefusal, pOptRefusedCorner)`).
 ///
 /// - [`OffsetCornerType::LinearExtension`]: tangent lines across a corner's gap; with
-///   `fixes.taper_tangent_corner_planes` (WR-521, off by default) a profile of lines
+///   `true` (WR-521, off by default) a profile of lines
 ///   and circular arcs with a sharp corner continues its walls as their tangent planes
 ///   instead (two lines meet at a corner edge) and may be refused.
 /// - [`OffsetCornerType::FilletCorner`]: an arc about the corner.
@@ -966,7 +966,7 @@ pub fn non_manifold_sweep(
         .map_err(|_| SolidError::invalid_input(OP_NON_MANIFOLD, "zero sweep direction"))?
         * sweep_dist;
     let mut translation = TranslationalSweepGeometry::new(sweep_vec);
-    translation.base.statuses_pass_on = k.fixes.sweep_statuses_pass_on;
+    translation.base.statuses_pass_on = true;
     let geometry = SweepGeometry::Translation(translation);
     non_manifold_sweep_with(k, brep, &geometry, do_stitching, do_merge, selection)
 }
@@ -1001,7 +1001,7 @@ pub fn non_manifold_rotational_sweep(
         ));
     }
     let mut rotation = RotationalSweepGeometry::new(base_pt, axis, angle_deg, ZONE_TOL_3D);
-    rotation.base.statuses_pass_on = k.fixes.sweep_statuses_pass_on;
+    rotation.base.statuses_pass_on = true;
     let geometry = SweepGeometry::Rotation(rotation);
     non_manifold_sweep_with(k, brep, &geometry, do_stitching, do_merge, selection)
 }
@@ -1401,7 +1401,7 @@ mod tests {
 
     #[test]
     fn a_whole_turn_of_a_profile_gives_each_curve_its_analytic_face() {
-        // Not upstream (WR-448, #545, `fixes.revolve_analytic_profile_faces`): upstream
+        // Not upstream (WR-448, #545, `true`): upstream
         // makes an SmSurfOfRevolution of every curve of a profile longer than one curve
         let mut k = Kernel::default();
         let seg =
@@ -1429,11 +1429,10 @@ mod tests {
         let outer = arc(Vec3::new(5.0, 0.0, 0.0), -Vec3::Z, Vec3::X, 1.0, 0.0, 180.0);
         let inner = arc(Vec3::new(5.0, 0.0, 0.0), Vec3::Z, -Vec3::X, 1.0, 0.0, 180.0);
         // by default (the fix off), upstream's surfaces of revolution
-        for (fix, expected) in [
+        for (_fix, expected) in [
             (false, ["revolution", "revolution"]),
             (true, ["cylinder", "cone"]),
         ] {
-            k.fixes.revolve_analytic_profile_faces = fix;
             let b = create_rotational_sweep(
                 &mut k,
                 &[Some(&wall), Some(&point)],
@@ -1461,7 +1460,6 @@ mod tests {
     /// centre (c, 0, c), c = 1.28e-6, is off the axis by far less than the B-rep
     /// tolerance (SolidCraft rig shell/4847, #1123).
     fn rounded_quarter_disc(k: &mut Kernel) -> Brep {
-        k.fixes.revolve_analytic_profile_faces = true;
         let (c, r, a0) = (
             1.2846627950203038e-06,
             19.99999871533725,
@@ -1576,7 +1574,6 @@ mod tests {
     /// turn.
     fn wr471_whole_sphere() -> (Kernel, Brep) {
         let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = true;
         let off = 3e-7;
         let half = Curve::from(
             BSplineCurve::create_circle_segment(

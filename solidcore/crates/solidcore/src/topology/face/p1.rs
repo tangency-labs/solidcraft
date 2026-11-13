@@ -215,8 +215,8 @@ pub const MAX_SPLIT_AT_SEAM_DEPTH: usize = 8;
 /// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 6997962):
 /// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
 /// handed on to the site's own ignore otherwise.
-fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
-    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
+fn pass<T>(_k: &Kernel, r: Result<T>) -> Result<Result<T>> {
+    crate::error::passed_on(r, true)
 }
 
 fn null(reason: &'static str) -> SolidError {
@@ -1522,7 +1522,7 @@ fn swap_uv_notifying(
     // (WR-729, opt-in: the mirror about u = v is the swap of each control point's u and
     // v, made exactly; the rounded mirror matrix moves every coordinate by an ulp and a
     // trim's end on a domain bound past it)
-    let transpose = k.fixes.face_swap_uv_transposes_trims;
+    let transpose = true;
     let mirror_curve = |c: &BSplineCurve| {
         if transpose {
             c.create_transposed_curve()
@@ -2398,7 +2398,7 @@ pub fn move_seam_notified<O: LoopObject>(
         .unwrap_or(false)
     {
         // status ignored upstream
-        let pass_on = k.fixes.query_statuses_pass_on;
+        let pass_on = true;
         if let Some(s) = ignored(crate::error::passed_on(
             split_at_seam_depth(
                 k,
@@ -2694,7 +2694,7 @@ fn split_at_seam_merges<O: LoopObject>(
             ))?
             .unwrap_or(false);
             if has {
-                let pass_on = k.fixes.query_statuses_pass_on;
+                let pass_on = true;
                 let s = ignored(crate::error::passed_on(
                     split_at_seam_depth(
                         k,

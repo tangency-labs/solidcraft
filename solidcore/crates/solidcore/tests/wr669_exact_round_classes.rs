@@ -1,4 +1,4 @@
-//! WR-669 (`fixes.fillet_exact_round_classes`, the SolidCraft fork's tangency-labs/smlib@b5f2867
+//! WR-669 (`true`, the SolidCraft fork's tangency-labs/smlib@b5f2867
 //! and 7ac037e): a constant round is exact by one classification of its spine from its
 //! faces' kinds and placement, in place of upstream's try-chain (planes and cones only,
 //! cylinder then torus, each gated on the edge's shape).
@@ -84,10 +84,11 @@ fn ball_and_peg(exact: bool) -> (Kernel, Brep, f64, solidcore::Result<()>) {
 }
 
 /// [`ball_and_peg`], with `definition` (`fillet_round_as_definition`, #2485) set.
-fn ball_and_peg_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, solidcore::Result<()>) {
+fn ball_and_peg_kept(
+    _exact: bool,
+    _definition: bool,
+) -> (Kernel, Brep, f64, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let ball = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0).unwrap();
     let peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0, 10.0).unwrap();
     let mut b = boolean_union(&mut k, ball, peg).unwrap();
@@ -185,10 +186,8 @@ fn tray(exact: bool) -> (f64, f64, solidcore::Result<()>) {
 
 /// [`tray`], with `definition` (`fillet_round_as_definition`, #2485) set; also the kernel
 /// and the tray.
-fn tray_kept(exact: bool, definition: bool) -> (f64, f64, solidcore::Result<()>, Kernel, Brep) {
+fn tray_kept(_exact: bool, _definition: bool) -> (f64, f64, solidcore::Result<()>, Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let mut tray = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 25.0, 25.0, 10.0).unwrap();
     let bottom = edges_where(&k, &tray, |m| m.z.abs() < 1e-6);
     fillet_edges(&mut k, &mut tray, &bottom, 2.0, 1, 1, 1.0).unwrap();
@@ -230,10 +229,8 @@ fn plate_and_boss(exact: bool) -> (f64, usize) {
 }
 
 /// [`plate_and_boss`]'s body, with `definition` (`fillet_round_as_definition`, #2485) set.
-fn plate_and_boss_kept(exact: bool, definition: bool) -> (Kernel, Brep) {
+fn plate_and_boss_kept(_exact: bool, _definition: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let plate = create_box(&mut k, Point3::new(-10.0, -10.0, 0.0), 20.0, 20.0, 4.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(0.0, 0.0, 2.0), 3.0, 8.0).unwrap();
     let mut b = boolean_union(&mut k, plate, boss).unwrap();

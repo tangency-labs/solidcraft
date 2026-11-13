@@ -337,7 +337,7 @@ pub fn transform_matrix_with_notifications(
         let angle_check = match row0.cross(row1).angle_between(row2) {
             Ok(a) => a,
             // (fork 60a8a51 passes the status on: `SER`)
-            Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
+            Err(e) if true => return Err(e),
             Err(_) => 0.0,
         };
 
@@ -413,7 +413,7 @@ pub fn transform_matrix_with_notifications(
     // upstream ignores SetCanonical's status
     ignore_status(crate::error::passed_on(
         transform_v.set_canonical(origin, vx / vx_len, vy / vy_len),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
 
     let utx = row(&ut, 0)?;
@@ -432,7 +432,7 @@ pub fn transform_matrix_with_notifications(
     let angle_v = match vx.cross(vy).angle_between(vz) {
         Ok(a) => a,
         // (fork 60a8a51 passes the status on: `SER`)
-        Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
+        Err(e) if true => return Err(e),
         Err(_) => 0.0,
     };
     let mirror_v = angle_v > HALF_PI;
@@ -440,7 +440,7 @@ pub fn transform_matrix_with_notifications(
     let angle_ut = match utx.cross(uty).angle_between(utz) {
         Ok(a) => a,
         // (fork 60a8a51 passes the status on: `SER`)
-        Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
+        Err(e) if true => return Err(e),
         Err(_) => 0.0,
     };
     let mirror_ut = angle_ut > HALF_PI;
@@ -470,7 +470,7 @@ pub fn transform_matrix_with_notifications(
     if mirror_ut {
         ignore_status(crate::error::passed_on(
             transform_ut.set_canonical(origin, utx / utx_len, uty / uty_len),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         fold_status(
             &mut worst,
@@ -493,7 +493,7 @@ pub fn transform_matrix_with_notifications(
 
         ignore_status(crate::error::passed_on(
             transform_ut.set_canonical(disp, v_x, v_y),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         // the defaults: no scale, bScaleTol = TRUE
         fold_status(
@@ -504,7 +504,7 @@ pub fn transform_matrix_with_notifications(
         // transform without mirror
         ignore_status(crate::error::passed_on(
             transform_ut.set_canonical(disp, utx / utx_len, uty / uty_len),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         fold_status(
             &mut worst,

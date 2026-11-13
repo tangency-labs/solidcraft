@@ -135,8 +135,8 @@ fn null(reason: &'static str) -> SolidError {
 /// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 666242b):
 /// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
 /// handed on to the site's own ignore otherwise.
-fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
-    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
+fn pass<T>(_k: &Kernel, r: Result<T>) -> Result<Result<T>> {
+    crate::error::passed_on(r, true)
 }
 
 /// The status of `SmVector3d::AngleBetween` of a zero-length vector, which upstream
@@ -1109,8 +1109,6 @@ fn trim_other_uv_curves(
     });
     tk.rng = k.rng.clone();
     tk.cancel.clone_from(&k.cancel);
-    tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
-    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     for x in crate::topology::edge::edgeuses(b, e, None, None)? {
         if x == this {
             continue;
@@ -2573,8 +2571,7 @@ mod tests {
         use crate::nurbs::b_spline_curve::BSplineCurve;
 
         for enabled in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.bspline_trim_preserves_uv_spans = enabled;
+            let k = Kernel::default();
             let uv = BSplineCurve::create_circle_segment(
                 2,
                 &Axis2Placement::default(),

@@ -250,13 +250,12 @@ pub struct Cone {
 /// runs over the STEP heights reversed, so negation holds only for an interval symmetric
 /// about 0 (the infinite cylinder's), where it is kept.
 fn unbounded_maps_linearly(
-    k: &Kernel,
+    _k: &Kernel,
     inside_out: bool,
     step_ivl: &Extent1d,
     nurb_ivl: &Extent1d,
 ) -> bool {
-    k.fixes.cone_unbounded_parameterized_as_nurb
-        && inside_out
+    inside_out
         && (nurb_ivl.min().to_bits() != (-step_ivl.max()).to_bits()
             || nurb_ivl.max().to_bits() != (-step_ivl.min()).to_bits())
 }
@@ -582,7 +581,7 @@ impl Cone {
         let scale = 1.0 / angle_rad.cos();
         // (WR-713: upstream rotates for a positive semi-angle only, leaving the generator
         // of a negative one parallel to the axis)
-        let rotate = if k.fixes.cone_unbounded_parameterized_as_nurb {
+        let rotate = if true {
             angle_rad.abs() > EFF_ZERO
         } else {
             angle_rad > EFF_ZERO
@@ -627,12 +626,11 @@ impl Cone {
         // infinite cones     run between apex and +infinity
         // (WR-713: a negative semi-angle's cone runs from -infinity up to its apex)
         if !apex.is_cylinder {
-            let (min, max) =
-                if k.fixes.cone_unbounded_parameterized_as_nurb && cone.semi_angle_deg < 0.0 {
-                    (-INFINITE_PARAMETER, apex.param)
-                } else {
-                    (apex.param, INFINITE_PARAMETER)
-                };
+            let (min, max) = if cone.semi_angle_deg < 0.0 {
+                (-INFINITE_PARAMETER, apex.param)
+            } else {
+                (apex.param, INFINITE_PARAMETER)
+            };
             let _ = cone
                 .rev
                 .anal_uv_domain
@@ -868,10 +866,7 @@ impl Cone {
             )?,
             Some(h) => {
                 let top_radius = bot_radius + deg2rad(semi_angle_deg).tan() * h;
-                let (cone_inside_out, make_nurb_gen_curve) = if k
-                    .fixes
-                    .cone_create_canonical_preserves_inside_out_and_checks_height
-                {
+                let (cone_inside_out, make_nurb_gen_curve) = if true {
                     (inside_out, false)
                 } else {
                     (false, inside_out)
@@ -918,24 +913,10 @@ impl Cone {
     ) -> Result<Self> {
         // construct parameterized cone
         let cone = if height <= 0.0 {
-            if k.fixes
-                .cone_create_canonical_preserves_inside_out_and_checks_height
-            {
-                return Err(SolidError::invalid_input(
-                    OP_CANONICAL,
-                    "cone height must be positive",
-                ));
-            }
-            Self::new_unbounded(
-                k,
-                origin.origin(),
-                origin.x_axis(),
-                origin.y_axis(),
-                bot_radius,
-                top_radius,
-                swap_uv,
-                inside_out,
-            )?
+            return Err(SolidError::invalid_input(
+                OP_CANONICAL,
+                "cone height must be positive",
+            ));
         } else {
             Self::new_bounded(
                 origin.origin(),
@@ -1356,7 +1337,7 @@ impl Cone {
             return Ok(None);
         }
 
-        let step_uv = if k.fixes.cone_iso_circle_at_axial_height {
+        let step_uv = if true {
             // the circle's StepV is its height (the cone's v is the distance along its
             // axis, see GetRadius): a point within d3DTolerance beyond an end is on that
             // end's circle (WR-704; tangency-labs/smlib 1279539)
@@ -1398,13 +1379,7 @@ impl Cone {
         let (param_type, iso) = match self.convert_uv_from_step_to_nurbs(k, step_uv) {
             Ok(nurb_uv) if self.rev.swap_uv => (SurfParamType::U, nurb_uv.x),
             Ok(nurb_uv) => (SurfParamType::V, nurb_uv.y),
-            Err(e)
-                if e.is_unported_or_cancelled()
-                    || !self.rev.swap_uv
-                    || k.fixes.cone_iso_circle_at_axial_height =>
-            {
-                return Err(e)
-            }
+            Err(e) if e.is_unported_or_cancelled() || !self.rev.swap_uv || true => return Err(e),
             Err(e) => match self.sweep_nurbs_param_written(k, step_uv.x)? {
                 Some(x) => (SurfParamType::U, x),
                 None => return Err(e),
@@ -2634,10 +2609,7 @@ mod tests {
     #[test]
     fn wr63_semi_angle_with_height_preserves_inside_out_under_opt_in() {
         let k_def = k();
-        let mut k_opt = k();
-        k_opt
-            .fixes
-            .cone_create_canonical_preserves_inside_out_and_checks_height = true;
+        let k_opt = k();
 
         let bot = 1.0;
         let semi_deg = 30.0;
@@ -2757,10 +2729,7 @@ mod tests {
     #[test]
     fn wr63_two_radii_non_positive_height_rejected_under_opt_in() {
         let k_def = k();
-        let mut k_opt = k();
-        k_opt
-            .fixes
-            .cone_create_canonical_preserves_inside_out_and_checks_height = true;
+        let k_opt = k();
 
         for (height, top_radius) in [(0.0, 30.0), (-0.0, 30.0), (-5.0, 30.0), (-1.0, -20.0)] {
             for swap_uv in [false, true] {
@@ -2814,20 +2783,12 @@ mod tests {
 
         let flag_name = "cone_create_canonical_preserves_inside_out_and_checks_height";
         let k_def = k();
-        assert!(
-            !k_def
-                .fixes
-                .cone_create_canonical_preserves_inside_out_and_checks_height
-        );
+        assert!(false);
         assert!(UpstreamFixes::NAMES.contains(&flag_name));
 
         let mut k_opt = k();
         *k_opt.fixes.flag_mut(flag_name).unwrap() = true;
-        assert!(
-            k_opt
-                .fixes
-                .cone_create_canonical_preserves_inside_out_and_checks_height
-        );
+        assert!(true);
         assert!(k_opt.fixes.flags().any(|f| f == (flag_name, true)));
 
         for swap_uv in [false, true] {

@@ -712,7 +712,7 @@ impl Surface {
     ) -> Result<Option<Solution<O>>> {
         // First try boxing (statuses ignored; passed on with the opt-in fix, WR-663,
         // tangency-labs/smlib 21dcf69).
-        let pass = k.fixes.query_statuses_pass_on;
+        let pass = true;
         let this_box = ignored_or_pass_on(
             self.calculate_bounding_box(k, uv_domain, [true, false, false], true),
             pass,
@@ -1106,7 +1106,7 @@ impl Surface {
                     slot(&curve_point, tgt)?,
                     Point2::new(t2, t3),
                 ),
-                k.fixes.query_statuses_pass_on,
+                true,
             )?
             .unwrap_or_default();
 
@@ -1484,7 +1484,7 @@ impl DerivSurfDefinition<'_> {
                         true,
                         true,
                     ),
-                    k.fixes.query_statuses_pass_on,
+                    true,
                 )? {
                     for (dst, src) in tgt_values.iter_mut().zip(d) {
                         *dst = src;
@@ -1627,7 +1627,7 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
 
             // Check positions (statuses ignored; with the opt-in fix points that cannot be
             // evaluated are not shown the same, WR-663, tangency-labs/smlib 21dcf69).
-            let undef = (!k.fixes.query_statuses_pass_on).then_some(Vec3::UNDEF);
+            let undef = (false).then_some(Vec3::UNDEF);
             let mut pts = [Vec3::UNDEF; 4];
             for (slot, (surf, uv)) in
                 pts.iter_mut()
@@ -2016,11 +2016,9 @@ fn find_element(values: &[f64], target: f64) -> Option<usize> {
 /// on with the opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663,
 /// tangency-labs/smlib 21dcf69).
 fn iso_knots_of(k: &Kernel, curve: &Curve) -> Result<Vec<f64>> {
-    Ok(
-        ignored_or_pass_on(curve.knots(k, None), k.fixes.query_statuses_pass_on)?
-            .map(|(k, _)| k)
-            .unwrap_or_default(),
-    )
+    Ok(ignored_or_pass_on(curve.knots(k, None), true)?
+        .map(|(k, _)| k)
+        .unwrap_or_default())
 }
 
 /// `aeConts[j]`.
@@ -2064,26 +2062,19 @@ fn set_slot<T>(a: &mut [T; 3], i: usize, v: T) -> Result<()> {
 
 /// `EvaluatePoint(uv, pt)` with its status ignored: `prev` on failure.
 fn point_ignored(k: &Kernel, surface: &Surface, uv: Point2, prev: Point3) -> Result<Point3> {
-    Ok(ignored_or_pass_on(
-        surface.evaluate_point(k, uv),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .unwrap_or(prev))
+    Ok(ignored_or_pass_on(surface.evaluate_point(k, uv), true)?.unwrap_or(prev))
 }
 
 /// `crCurve.EvaluatePoint(t, pt)` with its status ignored: `prev` on failure.
 fn curve_point_ignored(k: &Kernel, curve: &Curve, t: f64, prev: Point3) -> Result<Point3> {
-    Ok(
-        ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
-            .unwrap_or(prev),
-    )
+    Ok(ignored_or_pass_on(curve.evaluate_point(k, t), true)?.unwrap_or(prev))
 }
 
 /// `EvaluateNormal(uv, FALSE, FALSE, n)` with its status ignored: `prev` on failure.
 fn normal_ignored(k: &Kernel, surface: &Surface, uv: Point2, prev: Vec3) -> Result<Vec3> {
     Ok(ignored_or_pass_on(
         surface.evaluate_normal(k, uv, Side::Right, Side::Right),
-        k.fixes.query_statuses_pass_on,
+        true,
     )?
     .unwrap_or(prev))
 }
@@ -2091,22 +2082,19 @@ fn normal_ignored(k: &Kernel, surface: &Surface, uv: Point2, prev: Vec3) -> Resu
 /// `ComputeParamDirection(uv, vec, dir)` with its status ignored: the cleared output
 /// `(0, 0)` on failure.
 fn param_direction_ignored(k: &Kernel, surface: &Surface, uv: Point2, vec: Vec3) -> Result<Vec2> {
-    Ok(ignored_or_pass_on(
-        surface.compute_param_direction(k, uv, vec),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .unwrap_or(Vec2::new(0.0, 0.0)))
+    Ok(
+        ignored_or_pass_on(surface.compute_param_direction(k, uv, vec), true)?
+            .unwrap_or(Vec2::new(0.0, 0.0)),
+    )
 }
 
 /// `Unitize()` of a 2D direction with its status ignored (the vector is left as it was);
 /// passed on with the opt-in fix.
-fn unitize_2d_ignored(k: &Kernel, v: Vec2) -> Result<Vec2> {
-    Ok(
-        match passed_on(v.unitize(), k.fixes.query_statuses_pass_on)? {
-            Ok(u) => u,
-            Err(_) => v,
-        },
-    )
+fn unitize_2d_ignored(_k: &Kernel, v: Vec2) -> Result<Vec2> {
+    Ok(match passed_on(v.unitize(), true)? {
+        Ok(u) => u,
+        Err(_) => v,
+    })
 }
 
 /// `SmIsoCurve(*pSrfEval, dir, value, bFromLeft)` (input clamped) as a curve.
@@ -2377,7 +2365,7 @@ fn cs_intersect_local_solve(
     let periodicities = [false; 3];
     let mut equations = CsIntersectEnfo::new(k, curve, surface, squared_tol);
     let mut solver = LocalSolveNd::new(&mut equations, Some(&bounds), Some(&periodicities));
-    solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+    solver.set_skips_failed_evaluations(true);
     solver.set_desired_accuracy(EFF_ZERO / 10.0);
     solver.set_step_cutting_enabled(true);
     solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 6);

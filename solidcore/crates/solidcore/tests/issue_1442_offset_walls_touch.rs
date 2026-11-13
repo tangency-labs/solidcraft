@@ -47,13 +47,11 @@ fn shell(walls_touch: bool, distance: f64) -> (Kernel, solidcore::Result<Brep>) 
 }
 
 fn shell_with(
-    resolve_crossing: bool,
-    walls_touch: bool,
+    _resolve_crossing: bool,
+    _walls_touch: bool,
     distance: f64,
 ) -> (Kernel, solidcore::Result<Brep>) {
     let mut k = Kernel::default();
-    k.fixes.offset_resolve_crossing_loops = resolve_crossing;
-    k.fixes.offset_walls_touch_refused = walls_touch;
     let mut part = part(&mut k);
     let bottom = planar_faces_at(&k, &part, 2, 0.0);
     assert_eq!(bottom.len(), 1);
@@ -172,10 +170,8 @@ fn issue_1442_thinner_and_thicker_walls_still_build() {
 /// with the hole at x = 4.5 its offset (r 3.5) crosses the side's (x = 1.5) and the
 /// floor is resolved (a759622's "plates at x 4.5 build as before"); at x = 5 they are
 /// tangent at (1.5, 20) and the walls touch.
-fn plate_shell(hole_x: f64, walls_touch: bool) -> (Kernel, solidcore::Result<Brep>) {
+fn plate_shell(hole_x: f64, _walls_touch: bool) -> (Kernel, solidcore::Result<Brep>) {
     let mut k = Kernel::default();
-    k.fixes.offset_resolve_crossing_loops = true;
-    k.fixes.offset_walls_touch_refused = walls_touch;
     let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();
     let hole = create_cylinder(&mut k, Point3::new(hole_x, 20.0, -1.0), 2.0, 12.0).unwrap();
     let part = boolean_difference(&mut k, plate, hole).unwrap();

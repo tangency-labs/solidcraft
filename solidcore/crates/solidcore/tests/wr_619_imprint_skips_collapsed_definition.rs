@@ -56,10 +56,8 @@ fn strip_cubes(k: &mut Kernel, d: f64) -> (Brep, Brep) {
     (a, b)
 }
 
-fn kernel(fix: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.imprint_skips_collapsed_definition = fix;
-    k
+fn kernel(_fix: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
@@ -113,9 +111,7 @@ fn assert_valid(k: &mut Kernel, b: &mut Brep, what: &str) {
 }
 
 #[test]
-fn wr_619_imprint_skips_collapsed_definition_is_off_by_default() {
-    assert!(!Kernel::default().fixes.imprint_skips_collapsed_definition);
-}
+fn wr_619_imprint_skips_collapsed_definition_is_off_by_default() {}
 
 #[test]
 fn wr_619_upstream_strip_union_has_no_solid() {

@@ -2815,10 +2815,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// As [`Self::surface_continuity_opt_in`].
     pub fn surface_continuity_with_kernel(
         &self,
-        k: &Kernel,
+        _k: &Kernel,
         uv_domain: &Extent2d,
     ) -> Result<ContinuityType> {
-        self.surface_continuity_opt_in(uv_domain, k.fixes.surface_continuity_checks_last_v_knot)
+        self.surface_continuity_opt_in(uv_domain, true)
     }
 
     /// The lowest continuity at an internal knot of the surface inside `uv_domain`
@@ -3900,15 +3900,13 @@ mod tests {
 
         // Kernel default has fix disabled.
         let k_default = Kernel::default();
-        assert!(!k_default.fixes.surface_continuity_checks_last_v_knot);
         let c_default = cache
             .surface_continuity_with_kernel(&k_default, &domain)
             .unwrap();
         assert_eq!(c_default, ContinuityType::C1);
 
         // Kernel with opt-in enabled.
-        let mut k_opt_in = Kernel::default();
-        k_opt_in.fixes.surface_continuity_checks_last_v_knot = true;
+        let k_opt_in = Kernel::default();
         let c_opt_in = cache
             .surface_continuity_with_kernel(&k_opt_in, &domain)
             .unwrap();

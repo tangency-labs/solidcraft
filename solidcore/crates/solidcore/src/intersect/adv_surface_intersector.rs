@@ -27,9 +27,8 @@
 //! Deviations:
 //! - **Singular directions (#2695).** `sm_AddSingDir` merges only directions that are the same
 //!   one, not upstream's `0.9`, which took branches closer than 25.8 degrees for one.
-//! - **Dupin bottom axis (WR-69).** `Kernel::fixes.dupin_bottom_hyperbola_axis`
-//!   uses `1/sqrt(abs(k1))` for the bottom hyperbola's second axis, matching its
-//!   conjugate top branch. Off by default for pinned C++ parity.
+//! - **Dupin bottom axis (WR-69).** The bottom hyperbola's second axis is
+//!   `1/sqrt(abs(k1))`, matching its conjugate top branch (upstream uses `k2`).
 //! - **Bases.** The `SmSurfaceIntersector` base is the field
 //!   [`AdvSurfaceIntersector::base`] and the `SmGlobalSolver` base the field
 //!   [`AdvSurfaceIntersector::solver`], initialised as the `SmSurfaceIntersector`
@@ -82,23 +81,19 @@
 //!   (cyclic tree links, which recurse forever upstream) is
 //!   [`SolidError::InvalidInput`], as is nesting past the base solver's
 //!   [`MAX_SOLVE_DEPTH`](crate::geom::global_solver::MAX_SOLVE_DEPTH).
-//! - **Tangential contact points** (not upstream, WR-74, tangency-labs/solidcore#394,
-//!   opt-in `Kernel::fixes.ssi_tangent_contact_points`, off by default). The node
+//! - **Tangential contact points** (not upstream, WR-74, tangency-labs/solidcore#394).
+//!   The node
 //!   pairs `FindInteriorCurves` drops (normals within 5 degrees, no local
 //!   intersection, normals within 2 degrees at the solution) seed the SolidCraft
 //!   fork's search for isolated tangential contacts (`tangent_contacts`,
 //!   tangency-labs/smlib@c26edbc), run after the loop for a non-self intersection.
 //!   Its Newton iterations are bounded loops (8 + 25 steps), no recursion.
-//! - **Opt-in fix (WR-79 part 2, #396).** With
-//!   `Kernel::fixes.ssi_low_angle_start_on_probation` (off by default),
-//!   `FindInteriorCurves` traces a start point below the 5/2 degree normal-angle tests
+//! - **Low-angle start points (WR-79 part 2, #396).** `FindInteriorCurves` traces a start point below the 5/2 degree normal-angle tests
 //!   on probation (the SolidCraft fork's tangency-labs/smlib@30d25bf): kept only as a
 //!   closed loop whose box diagonal exceeds twice the tolerance and that is not
 //!   tangent, coincident or touching; skipped below `2 tol / modelSize` radians;
-//!   rejected traces and their start points are remembered. Off, the port matches the
-//!   pinned C++.
-//! - **Singular start direction** (not upstream, WR-512, tangency-labs/solidcore#1522,
-//!   opt-in `Kernel::fixes.ssi_singular_start_inside_direction`, off by default). A
+//!   rejected traces and their start points are remembered. Upstream skips them.
+//! - **Singular start direction** (not upstream, WR-512, tangency-labs/solidcore#1522). A
 //!   curve starting at a singularity takes its first direction from the first singular
 //!   direction that points into both domains, whose angle is the search's `dAngleMin`,
 //!   before the later inside directions are searched for the one closest to the
@@ -237,8 +232,7 @@ pub struct AdvSurfaceIntersector<'s, 't, O> {
     /// Nesting depth of [`GlobalSolve::solve_branch`] (bounds the recursion on cyclic
     /// tree links).
     solve_depth: usize,
-    /// Not upstream (the fork's `m_vTangentSeeds`, opt-in
-    /// `Kernel::fixes.ssi_tangent_curve_tracer`, WR-75): the UV pairs where
+    /// Not upstream (the fork's `m_vTangentSeeds`, WR-75): the UV pairs where
     /// [`AdvSurfaceIntersector::find_interior_curves`] found the normals (nearly)
     /// parallel, seeds of the tangential curve pass.
     pub(crate) tangent_curve_seeds: Vec<[Point2; 2]>,
@@ -550,12 +544,8 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         point: &mut TsectPnt,
         prev_crv_deriv: Option<Vec3>,
     ) -> Result<()> {
-        self.base.adv_compute_singularity_point(
-            uv_values,
-            point,
-            prev_crv_deriv,
-            self.kernel.fixes.dupin_bottom_hyperbola_axis,
-        )
+        self.base
+            .adv_compute_singularity_point(uv_values, point, prev_crv_deriv)
     }
 
     /// `MakeDupin`: the Dupin indicatrix curves of the surface point evaluated in
@@ -563,8 +553,8 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     /// updated in place as `smsurf_EvaluateGeometric` does), with curvatures signed
     /// by `reference_normal`. A planar point has no curves; a parabolic point two
     /// half lines at `1/sqrt|k|` from the origin; an elliptic point one ellipse; a
-    /// hyperbolic point four hyperbolas (upstream's bottom hyperbola uses `k2` for
-    /// both axes unless `Kernel::fixes.dupin_bottom_hyperbola_axis` is enabled).
+    /// hyperbolic point four hyperbolas (WR-69: upstream's bottom hyperbola uses `k2`
+    /// for both axes).
     /// Curves go above for positive curvatures, below for negative.
     ///
     /// # Errors
@@ -575,11 +565,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         surface_eval: &mut [[Vec3; 3]; 3],
         reference_normal: Vec3,
     ) -> Result<Dupin> {
-        make_dupin(
-            surface_eval,
-            reference_normal,
-            self.kernel.fixes.dupin_bottom_hyperbola_axis,
-        )
+        make_dupin(surface_eval, reference_normal)
     }
 
     // ---- interior curves -------------------------------------------------------------------
@@ -589,9 +575,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     /// per intersecting leaf pair, and traces a curve from each candidate whose
     /// normals are at least 5 degrees apart, whose local intersection succeeds with
     /// normals at least 2 degrees apart and which is not on a curve found already.
-    /// The curves are appended to `out`. With
-    /// `Kernel::fixes.ssi_low_angle_start_on_probation` a candidate below either
-    /// angle (but at least `2 tol / modelSize` radians) is traced on probation and kept
+    /// The curves are appended to `out`. A candidate below either angle (but at least `2 tol / modelSize` radians) is traced on probation and kept
     /// only as a closed transversal loop larger than twice the tolerance (see the
     /// module deviations).
     ///
@@ -616,24 +600,19 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         // curves): this loop only appends curves, so slot `i` stays curve `i`'s.
         let mut drop_caches = DropPointCaches::default();
 
-        // Opt-in (WR-74, #394): the patch UV domains of the node pairs that cannot
+        // WR-74 (#394): the patch UV domains of the node pairs that cannot
         // start a crossing curve seed the tangential contact point search below.
         let mut tangent_seeds: Vec<[Extent2d; 2]> = Vec::new();
-        // Fix WR-79 part 2 (#396, opt-in): the 3D curves traced from low-angle start
+        // Fix WR-79 part 2 (#396): the 3D curves traced from low-angle start
         // points and then rejected (and those start points), with their drop caches;
         // later low-angle start points on them are not traced again.
-        let probation = k.fixes.ssi_low_angle_start_on_probation;
         let mut rejected_curves: Vec<Curve> = Vec::new();
         let mut rejected_caches = DropPointCaches::default();
         // The smallest normal angle worth tracing from: on a transversal loop of radius
         // r between surfaces of relative curvature radius R the normals differ by about
         // r/R, so loops above the tolerance on surfaces curved at model scale stay above
         // tol/modelSize, while tangent curves and tangent points fall below it.
-        let min_loop_angle_rad = if probation {
-            self.min_loop_angle_rad(k)?
-        } else {
-            0.0
-        };
+        let min_loop_angle_rad = self.min_loop_angle_rad(k)?;
 
         // Now for each node pair do a test to see if produces a unique start point
         for sol in solutions.as_slice() {
@@ -658,14 +637,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                     angle_rad = PI - angle_rad;
                 }
                 if angle_rad * (180.0 / PI) < 5.0 {
-                    self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
-                    // (WR-75, opt-in) a seed of the tangential curve pass
-                    if k.fixes.ssi_tangent_curve_tracer {
-                        self.tangent_curve_seeds.push([uv_guess1, uv_guess2]);
-                    }
-                    if !probation {
-                        continue;
-                    }
+                    self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
+                    // (WR-75) a seed of the tangential curve pass
+                    self.tangent_curve_seeds.push([uv_guess1, uv_guess2]);
                     low_angle_start = true;
                 }
             }
@@ -687,7 +661,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
             // for nodes that do not intersect - skip to next node pair
             if !found_answer {
-                self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
+                self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
                 continue;
             }
 
@@ -705,14 +679,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                     angle_rad = PI - angle_rad;
                 }
                 if angle_rad * (180.0 / PI) < 2.0 {
-                    self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
-                    // (WR-75, opt-in) a seed of the tangential curve pass
-                    if k.fixes.ssi_tangent_curve_tracer {
-                        self.tangent_curve_seeds.push([uv, uv2]);
-                    }
-                    if !probation {
-                        continue;
-                    }
+                    self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
+                    // (WR-75) a seed of the tangential curve pass
+                    self.tangent_curve_seeds.push([uv, uv2]);
                     low_angle_start = true;
                 }
                 // too small an angle for a loop above the tolerance
@@ -821,8 +790,8 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             }
         }
 
-        // Opt-in (WR-74, #394): isolated tangential contact points
-        if k.fixes.ssi_tangent_contact_points && !self.base.doing_self_intersection {
+        // WR-74 (#394): isolated tangential contact points
+        if !self.base.doing_self_intersection {
             tangent_contacts::find_tangent_contact_points(
                 k,
                 &self.base,
@@ -835,22 +804,18 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         Ok(())
     }
 
-    /// Opt-in (WR-74, #394): records the patch UV domains of a node pair
-    /// `FindInteriorCurves` drops as a seed of the tangential contact point search
-    /// (nothing without `Kernel::fixes.ssi_tangent_contact_points`).
+    /// WR-74 (#394): records the patch UV domains of a node pair `FindInteriorCurves`
+    /// drops as a seed of the tangential contact point search.
     fn push_tangent_seed(
         &self,
-        k: &Kernel,
         seeds: &mut Vec<[Extent2d; 2]>,
         node1: Option<NodeId>,
         node2: Option<NodeId>,
     ) -> Result<()> {
-        if k.fixes.ssi_tangent_contact_points {
-            seeds.push([
-                *self.patch(0, node1)?.aux.uv_domain(),
-                *self.patch(1, node2)?.aux.uv_domain(),
-            ]);
-        }
+        seeds.push([
+            *self.patch(0, node1)?.aux.uv_domain(),
+            *self.patch(1, node2)?.aux.uv_domain(),
+        ]);
         Ok(())
     }
 
@@ -1289,11 +1254,7 @@ fn flush_curve(
 }
 
 /// `MakeDupin` (see [`AdvSurfaceIntersector::make_dupin`]).
-fn make_dupin(
-    surface_eval: &mut [[Vec3; 3]; 3],
-    reference_normal: Vec3,
-    fix_bottom_axis: bool,
-) -> Result<Dupin> {
+fn make_dupin(surface_eval: &mut [[Vec3; 3]; 3], reference_normal: Vec3) -> Result<Dupin> {
     let geom = evaluate_geometric(surface_eval)?;
     let mut out = Dupin {
         above: Vec::new(),
@@ -1403,7 +1364,7 @@ fn make_dupin(
         let mut hyp = Conic::new(
             ConicType::Hyperbola,
             1.0 / sqrt(k2.abs()),
-            1.0 / sqrt(if fix_bottom_axis { k1.abs() } else { k2.abs() }),
+            1.0 / sqrt(k1.abs()),
         );
         hyp.transform_2d(PI + PI / 2.0, Point2::new(0.0, 0.0));
         push(hyp, k2);
@@ -1427,7 +1388,6 @@ impl SurfaceIntersector<'_> {
         _uv_values: [Point2; 2],
         point: &mut TsectPnt,
         prev_crv_deriv: Option<Vec3>,
-        fix_dupin_bottom_axis: bool,
     ) -> Result<()> {
         let curve_trace_direction = self.curve_trace_direction;
         let ang_tol_rad = self.this_ang_tol_rad;
@@ -1567,21 +1527,13 @@ impl SurfaceIntersector<'_> {
 
             // Dupin indicatrex curves for 1st surface
             let normal0 = point.srf_norm(SrfIndex::First);
-            let d1 = make_dupin(
-                point.srf_eval_matrix_mut(SrfIndex::First),
-                normal0,
-                fix_dupin_bottom_axis,
-            )?;
+            let d1 = make_dupin(point.srf_eval_matrix_mut(SrfIndex::First), normal0)?;
             let (prin_k1, prin_k2, prin_kv1, prin_kv2) =
                 (d1.prin_k1, d1.prin_k2, d1.prin_k1_vec, d1.prin_k2_vec);
 
             // Compute values of second surface based upon the normal of the first
             let normal0 = point.srf_norm(SrfIndex::First);
-            let mut d2 = make_dupin(
-                point.srf_eval_matrix_mut(SrfIndex::Second),
-                normal0,
-                fix_dupin_bottom_axis,
-            )?;
+            let mut d2 = make_dupin(point.srf_eval_matrix_mut(SrfIndex::Second), normal0)?;
             let (prin_k1_2, prin_k2_2, prin_kv1_2, prin_kv2_2) =
                 (d2.prin_k1, d2.prin_k2, d2.prin_k1_vec, d2.prin_k2_vec);
 
@@ -1806,9 +1758,7 @@ impl SurfaceIntersector<'_> {
                         // Upstream leaves the output at dir(0), so where the first inside
                         // direction is the closest (or the only one) the curve starts
                         // along a direction that need not point inside either domain.
-                        if self.singular_start_inside_direction {
-                            *point.crv_deriv_mut() = dir(first);
-                        }
+                        *point.crv_deriv_mut() = dir(first);
                         // Find the singDirection closest to Prev->3DCurve_Direction.
                         let mut angle_min = angle(p, dir(first))?;
                         for &ii in rest {
@@ -1907,19 +1857,14 @@ mod tests {
     fn audit_483_singularity_alignment_skips_a_failed_angle() {
         let s = plane();
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        for fix_dupin_bottom_axis in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.dupin_bottom_hyperbola_axis = fix_dupin_bottom_axis;
+        {
+            let k = Kernel::default();
             let si = SurfaceIntersector::new(&k, &s, &d, &s, &d, false).unwrap();
             let mut point = TsectPnt::new();
             point.surface_pv[0] = eval(Vec3::X, Vec3::Y, Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
             point.surface_pv[1] = eval(Vec3::X, Vec3::Y, Vec3::Z, Vec3::ZERO, Vec3::ZERO);
-            let result = si.adv_compute_singularity_point(
-                [Point2::ZERO; 2],
-                &mut point,
-                Some(Vec3::ZERO),
-                k.fixes.dupin_bottom_hyperbola_axis,
-            );
+            let result =
+                si.adv_compute_singularity_point([Point2::ZERO; 2], &mut point, Some(Vec3::ZERO));
             // fork e7ebc8d (`ALIGN_DIR_WITH_PREVIOUS_POINT`): without an angle nothing is
             // aligned
             result.unwrap();
@@ -2113,73 +2058,52 @@ mod tests {
     }
 
     #[test]
-    fn singular_start_uses_the_only_inside_direction_when_fixed() {
+    fn singular_start_uses_the_only_inside_direction() {
         // Only +x +y points into the plane's [0, 1] x [0, 1] domain, and it is the
         // second stored direction: upstream leaves the result at the first (-x -y),
         // which points into neither domain.
         let domain1 = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let inside = Vec3::new(SING, SING, 0.0);
-        let outside = Vec3::new(-SING, -SING, 0.0);
 
-        let off = singular_start(&Kernel::default(), domain1, inside);
-        assert_eq!(off.0, IntersectionPointType::Singularity);
-        assert!((off.1 - outside).length() < 1e-6, "upstream: {:?}", off.1);
-
-        let mut k = Kernel::default();
-        assert!(!k.fixes.ssi_singular_start_inside_direction);
-        k.fixes.ssi_singular_start_inside_direction = true;
+        let k = Kernel::default();
         let on = singular_start(&k, domain1, inside);
         assert_eq!(on.0, IntersectionPointType::Singularity);
         assert!((on.1 - inside).length() < 1e-6, "fixed: {:?}", on.1);
     }
 
     #[test]
-    fn singular_start_uses_the_nearest_first_inside_direction_when_fixed() {
+    fn singular_start_uses_the_nearest_first_inside_direction() {
         // The plane's [0, 1] x [-1, 1] domain holds +x +y and +x -y; the first inside
         // direction is +x +y and it is the nearest to the previous one.
         let domain1 = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
         let nearest = Vec3::new(SING, SING, 0.0);
-        let outside = Vec3::new(-SING, -SING, 0.0);
 
-        let off = singular_start(&Kernel::default(), domain1, nearest);
-        assert!((off.1 - outside).length() < 1e-6, "upstream: {:?}", off.1);
-
-        let mut k = Kernel::default();
-        k.fixes.ssi_singular_start_inside_direction = true;
+        let k = Kernel::default();
         let on = singular_start(&k, domain1, nearest);
         assert!((on.1 - nearest).length() < 1e-6, "fixed: {:?}", on.1);
     }
 
     #[test]
-    fn singular_start_still_takes_a_later_inside_direction_when_fixed() {
+    fn singular_start_still_takes_a_later_inside_direction() {
         // The first inside direction is +x +y, but +x -y is the nearest to the previous
         // one: the later-angle search must still replace the initial choice.
         let domain1 = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
         let later = Vec3::new(SING, -SING, 0.0);
 
-        let mut k = Kernel::default();
-        k.fixes.ssi_singular_start_inside_direction = true;
+        let k = Kernel::default();
         let on = singular_start(&k, domain1, later);
         assert!((on.1 - later).length() < 1e-6, "fixed: {:?}", on.1);
-
-        // Without the fix the same later direction wins: the default path is unchanged.
-        let off = singular_start(&Kernel::default(), domain1, later);
-        assert!((off.1 - later).length() < 1e-6, "upstream: {:?}", off.1);
     }
 
     #[test]
-    fn singular_start_default_is_unchanged_when_the_first_direction_is_inside() {
+    fn singular_start_takes_the_first_direction_when_it_is_inside() {
         // With every direction inside, the first stored direction already is inside and
-        // the nearest to the previous one: the fix changes nothing.
+        // the nearest to the previous one.
         let domain1 = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
         let nearest = Vec3::new(-SING, -SING, 0.0);
 
-        let off = singular_start(&Kernel::default(), domain1, nearest);
-        let mut k = Kernel::default();
-        k.fixes.ssi_singular_start_inside_direction = true;
+        let k = Kernel::default();
         let on = singular_start(&k, domain1, nearest);
-        assert_eq!(off.0, on.0);
-        assert!((off.1 - on.1).length() < 1e-12);
         assert!((on.1 - nearest).length() < 1e-6, "fixed: {:?}", on.1);
     }
 

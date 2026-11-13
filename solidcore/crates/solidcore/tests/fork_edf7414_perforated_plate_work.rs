@@ -78,7 +78,6 @@ fn plate(k: &mut Kernel, w: f64) -> Brep {
 /// and its inner loops classified (none), and returns the face pairs.
 fn plate_pairs(n: u32) -> u64 {
     let mut k = Kernel::default();
-    k.fixes.boolean_skips_faces_apart = true;
     let t0 = Instant::now();
     k.work_counters.reset();
     let mut holes = Vec::new();
@@ -171,7 +170,6 @@ fn plate_and_hole_curves(k: &mut Kernel, n: u32) -> (Vec<Curve>, f64) {
 fn plate_in_one_call_walks(n: u32) -> u64 {
     let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
     k.memoize_curve_caches = true; // the count is the shortcut's, whatever `curve-memo-off` says
-    k.fixes.boolean_skips_faces_apart = true;
     let (curves, w) = plate_and_hole_curves(&mut k, n);
     let t0 = Instant::now();
     k.work_counters.reset();

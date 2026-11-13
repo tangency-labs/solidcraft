@@ -13,7 +13,7 @@
 //! | [`SurfaceIntersector::find_interior_curves`], [`SurfaceIntersector::find_interior_curves_from_node_pairs`], [`InteriorNodePair`] | `FindInteriorCurves` |
 //! | [`SurfaceIntersector::do_point_intersection`], [`PointIntersectionOptions`] | `DoPointIntersection` |
 //! | [`SurfaceIntersector::do_law_intersection`], [`LawIntersectionOptions`] | `DoLawIntersection` |
-//! | `SurfaceIntersector::span_on_found_curve`, `SurfaceIntersector::reaches_found_curve_end`, `stop_at_found_curve_end` (crate/private) | the SolidCraft fork's `bSpanOnFoundCurve`, `bReachesFoundCurveEnd` lambdas of `TraceCurve` and its loop-top stop (opt-in, WR-76) |
+//! | `SurfaceIntersector::span_on_found_curve`, `SurfaceIntersector::reaches_found_curve_end`, `stop_at_found_curve_end` (crate/private) | the SolidCraft fork's `bSpanOnFoundCurve`, `bReachesFoundCurveEnd` lambdas of `TraceCurve` and its loop-top stop (WR-76) |
 //! | [`IntersectionCurve`]                                 | the curve, type and deviation out-params of both drivers |
 //! | [`IntersectorVirtuals`], [`do_point_intersection_with`], [`trace_curve_with`], [`do_law_intersection_with`] | the virtual calls of `DoPointIntersection` / `TraceCurve` / `DoLawIntersection` (`this->ComputePointValues(..)`, ..) on a derived intersector |
 //!
@@ -76,13 +76,11 @@
 //!   the global surface solve's leaf solve that are not ported yet (`surface.surface_p3`,
 //!   `surface.surface_p8`) return [`SolidError::Unported`], which always propagates
 //!   (also where upstream ignores the status).
-//! - **Opt-in fix (WR-76, #392).** With
-//!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
-//!   `TraceCurve` runs its "already traced" test also on a first step that `TestPoint`
+//! - **WR-76 (#392).** `TraceCurve` runs its "already traced" test also on a first step that `TestPoint`
 //!   ended (`SurfaceIntersector::span_on_found_curve`), and a near-tangent trace that
 //!   passes a found curve's free end stops there, its last span shortened to that end
 //!   (`SurfaceIntersector::reaches_found_curve_end`); the SolidCraft fork's
-//!   tangency-labs/smlib@0ce09f2. Off by default (upstream behaviour).
+//!   tangency-labs/smlib@0ce09f2.
 //! - **Empty trace (WR-80).** The trace-back of `FindInteriorCurves` and
 //!   `DoIntersection` (part 5) is one method, [`SurfaceIntersector::trace_back`], which
 //!   traces a curve back the other way only when `TraceCurve` produced points.
@@ -536,7 +534,7 @@ impl SurfaceIntersector<'_> {
     /// True when the span from point `from` to point `to` already lies on a found
     /// curve: `to` and three points of the span (a Hermite with chord-length
     /// tangents) are all on `curves_3d` (the fork's `bSpanOnFoundCurve` of
-    /// `TraceCurve`, opt-in fix WR-76, #392; tangency-labs/smlib@0ce09f2). Used for
+    /// `TraceCurve`, WR-76, #392; tangency-labs/smlib@0ce09f2). Used for
     /// the second point of a trace whose first step `TestPoint` ended (snapped onto
     /// another start point or curve end), which upstream adds without its "already
     /// traced" test.
@@ -582,7 +580,7 @@ impl SurfaceIntersector<'_> {
     /// within 1 degree at both ends) at which it passes within `max(10 tol,
     /// sqrt(tol (1 + size)))` of a free end of a non-degenerate found curve, an end
     /// not at the trace's `start` point and with `t` in `[0, 0.95]` (the fork's
-    /// `bReachesFoundCurveEnd` of `TraceCurve`, opt-in fix WR-76, #392;
+    /// `bReachesFoundCurveEnd` of `TraceCurve`, WR-76, #392;
     /// tangency-labs/smlib@0ce09f2).
     ///
     /// # Errors
@@ -1207,13 +1205,11 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             .last()
             .ok_or_else(|| SolidError::invalid_input(OP_TRACE, "no curve point"))?;
 
-        // opt-in fix (WR-76, #392): a tangent curve traced from its other end that
+        // WR-76 (#392): a tangent curve traced from its other end that
         // has run onto the free end of an already traced curve is the same tangent
         // curve, whose earlier trace stopped part way; stop here so the two traces
         // meet instead of the second retracing the first
-        if k.fixes.ssi_trace_tangent_curves_once
-            && stop_at_found_curve_end(v, k, start, tsp, curves_3d, uv_tol)?
-        {
+        if stop_at_found_curve_end(v, k, start, tsp, curves_3d, uv_tol)? {
             break;
         }
 
@@ -1273,9 +1269,8 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         let mut last_curve_param = v.intersector().point(next)?.curve_parameter;
         trace_test(v, k, next, &mut done)?;
         if done || v.intersector().point(next)?.curve_parameter != last_curve_param {
-            // opt-in fix (WR-76, #392): don't retrace an already found curve
-            if k.fixes.ssi_trace_tangent_curves_once
-                && point_count == 0
+            // WR-76 (#392): don't retrace an already found curve
+            if point_count == 0
                 && v.intersector()
                     .span_on_found_curve(k, tsp, next, curves_3d)?
             {
@@ -1327,10 +1322,9 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                 trace_test(v, k, next, &mut done)?;
                 if done || v.intersector().point(next)?.curve_parameter != last_curve_param {
                     if done {
-                        // opt-in fix (WR-76, #392): don't retrace an already found
+                        // WR-76 (#392): don't retrace an already found
                         // curve
-                        if k.fixes.ssi_trace_tangent_curves_once
-                            && point_count == 0
+                        if point_count == 0
                             && v.intersector()
                                 .span_on_found_curve(k, tsp, next, curves_3d)?
                         {
@@ -1430,7 +1424,7 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     Ok(())
 }
 
-/// The loop-top test of the opt-in fix WR-76 (#392) in `TraceCurve` (the SolidCraft
+/// The loop-top test of WR-76 (#392) in `TraceCurve` (the SolidCraft
 /// fork's tangency-labs/smlib@0ce09f2): when the curve's last span `prev -> last` of a
 /// near-tangent trace has gone past a free end of a found curve
 /// ([`SurfaceIntersector::reaches_found_curve_end`]), the last span is shortened to end
@@ -1654,7 +1648,7 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             // fork bcc6f01)
             ignored(passed_on(
                 v.intersector_mut().add_start_point(k, start_id),
-                k.fixes.ssi_proto_topology_statuses_pass_on,
+                true,
             )?)?;
             v.intersector_mut().point_mut(pid)?.curve_parameter = 0.0;
             if !(opts.start_direction.is_some() && n > 1) {
@@ -1674,7 +1668,7 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                     | SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }),
                 ) => return Err(e),
-                Err(e) if k.fixes.ssi_proto_topology_statuses_pass_on => return Err(e),
+                Err(e) if true => return Err(e),
                 _ => {}
             }
         }

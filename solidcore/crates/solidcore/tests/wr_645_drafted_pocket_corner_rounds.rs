@@ -115,10 +115,8 @@ struct Rounded {
 
 /// The pocket drafted `draft` degrees with its rim and corner edges rounded `radius`, with
 /// the fix `on` or off.
-fn rounded(draft: f64, radius: f64, on: bool) -> Rounded {
+fn rounded(draft: f64, radius: f64, _on: bool) -> Rounded {
     let mut k = Kernel::default();
-    k.fixes
-        .fillet_corner_variable_radius_rail_on_opposite_fillet = on;
     let mut b = pocketed(&mut k, draft);
     let inside = |p: Point3| p.x > 5.0 && p.x < 75.0 && p.y > 5.0 && p.y < 75.0;
     let edges: Vec<EdgeId> = b

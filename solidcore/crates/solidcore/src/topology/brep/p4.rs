@@ -1017,7 +1017,7 @@ fn delete_manifold_edge(
                     if flip_face {
                         ignore_status(crate::error::passed_on(
                             face1::flip_face_orientation(b, sf),
-                            k.fixes.brep_edit_statuses_pass_on,
+                            true,
                         )?)?;
                     }
                 }
@@ -1103,10 +1103,7 @@ fn delete_manifold_edge(
         // Normal case: need to remove vertexuses.
         let vu = ner(eu1::vertexuse(b, eu)?, OP, "the edge use's vertex use")?;
         let v = ner(vertexuse::vertex(b, vu)?, OP, "the vertex use's vertex")?;
-        ignore_status(crate::error::passed_on(
-            vertex_remove(b, v, vu, OP),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        ignore_status(crate::error::passed_on(vertex_remove(b, v, vu, OP), true)?)?;
         b.remove_vertexuse_record(vu)?;
         let vu_rad_mate = ner(
             eu1::vertexuse(b, eu_rad_mate)?,
@@ -1115,7 +1112,7 @@ fn delete_manifold_edge(
         )?;
         ignore_status(crate::error::passed_on(
             vertex_remove(b, v, vu_rad_mate, OP),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         b.remove_vertexuse_record(vu_rad_mate)?;
     }
@@ -1142,22 +1139,19 @@ fn delete_manifold_edge(
         )?;
         ignore_status(crate::error::passed_on(
             vertex_remove(b, v_mate, vu_mate, OP),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         b.remove_vertexuse_record(vu_mate)?;
         let vu_rad = ner(eu1::vertexuse(b, eu_rad)?, OP, "the edge use's vertex use")?;
         ignore_status(crate::error::passed_on(
             vertex_remove(b, v_mate, vu_rad, OP),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         b.remove_vertexuse_record(vu_rad)?;
     }
 
     for x in [eu, eu_mate, eu_rad, eu_rad_mate] {
-        ignore_status(crate::error::passed_on(
-            edge_remove(b, e, x, OP),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        ignore_status(crate::error::passed_on(edge_remove(b, e, x, OP), true)?)?;
     }
 
     for (l, x) in [
@@ -1172,7 +1166,7 @@ fn delete_manifold_edge(
             let c = ccw(b, x)?;
             ignore_status(crate::error::passed_on(
                 loopuse::set_edgeuse(b, l, c),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
         }
     }
@@ -1287,12 +1281,12 @@ fn delete_manifold_edge(
     let s = deref(eu1::faceuse_shell(b, fu_del)?, OP)?;
     ignore_status(crate::error::passed_on(
         shell_remove_faceuse(b, s, fu_del, OP),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     let s = deref(eu1::faceuse_shell(b, fu_del_mate)?, OP)?;
     ignore_status(crate::error::passed_on(
         shell_remove_faceuse(b, s, fu_del_mate, OP),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
     b.remove_faceuse_record(fu_del)?;
     b.remove_faceuse_record(fu_del_mate)?;
@@ -1316,7 +1310,7 @@ fn edgeuse_normal(
 ) -> Result<Vec3> {
     if let Some(e) = ignored(crate::error::passed_on(
         eu3::normalized_evaluate(k, b, eu, 0.5, true, false, true),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)? {
         *uv3 = e.point;
     }
@@ -1325,7 +1319,7 @@ fn edgeuse_normal(
     let s = deref(b.face(f)?.surface.as_ref(), op)?;
     Ok(ignored(crate::error::passed_on(
         s.evaluate_normal(k, uv, Side::Right, Side::Right),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?
     .unwrap_or(Vec3::UNDEF))
 }
@@ -1377,10 +1371,7 @@ fn delete_lamina_edge(
         // Normal case: need to remove two vertexuses.
         let vu = ner(eu1::vertexuse(b, eu)?, OP, "the edge use's vertex use")?;
         let v = ner(vertexuse::vertex(b, vu)?, OP, "the vertex use's vertex")?;
-        ignore_status(crate::error::passed_on(
-            vertex_remove(b, v, vu, OP),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        ignore_status(crate::error::passed_on(vertex_remove(b, v, vu, OP), true)?)?;
         b.remove_vertexuse_record(vu)?;
         let vu_mate = ner(eu1::vertexuse(b, eu_mate)?, OP, "the edge use's vertex use")?;
         let v_mate = ner(
@@ -1390,32 +1381,29 @@ fn delete_lamina_edge(
         )?;
         ignore_status(crate::error::passed_on(
             vertex_remove(b, v_mate, vu_mate, OP),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         b.remove_vertexuse_record(vu_mate)?;
     }
 
-    ignore_status(crate::error::passed_on(
-        edge_remove(b, e, eu, OP),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    ignore_status(crate::error::passed_on(edge_remove(b, e, eu, OP), true)?)?;
     ignore_status(crate::error::passed_on(
         edge_remove(b, e, eu_mate, OP),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
 
     if loopuse::eu_or_vu(b, lu)? == Some(EntityRef::Edgeuse(eu)) {
         let c = ccw(b, eu)?;
         ignore_status(crate::error::passed_on(
             loopuse::set_edgeuse(b, lu, c),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
     }
     if loopuse::eu_or_vu(b, lu_mate)? == Some(EntityRef::Edgeuse(eu_mate)) {
         let c = ccw(b, eu_mate)?;
         ignore_status(crate::error::passed_on(
             loopuse::set_edgeuse(b, lu_mate, c),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
     }
 
@@ -1452,27 +1440,24 @@ fn delete_wire_edge(
     const OP: &str = OP_DELETE_EDGE;
     let shell = ner(eu1::shell(b, eu)?, OP, "the edge use's shell")?;
 
-    ignore_status(crate::error::passed_on(
-        edge_remove(b, e, eu, OP),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    ignore_status(crate::error::passed_on(edge_remove(b, e, eu, OP), true)?)?;
     ignore_status(crate::error::passed_on(
         edge_remove(b, e, eu_mate, OP),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
 
     let vu1 = ner(eu1::vertexuse(b, eu)?, OP, "the edge use's vertex use")?;
     let v1 = ner(vertexuse::vertex(b, vu1)?, OP, "the vertex use's vertex")?;
     ignore_status(crate::error::passed_on(
         vertex_remove(b, v1, vu1, OP),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
 
     let vu2 = ner(eu1::vertexuse(b, eu_mate)?, OP, "the edge use's vertex use")?;
     let v2 = ner(vertexuse::vertex(b, vu2)?, OP, "the vertex use's vertex")?;
     ignore_status(crate::error::passed_on(
         vertex_remove(b, v2, vu2, OP),
-        k.fixes.brep_edit_statuses_pass_on,
+        true,
     )?)?;
 
     let mut vu1 = Some(vu1);
@@ -1480,10 +1465,7 @@ fn delete_wire_edge(
     for (v, slot) in [(v1, &mut vu1), (v2, &mut vu2)] {
         let Some(vu) = *slot else { continue };
         if vertex::vertexuses(b, v)?.is_empty() {
-            ignore_status(crate::error::passed_on(
-                vertex_post_insert(b, v, vu),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            ignore_status(crate::error::passed_on(vertex_post_insert(b, v, vu), true)?)?;
             b.vertexuse_mut(vu)?.owner = VertexuseOwner::Shell(Some(shell));
         } else {
             // the vertex is connected to some other edges: delete the vertex use
@@ -1619,7 +1601,7 @@ fn wire_split_shell(
         for &fu in &faceuses2 {
             ignore_status(crate::error::passed_on(
                 shell_remove_faceuse(b, shell, fu, OP),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             shell_post_insert_faceuse(b, new_shell, fu)?;
         }
@@ -1742,14 +1724,11 @@ fn delete_vertex_in(
             let region = deref(shell_region(b, shell)?, OP)?;
             ignore_status(crate::error::passed_on(
                 shell::region_remove_shell(b, region, shell),
-                k.fixes.brep_edit_statuses_pass_on,
+                true,
             )?)?;
             destroy_shell(k, b, env, shell)?;
         }
-        ignore_status(crate::error::passed_on(
-            vertex_remove(b, v, vu, OP),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        ignore_status(crate::error::passed_on(vertex_remove(b, v, vu, OP), true)?)?;
         b.remove_vertex_record(v)?;
         b.remove_vertexuse_record(vu)?;
         return Ok(());
@@ -1779,12 +1758,12 @@ fn delete_vertex_in(
         // remove and delete vertex to loop connections
         ignore_status(crate::error::passed_on(
             faceuse_remove(b, fu1, lu1, OP),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         let fu2 = deref(loopuse::faceuse(b, lu2)?, OP)?;
         ignore_status(crate::error::passed_on(
             faceuse_remove(b, fu2, lu2, OP),
-            k.fixes.brep_edit_statuses_pass_on,
+            true,
         )?)?;
         if let Some(l) = loopuse::loop_(b, lu1)? {
             b.remove_loop_record(l)?;
@@ -1792,14 +1771,8 @@ fn delete_vertex_in(
         loopuse::set_loop(b, lu1, None)?;
         b.remove_loopuse_record(lu1)?;
         b.remove_loopuse_record(lu2)?;
-        ignore_status(crate::error::passed_on(
-            vertex_remove(b, v, vu1, OP),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
-        ignore_status(crate::error::passed_on(
-            vertex_remove(b, v, vu2, OP),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        ignore_status(crate::error::passed_on(vertex_remove(b, v, vu1, OP), true)?)?;
+        ignore_status(crate::error::passed_on(vertex_remove(b, v, vu2, OP), true)?)?;
         b.remove_vertexuse_record(vu1)?;
         b.remove_vertexuse_record(vu2)?;
     }
@@ -2054,7 +2027,7 @@ pub fn shrink_geometry(k: &Kernel, b: &mut Brep) -> Result<()> {
         // `Init()`ed the result (SmExtent2d.cpp:414-418), and that undefined extent is
         // the face domain from here on (`AreEqual`, `TrimWithDomain`, `SetUVDomain`).
         // (fork 60a8a51 passes this status on, and the trim's and removal's below: `SER`)
-        let pass_on = k.fixes.brep_edit_statuses_pass_on;
+        let pass_on = true;
         face_domain = match surf_domain.intersect(&face_domain) {
             Ok(d) => d,
             Err(e) if pass_on => return Err(e),

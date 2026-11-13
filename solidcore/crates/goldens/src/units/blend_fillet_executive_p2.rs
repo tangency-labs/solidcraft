@@ -2383,8 +2383,7 @@ mod tests {
             Ok(())
         });
         assert!(default_body_called);
-        let mut fixes = solidcore::kernel::UpstreamFixes::default();
-        fixes.temporary_radius_setup_errors = true;
+        let fixes = solidcore::kernel::UpstreamFixes::default();
         let error =
             TemporaryRadiusChange::new_with_fixes(&mut access, solver, 0, side, &fixes).unwrap_err();
         assert_eq!(error, expected);

@@ -1,7 +1,7 @@
 //! tangency-labs/solidcore#420 (WR-421): a chamfer as wide as the corner rounds it runs
 //! round. `CalcTorusFilletGeom` only handled a circular section, so a linear one went to
 //! the offset trace, which collapses to a point where the neighbouring round's offset
-//! reaches its axis. `fixes.fillet_chamfer_cone_on_arc` revolves the linear section into a
+//! reaches its axis. `true` revolves the linear section into a
 //! cone. The case is the fork's capi test: a 40 x 40 x 20 plate with its vertical edges
 //! rounded R1, its bottom loop chamfered 1.
 #![allow(
@@ -48,9 +48,8 @@ fn edges_where(k: &Kernel, b: &Brep, keep: impl Fn(Point3) -> bool) -> Vec<EdgeI
 
 /// The plate's volume after its corners are rounded, after its bottom loop is chamfered,
 /// and the chamfer's result.
-fn chamfered_plate(fix: bool) -> (f64, f64, solidcore::Result<()>) {
+fn chamfered_plate(_fix: bool) -> (f64, f64, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = fix;
     let mut plate = create_box(&mut k, Point3::new(-20.0, -20.0, 0.0), 40.0, 40.0, 20.0).unwrap();
     let corners = edges_where(&k, &plate, |m| (m.z - 10.0).abs() < 1e-6);
     fillet_edges(&mut k, &mut plate, &corners, 1.0, 1, 1, 1.0).unwrap();
@@ -91,9 +90,7 @@ use solidcore::SolidError;
 
 /// The section generator and rounds (and chamfers) as their definitions.
 fn definition_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
-    k
+    Kernel::default()
 }
 
 /// A cylinder of radius 5 and height 10 on the origin, its top rim chamfered by `size`:
@@ -201,7 +198,6 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 /// `fillet_chamfer_cone_on_arc`: the kernel, the body and the chamfer's result.
 fn chamfered_rounded_cube(d: f64) -> (Kernel, Brep, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = true;
     let mut cube = create_box(&mut k, Point3::new(-15.0, -15.0, 0.0), 30.0, 30.0, 30.0).unwrap();
     let corners = edges_where(&k, &cube, |m| (m.z - 15.0).abs() < 1e-6);
     assert_eq!(corners.len(), 4);
@@ -282,7 +278,6 @@ fn issue_2546_chamfers_within_the_resolution_of_the_rounds_are_refused_naming_th
     }
     // the session's note names both sizes
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = true;
     let mut cube = create_box(&mut k, Point3::new(-15.0, -15.0, 0.0), 30.0, 30.0, 30.0).unwrap();
     let corners = edges_where(&k, &cube, |m| (m.z - 15.0).abs() < 1e-6);
     fillet_edges(&mut k, &mut cube, &corners, 5.0, 1, 1, 1.0).unwrap();

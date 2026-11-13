@@ -1,7 +1,7 @@
 //! tangency-labs/solidcore#1073 (WR-460): rounds on the four vertical edges of a
 //! 14 x 6 x 10 post, each 6 mm face carrying two of them. Past r = 3 the two rails on a
 //! face have crossed and SMLib builds an open body. With SolidCraft's fix list the band
-//! test (`fixes.fillet_refuse_overlapping_bands`, WR-542) refuses it before the post is
+//! test (`true`, WR-542) refuses it before the post is
 //! edited, naming the largest radius that builds. (The crossing-rails refusal
 //! `fillet_refuse_crossing_rails`, which refused it with a bare 1001 after the fillet's
 //! B-rep was built, is retired: the band test is the one test of two bands on a face.)

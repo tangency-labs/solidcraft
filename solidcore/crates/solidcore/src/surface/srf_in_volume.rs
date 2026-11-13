@@ -944,7 +944,7 @@ impl SrfInVolume {
                 vol1,
                 vol2,
                 vol3,
-                k.fixes.volume_lift_third_derivative_terms,
+                true,
             );
             // when managing the special case of lHighestUDeriv != lHighestVDeriv is
             // when one or the other is 0.

@@ -1,4 +1,4 @@
-//! `fixes.fillet_refuse_non_manifold_result` (WR-212) on a round it does not refuse: the
+//! `true` (WR-212) on a round it does not refuse: the
 //! result is the flag-off result, curve owners included. The refusal's rollback copy
 //! (`Brep::clone_for_rollback`) used to share the edge arenas copy-on-write, so the
 //! round's first edge edit copied them for the caller's body with the copy
@@ -66,9 +66,8 @@ fn bar(k: &mut Kernel) -> Brep {
 }
 
 /// The WR-592 bar's first round (its front top edge, r 2) with the flag as `fix` says.
-fn first_round(fix: bool) -> (Kernel, Brep) {
+fn first_round(_fix: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_non_manifold_result = fix;
     let mut b = bar(&mut k);
     let front_top = nearest_edge(&k, &b, Point3::new(20.0, 0.0579, 10.0));
     fillet_edges(&mut k, &mut b, &[front_top], 2.0, 1, 1, 1.0).unwrap();

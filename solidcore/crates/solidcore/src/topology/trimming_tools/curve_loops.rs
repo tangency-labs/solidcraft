@@ -282,7 +282,7 @@ impl CurveLoops {
 
     /// `GetLoopStartEnd` with its outputs as left on failure: the status, `rlStart` and
     /// `rlEnd`.
-    fn loop_start_end_raw(&self, k: &Kernel, curve_index: usize) -> (bool, usize, usize) {
+    fn loop_start_end_raw(&self, _k: &Kernel, curve_index: usize) -> (bool, usize, usize) {
         let mut start = 0usize;
         let mut end = 0usize;
         for (ii, &c) in self.loop_counts.iter().enumerate() {
@@ -293,17 +293,13 @@ impl CurveLoops {
             if curve_index <= end {
                 return (true, start, end);
             }
-            start = if k.fixes.curve_loop_start_after_previous_end {
-                end.wrapping_add(1)
-            } else {
-                end
-            };
+            start = if true { end.wrapping_add(1) } else { end };
         }
         (false, start, end)
     }
 
     /// `GetLoopStartEnd`: the first and last curve index of the loop holding
-    /// `curve_index`. With `k.fixes.curve_loop_start_after_previous_end`, a later
+    /// `curve_index`. With `true`, a later
     /// loop starts after the previous loop's end; the default reproduces WR-96.
     ///
     /// # Errors
@@ -321,7 +317,7 @@ impl CurveLoops {
 
     /// `FindAdjacentLoopCurve`: the index of the loop curve before `key` (when `param`
     /// lies in the first half of its natural interval) or after it, cyclically in its
-    /// loop. Honors `k.fixes.curve_loop_start_after_previous_end` (WR-96).
+    /// loop. Honors `true` (WR-96).
     ///
     /// # Errors
     ///

@@ -2069,8 +2069,7 @@ impl Line {
     }
 
     /// [`Line::assert_valid`] of a UV trim on `trim_surface`, its face's surface: the
-    /// `SmBSplineCurve` checks measure the trim on it with
-    /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560, see
+    /// `SmBSplineCurve` checks measure the trim on it (WR-560, see
     /// [`BSplineCurve::assert_valid_on`]).
     ///
     /// # Errors

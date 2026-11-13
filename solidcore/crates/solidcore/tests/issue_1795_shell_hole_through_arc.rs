@@ -251,8 +251,7 @@ fn probe(fixes: &UpstreamFixes, create_offset_solid: bool, open: Open) -> solidc
 #[ignore = "probe: the #1795 failure under offset_extended_edges_mated"]
 fn issue_1795_extended_edges_mated() {
     // (`UpstreamFixes` is `#[non_exhaustive]`: set the field on a default)
-    let mut fixes = UpstreamFixes::default();
-    fixes.offset_extended_edges_mated = true;
+    let fixes = UpstreamFixes::default();
     for open in [Open::Z27, Open::Y20] {
         match probe(&fixes, true, open) {
             Err(e) => eprintln!(
@@ -289,7 +288,6 @@ fn issue_1795_input_checks_clean() {
 #[ignore = "probe: the #1795 operand's edge uses and edges"]
 fn issue_1795_edge_map() {
     let mut k = Kernel::default();
-    k.fixes.offset_extended_edges_mated = true;
     let b = drilled(&mut k);
     let kind = |d: String| d.split(['(', ' ', '{']).next().unwrap_or("").to_string();
     for (eu, rec) in b.edgeuses().iter() {

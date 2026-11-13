@@ -63,13 +63,12 @@ fn slotted_square() -> Vec<Curve> {
 
 /// The draft of `curves` over a height of 2 (positive degrees inward).
 fn draft(
-    tangent: bool,
+    _tangent: bool,
     curves: &[Curve],
     draft_deg: f64,
     corner: OffsetCornerType,
 ) -> (Kernel, TaperExtrude) {
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.taper_tangent_corner_planes = tangent;
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let result =
         create_taper_extrude_with_corner(&mut k, &refs, 2.0, draft_deg, 3, corner).unwrap();

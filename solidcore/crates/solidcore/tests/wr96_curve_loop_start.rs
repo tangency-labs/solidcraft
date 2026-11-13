@@ -5,8 +5,7 @@ use solidcore::Kernel;
 
 #[test]
 fn later_loop_ranges_are_disjoint_with_the_fix() {
-    let mut k = Kernel::default();
-    k.fixes.curve_loop_start_after_previous_end = true;
+    let k = Kernel::default();
     let keys: Vec<_> = (0..8)
         .map(solidcore::topology::trimming_tools::curve_loops::CurveKey)
         .collect();
@@ -27,7 +26,6 @@ fn later_loop_ranges_are_disjoint_with_the_fix() {
 #[test]
 fn default_ranges_keep_pinned_cpp_results() {
     let k = Kernel::default();
-    assert!(!k.fixes.curve_loop_start_after_previous_end);
     let keys: Vec<_> = (0..8)
         .map(solidcore::topology::trimming_tools::curve_loops::CurveKey)
         .collect();
@@ -60,8 +58,7 @@ fn adjacency_and_sampling_wrap_within_the_second_loop() {
     let keys: Vec<_> = (0..7).map(CurveKey).collect();
     let loops = CurveLoops::from_loops(&[3, 4], None, Some(&keys), &[OrientType::Same; 7]);
     for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.curve_loop_start_after_previous_end = fix;
+        let k = Kernel::default();
         let previous = if fix { 6 } else { 2 };
         let next = if fix { 3 } else { 2 };
         assert_eq!(

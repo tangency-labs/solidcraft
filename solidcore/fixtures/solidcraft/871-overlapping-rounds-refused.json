@@ -7,9 +7,7 @@
   {
    "name": "overlapping_rounds_are_refused",
    "note": "r 1 on the 24 end-face edges: the rounds overlap across the 1.26 mm wall.",
-   "fixes": [
-    "fillet_refuse_overlapping_bands"
-   ],
+   "fixes": [],
    "steps": [
     {
      "op": "box",

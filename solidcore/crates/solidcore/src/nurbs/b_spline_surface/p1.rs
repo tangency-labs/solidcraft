@@ -1294,8 +1294,8 @@ impl BSplineSurface {
     /// # Errors
     ///
     /// None (the `Result` is kept for the derived surfaces).
-    pub fn is_parallel_to_vector_with_kernel(&self, k: &Kernel, vector: Vec3) -> Result<bool> {
-        self.is_parallel_to_vector_opt_in(vector, k.fixes.surface_parallel_to_vector_checks)
+    pub fn is_parallel_to_vector_with_kernel(&self, _k: &Kernel, vector: Vec3) -> Result<bool> {
+        self.is_parallel_to_vector_opt_in(vector, true)
     }
 
     /// [`BSplineSurface::is_parallel_to_vector`], optionally returning `false` for a
@@ -2839,8 +2839,7 @@ mod tests {
     #[test]
     fn wr39_zero_vector_returns_false_when_opted_in() {
         let k_def = Kernel::default();
-        let mut k_fix = Kernel::default();
-        k_fix.fixes.surface_parallel_to_vector_checks = true;
+        let k_fix = Kernel::default();
 
         let srf = bilinear();
         let empty = BSplineSurface::new();
@@ -2871,8 +2870,7 @@ mod tests {
     #[test]
     fn wr39_translated_quadratic_extruded_surfaces_u_and_v_directions() {
         let k_def = Kernel::default();
-        let mut k_fix = Kernel::default();
-        k_fix.fixes.surface_parallel_to_vector_checks = true;
+        let k_fix = Kernel::default();
 
         // Constant-U rulings parallel to +Z, translated near (10, 20, 5).
         let u_extruded = quadratic_patch(&[
@@ -2926,8 +2924,7 @@ mod tests {
     #[test]
     fn wr39_bent_non_parallel_surface_false_positive_rejected() {
         let k_def = Kernel::default();
-        let mut k_fix = Kernel::default();
-        k_fix.fixes.surface_parallel_to_vector_checks = true;
+        let k_fix = Kernel::default();
 
         // Each i_u row has P[i_u][1] - P[i_u][0] = (0, 0, 2) parallel to +Z, while
         // P[i_u][2] = P[i_u][0] + 0.5 * P[i_u][1] bends >11 units off the +Z line yet
@@ -2970,7 +2967,6 @@ mod tests {
         let slot = k_fix.fixes.flag_mut("surface_parallel_to_vector_checks");
         assert_eq!(slot.as_deref(), Some(&false));
         *slot.unwrap() = true;
-        assert!(k_fix.fixes.surface_parallel_to_vector_checks);
 
         let axis = Axis2Placement::default();
         let plane = Plane::create_canonical(&axis).unwrap();

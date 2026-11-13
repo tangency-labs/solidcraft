@@ -26,7 +26,7 @@
 //!   including a trailing interval at the source curve's end. The extent bound
 //!   includes arithmetic rounding.
 //! - **Plane first with a torus (opt-in, not upstream).** With
-//!   `fixes.plane_first_torus_section_exact` (WR-721, #2405) `GlobalSurfaceIntersect` takes a
+//!   `true` (WR-721, #2405) `GlobalSurfaceIntersect` takes a
 //!   torus's own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV
 //!   curves swapped as for a surface of revolution); upstream has no torus case and marches it.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments are
@@ -613,11 +613,9 @@ impl Plane {
 
         // The opt-in upstream fix anchors the origin using the final axes, so a nonzero
         // domain minimum does not amplify the small Y-axis adjustment.
-        if k.fixes.plane_recognition_origin_after_axes {
-            new_origin = origin
-                - uv_domain.min().x * x_axis * uv_scale.x
-                - uv_domain.min().y * y_axis * uv_scale.y;
-        }
+        new_origin = origin
+            - uv_domain.min().x * x_axis * uv_scale.x
+            - uv_domain.min().y * y_axis * uv_scale.y;
 
         // construct temporary new plane (m_pNurb == NULL)
         let mut plane = Self::new(new_origin, x_axis, y_axis, uv_scale, &uv_domain);
@@ -1682,7 +1680,7 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
         }
         // Not upstream (WR-721, #2405, opt-in): the torus's own plane section, as for a
         // surface of revolution (upstream has no SmTorus case: the default branch)
-        SurfaceKind::Torus(torus) if k.fixes.plane_first_torus_section_exact => {
+        SurfaceKind::Torus(torus) if true => {
             // the plane's boxes take its face's tolerance
             let need = torus.intersect_with_plane_owned_into(
                 k,
@@ -1815,8 +1813,7 @@ mod tests {
         assert!(Plane::is_nurb_surface_plane(k, &twisted, 1.0)
             .unwrap()
             .is_none());
-        let mut fixed_kernel = Kernel::default();
-        fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
+        let fixed_kernel = Kernel::default();
         assert!(Plane::is_nurb_surface_plane(&fixed_kernel, &twisted, 1.0)
             .unwrap()
             .is_none());
@@ -1829,7 +1826,6 @@ mod tests {
             Extent2d::from_bounds(2.0, 4.0, 3.0, 5.0),
             Extent2d::from_bounds(2.0, -5.0, 3.0, -4.0),
         ];
-        assert!(!Kernel::default().fixes.plane_recognition_origin_after_axes);
 
         for domain in domain_cases {
             let surface = skewed_bilinear(domain, SHEAR);
@@ -1851,8 +1847,7 @@ mod tests {
             assert!((default_plane.uv_scale().x - 2.0).abs() < 1.0e-12);
             assert!((default_plane.uv_scale().y - 40.0).abs() < 1.0e-12);
 
-            let mut fixed_kernel = Kernel::default();
-            fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
+            let fixed_kernel = Kernel::default();
             let fixed_plane = Plane::is_nurb_surface_plane(&fixed_kernel, &surface, 1.0)
                 .unwrap()
                 .unwrap();
@@ -1884,8 +1879,7 @@ mod tests {
         let baseline = Plane::is_nurb_surface_plane(&Kernel::default(), &surface, 1.0)
             .unwrap()
             .unwrap();
-        let mut fixed_kernel = Kernel::default();
-        fixed_kernel.fixes.plane_recognition_origin_after_axes = true;
+        let fixed_kernel = Kernel::default();
         let fixed = Plane::is_nurb_surface_plane(&fixed_kernel, &surface, 1.0)
             .unwrap()
             .unwrap();

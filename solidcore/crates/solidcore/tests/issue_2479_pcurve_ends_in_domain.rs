@@ -29,10 +29,8 @@ use solidcore::sweep::api_brep::{create_linear_sweep, create_rotational_sweep};
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel, Point3, Vec3};
 
-fn kernel(fix: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.face_swap_uv_transposes_trims = fix;
-    k
+fn kernel(_fix: bool) -> Kernel {
+    Kernel::default()
 }
 
 /// The edges whose midpoint satisfies `keep`.

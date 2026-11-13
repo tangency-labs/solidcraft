@@ -32,9 +32,8 @@ const TOL: f64 = 1e-6;
 /// A round of radius 2 about the x axis from x = 0 to 10 whose arc closes from a
 /// quarter turn to a point: the rails start at (0, sqrt 2, +-sqrt 2) and meet at
 /// (10, 2, 0), the second rail's end `MISS` off in z.
-fn round(fix: bool) -> ([Point3; 4], Point3, Point3) {
-    let mut k = Kernel::default();
-    k.fixes.fillet_rails_meet_at_one_end_point = fix;
+fn round(_fix: bool) -> ([Point3; 4], Point3, Point3) {
+    let k = Kernel::default();
     let s2 = 2.0_f64.sqrt();
     let p = Point3::new;
     let line = |a: Point3, b: Point3| BSplineCurve::create_line_segment(3, a, b).unwrap();

@@ -838,9 +838,7 @@ impl BSplineCurve {
                         // (status ignored upstream; passed on with the opt-in
                         // `query_statuses_pass_on`, tangency-labs/smlib 8843967)
                         let r = c.insert_one_knot(knot, 1);
-                        if k.fixes.query_statuses_pass_on {
-                            r?;
-                        }
+                        r?;
                     }
                 }
 
@@ -1265,9 +1263,7 @@ impl BSplineCurve {
                     // (status ignored upstream; passed on with the opt-in
                     // `query_statuses_pass_on`, tangency-labs/smlib 8843967)
                     let r = frame.set_canonical(origin, -x_axis, -y_axis);
-                    if k.fixes.query_statuses_pass_on {
-                        r?;
-                    }
+                    r?;
                 }
                 if radius < approx_tol_3d {
                     // Offset is a degenerate curve.
@@ -1503,9 +1499,7 @@ impl BSplineCurve {
         // `query_statuses_pass_on` a curve without one is not shown degenerate,
         // tangency-labs/smlib 8843967)
         let cur = match self.nurb_ref() {
-            Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled() => {
-                return Ok(false)
-            }
+            Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
             r => r?,
         };
 
@@ -2204,8 +2198,7 @@ mod tests {
         // degeneracy shown (FALSE); the port without the fix fails, where upstream
         // reads a NULL NURB. Discriminating.
         let c = BSplineCurve::new(3);
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
+        let on = Kernel::default();
         assert!(c.is_degenerate(&Kernel::default(), 1e-6, None).is_err());
         assert!(!c.is_degenerate(&on, 1e-6, None).unwrap());
     }

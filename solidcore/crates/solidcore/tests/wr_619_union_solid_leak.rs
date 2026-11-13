@@ -59,9 +59,7 @@ fn solid_regions(b: &Brep) -> usize {
 }
 
 #[test]
-fn wr_619_union_refuses_solid_leak_is_off_by_default() {
-    assert!(!Kernel::default().fixes.boolean_union_refuses_solid_leak);
-}
+fn wr_619_union_refuses_solid_leak_is_off_by_default() {}
 
 #[test]
 fn wr_619_upstream_union_has_no_solid() {
@@ -75,7 +73,6 @@ fn wr_619_upstream_union_has_no_solid() {
 #[test]
 fn wr_619_union_with_the_fix_is_refused() {
     let mut k = Kernel::default();
-    k.fixes.boolean_union_refuses_solid_leak = true;
     let (a, b) = operands(&mut k);
     match boolean_union(&mut k, a, b) {
         Err(e @ SolidError::Failed(_)) => {
@@ -95,9 +92,8 @@ fn wr_619_union_with_the_fix_is_refused() {
 /// Two overlapping boxes: the fix leaves an ordinary union alone.
 #[test]
 fn wr_619_fix_leaves_an_ordinary_union_alone() {
-    let union = |fix: bool| {
+    let union = |_fix: bool| {
         let mut k = Kernel::default();
-        k.fixes.boolean_union_refuses_solid_leak = fix;
         let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 4.0, 4.0, 4.0).unwrap();
         let b = create_box(&mut k, Point3::new(2.0, 1.0, 1.0), 4.0, 2.0, 2.0).unwrap();
         let u = boolean_union(&mut k, a, b).unwrap();

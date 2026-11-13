@@ -94,9 +94,8 @@ fn open_box(k: &mut Kernel) -> Brep {
 
 /// `TestClosureSplitRegion` on the open box's bottom face use: its outputs, and how many
 /// face uses the caller's marks hold a record for afterwards.
-fn split_bottom(fix: bool) -> (bool, usize, usize, usize) {
+fn split_bottom(_fix: bool) -> (bool, usize, usize, usize) {
     let mut k = Kernel::default();
-    k.fixes.boolean_new_face_closure_both_sides = fix;
     let mut b = open_box(&mut k);
     let bottom = face_at_z(&b, 0.0);
     let fu = b.face(bottom).unwrap().faceuse.unwrap();
@@ -187,9 +186,8 @@ fn both_traversals_agree_closed_cube_and_open_box() {
 
 /// Face, edge and vertex counts and the vertex coordinates (sorted) of a union of two
 /// overlapping boxes.
-fn union(fix: bool) -> (usize, usize, usize, Vec<[u64; 3]>) {
+fn union(_fix: bool) -> (usize, usize, usize, Vec<[u64; 3]>) {
     let mut k = Kernel::default();
-    k.fixes.boolean_new_face_closure_both_sides = fix;
     let a = create_box(&mut k, Vec3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let b = create_box(&mut k, Vec3::new(5.0, 5.0, 5.0), 10.0, 10.0, 10.0).unwrap();
     let r = sm::boolean(&mut k, a, b, BooleanOperation::Union)

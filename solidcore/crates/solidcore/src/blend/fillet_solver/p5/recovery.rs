@@ -471,7 +471,7 @@ impl Recovery<'_> {
         let start = self.start(rail)?;
         required(edge::other_vertex(self.fillets.brep(), rail, Some(start))?)
     }
-    /// Not upstream (#2406; with `fixes.fillet_round_as_definition`):
+    /// Not upstream (#2406; with `true`):
     /// whether geometry `geom`, a piece of the rollover that ends where a rail rolls over
     /// a tangent edge (`hits`) and is not the last, keeps its round. Its ball rolls on the
     /// same two faces as before (its offsets unchanged, `geom_type` the default), and its
@@ -494,12 +494,8 @@ impl Recovery<'_> {
         hits: &[SideHit; 2],
         saved: &FilletSolverOffsetsData,
     ) -> Result<bool> {
-        let fixes = &self.k.fixes;
-        if !fixes.fillet_round_as_definition
-            || last
-            || geom_type != FilletGeomType::Default
-            || !hits.iter().any(|h| h.tangent)
-        {
+        let _fixes = &self.k.fixes;
+        if last || geom_type != FilletGeomType::Default || !hits.iter().any(|h| h.tangent) {
             return Ok(false);
         }
         for which in 0..2 {
@@ -937,10 +933,7 @@ impl Recovery<'_> {
                         // Bare Copy: upstream ignores its status but uses its output.
                         let (copy, status) = ops.copy_offset(self.k, &orig.surface);
                         // fork 66b02de passes this on (SER)
-                        ignored(crate::error::passed_on(
-                            status,
-                            self.k.fixes.fillet_statuses_pass_on,
-                        )?)?;
+                        ignored(crate::error::passed_on(status, true)?)?;
                         if let Some(copy) = copy {
                             self.fillets
                                 .geom_mut(required(new_geom)?)?

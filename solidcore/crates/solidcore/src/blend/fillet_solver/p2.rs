@@ -62,18 +62,18 @@
 //! - **Iteration.** `sm_FindRolloverSideEdge`'s `while (TRUE)` advances its interval
 //!   index on every pass that does not return, so it runs at most `pCC.len()` times;
 //!   there is no recursion.
-//! - **Side edge run on (WR-610, #960).** With `fixes.fillet_trace_reaches_rails`,
+//! - **Side edge run on (WR-610, #960).** With `true`,
 //!   `RailEdgeuseIntersect` widens a straight side edge's parameter interval on a planar
 //!   base surface past both ends (`run_side_edge_on_along_its_line`, the fork's
-//!   tangency-labs/smlib@6e77631). With `fixes.fillet_run_on_past_far_end_only` too, past
+//!   tangency-labs/smlib@6e77631). With `true` too, past
 //!   the end away from the filleted edge's vertex only (WR-643, the fork's
-//!   tangency-labs/smlib@7224896). With `fixes.fillet_run_on_bspline_trims` too, a widened
+//!   tangency-labs/smlib@7224896). With `true` too, a widened
 //!   side edge's B-spline UV trim (its local copy) evaluates out of bounds, so it runs on
 //!   along its line as a line trim does instead of clamping to its ends
 //!   (`continue_bspline_trim_past_its_ends`, WR-654, #1981). With far-end-only (and WR-600,
 //!   the fork's tangency-labs/smlib@856b54e), a side edge whose faces meet tangentially at the
 //!   filleted edge's vertex (a tangent seam) still runs on past both ends.
-//! - **Exact round classes (WR-669, #2085).** For `fixes.fillet_exact_round_classes`, the
+//! - **Exact round classes (WR-669, #2085).** For `true`, the
 //!   SolidCraft fork's (tangency-labs/smlib@7ac037e) class builders: the line spine's is the
 //!   cylinder body without its generator and `IsLine` gates; the circle spine's the torus
 //!   body without its generator and `IsArc` gates, its frame from the class axis (no `IsArc`
@@ -518,15 +518,7 @@ fn run_side_edge_on_along_its_line(
         let past = reach * edge_ivl.length() / length;
         let (in_lo, in_hi) = line_in_domain(k, uv_trim, &edge_ivl, domain)?;
         let (past_lo, past_hi) = (past.max(in_lo), past.max(in_hi));
-        if !k.fixes.fillet_run_on_past_far_end_only {
-            set_interval(
-                intervals,
-                0,
-                Extent1d::from_min_max(edge_ivl.min() - past_lo, edge_ivl.max() + past_hi),
-            );
-            return Ok(true);
-        }
-        // Opt-in (`fixes.fillet_run_on_past_far_end_only`, WR-643; the fork's
+        // Opt-in (`true`, WR-643; the fork's
         // tangency-labs/smlib@7224896): only past the end away from the corner. The side
         // edge leaves the corner's vertex into the sector the blend fills, and a point of
         // its line behind that vertex lies on the far side of the filleted edge, where no
@@ -633,7 +625,7 @@ fn line_in_domain(
     Ok((reach([a.x, a.y], -1.0), reach([c.x, c.y], 1.0)))
 }
 
-/// Opt-in (`fixes.fillet_run_on_bspline_trims`, WR-654, #1981), not upstream: turns
+/// Opt-in (`true`, WR-654, #1981), not upstream: turns
 /// on out-of-bounds evaluation of a side edge's B-spline UV trim that
 /// [`run_side_edge_on_along_its_line`] widened, so the solve finds a point of its line
 /// past its ends, as on a line trim (whose evaluation is never clamped). An
@@ -939,10 +931,7 @@ impl FilletSolver {
         // CreateConePatch() makes a STEP-parameterized cone,
         // we go the other way: u along the edge, v around the fillet surface.
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            cone_patch.swap_uv(),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        ignore_status(crate::error::passed_on(cone_patch.swap_uv(), true)?)?;
 
         // Copy pConePatch, when possible as an analytic surface. Not the fork (#2405): the
         // class's cylinder is the analytic cone CopyAndAddAnalytics recognises in the patch,
@@ -1105,10 +1094,7 @@ impl FilletSolver {
         cone.adjust_step_uv_domain(k, &step_domain)?;
         let mut cone = Surface::from(cone);
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            cone.swap_uv(k),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        ignore_status(crate::error::passed_on(cone.swap_uv(k), true)?)?;
 
         let uv_domain = cone.natural_uv_domain_with_nurb(k)?;
         let ivl = Extent1d::from_min_max(uv_domain.min.x, uv_domain.max.x);
@@ -1254,12 +1240,11 @@ impl FilletSolver {
         let curve = checked_edge_curve(k, s, b, e)?;
 
         // no work - not a circular cross-section on a circular arc (with
-        // `fixes.fillet_chamfer_cone_on_arc`, or a linear one: its revolution is a cone)
+        // `true`, or a linear one: its revolution is a cone)
         // Side effect: get circular arc RefFrame, Radius, StartAng, and EndAng (only the
         // frame is used: the span is the turn from the start section, WR-568).
         let section = fsg_type(s)?;
-        let linear_section =
-            k.fixes.fillet_chamfer_cone_on_arc && section == FilletSurfaceGeneratorType::Linear;
+        let linear_section = section == FilletSurfaceGeneratorType::Linear;
         let ref_frame = if let Some(class) = class {
             // WR-669: the circular or linear cross-section turned about the faces' common
             // axis (the class's); the frame's origin: the centre of the edge's circle, where
@@ -1426,7 +1411,7 @@ impl FilletSolver {
         // fork 66b02de passes this on (SER)
         let mut span_ang = match crate::error::passed_on(
             axis_of_revolution.ccw_angle_between(vec, end_vec),
-            k.fixes.fillet_statuses_pass_on,
+            true,
         )? {
             Ok(a) => a,
             Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
@@ -1543,10 +1528,7 @@ impl FilletSolver {
             cs.rotate_about_axis(PI, ref_frame.z_axis());
             cs.translate(ref_frame.origin());
             // fork 66b02de passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                arc.transform(&cs, None),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            ignore_status(crate::error::passed_on(arc.transform(&cs, None), true)?)?;
         }
 
         // create surface of revolution
@@ -1573,12 +1555,12 @@ impl FilletSolver {
             trans.translate(origin);
             torus.transform(k, &trans, None)?;
         }
-        // `fixes.fillet_chamfer_cone_stored_as_cone` (WR-572, the fork's b5743ec): a linear
+        // `true` (WR-572, the fork's b5743ec): a linear
         // section revolved is a cone, and is stored as one (SmCone), as a straight edge's
         // round is stored as its cylinder: the revolution's NURBS form (its
         // `SmBSplineSurface::Copy`) through `CopyAndAddAnalytics`, kept when that gives a
         // cone; anything else stays the revolution
-        let torus = if linear_section && k.fixes.fillet_chamfer_cone_stored_as_cone {
+        let torus = if linear_section {
             let cone = torus.base().copy().copy_and_add_analytics(k)?;
             if matches!(cone.kind(), crate::surface::surface::SurfaceKind::Cone(_)) {
                 cone
@@ -1687,7 +1669,7 @@ impl FilletSolver {
             return Err(sm_err());
         }
 
-        let (center, axes) = if k.fixes.fillet_corner_ball_center_from_axes {
+        let (center, axes) = if true {
             // Not upstream (WR-541, the fork's tangency-labs/smlib@bc6ddf9): the ball's
             // centre is where the axes meet. Not the trace's points: at the edge's end where
             // the contact circles meet both offset cylinders collapse onto their axes, so a
@@ -1717,7 +1699,7 @@ impl FilletSolver {
             (center, axes)
         };
         let mut turn_axis = axes[0].cross(axes[1]);
-        if !k.fixes.fillet_corner_ball_center_from_axes && turn_axis.length() < EFF_ZERO_SQRT {
+        if false && turn_axis.length() < EFF_ZERO_SQRT {
             return Err(sm_err()); // parallel cylinders: the centres fill a line, not this case
         }
         turn_axis = turn_axis.unitize()?;
@@ -2017,7 +1999,7 @@ impl FilletSolver {
         // allocate NewtonRaphson evaluator - contains equation definitions being solved
         let mut eval = SphereEval(FilletSphereSolveEnfo::new(plane_normal, plane_d, ops), k);
         let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+        ls.set_skips_failed_evaluations(true);
 
         // set solve parameters
         ls.set_desired_accuracy(EFF_ZERO_SQ);
@@ -2115,33 +2097,31 @@ impl FilletSolver {
         // virtual SetupOffsetExtension: dispatched on the solver's kind
         ops.setup_offset_extension(k, &base, &mut domain)?;
 
-        // Opt-in, not upstream (`fixes.fillet_trace_reaches_rails`, WR-610; the fork's
+        // Opt-in, not upstream (`true`, WR-610; the fork's
         // tangency-labs/smlib@6e77631): a straight side edge on a plane continues
         // exactly along its line, as far as the base surface's domain is extended
         // across the edge (its extension factor, or the trace's reach). A rail that
         // leaves its face across a cliff meets the side edge's line past the edge's
         // end; bounded to the edge's own interval, the solve found that point only
         // from a first guess already on it.
-        if k.fixes.fillet_trace_reaches_rails {
-            if let Some(side_edge) = side_edge {
-                let widened = run_side_edge_on_along_its_line(
-                    k,
-                    b,
-                    side_eu,
-                    side_edge,
-                    &uv_trim,
-                    &base,
-                    &domain,
-                    ops.solver(),
-                    &mut intervals,
-                )?;
-                // Opt-in (`fixes.fillet_run_on_bspline_trims`, WR-654, #1981): a B-spline
-                // trim clamps to its ends, so the widened interval reached no point of
-                // its line past them; a line trim on the other wall did, and the two
-                // rails' ends at the side vertex fell apart.
-                if widened && k.fixes.fillet_run_on_bspline_trims {
-                    continue_bspline_trim_past_its_ends(&mut uv_trim);
-                }
+        if let Some(side_edge) = side_edge {
+            let widened = run_side_edge_on_along_its_line(
+                k,
+                b,
+                side_eu,
+                side_edge,
+                &uv_trim,
+                &base,
+                &domain,
+                ops.solver(),
+                &mut intervals,
+            )?;
+            // Opt-in (`true`, WR-654, #1981): a B-spline
+            // trim clamps to its ends, so the widened interval reached no point of
+            // its line past them; a line trim on the other wall did, and the two
+            // rails' ends at the side vertex fell apart.
+            if widened {
+                continue_bspline_trim_past_its_ends(&mut uv_trim);
             }
         }
         set_interval(
@@ -2195,7 +2175,7 @@ impl FilletSolver {
             k,
         );
         let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+        ls.set_skips_failed_evaluations(true);
         ls.set_desired_accuracy(EFF_ZERO_SQ);
         ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
         ls.set_maximum_iterations(30);
@@ -2406,7 +2386,7 @@ impl FilletSolver {
                 k,
             );
             let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-            ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
+            ls.set_skips_failed_evaluations(true);
             ls.set_desired_accuracy(EFF_ZERO_SQ);
             ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
             ls.set_maximum_iterations(30);
@@ -2621,7 +2601,7 @@ impl FilletSolver {
                 // fork 66b02de passes this on (SER)
                 ignore_status(crate::error::passed_on(
                     cs_curve.trim(&tk, &mut trim_ivl, TrimMode::Notify),
-                    k.fixes.fillet_statuses_pass_on,
+                    true,
                 )?)?;
                 if let Some(c) = pseudo.brep_mut().edge_mut(cross_section)?.curve.as_mut() {
                     *c = cs_curve.clone();
@@ -2637,7 +2617,7 @@ impl FilletSolver {
                         // fork 66b02de passes this on (SER)
                         ignore_status(crate::error::passed_on(
                             uv.trim(&tk, &mut trim_ivl, TrimMode::Notify),
-                            k.fixes.fillet_statuses_pass_on,
+                            true,
                         )?)?;
                     }
                 }
@@ -2938,8 +2918,6 @@ fn edge_zone_kernel(k: &Kernel, tol: f64) -> Kernel {
     });
     tk.rng = k.rng.clone();
     tk.cancel.clone_from(&k.cancel);
-    tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
-    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     tk
 }
 
@@ -3386,14 +3364,12 @@ mod tests {
     /// Returns the loaded interval, the side edge use's natural interval, and the end of
     /// it (0 start, 1 end) at the corner, if any.
     fn run_on_interval(
-        far_end_only: bool,
+        _far_end_only: bool,
         at_corner: bool,
     ) -> ((f64, f64), (f64, f64), Option<usize>) {
         use crate::primitive::api_primitives::create_box;
         use crate::topology::vertex;
         let mut k = Kernel::default();
-        k.fixes.fillet_trace_reaches_rails = true;
-        k.fixes.fillet_run_on_past_far_end_only = far_end_only;
         let mut ops = jacobian_size_ops(&k, 2);
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
         let ends = |b: &Brep, e: EdgeId| {

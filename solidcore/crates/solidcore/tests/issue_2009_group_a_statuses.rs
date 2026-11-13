@@ -11,10 +11,8 @@ use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::Brep;
 use solidcore::{Kernel, SolidError};
 
-fn kernel(pass_on: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.brep_edit_statuses_pass_on = pass_on;
-    k
+fn kernel(_pass_on: bool) -> Kernel {
+    Kernel::default()
 }
 
 fn unit_box(k: &mut Kernel) -> Brep {

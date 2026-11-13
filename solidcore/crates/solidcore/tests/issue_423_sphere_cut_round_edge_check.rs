@@ -49,9 +49,8 @@ fn failures(k: &mut Kernel, b: &mut Brep) -> Vec<(i64, u64)> {
 
 /// The r2 sphere about the origin less everything above z = 1, rounded R1 along its
 /// rim, with `fillet_cleanup_keeps_target_faces` as `keep` says.
-fn rounded_cap(keep: bool) -> (Kernel, Brep) {
+fn rounded_cap(_keep: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_cleanup_keeps_target_faces = keep;
     let sphere = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
     let cut = create_box(&mut k, Point3::new(-3.0, -3.0, 1.0), 6.0, 6.0, 3.0).unwrap();
     let mut b = boolean_difference(&mut k, sphere, cut).unwrap();

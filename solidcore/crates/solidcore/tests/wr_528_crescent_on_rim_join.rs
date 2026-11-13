@@ -71,7 +71,6 @@ fn crescent_on_rim_join_is_exact_with_the_fix() {
     // across the cylinder's seam, and clear of it
     for angle in [0.0, 90.0] {
         let mut k = Kernel::default();
-        k.fixes.close_loop_relates_only_coincident_edges = true;
         let cylinder = create_cylinder(&mut k, Vec3::new(0.0, 0.0, 0.0), R, HEIGHT).unwrap();
         let prism = crescent_prism(&mut k, angle);
         let mut joined = boolean_union(&mut k, cylinder, prism).unwrap();

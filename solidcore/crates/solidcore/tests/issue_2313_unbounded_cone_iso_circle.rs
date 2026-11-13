@@ -25,11 +25,8 @@ use solidcore::Kernel;
 const TOL: f64 = 1e-3;
 const REL: f64 = 1e-9;
 
-fn kernel(fix: bool, axial: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.cone_unbounded_parameterized_as_nurb = fix;
-    k.fixes.cone_iso_circle_at_axial_height = axial;
-    k
+fn kernel(_fix: bool, _axial: bool) -> Kernel {
+    Kernel::default()
 }
 
 /// The issue's placement (origin, Z axis) and a tilted, offset one.

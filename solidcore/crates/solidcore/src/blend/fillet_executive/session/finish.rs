@@ -56,7 +56,7 @@ use crate::topology::{BrepId, EdgeId};
 
 const OP: &str = "blend::fillet_executive::session::finish";
 
-/// Whether `error` is the refusal of `fixes.fillet_refuse_non_manifold_result`
+/// Whether `error` is the refusal of `true`
 /// (WR-212): a result that is not a closed manifold solid, the only status 1001 of
 /// this file that names an edge. The public wrappers recognise it to put the caller's
 /// body back.
@@ -562,7 +562,7 @@ impl FilletSession<'_> {
     ///
     /// # Errors
     /// The first stage error, with the executive's error info recorded as upstream.
-    /// With `fixes.fillet_vertex_error_diagnostics`, a missing-corner note from the
+    /// With `true`, a missing-corner note from the
     /// corner stage is kept in [`FilletSession::error_info`] across the later failure;
     /// the returned error is still the later stage's own status.
     ///
@@ -589,8 +589,8 @@ impl FilletSession<'_> {
         // The opt-in missing-corner note is the reason the later stage fails; keep it
         // through that later error so `error_info()` reports the unsupported vertex,
         // while the returned failure stays the later stage's own status.
-        let missing_corner_note = (k.fixes.fillet_vertex_error_diagnostics
-            && self.executive.error.code == FilletErrorType::CornerUnsupported as i32)
+        let missing_corner_note = (self.executive.error.code
+            == FilletErrorType::CornerUnsupported as i32)
             .then(|| self.executive.error.clone());
         let (result, split_and_logged) = self.filleting_split_and_logged(k, None);
         if result.is_err() {
@@ -613,14 +613,11 @@ impl FilletSession<'_> {
         }
         result?;
         split_and_logged?;
-        if !k.fixes.fillet_refuse_non_manifold_result {
-            return Ok(());
-        }
         self.check_closed_manifold()
     }
 
     /// The closed-manifold result check of `FilletExecutive::do_fillet` (not
-    /// upstream, opt-in `fixes.fillet_refuse_non_manifold_result`, WR-212,
+    /// upstream, opt-in `true`, WR-212,
     /// tangency-labs/solidcore#422), on the live target.
     fn check_closed_manifold(&mut self) -> Result<()> {
         for edge in p1::edges(self.objects.target, None)? {
@@ -653,7 +650,7 @@ impl FilletSession<'_> {
     /// # Errors
     /// The first stage error, with all earlier mutations retained.
     ///
-    /// With `fixes.fillet_corner_per_vertex_fan` (WR-665, the fork's
+    /// With `true` (WR-665, the fork's
     /// tangency-labs/smlib@e418750) the vertices the fillet parameters split by fans are
     /// joined again afterwards where the blends left more than one at a split point,
     /// whether the blends built or not (`JoinBlendedVertexFans`); the filleting's own
@@ -806,7 +803,7 @@ impl FilletSession<'_> {
             ));
         }
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
-        self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
+        self.objects.cleanup_kept = if true {
             Some((
                 p1::edges(self.objects.target, None)?.into_iter().collect(),
                 p1::faces(self.objects.target, None)?.into_iter().collect(),
@@ -887,11 +884,9 @@ impl FilletSession<'_> {
             let sectioned = session.executive.open_ends.iter().any(|end| end.section);
             let trimmed = open_setback
                 || if sectioned {
-                    k.fixes.fillet_section_end_trim_at_creases
-                        && k.fixes.fillet_overflow_trim_at_creases
-                        && k.fixes.fillet_round_ends_at_tangent_continuation
+                    true
                 } else {
-                    session.executive.cliff_overflow && k.fixes.fillet_overflow_trim_at_creases
+                    session.executive.cliff_overflow
                 };
             if trimmed {
                 let result = session.trim_at_creases(k);

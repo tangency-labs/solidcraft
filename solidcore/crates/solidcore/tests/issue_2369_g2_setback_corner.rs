@@ -158,9 +158,8 @@ fn round(file: &str, picks: &[[f64; 3]]) -> (Kernel, Brep, Made) {
 }
 
 /// [`round`], with `definition` (`fillet_round_as_definition`, #2488) set.
-fn round_kept(definition: bool, file: &str, picks: &[[f64; 3]]) -> (Kernel, Brep, Made) {
+fn round_kept(_definition: bool, file: &str, picks: &[[f64; 3]]) -> (Kernel, Brep, Made) {
     let mut k = kernel();
-    k.fixes.fillet_round_as_definition = definition;
     let mut b = read(&mut k, file);
     let es: Vec<EdgeId> = picks.iter().map(|p| pick(&k, &b, *p)).collect();
     let vtx = corner_vertex(&b, &es);

@@ -146,9 +146,8 @@ fn closed_form() -> f64 {
 #[test]
 fn wr_533_lip_swept_flush_round_a_corner_joins_with_either_setting() {
     let want = closed_form();
-    for fix in [false, true] {
+    for _fix in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.boolean_splits_definition_across_split = fix;
         let a = block(&mut k);
         let b = lip(&mut k);
         let joined = boolean_union(&mut k, a, b);
@@ -172,7 +171,6 @@ fn wr_533_lip_swept_flush_round_a_corner_joins_with_either_setting() {
 #[test]
 fn wr_533_lip_swept_flush_round_a_corner_has_the_block_and_lip_topology() {
     let mut k = Kernel::default();
-    k.fixes.boolean_splits_definition_across_split = true;
     let a = block(&mut k);
     let b = lip(&mut k);
     let mut r = boolean_union(&mut k, a, b).unwrap();

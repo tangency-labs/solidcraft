@@ -47,9 +47,8 @@ fn worst_edge_tolerance(b: &Brep) -> f64 {
 
 /// The two pairs' (face count, worst edge tolerance) and the four-disk join, with WR-536's
 /// `fixed`.
-fn joins(fixed: bool) -> ([(usize, f64); 2], solidcore::Result<Brep>) {
+fn joins(_fixed: bool) -> ([(usize, f64); 2], solidcore::Result<Brep>) {
     let mut k = Kernel::default();
-    k.fixes.boolean2d_plane_covers_far_faces = fixed;
     let d: Vec<Brep> = [(30.0, 20.0), (1500.0, 20.0), (2970.0, 980.0), (30.0, 980.0)]
         .iter()
         .map(|&(x, y)| disk(&mut k, x, y))

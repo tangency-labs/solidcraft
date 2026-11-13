@@ -2434,7 +2434,7 @@ impl BSplineCurve {
     /// The same errors as [`Self::trim`].
     pub(crate) fn trim_with_zone_tol(
         &mut self,
-        k: &Kernel,
+        _k: &Kernel,
         trim_interval: &mut Extent1d,
         mode: TrimMode,
         zone_tol_3d: f64,
@@ -2518,13 +2518,12 @@ impl BSplineCurve {
             }
         }
 
-        // `fixes.bspline_trim_keeps_rational_end_spans` (WR-575): a rational curve keeps
+        // `true` (WR-575): a rational curve keeps
         // its short end spans, as removing one moves the conic off its shape. A model
         // curve's end within a pole of an interior knot (#2090) is that knot whichever
         // side of it is kept, so pieces split there, and the edge's UV trims split at
         // its end, all end at the same parameter (#2424)
-        let keeps_rational = k.fixes.bspline_trim_keeps_rational_end_spans
-            && self.nurb.as_ref().is_some_and(Curve::is_rational);
+        let keeps_rational = self.nurb.as_ref().is_some_and(Curve::is_rational);
         if keeps_rational && self.dim == 3 {
             let this_cur = nurb_of(self, OP)?;
             let at_min = knot_within_pole(this_cur, &knots, d_min, zone_tol_1d_min, degree)?;
@@ -2585,11 +2584,10 @@ impl BSplineCurve {
             // model curve's ends are at the knot then (above), and a UV curve, whose
             // ends are its edge's, is cleaned as upstream
             let keeps_rational = keeps_rational && cur1.is_rational() && !pole_end;
-            // `fixes.bspline_trim_preserves_uv_spans` (WR-441): a UV curve keeps its
+            // `true` (WR-441): a UV curve keeps its
             // short end spans, unless one collapses to a pole that check test #15 would
             // report (`SM_ZONE_TOL_3D / 10`); that curve is cleaned as upstream (#2129)
-            let cleans_spans =
-                !k.fixes.bspline_trim_preserves_uv_spans || self.dim == 3 || pole_end;
+            let cleans_spans = self.dim == 3 || pole_end;
             if cleans_spans
                 && !keeps_rational
                 && ((head < zone_tol_1d_min && knots.len() > 2)
@@ -3013,10 +3011,8 @@ mod tests {
         // #1529: a trim 1e-7 from the middle knot of a radius 16 half circle leaves an end
         // span of about 3.5e-6, shorter than the 3D zone tolerance
         let r = 16.0;
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
+        let fixed = Kernel::default();
         let default = Kernel::default();
-        assert!(!default.fixes.bspline_trim_keeps_rational_end_spans);
         for (min, max) in [(0.5 - 1e-7, 0.9), (0.1, 0.5 + 1e-7)] {
             let ivl = Extent1d::from_min_max(min, max);
             let mut kept = half_circle(r);
@@ -3055,8 +3051,7 @@ mod tests {
         // three control points about 2e-7 apart, within the 1e-6 pole tolerance of
         // check test #15; the trim then ends at the interior knot, on the circle
         let r = 16.0;
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
+        let fixed = Kernel::default();
         let full = half_circle(r);
         // (d, whether the short span is kept)
         for (d, kept) in [
@@ -3119,8 +3114,7 @@ mod tests {
         // split at the edge's end, meet at one parameter; a longer span is kept on both
         // sides and the split stays where it was asked
         let r = 16.0;
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
+        let fixed = Kernel::default();
         // (d, where the pieces meet)
         for (d, meet) in [
             (1e-8, 0.5),
@@ -3160,8 +3154,7 @@ mod tests {
 
     #[test]
     fn wr_575_non_rational_short_end_span_is_still_removed() {
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
+        let fixed = Kernel::default();
         let default = Kernel::default();
         // a polynomial (weights 1) curve with an interior knot at 0.5
         let points = [
@@ -3188,8 +3181,7 @@ mod tests {
 
     #[test]
     fn uv_trim_keeps_short_head_and_tail_spans() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_trim_preserves_uv_spans = true;
+        let k = Kernel::default();
         for mode in [TrimMode::Notify, TrimMode::Silent] {
             for (min, max) in [(0.5 - 3.5e-6, 0.9), (0.1, 0.5 + 3.5e-6)] {
                 let original = short_span_arc(2);
@@ -3209,9 +3201,7 @@ mod tests {
     #[test]
     fn uv_trim_fix_preserves_default_and_model_space_cleanup() {
         let default = Kernel::default();
-        assert!(!default.fixes.bspline_trim_preserves_uv_spans);
-        let mut fixed = Kernel::default();
-        fixed.fixes.bspline_trim_preserves_uv_spans = true;
+        let fixed = Kernel::default();
         for dim in [2, 3] {
             for (min, max) in [(0.5 - 3.5e-6, 0.9), (0.1, 0.5 + 3.5e-6)] {
                 let original = short_span_arc(dim);
@@ -3237,8 +3227,7 @@ mod tests {
 
     #[test]
     fn uv_trim_fix_preserves_interval_only_and_curve_dispatch() {
-        let mut k = Kernel::default();
-        k.fixes.bspline_trim_preserves_uv_spans = true;
+        let k = Kernel::default();
         let original = short_span_arc(2);
         let mut untouched = original.clone();
         let mut ivl = Extent1d::from_min_max(0.5 - 3.5e-6, 0.9);

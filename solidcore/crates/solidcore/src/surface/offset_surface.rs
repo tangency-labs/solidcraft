@@ -92,7 +92,7 @@
 //!   derivative slot write) is still unfixed. `SplitAt` with an extended
 //!   surface splits the base surface a second time for the extended halves; `SwapUV`
 //!   with an extended surface negates the offset distance twice (kept unless
-//!   `fixes.offset_swap_uv_extended_distance`, WR-164); `STEPInversion`
+//!   `true`, WR-164); `STEPInversion`
 //!   retries on the extended surface with the tolerance not widened by the offset.
 //! - **Recursion.** The pole step-off of `EvaluatePlainOrSimple` evaluates itself at
 //!   the step-off points; its depth is bounded by [`MAX_STEPOFF_DEPTH`] (upstream
@@ -1044,9 +1044,7 @@ impl OffsetSurface {
         if let Some(p) = pseudo_box.as_mut() {
             let [b0, b1, b2] = *base_pseudo.basis();
             let set = p.set_basis(b0, b1, b2);
-            if k.fixes.brep_edit_statuses_pass_on {
-                set?;
-            }
+            set?;
         }
 
         match base_polar.state() {
@@ -1321,9 +1319,9 @@ impl OffsetSurface {
         if !domain.contains_point(uv, 0.0) {
             if self.allow_extension {
                 // extend original base surface so that it contains given sUV
-                // (`fixes.offset_extension_from_base`: always the base, however the
+                // (`true`: always the base, however the
                 // extension was made before; the extension only sets a lower bound.)
-                let from_base = k.fixes.offset_extension_from_base;
+                let from_base = true;
                 let original = if use_ext && !from_base {
                     ext.current()
                 } else {
@@ -1921,7 +1919,7 @@ impl OffsetSurface {
             self.surface.swap_uv_notifying(k, notify)?;
             // WR-164: the extension's swap already negated the distance (the normal
             // flipped); negating again for the base leaves it on the wrong side.
-            if !(swapped_extension && k.fixes.offset_swap_uv_extended_distance) {
+            if !(swapped_extension) {
                 self.offset_distance.set(-self.offset_distance.get());
             }
         } else {
@@ -2420,14 +2418,12 @@ pub(crate) fn extends_as_itself(k: &Kernel, surface: &Surface) -> bool {
     }
 }
 
-/// Whether the offset of `surface` continues as itself: `fixes.offset_extension_from_base` and
-/// `fixes.offset_extension_as_itself` on, and [`extends_as_itself`]. The one place that decides
+/// Whether the offset of `surface` continues as itself: `true` and
+/// `true` on, and [`extends_as_itself`]. The one place that decides
 /// it: the extension ([`extend_from_base`]), the face a round rolls on and the drop that seeds a
 /// rail end all ask this.
 pub(crate) fn offset_continues_as_itself(k: &Kernel, surface: &Surface) -> bool {
-    k.fixes.offset_extension_from_base
-        && k.fixes.offset_extension_as_itself
-        && extends_as_itself(k, surface)
+    extends_as_itself(k, surface)
 }
 
 /// One parameter direction of [`closed_turn`]: its interval, and whether it wraps there.
@@ -2723,7 +2719,7 @@ fn net_at(g: &[Vec<WeightedPoint>], r: usize, i: usize) -> Result<WeightedPoint>
     })
 }
 
-/// The fork's `sm_ExtendAsItself` (`fixes.offset_extension_as_itself`, WR-633 and WR-650;
+/// The fork's `sm_ExtendAsItself` (`true`, WR-633 and WR-650;
 /// tangency-labs/smlib@de0a6b8 as rebuilt by @93db777 and @b298cc2): the NURB of a
 /// cylinder, cone, sphere or torus extended as itself so that its domain reaches `lo` and
 /// `hi`, built directly from the surface it is tagged as. Its spans are kept, and new
@@ -3057,13 +3053,13 @@ fn extend_as_itself(
     Ok(Surface::from(extended))
 }
 
-/// The extension of `fixes.offset_extension_from_base` (WR-458, #419; the fork's
+/// The extension of `true` (WR-458, #419; the fork's
 /// tangency-labs/smlib@2d7c7ed): `base` is extended on every side that can grow at once,
 /// each by the base domain's size times the least power of two that reaches `uv`, and
 /// never less than the `current` extension's domain, so one point always gives one
 /// extension whatever was evaluated first. `Ok(None)` when `have` already contains `uv`.
 ///
-/// With `fixes.offset_extension_as_itself` (WR-650; the fork's tangency-labs/smlib@b298cc2)
+/// With `true` (WR-650; the fork's tangency-labs/smlib@b298cc2)
 /// a cylinder's, cone's, sphere's or torus's extension reaches round its axis no further
 /// than closing the turn ([`RotTurn`]); once the extension reaches it, that direction is
 /// periodic and `uv` is wrapped to the closed turn, as a periodic surface's.
@@ -3078,7 +3074,7 @@ fn extend_from_base(
     let domain = base.natural_uv_domain_with_nurb(k)?;
     let size = domain.size();
 
-    // Opt-in (`fixes.offset_extension_as_itself`, WR-633; the fork's
+    // Opt-in (`true`, WR-633; the fork's
     // tangency-labs/smlib@de0a6b8): a cylinder, cone, sphere or torus continues as itself
     // (`sm_ExtendAsItself`): its NURB spans are rational arcs and straight lines, whose
     // polynomials carried on stay on the surface. A tangent extension (G1R) leaves it at once.
@@ -3190,7 +3186,7 @@ fn extend_from_base(
 /// periodic directions and clamping it at singular sides; if it is still outside,
 /// returns the B-spline surface extended (G1, ruled) to contain a point one domain
 /// size farther out (or `uv` itself when that fails), `None` otherwise. `uv` is updated
-/// in place. With `fixed` (`fixes.offset_extension_from_base`; `current` is the current
+/// in place. With `fixed` (`true`; `current` is the current
 /// extension's domain) the extension is made by [`extend_from_base`] instead.
 ///
 /// # Errors
@@ -3255,7 +3251,7 @@ fn extend_surface(
         ));
     }
 
-    // `fixes.offset_extension_from_base`: `fixed` holds the current extension's domain
+    // `true`: `fixed` holds the current extension's domain
     if fixed {
         let periodic = [is_periodic_on_u, is_periodic_on_v];
         return extend_from_base(k, surface, uv, current, periodic, singularities);
@@ -3805,11 +3801,10 @@ mod tests {
     /// ends of its arc, one straight at the farther points, the other after two nearer
     /// ones first (tangency-labs/solidcore#419, WR-458): upstream's extension reaches
     /// one domain size past the first point, so the copies disagree; with
-    /// `fixes.offset_extension_from_base` the same points give the same extension.
-    fn offset_extension_gap(from_base: bool) -> f64 {
+    /// `true` the same points give the same extension.
+    fn offset_extension_gap(_from_base: bool) -> f64 {
         use crate::surface::cone::Cone;
-        let mut k = Kernel::default();
-        k.fixes.offset_extension_from_base = from_base;
+        let k = Kernel::default();
         let mut half = Cone::new_cylinder_bounded(
             Vec3::ZERO,
             Vec3::X,
@@ -4324,8 +4319,7 @@ mod tests {
 
             // WR-164 fix: one negation, the swapped offset is the pre-swap one with
             // its parameters exchanged, and a second swap restores both.
-            let mut k = Kernel::default();
-            k.fixes.offset_swap_uv_extended_distance = true;
+            let k = Kernel::default();
             let mut off = wr_164_offset(&k, d);
             wr_164_extend(&off, &k);
             let (before, before_swapped) = before_and_swapped(&off, &k);
@@ -4356,8 +4350,7 @@ mod tests {
     #[test]
     fn wr_164_swap_uv_without_an_extension_negates_once_either_way() {
         for fixed in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.offset_swap_uv_extended_distance = fixed;
+            let k = Kernel::default();
             let mut off = wr_164_offset(&k, 0.4);
             assert!(off.extended_base_surface().is_none());
             off.swap_uv(&k).unwrap();
@@ -4373,8 +4366,7 @@ mod tests {
     #[test]
     fn wr_164_swap_uv_non_owned_keeps_the_extension_negation_and_error() {
         for fixed in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.offset_swap_uv_extended_distance = fixed;
+            let k = Kernel::default();
             let mut off = OffsetSurface::new(&k, 0.4, wr_164_base(), false, SS_UNKNOWN).unwrap();
             off.set_allow_extension(true);
             wr_164_extend(&off, &k);
@@ -4405,8 +4397,7 @@ mod tests {
     fn wr_164_swap_uv_failed_base_edit_keeps_the_extension_negation() {
         use crate::geom::object::NotifyOperation;
         for fixed in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.offset_swap_uv_extended_distance = fixed;
+            let k = Kernel::default();
             let mut off = wr_164_offset(&k, 0.4);
             wr_164_extend(&off, &k);
             let base_point = off
@@ -4451,11 +4442,9 @@ mod tests {
     /// The farthest an offset (4) of a half cylinder (r 5, its axis the z axis) evaluated
     /// from 0.07 to 3 domains of turn past both ends of its arc lies from 9 off its axis
     /// (WR-633, the fork's tangency-labs/smlib@de0a6b8).
-    fn as_itself_off_circle(as_itself: bool) -> f64 {
+    fn as_itself_off_circle(_as_itself: bool) -> f64 {
         use crate::surface::cone::Cone;
-        let mut k = Kernel::default();
-        k.fixes.offset_extension_from_base = true;
-        k.fixes.offset_extension_as_itself = as_itself;
+        let k = Kernel::default();
         let mut half = Cone::new_cylinder_bounded(
             Vec3::ZERO,
             Vec3::X,
@@ -4504,11 +4493,9 @@ mod tests {
 
     /// A partial cylinder (r 5, its axis the z axis, from 0 degrees to `end_deg`), its NURB
     /// made, and an offset 4 of it that may extend, with both extension flags as given.
-    fn wr650_offset(as_itself: bool, end_deg: f64) -> (Kernel, Surface, OffsetSurface) {
+    fn wr650_offset(_as_itself: bool, end_deg: f64) -> (Kernel, Surface, OffsetSurface) {
         use crate::surface::cone::Cone;
-        let mut k = Kernel::default();
-        k.fixes.offset_extension_from_base = true;
-        k.fixes.offset_extension_as_itself = as_itself;
+        let k = Kernel::default();
         let mut arc = Cone::new_cylinder_bounded(
             Vec3::ZERO,
             Vec3::X,
@@ -4666,12 +4653,10 @@ mod tests {
     fn wr650_off_surface_with(
         base: Surface,
         d: f64,
-        as_itself: bool,
+        _as_itself: bool,
         off: impl Fn(Point3) -> f64,
     ) -> f64 {
-        let mut k = Kernel::default();
-        k.fixes.offset_extension_from_base = true;
-        k.fixes.offset_extension_as_itself = as_itself;
+        let k = Kernel::default();
         let dom = base.natural_uv_domain_with_nurb(&k).unwrap();
         let (lo, hi, size) = (dom.min(), dom.max(), dom.size());
         let mut o = OffsetSurface::new(&k, d, base, true, crate::geom::extent2d::SS_NONE).unwrap();
@@ -4772,11 +4757,10 @@ mod tests {
             // the offset's side of the tube: r 2.5 outward, 1.5 inward
             (d - 2.5).abs().min((d - 1.5).abs())
         };
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let base = revolved_semicircle();
         assert!(matches!(base.kind(), SurfaceKind::SurfOfRevolution(_)));
         assert!(extends_as_itself(&k, &base));
-        k.fixes.offset_extension_as_itself = true;
         let fixed = wr650_off_surface_with(base.clone(), 0.5, true, tube);
         assert!(fixed < 1e-9, "the continuation is {fixed} off the tube");
         let upstream = wr650_off_surface_with(base, 0.5, false, tube);
