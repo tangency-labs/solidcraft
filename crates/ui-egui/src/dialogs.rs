@@ -5494,7 +5494,11 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                 | FeatureKind::Emboss { sketch, profiles: ProfileSel::All, .. } => Some(*sketch),
                 _ => None,
             };
+            // A thin extrude follows curves and takes no profiles: an extrude of every profile
+            // turned thin in its editor keeps only the curves the dialog sends.
+            let thin_now = params.get("thin").and_then(Value::as_bool).unwrap_or(false);
             if let Some(sketch) = original_all
+                && !thin_now
                 && !d.profile_selection_changed
                 && let Some(ss) = crate::open_meshing::session_world(&app.session).sketch(sketch.0)
             {
