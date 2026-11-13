@@ -2282,6 +2282,53 @@ mod tests {
         assert_eq!(other.doc.name, "Other");
     }
 
+    /// Every placement of a part is its first placement's triangles, moved: a copy moved by a
+    /// translation that rounds (0.1, 1/3, 7.3) and a copy turned 45° about z (whose box, and so
+    /// whose own size, is not the part's) are exported with the same triangles, their points the
+    /// first placement's carried by the placement, to the file's precision (3MF with face tags
+    /// writes full precision).
+    #[test]
+    fn every_placement_of_a_part_exports_its_first_placements_triangles_moved() {
+        use solidcraft_geom::prelude::*;
+        let dir = std::env::temp_dir().join(format!("solidcraft-placed-copies-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("copies.3mf").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("component.create", &json!({"name": "Part"})).unwrap();
+        s.execute("solid.box", &json!({"length": 30, "width": 20, "height": 10, "body_name": "Base"})).unwrap();
+        s.execute("solid.cylinder", &json!({"radius": 5, "height": 10, "base": [10, 10, 10], "operation": "new", "body_name": "Boss"})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("occurrence.copy", &json!({"component": "Part", "translate": [0.1, 1.0 / 3.0, 7.3]})).unwrap();
+        let turned = s.execute("occurrence.copy", &json!({"component": "Part", "translate": [60, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": turned, "angle": "45 deg", "axis": [0, 0, 1], "origin": [60, 0, 0]})).unwrap();
+        s.execute("file.export", &json!({"path": path, "format": "3mf-tagged"})).unwrap();
+        let (objects, _) = solidcraft_io::read_3mf(&std::fs::read(&path).unwrap()).unwrap();
+        let world = s.world_state().unwrap();
+        for part in ["Base", "Boss"] {
+            let placed: Vec<_> = world.bodies.iter().filter(|b| b.definition_name() == part).collect();
+            assert_eq!(placed.len(), 3, "{part}: three placements");
+            let object = |name: &str| objects.iter().find(|o| o.name == name).unwrap_or_else(|| panic!("no object {name}"));
+            let first = object(&placed[0].name);
+            let inv = solidcraft_doc::mat_inverse(&placed[0].source_transform).unwrap();
+            for copy in &placed[1..] {
+                let o = object(&copy.name);
+                assert_eq!(o.triangles.len(), first.triangles.len(), "{}", copy.name);
+                assert_eq!(o.positions.len(), first.positions.len(), "{}", copy.name);
+                let rel = solidcraft_doc::mat_mul(&copy.source_transform, &inv);
+                let far = first
+                    .positions
+                    .iter()
+                    .map(|p| {
+                        let q = solidcraft_doc::apply_point(&rel, *p);
+                        o.positions.iter().map(|r| r.dist(q)).fold(f64::INFINITY, f64::min)
+                    })
+                    .fold(0.0, f64::max);
+                assert!(far < 1e-9 * 100.0, "{}: a point of the first placement, moved, is {far} mm from the copy's", copy.name);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
     /// with two or more bodies, its bodies the object's parts; the design's own bodies stay objects
     /// of their own. The default (and `objects: "body"`) is one object per body, as before. Read

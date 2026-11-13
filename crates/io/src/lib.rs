@@ -514,7 +514,14 @@ pub fn export_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Resu
 /// export, naming the face. With it, a note for each face left short of the smallest angle or
 /// the chord tolerance (and each edge whose sampling stopped off it), for the export's warnings.
 pub fn export_mesh_noted(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
-    let spec = quality.spec(b.size());
+    export_mesh_sized(b, b.size(), quality)
+}
+
+/// [`export_mesh_noted`] with the chord taken from `size` rather than the body's own: placements
+/// of one part ([`shared_placements`]) all take their first placement's, so they ask for the one
+/// mesh (a rotated copy's box, and so its own size, is not the part's).
+fn export_mesh_sized(b: &solidcraft_kernel::Body, size: f64, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
+    let spec = quality.spec(size);
     let made = b.export_mesh(&spec)?;
     let notes = made.notes(&spec);
     Ok((made.mesh, notes))
@@ -793,62 +800,80 @@ fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQ
     Ok(ObjFiles { warnings, ..obj_files(&bodies, mtl_name) })
 }
 
-/// A body's export mesh ([`export_mesh_noted`]) of `body` (`b`'s body, or the same placed as
-/// [`shared_placements`] gives it) with its notes, each led by the body's name.
-fn body_mesh(b: &solidcraft_doc::ModelBody, body: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
-    let (mesh, notes) = export_mesh_noted(body, quality)?;
+/// A body's export mesh of `body` (`b`'s body, or the same showing its part's mesh, as
+/// [`shared_placements`] gives it), its chord from `size` ([`export_mesh_sized`]), with its
+/// notes, each led by the body's name.
+fn body_mesh(b: &solidcraft_doc::ModelBody, (body, size): &(solidcraft_kernel::Body, f64), quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
+    let (mesh, notes) = export_mesh_sized(body, *size, quality)?;
     Ok((mesh, notes.into_iter().map(|n| format!("{}: {n}", b.name)).collect()))
 }
 
-/// The bodies of an export as they are meshed: each placement of a component's body (a world
-/// state's computed placement) shows the mesh of the first placement of that body in `sel`,
-/// placed ([`solidcraft_kernel::Body::with_display_share`]), so every placement of one part is
-/// meshed once and its copies are the same triangles, moved. The mesh path is not the same
-/// under a move to the bit: a copy's record is the part's moved, rounded (a rational form's
-/// weighted points round as they move), and its shaping can take other points for so small a
-/// difference. Any other body is meshed as it is, and so is a placement whose vertices are not
-/// its first placement's moved (within the export's weld distance): it is no copy of it.
-fn shared_placements(sel: &[&solidcraft_doc::ModelBody]) -> Vec<solidcraft_kernel::Body> {
-    type Leader = (solidcraft_kernel::DisplayShare, solidcraft_doc::Mat);
+/// The bodies of an export as they are meshed, each with the size its chord is taken from. Each
+/// placement of a component's body (a world state's computed placement) shows the mesh of the
+/// first placement of that body in `sel`, placed ([`solidcraft_kernel::Body::with_display_share`],
+/// the first placement through it too), and takes that placement's size: every placement of one
+/// part asks for one spec, so the part is meshed once and its copies are those triangles, moved.
+/// The mesh path is not the same under a move to the bit: a copy's record is the part's moved,
+/// rounded (a rational form's weighted points round as they move), and its shaping can take
+/// other points for so small a difference; nor is a copy's own size its part's (a rotated box is
+/// another box). The share's lock is held while its part is meshed, so the copies wait for that
+/// one mesh rather than make it again; other parts are meshed on other threads meanwhile. Any
+/// other body is meshed as it is at its own size, and so is a placement that is not its first
+/// placement moved ([`placed_vertices_match`]).
+fn shared_placements(sel: &[&solidcraft_doc::ModelBody]) -> Vec<(solidcraft_kernel::Body, f64)> {
+    type Leader = (solidcraft_kernel::DisplayShare, solidcraft_doc::Mat, f64);
     let mut leaders: std::collections::BTreeMap<(String, u64), Leader> = std::collections::BTreeMap::new();
     sel.iter()
         .map(|b| {
-            let (Some(name), key) = (b.source_name.as_ref(), b.source_key()) else { return b.body.clone() };
-            if key == 0 || b.body.is_mesh() {
-                return b.body.clone();
+            let own = (b.body.clone(), b.body.size());
+            let (Some(name), key) = (b.source_name.as_ref(), b.source_key()) else { return own };
+            if key == 0 || b.body.is_mesh() || b.body.record().vertices.is_empty() {
+                return own;
             }
             match leaders.get(&(name.clone(), key)) {
                 None => {
                     let share = solidcraft_kernel::DisplayShare::new(b.body.clone());
-                    leaders.insert((name.clone(), key), (share, b.source_transform));
-                    b.body.clone()
+                    let size = b.body.size();
+                    let first = b.body.clone().with_display_share(&share, solidcraft_doc::IDENTITY);
+                    leaders.insert((name.clone(), key), (share, b.source_transform, size));
+                    (first, size)
                 }
-                Some((share, first)) => {
+                Some((share, first, size)) => {
                     let Some(rel) = solidcraft_doc::mat_inverse(first).map(|inv| solidcraft_doc::mat_mul(&b.source_transform, &inv)) else {
-                        return b.body.clone();
+                        return own;
                     };
                     if !placed_vertices_match(share.original(), &b.body, &rel) {
-                        return b.body.clone();
+                        return own;
                     }
-                    b.body.clone().with_display_share(share, rel)
+                    (b.body.clone().with_display_share(share, rel), *size)
                 }
             }
         })
         .collect()
 }
 
-/// `copy`'s vertices are `original`'s moved by `m`, in the same order, each within the export's
-/// weld distance ([`weld_distance`]).
+/// `copy` is `original` moved by `m`: as many faces, edges and vertices, at least one vertex
+/// (so the comparison says something), each of `copy`'s vertices `original`'s moved, in the
+/// same order, within the export's weld distance ([`weld_distance`]), and so their boxes too.
 fn placed_vertices_match(original: &solidcraft_kernel::Body, copy: &solidcraft_kernel::Body, m: &solidcraft_doc::Mat) -> bool {
     let (a, b) = (original.record(), copy.record());
     let eps = weld_distance(copy.size());
-    a.faces.len() == b.faces.len()
+    let at = |q: &solidcore_record::brep::Vertex| Vec3::new(q.point[0], q.point[1], q.point[2]);
+    let moved: Vec<Vec3> = a.vertices.iter().map(|p| solidcraft_doc::apply_point(m, at(p))).collect();
+    let boxed = |ps: &mut dyn Iterator<Item = Vec3>| {
+        ps.fold(solidcraft_geom::Aabb3::EMPTY, |mut x, p| {
+            x.add(p);
+            x
+        })
+    };
+    let (ba, bb) = (boxed(&mut moved.iter().copied()), boxed(&mut b.vertices.iter().map(at)));
+    !b.vertices.is_empty()
+        && a.faces.len() == b.faces.len()
         && a.edges.len() == b.edges.len()
         && a.vertices.len() == b.vertices.len()
-        && a.vertices.iter().zip(&b.vertices).all(|(p, q)| {
-            let moved = solidcraft_doc::apply_point(m, Vec3::new(p.point[0], p.point[1], p.point[2]));
-            moved.dist(Vec3::new(q.point[0], q.point[1], q.point[2])) <= eps
-        })
+        && moved.iter().zip(&b.vertices).all(|(p, q)| p.dist(at(q)) <= eps)
+        && ba.min.dist(bb.min) <= eps
+        && ba.max.dist(bb.max) <= eps
 }
 
 /// `f` for each body of an export and the body it is meshed as ([`shared_placements`]), on
@@ -858,10 +883,10 @@ fn placed_vertices_match(original: &solidcraft_kernel::Body, copy: &solidcraft_k
 /// then. An assembly of many bodies meshed on one core took most of the export's time.
 fn per_placed_body<R: Send>(
     sel: &[&solidcraft_doc::ModelBody],
-    f: impl Fn(&solidcraft_doc::ModelBody, &solidcraft_kernel::Body) -> Result<R> + Sync,
+    f: impl Fn(&solidcraft_doc::ModelBody, &(solidcraft_kernel::Body, f64)) -> Result<R> + Sync,
 ) -> Result<Vec<R>> {
     let meshed = shared_placements(sel);
-    let pairs: Vec<(&solidcraft_doc::ModelBody, &solidcraft_kernel::Body)> = sel.iter().copied().zip(&meshed).collect();
+    let pairs: Vec<(&solidcraft_doc::ModelBody, &(solidcraft_kernel::Body, f64))> = sel.iter().copied().zip(&meshed).collect();
     solidcraft_kernel::map_on_threads(&pairs, EXPORT_THREADS, |(b, body)| f(b, body))
         .into_iter()
         .zip(sel)
@@ -1028,7 +1053,7 @@ const EXPORT_THREADS: usize = 16;
 /// each triangle keeps the B-rep face it came from.
 fn mesh_object(
     b: &solidcraft_doc::ModelBody,
-    body: &solidcraft_kernel::Body,
+    body: &(solidcraft_kernel::Body, f64),
     tagged: bool,
     quality: MeshQuality,
 ) -> Result<(MeshObject, Vec<String>)> {
