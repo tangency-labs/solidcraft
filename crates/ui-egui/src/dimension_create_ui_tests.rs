@@ -46,8 +46,9 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     assert!(h.widget(&format!("Dimension: {target}")).is_some(), "new dimension shows its actual parameter name");
     // Let the preceding placement clicks expire before starting a distinct double-click.
     h.frames(40);
-    h.step(&json!({"click":{"dimension":source},"double":true})).unwrap();
+    h.step(&json!({"click":{"dimension":source}})).unwrap();
     assert!(crate::dim_view::editing(), "reference click keeps the draft open");
+    h.frames(40);
     h.step(&json!({"text":" / 2"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
@@ -59,7 +60,8 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     assert!(h.widget(&format!("Dimension: {target}")).is_some());
     type_value(&mut h, "2 * ");
     h.frames(40);
-    h.step(&json!({"click":{"dimension":source},"double":true})).unwrap();
+    h.step(&json!({"click":{"dimension":source}})).unwrap();
+    h.frames(40);
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param(&target).unwrap().expr, format!("2 * {source}"));
     h.app.run("parameters.change", json!({"name":source,"expression":"15 mm"})).unwrap();
@@ -84,7 +86,7 @@ fn editing_d2(typed: &str) -> Harness {
 fn click_d1_and_apply(h: &mut Harness) -> String {
     h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
     assert!(crate::dim_view::editing(), "a reference click keeps the editor open");
-    h.frames(2);
+    h.frames(40);
     assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")), "the value field keeps the keyboard");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
@@ -118,7 +120,7 @@ fn clicking_another_dimension_replaces_a_lone_value() {
 fn clicking_another_dimension_lets_typing_continue_after_its_name() {
     let mut h = editing_d2("2 * ");
     h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
-    h.frames(2);
+    h.frames(40);
     h.step(&json!({"text":" + 1"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "2 * d1 + 1");
@@ -141,14 +143,56 @@ fn clicking_another_dimension_replaces_the_selected_text() {
     assert_eq!(click_d1_and_apply(&mut h), "5 + d1");
 }
 
+/// Whether the open editor is the one for dimension parameter `param`.
+fn is_editing(h: &Harness, param: &str) -> bool {
+    crate::dim_view::editing() && h.widget(&format!("Dimension: {param}")).is_some()
+}
+
 #[test]
-fn double_clicking_another_dimension_inserts_its_name_once() {
-    let mut h = editing_d2("3 * ");
-    // Synthetic input feeds one pointer event per frame, so this is a click and, a frame
-    // later, a second click that egui reads as a double-click.
-    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+fn a_single_click_waits_out_the_double_click_window_before_inserting() {
+    let mut h = editing_d2("2 * ");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"}})).unwrap();
+    // Not yet: a second click would open d1 instead.
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "3 * d1");
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "12", "an unfinished `2 * ` does not apply, so the box is open and untouched");
+    assert!(is_editing(&h, "d2"), "{}", h.call("ui.inspect", json!({})));
+    h.frames(40);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "2 * d1", "the name went in after the delay");
+    crate::dim_view::cancel();
+}
+
+#[test]
+fn double_clicking_another_dimension_opens_it_and_inserts_nothing() {
+    let mut h = editing_d2("8");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+    h.frames(40);
+    assert!(is_editing(&h, "d1"), "d1 is open: {}", h.call("ui.inspect", json!({})));
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "8", "the edit of d2 was applied, with no name in it");
+    type_value(&mut h, "30");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.doc.param("d1").unwrap().expr, "30", "d1's value was selected, so typing replaced it");
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "8");
+    crate::dim_view::cancel();
+}
+
+#[test]
+fn double_clicking_leaves_the_original_box_without_a_name_when_it_does_not_apply() {
+    let mut h = editing_d2("not a value (");
+    h.frames(40);
+    h.step(&json!({"click":{"dimension":"d1"},"double":true})).unwrap();
+    h.frames(40);
+    assert!(is_editing(&h, "d2") && !is_editing(&h, "d1"), "an invalid value blocks the switch: {}", h.call("ui.inspect", json!({})));
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "12", "nothing was applied");
+    assert!(h.app.status.is_some(), "the error shows");
+    // The box still holds what was typed: no name was inserted.
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"7"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "7");
     crate::dim_view::cancel();
 }
 
@@ -1848,6 +1892,41 @@ fn shown_dimensions() -> (Harness, u64) {
     (h, sketch)
 }
 
+/// The painted model-view text of the dimension driven by `param`.
+fn model_text_shape(h: &Harness, param: &str) -> egui::epaint::TextShape {
+    let sk = h
+        .app
+        .session
+        .world_state()
+        .unwrap()
+        .sketch(h.app.session.doc.features.iter().find(|f| f.name.starts_with("Sketch")).unwrap().id)
+        .unwrap()
+        .sketch
+        .clone();
+    let id = sk.constraints.iter().find(|c| c.param.as_deref() == Some(param)).unwrap().id.clone();
+    let (_, _, centre) = crate::dim_view::model_drawn().into_iter().find(|(_, d, _)| *d == id).expect("the dimension is shown in the model view");
+    h.shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 2.0 => Some(t.clone()),
+            _ => None,
+        })
+        .expect("the dimension's value is painted")
+}
+
+/// The painted model-view text of the shown dimension with this constraint `id` in `sketch`.
+fn model_text_shape_of(h: &Harness, sketch: u64, id: &str) -> egui::epaint::TextShape {
+    let (_, _, centre) =
+        crate::dim_view::model_drawn().into_iter().find(|(s, d, _)| *s == sketch && d == id).expect("the dimension is shown in the model view");
+    h.shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 2.0 => Some(t.clone()),
+            _ => None,
+        })
+        .expect("the dimension's value is painted")
+}
+
 /// The model view's text of the dimension driven by `param` (screen).
 fn model_text(h: &Harness, param: &str) -> [f32; 2] {
     let sk = h
@@ -1892,6 +1971,27 @@ fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();
     assert!((plate_max(&h)[1] - 10.0).abs() < 1e-6, "undo restores it");
+}
+
+#[test]
+fn double_clicking_another_shown_dimension_opens_it_from_the_model_view() {
+    let (mut h, _) = shown_dimensions();
+    let first = model_text(&h, "d1");
+    h.step(&json!({"click":first,"double":true})).unwrap();
+    assert!(crate::dim_view::editing());
+    h.frames(40);
+    let second = model_text(&h, "d2");
+    h.step(&json!({"click":second,"double":true})).unwrap();
+    h.frames(40);
+    assert!(crate::dim_view::editing() && h.widget("Dimension: d2").is_some(), "d2 is open: {}", h.call("ui.inspect", json!({})));
+    let d1 = h.app.session.doc.param("d1").unwrap().expr.clone();
+    assert!(!d1.contains("d2"), "nothing was inserted into d1: {d1}");
+    type_value(&mut h, "14");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "14");
+    assert_eq!(h.app.session.doc.param("d1").unwrap().expr, d1);
+    crate::dim_view::cancel();
 }
 
 /// A sketch seen nearly edge-on, with one of its directions pointing at the eye, keeps its
@@ -1946,6 +2046,24 @@ fn a_dimension_is_sized_from_whichever_direction_reaches_the_screen() {
     let neither = |p: Vec2| (p.x == at.x && p.y == at.y).then(|| screen(p));
     assert_eq!(mm_per_pixel(neither, at), None, "no direction projects: no size");
     assert_eq!(mm_per_pixel(|_| None, at), None, "the point itself does not project");
+}
+
+/// #14121: Show Dimensions follows the same text size and colour preferences as the open sketch.
+#[test]
+fn shown_dimensions_follow_the_dimension_text_size_and_colour() {
+    let (mut h, _) = shown_dimensions();
+    let before = model_text_shape(&h, "d1");
+    let custom = egui::Color32::from_rgb(0x12, 0x34, 0x56);
+    h.call("ui.prefs", json!({"dimension_text_scale":2.0,"dimension_colour":[0x12,0x34,0x56]}));
+    h.frames(2);
+    let after = model_text_shape(&h, "d1");
+    assert!(
+        (after.galley.size().y - before.galley.size().y * 2.0).abs() <= 2.0,
+        "the shown dimension's text height {} doubles to {}",
+        before.galley.size().y,
+        after.galley.size().y
+    );
+    assert_eq!(after.fallback_color, custom, "the shown dimension's value takes the custom colour");
 }
 
 #[test]
@@ -2237,4 +2355,76 @@ fn the_pointer_ring_stays_off_the_value_being_placed() {
     assert!(!crate::tools::pointer_ring_shown(tool, pointer), "no ring on the value");
     assert!(!crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(4.0, 0.0)), "nor one that would touch it");
     assert!(crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(20.0, 0.0)), "the ring elsewhere");
+}
+
+/// #14121: a shown dimension whose constraint fails takes the established conflict colour; a
+/// satisfied shown dimension keeps the preference colour.
+#[test]
+fn shown_dimensions_in_a_conflict_take_the_conflict_colour() {
+    crate::dim_view::cancel();
+    let mut h = Harness::new();
+    // A conflict colour nothing else in a sketch uses, so the assertions cannot pass by accident.
+    h.call(
+        "ui.prefs",
+        json!({"theme_import": {"format":"solidcraft-theme/1","name":"Conflict marker","base":"light","colors":{"sketch_conflict":"#12ab34"}}}),
+    );
+    h.frame();
+    let conflict = solidcraft_theme::Tokens::get().sketch_conflict;
+    let custom = egui::Color32::from_rgb(0x12, 0x34, 0x56);
+    h.call("ui.prefs", json!({"dimension_colour":[0x12,0x34,0x56]}));
+    h.frames(2);
+
+    // `w` places a guide line; the Reach sketch ends a 12 mm line on it. Moving the guide out of
+    // reach makes the Reach sketch's length dimension fail.
+    h.app.run("parameters.add", json!({"name": "w", "expression": "10 mm"})).unwrap();
+    let guide = h.app.run("sketch.create", json!({"plane": "XY", "name": "Guide"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points": [[10, -30], [10, 30]], "ids": ["guide"], "connect": false})).unwrap();
+    h.app.run("sketch.constraint.horizontal_vertical", json!({"line": "guide", "mode": "vertical"})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities": ["origin", "guide.start"], "type": "horizontal", "value": "w"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let reach = h.app.run("sketch.create", json!({"plane": "XY", "name": "Reach"})).unwrap()["sketch"].as_u64().unwrap();
+    let projected = h.app.run("sketch.project", json!({"refs": [{"sketch": "Guide", "curve": "guide"}]})).unwrap()["links"][0]["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let line = h.app.run("sketch.line", json!({"points": [[0, 0], [10, -(44.0_f64).sqrt()]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.dimension", json!({"entities": [line], "value": 12})).unwrap();
+    h.app.run("sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": projected})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("parameters.change", json!({"name": "w", "expression": "20 mm"})).unwrap();
+    h.settle();
+    assert!(!crate::open_meshing::session_world(&h.app.session).sketch(reach).unwrap().report.ok(), "the conflict is real");
+
+    for id in [guide, reach] {
+        crate::browser::set_sketch_visible(&mut h.app, id, true);
+        h.app.session.visibility.shown_dimensions.push(id);
+    }
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.cam.distance = 80.0;
+    h.app.cam.target = solidcore_record::Vec3::new(10.0, 0.0, 0.0);
+    h.settle();
+
+    let failing = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let ss = st.sketch(reach).unwrap();
+        ss.sketch.constraints.iter().find(|c| c.kind.is_dimension() && ss.report.failing.contains(&c.id)).map(|c| c.id.clone())
+    }
+    .expect("a failing dimension is shown");
+    assert_eq!(model_text_shape_of(&h, reach, &failing).fallback_color, conflict, "the failing shown dimension takes the conflict colour");
+
+    // The Guide's satisfied dimension keeps the custom preference colour.
+    let satisfied = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let ss = st.sketch(guide).unwrap();
+        ss.sketch.constraints.iter().find(|c| c.kind.is_dimension() && !ss.report.failing.contains(&c.id)).map(|c| c.id.clone())
+    }
+    .expect("a satisfied shown dimension is drawn");
+    assert_eq!(model_text_shape_of(&h, guide, &satisfied).fallback_color, custom, "a satisfied shown dimension keeps the preference colour");
+
+    // With the Sketch preference off, the failing dimension keeps its old error red.
+    h.app.preferences.sketch_conflict_colour = false;
+    h.settle();
+    assert_eq!(model_text_shape_of(&h, reach, &failing).fallback_color, solidcraft_theme::Tokens::get().error);
+    h.call("ui.prefs", json!({"theme": "dark"}));
+    h.frame();
 }

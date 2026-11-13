@@ -698,7 +698,7 @@ impl MixedDefinition {
                 seg.iter_mut().for_each(map);
             }
         };
-        for s in self.sides.iter_mut() {
+        for s in &mut *self.sides {
             crv(&mut s.c);
             crv(&mut s.dir);
             crv(&mut s.t);

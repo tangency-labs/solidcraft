@@ -1295,6 +1295,7 @@ impl PanelRuntime {
                 flow,
                 size_class,
                 focused: interaction.focused.as_ref() == Some(&geometry.instance),
+                preview_geometry: false,
                 direction: self.environment.direction,
                 motion: self.environment.motion,
             };

@@ -529,6 +529,9 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> crate::Result<Option<Ve
     if !outermost_move || !placed(s) || placements_moved(s, params).is_some() {
         return Ok(None);
     }
+    // A matrix can turn about the world origin, so normalize it before grouping frames.
+    let normalized = crate::cmd::move_matrix_params(params)?;
+    let params = normalized.as_ref().unwrap_or(params);
     let Some(names) = params.get("bodies").and_then(Value::as_array) else { return Ok(None) };
     let turns = params.get("axis").is_some() || params.get("angle").is_some();
     let alike = |a: &Mat, b: &Mat| {
@@ -569,6 +572,26 @@ pub(crate) fn split_move(s: &Session, params: &Value) -> crate::Result<Option<Ve
 
 /// [`to_local`] on the placed model `world`.
 fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: &Value) -> Option<Value> {
+    if id == "solid.move" && ["translate", "origin", "axis"].iter().any(|k| params.get(k).is_some_and(Value::is_object)) {
+        let mut normalized = params.clone();
+        let mut changed = false;
+        for key in ["translate", "origin", "axis"] {
+            if let Some(o) = params.get(key).and_then(Value::as_object)
+                && let Some(coords) = ["x", "y", "z"].iter().map(|k| o.get(*k).cloned()).collect::<Option<Vec<_>>>()
+            {
+                normalized[key] = Value::Array(coords);
+                changed = true;
+            }
+        }
+        if changed {
+            return Some(map_local(s, world, id, &normalized).unwrap_or(normalized));
+        }
+    }
+    if id == "solid.move"
+        && let Ok(Some(normalized)) = crate::cmd::move_matrix_params(params)
+    {
+        return Some(map_local(s, world, id, &normalized).unwrap_or(normalized));
+    }
     if id == "library.apply" {
         // Library targets are the same world selections as appearance.assign,
         // nested one level down. Convert at the outer boundary exactly once;
@@ -696,16 +719,23 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
     }
     // A move has no picks: its vector, axis and pivot are in the world and turn with the frame
     // of the bodies it moves (an imported part stood upright moved up goes up, not along its
-    // own frame's z). A turn with no pivot is about the world origin.
+    // own frame's z). Without `origin` a turn keeps its old default, about the moved body's own
+    // frame's origin and, without `axis`, its Z, so moves written before `origin` existed land
+    // where they did. A given `origin` (a matrix gives [0, 0, 0]) puts the whole turn in the
+    // world: a missing axis is then world Z.
     let first = (id == "solid.move")
         .then(|| obj.get("bodies").and_then(Value::as_array)?.first()?.as_str())
         .flatten()
         .and_then(|b| command_frames.bodies(s).iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m));
-    let mut obj = obj.clone();
-    if first.is_some() && obj.contains_key("axis") && !obj.contains_key("origin") {
-        obj.insert("origin".into(), serde_json::json!([0.0, 0.0, 0.0]));
-    }
-    let obj = &obj;
+    let world_axis;
+    let obj = if id == "solid.move" && obj.contains_key("origin") && obj.contains_key("angle") && !obj.contains_key("axis") {
+        let mut with_axis = obj.clone();
+        with_axis.insert("axis".into(), serde_json::json!([0, 0, 1]));
+        world_axis = with_axis;
+        &world_axis
+    } else {
+        obj
+    };
     let mut m = Mapper { s, world, f: command_frames, first, changed: false, here: false };
     let body = obj.get("body").or_else(|| obj.get("face_body")).and_then(Value::as_str).map(str::to_string);
     let mut out: Map<String, Value> = obj.clone();
@@ -728,7 +758,10 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
                 }),
                 Moved => {
                     let frame = m.first.unwrap_or(m.f.active);
-                    vec3(v).and_then(|p| m.local_point(&frame, p))
+                    match vec3(v) {
+                        Some(p) => m.local_point(&frame, p),
+                        None => m.map_expr(&frame, v, map_point_expr),
+                    }
                 }
                 Axis => {
                     // A name, and among them a component origin key (`o:…/origin/X`), passes

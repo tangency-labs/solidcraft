@@ -8,9 +8,10 @@ mod common;
 
 use common::kernel_copy;
 use solidcore::boolean::merge::p1::faces_coincide;
+use solidcore::query::face::p1::faces_on_other_surfaces;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::face::p2 as face;
-use solidcore_ops::{make_cone, make_cylinder, make_sphere, make_torus, Body};
+use solidcore_ops::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body};
 
 /// Whether the one curved face of `a` coincides with the one curved face of `b` (and the
 /// larger of their tolerances).
@@ -179,6 +180,57 @@ fn different_quadric_kinds_are_left_to_the_sector() {
         )
         .0
     );
+}
+
+/// The radial sector holds a coincidence back, and steps on, for faces the definitions show
+/// to lie on different surfaces: two different kinds (tangent at most), or two of one kind
+/// the gate tells apart. Two planes, and a sphere against a torus, may be one surface.
+#[test]
+fn faces_on_other_surfaces_are_told_by_their_definitions() {
+    // whether the first planar (or first curved) faces of two bodies lie on other surfaces
+    let other = |a: &Body, a_plane: bool, b: &Body, b_plane: bool| {
+        let pick = |body: &Body, plane: bool| {
+            let (k, brep) = kernel_copy(body);
+            let f = *brep
+                .face_list()
+                .iter()
+                .find(|&&f| {
+                    matches!(
+                        face::surface(&brep, f).unwrap().unwrap().kind(),
+                        SurfaceKind::Plane(_)
+                    ) == plane
+                })
+                .unwrap();
+            (k, brep, f)
+        };
+        let (k, ba, fa) = pick(a, a_plane);
+        let (_, bb, fb) = pick(b, b_plane);
+        let ab = faces_on_other_surfaces(&k, &ba, fa, &bb, fb).unwrap();
+        assert_eq!(ab, faces_on_other_surfaces(&k, &bb, fb, &ba, fa).unwrap());
+        ab
+    };
+    let block = make_box([0.0; 3], [5.0, 5.0, 5.0]).unwrap();
+    let cylinder = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+    let cone = make_cone([0.0; 3], 5.0, 3.0, 10.0).unwrap();
+    let sphere = make_sphere([0.0; 3], 5.0).unwrap();
+    let torus = make_torus([0.0; 3], 8.0, 2.0).unwrap();
+    // two kinds
+    assert!(other(&block, true, &cylinder, false));
+    assert!(other(&block, true, &cone, false));
+    assert!(other(&block, true, &sphere, false));
+    assert!(other(&block, true, &torus, false));
+    assert!(other(&cylinder, false, &sphere, false));
+    assert!(other(&cone, false, &torus, false));
+    // one kind, told apart: a cylinder beside it, a larger sphere
+    let beside = make_cylinder([10.0, 0.0, 0.0], 5.0, 10.0).unwrap();
+    assert!(other(&cylinder, false, &beside, false));
+    let larger = make_sphere([0.0; 3], 7.0).unwrap();
+    assert!(other(&sphere, false, &larger, false));
+    // one surface, or no telling
+    let shorter = make_cylinder([0.0, 0.0, 3.0], 5.0, 4.0).unwrap();
+    assert!(!other(&cylinder, false, &shorter, false));
+    assert!(!other(&block, true, &cylinder, true));
+    assert!(!other(&sphere, false, &torus, false));
 }
 
 #[test]

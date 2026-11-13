@@ -612,8 +612,11 @@ fn insert_footer(app: &mut SolveApp, ui: &mut egui::Ui) {
     container.edge("sc_library_insert", Edge::Bottom).exact_size(40.0 + gap * 2.0).show_separator_line(false).frame(egui::Frame::NONE).show(
         ui,
         |ui| {
-            let card =
-                if container.floating() { crate::timeline::floating_rect(ui.max_rect()).shrink2(egui::vec2(t.space_4, 0.0)) } else { ui.max_rect() };
+            let card = if container.floating() {
+                Container::floating_card(Surface::Panel).bottom_strip_rect(ui.max_rect(), 40.0).shrink2(egui::vec2(t.space_4, 0.0))
+            } else {
+                ui.max_rect()
+            };
             ui.painter().add(container.frame(ui.ctx(), t.timeline, crate::frame::Side::Left).paint(card));
             crate::scenario::publish_rect("library:import_card", card);
             let mut controls = ui.new_child(egui::UiBuilder::new().id_salt("library_import_card").max_rect(card));

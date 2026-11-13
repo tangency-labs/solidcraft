@@ -1,0 +1,152 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b2"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  14.42497833623499,
+                  14.424978336234988,
+                  1.5
+                ],
+                [
+                  13.364318164455169,
+                  13.364318164455165,
+                  3.0000000000000004
+                ]
+              ],
+              "index": 19
+            }
+          ],
+          "points": [
+            [
+              13.894648250345078,
+              13.894648250345076,
+              2.25
+            ]
+          ],
+          "tolerance": 3.0359135078343575
+        },
+        "kind": "chamfer",
+        "sizes": [
+          1.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "15505-chamfer-end-cap-between-two-faces-of-one-cylinder",
+  "expected": {
+    "body_count": 1,
+    "faces": 13,
+    "method": "the operand has 12 faces. The chamfer adds its one face. Its end at the wall lies on the cylinder r 20.4 that both wall faces lie on, so it is bounded by the wall itself and adds no end face: 12 + 1 = 13 faces, one closed solid",
+    "outcome": "solid",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#15505",
+      "tangency-labs/solidcraft#14558"
+    ],
+    "what": "a 1 mm chamfer on the concave edge between a cone (z 1.5..3) and a plane through the Z axis; the edge's outer end lies on the wall where two faces of one cylinder (r 20.4 about Z) meet, at a seam across the chamfer's end. The chamfer must end on the cylinder, without a face of its own there"
+  },
+  "expressible": true,
+  "gallery_note": "the chamfer's outer end (highlighted), where the wall's two faces of one cylinder meet: the end lies on the cylinder, so no end face is made",
+  "operation_expressible": true,
+  "params": {
+    "edges": {
+      "kind": "edge",
+      "picked": [
+        {
+          "at": [
+            [
+              14.42497833623499,
+              14.424978336234988,
+              1.5
+            ],
+            [
+              13.364318164455169,
+              13.364318164455165,
+              3.0000000000000004
+            ]
+          ],
+          "index": 19
+        }
+      ],
+      "points": [
+        [
+          13.894648250345078,
+          13.894648250345076,
+          2.25
+        ]
+      ],
+      "tolerance": 3.0359135078343575
+    },
+    "kind": "chamfer",
+    "sizes": [
+      1.0
+    ],
+    "turn": "mitre"
+  },
+  "records": "15505-chamfer-end-cap-between-two-faces-of-one-cylinder.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b5"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#15505",
+    "tangency-labs/solidcraft#14558"
+  ],
+  "ungraded": [],
+  "what": "a 1 mm chamfer on the concave edge between a cone (z 1.5..3) and a plane through the Z axis; the edge's outer end lies on the wall where two faces of one cylinder (r 20.4 about Z) meet, at a seam across the chamfer's end. The chamfer must end on the cylinder, without a face of its own there",
+  "why_not": []
+}

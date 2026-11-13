@@ -18,6 +18,7 @@
 
 pub mod arc;
 pub mod arc_of;
+pub mod blend;
 pub mod composite_curve;
 pub mod conic;
 pub mod crv_in_volume;

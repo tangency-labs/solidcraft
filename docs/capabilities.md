@@ -60,7 +60,7 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   replace the parametric design. Export to STEP (AP242 with body names, colours and
   components as assemblies; revolved faces as native planes, cylinders, cones, spheres and tori),
   IGES 5.3 (manifold solid B-reps with names and colours), 3MF, STL (binary/ASCII), OBJ and GLB (placed bodies with their opaque
-  colours, metallic and roughness, in metres with Y up), and
+  colours, metallic and roughness, in metres with Y up, each part under a node named after its occurrence), and
   assemblies with joints as URDF for robot simulators (urdf.md);
   3MF, STL, OBJ and glTF 2.0 (`.glb`/`.gltf`, its node tree as components and its materials as
   appearances) import as mesh bodies (they render, measure, move and export; solid features
