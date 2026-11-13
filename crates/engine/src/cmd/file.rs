@@ -423,7 +423,12 @@ fn open_step(
     };
     let cache = cache.filter(|_| reuse && !solidcraft_io::is_native_cad_path(path) && solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none());
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let key = solidcraft_io::ImportCache::key(&bytes, path, &json!({"y_up": options.y_up, "names": format!("{:?}", options.names)}));
+    // Every option that changes the design is in the key: a reused import is the one this open asks for.
+    let key = solidcraft_io::ImportCache::key(
+        &bytes,
+        path,
+        &json!({"y_up": options.y_up, "names": format!("{:?}", options.names), "folder": options.folder}),
+    );
     let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
     if let Some((doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {
         let mut fresh = Session::opened_validating(doc, Some(&saved), validation);
