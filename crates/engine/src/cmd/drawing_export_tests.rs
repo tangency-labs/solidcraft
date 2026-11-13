@@ -552,22 +552,8 @@ fn read_and_shown(s: &mut Session, dimensions: &[Value]) -> (Vec<Option<String>>
     (read, shown)
 }
 
-/// The M2 checkpoint (#4894 W23): the milestone plate's drawing made and checked end to end by
-/// commands alone, in one session, in the checkpoint's order. At each step each dimension's text as
-/// the engine reads it is the text the sheet shows, and the SVG and PNG are compared with the steps
-/// before.
-/// - Made: A3 is 420 x 297 mm in the SVG and 2481 x 1754 pixels in the PNG at 150 dpi. Deferred and
-///   updated, the drawing exports the same bytes.
-/// - The width, a driving size, changed to 100 with the drawing closed: held, the sheet exports the
-///   same bytes and lists its three views and three dimensions out of date, showing 80.00 where the
-///   engine reads 100.00. Updated, the views take case 85's sizes and the sheet shows 100.00.
-/// - Bore1, which a dimension references, deleted: the dimension is lost with its last value 10 and
-///   is drawn nowhere, and the sheet still exports. A new bore where Bore1 was doesn't take it;
-///   repaired to the new bore on purpose, it reads Ø10.00 again, as one undo step. The repair undone
-///   and redone, the sheet is each time the one it was.
-/// - Saved and opened in a new session: the drawing waits for an update, as its setting is saved and
-///   its last update isn't; updated, it exports the same bytes and reads the same.
-/// - Every step undone and the drawing updated, it exports the first bytes again.
+/// The M2 checkpoint (#4894 W23): the milestone plate's drawing run in order by commands alone.
+/// Its steps and checks: `docs/drawing-foundations.md#m2-checkpoint-w23`.
 #[test]
 fn the_milestone_plate_runs_the_m2_checkpoint_by_commands_alone() {
     let (mut s, views, made) = milestone_plate();

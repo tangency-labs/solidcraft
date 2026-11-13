@@ -121,11 +121,8 @@ rest of W23-1 and W23-2. In one, the plate saved and opened again exports the
 same SVG. In the other, each model edit of cases 85 to 87 moves the views to
 their hand sizes, and undo brings the sheet back.
 
-The plate is the W23a fixture's case 84 ([fixture contract][w23a]): 100 × 80 ×
-20 mm, with `Bore1` and `Bore2` Ø10. `examples/acceptance/drawing_m2.json`
-builds it and its drawing. The drawing has a top view at 1:2 on A3 and the
-views below and right of it: 50 × 40, 50 × 10 and 10 × 40 mm on paper. Its
-dimensions measure the length, the width and `Bore1`.
+The plate and its A3 drawing at 1:2 are case 84 of the [W23a fixture
+contract][w23a], built by `examples/acceptance/drawing_m2.json`.
 
 | Step | What the run does | What it checks |
 | --- | --- | --- |
@@ -154,12 +151,8 @@ the same files byte for byte.
   and assemblies belong to M3.
 - `Bore1` at Ø12 (case 86) is in the W23-2 test, not in the ordered run.
 
-**Results.** These are to be filled in from the W23 run:
-- `drawings` commit: _[to fill]_
-- The checkpoint test's time in `--profile ci`: _[to fill]_ s
-- Tests run and passed in the area: _[to fill]_ of _[to fill]_
-- Planted faults caught: _[to fill]_ of 4
-- Engine clippy with `-D warnings`: _[to fill]_
+**Result.** The run passes on `drawings` at f1cc6e70f9, as of 14 November
+2026.
 
 **Limits found, as proposed issues.** None has been raised yet:
 1. A deferred drawing that is opened again waits for an update, even when it
@@ -195,7 +188,7 @@ instructions govern any later change to those areas.
 [section-pr]: https://github.com/tangency-labs/solidcraft/pull/2068
 [solidcore]: https://github.com/tangency-labs/solidcraft/issues/1597
 [m2-issue]: https://github.com/tangency-labs/solidcraft/issues/4894
-[w23a]: ../tests/oracle/W23a-workshop-acceptance.md
+[w23a]: ../tests/oracle/W23a-workshop-acceptance.md#exact-geometry-and-states
 [ui-pr]: https://github.com/tangency-labs/solidcraft/pull/5349
 [w23-assembly]: https://github.com/tangency-labs/solidcraft/pull/11881
 [storage]: https://github.com/tangency-labs/solidcraft/issues/3890
