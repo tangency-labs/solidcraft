@@ -1148,6 +1148,13 @@ fn hostile_params_never_panic() {
         "references",
         "head",
         "head_gap",
+        "shape",
+        "size",
+        "web",
+        "clip",
+        "through_all",
+        "depth",
+        "dot_grid",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
@@ -2421,6 +2428,35 @@ fn a_used_up_or_dropped_checkpoint_says_why() {
     let dropped = s.execute("edit.restore_checkpoint", &json!({"checkpoint": first})).unwrap_err().to_string();
     assert!(dropped.contains("16"), "{dropped}");
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first + 1}));
+}
+
+/// Regression (#15865): forgetting a checkpoint dropped every later one too, so a batch that
+/// forgot its own rollback checkpoint took the checkpoint one of its steps had returned with it.
+#[test]
+fn forgetting_a_checkpoint_keeps_the_later_ones() {
+    let mut s = Session::default();
+    let empty = s.doc.clone();
+    let earlier = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let outer = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"name": "Kept", "length": 10, "width": 10, "height": 10}));
+    let inner = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let doc = s.doc.clone();
+    let undo = s.undo.len();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": outer, "forget": true}));
+    assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": outer})).is_err());
+    run(&mut s, "solid.box", json!({"name": "Later", "length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+    let back = run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": inner}));
+    assert_eq!(back["restored"], true, "{back}");
+    assert!(Arc::ptr_eq(&s.doc, &doc) && s.doc.find_feature("Kept").is_some() && s.doc.find_feature("Later").is_none());
+    assert_eq!(s.undo.len(), undo);
+    // Restoring still uses up every later checkpoint: they hold states after the one restored.
+    let first = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    let second = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first}));
+    assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": second})).is_err());
+    // Neither forgetting a later checkpoint nor restoring one used up the earlier one.
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": earlier}));
+    assert!(Arc::ptr_eq(&s.doc, &empty) && s.undo.is_empty());
 }
 
 /// Regression (#3242): `file.new` replaced the session and its checkpoints with it, so a

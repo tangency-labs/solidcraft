@@ -466,6 +466,17 @@ fn default_reuse_import(app: &SolveApp, request: &mut Request) {
     }
 }
 
+/// Import options the preferences add for `path` (with `history: solids` a FreeCAD file brings
+/// only its solids, as before its history was rebuilt).
+pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<String, Value> {
+    let mut out = serde_json::Map::new();
+    let freecad = std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("fcstd"));
+    if freecad && !app.preferences.freecad_history {
+        out.insert("history".into(), json!("solids"));
+    }
+    out
+}
+
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
@@ -477,6 +488,11 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
         return Ok(());
     }
     if matches!(request.kind, Kind::Open | Kind::Insert) {
+        // After `reuse_open`: an already open tab is kept whatever the import preferences say,
+        // as the folder option is.
+        for (k, v) in preferred_options(app, &request.path) {
+            request.options.entry(k).or_insert(v);
+        }
         step_folder_option(app, &request.path, &mut request.options);
     }
     #[cfg(target_arch = "wasm32")]
@@ -2009,6 +2025,21 @@ mod tests {
         assert_eq!(Request::new("scan.ply", Kind::Open).command().0, "doc.open");
         request.mesh = true;
         assert_eq!(request.command().0, "file.insert_mesh");
+    }
+
+    /// A FreeCAD file comes in as its rebuilt features; with the preference off, as its solids in
+    /// one Import feature, as before.
+    #[test]
+    fn freecad_history_preference_keeps_the_solids_only_import() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../io/src/native_cad/fixtures/bracket.FCStd");
+        assert!(crate::prefs::Prefs::default().freecad_history, "on by default");
+        for (on, types) in [(true, vec!["Sketch", "ExtrudeFeature", "Sketch", "ExtrudeFeature", "FilletFeature"]), (false, vec!["BaseFeature"])] {
+            let mut app = SolveApp::new(Session::default(), Default::default());
+            app.preferences.freecad_history = on;
+            app.insert_path(path);
+            let got: Vec<&str> = app.session.doc.features.iter().map(|f| f.kind.type_name()).collect();
+            assert_eq!(got, types, "preference {on}");
+        }
     }
 
     #[test]
