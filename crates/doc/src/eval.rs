@@ -5358,7 +5358,7 @@ fn resolve_edges(b: &Body, pts: &[Vec3], refs: &[EdgeRef], warning: &mut Option<
     let edges = b.edges((size * 1e-3).max(1e-3))?;
     let tight = (size * 2e-3).max(1e-3);
     let dist = |p: Vec3, e: &kernel::EdgeInfo| e.points.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
-    let now = b.mesh(&solidcraft_kernel::MeshTolerance::chord((size * 1e-2).max(1e-2))).map(|m| m.bounds()).ok();
+    let now = b.exact_bounds().ok().or_else(|| Some(b.outline_bounds()));
     let (mut out, mut moved, mut lost) = (Vec::new(), 0, 0);
     for (i, p) in pts.iter().enumerate() {
         let on = edges.iter().any(|e| dist(*p, e) <= tight);
@@ -5575,7 +5575,7 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
         }
         // The body changed since the pick: the pick may now sit at an end of the edge.
         let moved = f.edge_refs.get(i).is_some_and(|r| {
-            let now = mb.mesh().bounds();
+            let now = mb.body.exact_bounds().unwrap_or_else(|_| mb.outline_bounds());
             let tight = (mb.body.size() * 2e-3).max(1e-3);
             now.min.dist(r.min) > tight || now.max.dist(r.max) > tight
         });
@@ -5595,24 +5595,15 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
 /// of the edge (an upstream edit moved the edge along it), where the edges meeting there are as
 /// near: then the edge's middle.
 fn off_the_ends(mb: &ModelBody, edge: usize, p: Vec3) -> Vec3 {
-    let m = mb.mesh();
-    let Some(e) = m.edges.get(edge) else { return p };
+    let Some(rec_edge) = mb.body.record().edges.get(edge) else { return p };
+    let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(rec_edge.parameters()) else { return p };
+    let [t0, t1] = rec_edge.interval;
+    let (Some(a), Some(b)) = (eval.point(t0), eval.point(t1)) else { return p };
     let tight = (mb.body.size() * 2e-3).max(1e-3);
-    let (Some(a), Some(b)) = (e.first(), e.last()) else { return p };
-    if p.dist(*a) > tight && p.dist(*b) > tight {
+    if p.dist(a) > tight && p.dist(b) > tight {
         return p;
     }
-    let total: f64 = e.windows(2).map(|w| w[0].dist(w[1])).sum();
-    let mut acc = 0.0;
-    for w in e.windows(2) {
-        let l = w[0].dist(w[1]);
-        if acc + l >= total / 2.0 {
-            let t = if l > 0.0 { (total / 2.0 - acc) / l } else { 0.0 };
-            return w[0] + (w[1] - w[0]) * t;
-        }
-        acc += l;
-    }
-    p
+    eval.point((t0 + t1) * 0.5).unwrap_or(p)
 }
 
 /// The edges a tapered fillet tapered (a point on each, with its taper).

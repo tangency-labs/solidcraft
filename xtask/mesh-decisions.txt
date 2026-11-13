@@ -9,7 +9,6 @@ crates/doc/src/config_styles.rs:Document::configuration_face_indices checks a co
 crates/doc/src/construct.rs:GeoRef::name_picks names picked faces and edges through the display mesh
 crates/doc/src/construct.rs:named_vertex finds where named edges meet through the display mesh
 crates/doc/src/document.rs:MeshData::eq compares imported mesh payloads by their triangles
-crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
 crates/doc/src/eval.rs:body_at picks the body whose surface is nearest a point by the display mesh
 crates/doc/src/eval.rs:edge_refs turns edge picks into references through the display mesh
 crates/doc/src/eval.rs:eval_feature places features by the display mesh (faces, edges, nearness)
@@ -23,9 +22,7 @@ crates/doc/src/eval.rs:hole_depth_to works out a hole's To Object depth on the d
 crates/doc/src/eval.rs:hole_on_surface_in moves a hole back onto its face by the display mesh
 crates/doc/src/eval.rs:hole_reaches decides whether a drill reaches material by the display mesh
 crates/doc/src/eval.rs:nearest_object_face picks an extrusion's To Object face by the display mesh
-crates/doc/src/eval.rs:off_the_ends moves an edge point off the edge's ends by the display mesh
 crates/doc/src/eval.rs:parallel_tapped_wall finds a tapped hole's parallel wall on the display mesh
-crates/doc/src/eval.rs:resolve_edges finds edge references again on a mesh
 crates/doc/src/eval.rs:tangent_face_chain grows a face pick across tangent edges on the display mesh
 crates/doc/src/eval.rs:trim_to_body keeps the tool pieces touching the start by a mesh
 crates/doc/src/eval.rs:unrecorded_touches finds touching pieces by a mesh
