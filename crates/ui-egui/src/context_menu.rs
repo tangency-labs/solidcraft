@@ -617,7 +617,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
 
 /// The name of feature `id` when it is a construction plane, axis or point: the name its
 /// visibility is kept under.
-fn construction_name(app: &SolveApp, id: u64) -> Option<String> {
+pub(crate) fn construction_name(app: &SolveApp, id: u64) -> Option<String> {
     use solidcraft_engine::doc::FeatureKind;
     app.session
         .doc
