@@ -2315,9 +2315,9 @@
 {"case":"touching_torus_plane_circle_01_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[5.5,9.5,49.5]],"n":18}}}
 {"case":"touching_torus_plane_circle_01_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[5.5,9.5,49.5]],"n":18}}}
 {"case":"touching_torus_plane_circle_01_tol1e-6_nopts","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[5.5,9.5,49.5]],"n":18}}}
-{"case":"touching_torus_plane_circle_10_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[17.06523877773279,21.065241141587187,107.32618559328222]],"n":18}}}
-{"case":"touching_torus_plane_circle_10_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[17.066360819994873,21.06636082287069,107.33180408990518]],"n":18}}}
-{"case":"touching_torus_plane_circle_10_tol1e-6_nopts","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[17.066360819994873,21.06636082287069,107.33180408990518]],"n":18}}}
+{"case":"touching_torus_plane_circle_10_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[5.5,9.5,49.5]],"n":18}}}
+{"case":"touching_torus_plane_circle_10_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[5.5,9.5,49.5]],"n":18}}}
+{"case":"touching_torus_plane_circle_10_tol1e-6_nopts","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[5.5,9.5,49.5]],"n":18}}}
 {"case":"touching_torus_plane_point_01_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,-7.81723931868322e-15,2.5,0.0]}}
 {"case":"touching_torus_plane_point_01_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,-7.81723931868322e-15,2.5,0.0]}}
 {"case":"touching_torus_plane_point_01_tol1e-6_nopts","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
