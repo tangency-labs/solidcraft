@@ -484,7 +484,9 @@ pub fn wire_edges(kernel: &mut Kernel, brep: &Brep, id: ShellId) -> Result<Vec<E
                 for vertex in crate::topology::edge::vertices(brep, edge, None)? {
                     // Upstream marks every listed vertex: a NULL start vertex is a
                     // NULL dereference.
-                    let vertex = vertex.ok_or_else(|| SolidError::null_pointer(WIRE_OP))?;
+                    let vertex = vertex.ok_or_else(|| {
+                        SolidError::topology_missing(WIRE_OP, "the edge's start vertex")
+                    })?;
                     if marks.is_marked(kernel, Entity::Vertex(vertex), mark) {
                         continue;
                     }
@@ -606,21 +608,28 @@ pub fn region_post_insert_shell(brep: &mut Brep, region: RegionId, shell: ShellI
 pub fn shell_remove_faceuse(brep: &mut Brep, shell: ShellId, faceuse: FaceuseId) -> Result<()> {
     const OP: &str = "topology::shell::shell_remove_faceuse";
     if brep.faceuse(faceuse)?.shell != Some(shell) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the face use is not in the shell",
+        ));
     }
     let members = &mut brep.shell_mut(shell)?.members;
     match members {
         ShellMembers::Faceuses(list) => {
-            let index = list
-                .iter()
-                .position(|id| *id == faceuse)
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let index = list.iter().position(|id| *id == faceuse).ok_or_else(|| {
+                SolidError::topology_failed(OP, "the face use is not in the shell's face uses")
+            })?;
             list.remove(index);
             if list.is_empty() {
                 *members = ShellMembers::Empty;
             }
         }
-        ShellMembers::Empty => return Err(SolidError::sm_err(OP)),
+        ShellMembers::Empty => {
+            return Err(SolidError::topology_failed(
+                OP,
+                "the shell has no face uses",
+            ))
+        }
         _ => return Err(invalid_members()),
     }
     let record = brep.faceuse_mut(faceuse)?;
@@ -698,11 +707,17 @@ pub fn transfer_children(
             return if shell_list_size(brep, source)? == 0 {
                 Ok(())
             } else {
-                Err(SolidError::sm_err(OP))
+                Err(SolidError::topology_failed(
+                    OP,
+                    "the recipient is a vertex shell and the source is not empty",
+                ))
             };
         }
         if brep.shell(source)?.is_vertex_shell() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the source is a vertex shell",
+            ));
         }
     }
 
@@ -803,10 +818,9 @@ fn remove_and_post_insert(
 /// from its shell's face-use list, a recipient holding wire/vertex members, or
 /// dangling ids.
 pub fn move_faceuse(brep: &mut Brep, faceuse: FaceuseId, recipient: ShellId) -> Result<()> {
-    let source = brep
-        .faceuse(faceuse)?
-        .shell
-        .ok_or_else(|| SolidError::null_pointer("topology::shell::move_faceuse"))?;
+    let source = brep.faceuse(faceuse)?.shell.ok_or_else(|| {
+        SolidError::topology_missing("topology::shell::move_faceuse", "the face use's shell")
+    })?;
     brep.shell(recipient)?;
     remove_and_post_insert(brep, faceuse, source, recipient)?;
     refresh_faceuse_sibling_links(brep, source)?;
@@ -979,7 +993,8 @@ fn native_bounds(
 ) -> Result<crate::geom::extent3d::Extent3d> {
     match status {
         // Native SER returns the box unioned so far.
-        Ok(()) | Err(SolidError::Upstream { .. } | SolidError::Nlib { .. }) => Ok(bounds),
+        Ok(()) => Ok(bounds),
+        Err(e) if e.upstream_status().is_some() || e.is_nurbs_failure() => Ok(bounds),
         // Missing dependencies and safety errors must not become ordinary native
         // status results or disappear into an initialized extent.
         Err(error) => Err(error),
@@ -1187,7 +1202,8 @@ where
         let radius = if let Some(radius) = input.sphere_bound {
             radius
         } else {
-            shell_brep(brep, shell_id)?.ok_or(SolidError::null_pointer(OP))?;
+            shell_brep(brep, shell_id)?
+                .ok_or_else(|| SolidError::topology_missing(OP, "the shell's B-rep"))?;
             // pBrep->CalculateBoundingBox(sBBox) (unit `query.brep`, default arguments)
             qbrep::calculate_bounding_box(kernel, &mut *brep, BoundingBoxOptions::default())?
                 .sphere_bound()
@@ -1196,29 +1212,33 @@ where
         let end = input.start + input.direction * (3.01 * radius);
         let direction = (end - input.start)
             .unitize()
-            .map_err(|_| SolidError::Upstream {
-                operation: OP,
-                code: 1007, // SmVector3d::Unitize returns SM_ERR_INVALID_INPUT.
-                entity: None,
+            // SmVector3d::Unitize returns SM_ERR_INVALID_INPUT.
+            .map_err(|_| {
+                SolidError::topology_invalid_value(OP, "the ray's direction has zero length")
             })?;
         // `SmNewMarkAndLock` with the default (all marks) mask, released on every path.
-        let faces = with_mark_lock(kernel, ALL_MARKS, |kernel, mark| {
-            let mut marks = Marks::default();
-            let mut faces = Vec::new();
-            for id in brep.shell(shell_id)?.get_faceuses()? {
-                let faceuse = brep.faceuse(id)?;
-                let face = faceuse.face.ok_or(SolidError::null_pointer(OP))?;
-                if marks.is_marked(kernel, Entity::Face(face), mark) {
-                    continue;
+        let faces =
+            with_mark_lock(kernel, ALL_MARKS, |kernel, mark| {
+                let mut marks = Marks::default();
+                let mut faces = Vec::new();
+                for id in brep.shell(shell_id)?.get_faceuses()? {
+                    let faceuse = brep.faceuse(id)?;
+                    let face = faceuse
+                        .face
+                        .ok_or_else(|| SolidError::topology_missing(OP, "the face use's face"))?;
+                    if marks.is_marked(kernel, Entity::Face(face), mark) {
+                        continue;
+                    }
+                    marks.mark(kernel, Entity::Face(face), mark);
+                    let mate = brep.faceuse(faceuse.mate.ok_or_else(|| {
+                        SolidError::topology_missing(OP, "the face use's mate")
+                    })?)?;
+                    if mate.shell != Some(shell_id) {
+                        faces.push((brep_id, face));
+                    }
                 }
-                marks.mark(kernel, Entity::Face(face), mark);
-                let mate = brep.faceuse(faceuse.mate.ok_or(SolidError::null_pointer(OP))?)?;
-                if mate.shell != Some(shell_id) {
-                    faces.push((brep_id, face));
-                }
-            }
-            Ok::<_, SolidError>(faces)
-        })??;
+                Ok::<_, SolidError>(faces)
+            })??;
         let shape = world.shell_ray_shape(kernel, (brep_id, brep), &faces)?;
         let vectors = [direction];
         let solutions = world.solve_shape_ray(
@@ -1268,14 +1288,17 @@ where
                 .set_class_object(PointClassType::Unknown, None);
         }
         if parameter < EFF_ZERO * (1.0 + input.start.max_dimension()) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the ray hits the shell at its start",
+            ));
         }
         let object = chosen
             .objects
             .first()
             .copied()
             .flatten()
-            .ok_or(SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::topology_missing(OP, "the face the ray hits"))?;
         state.classification.load_from_intersection(
             input.zone_tolerance,
             object,
@@ -1284,7 +1307,8 @@ where
             parameter,
         )?;
         let endpoint = input.start + direction * parameter;
-        shell_brep(brep, shell_id)?.ok_or(SolidError::null_pointer(OP))?;
+        shell_brep(brep, shell_id)?
+            .ok_or_else(|| SolidError::topology_missing(OP, "the shell's B-rep"))?;
         let curve = BSplineCurve::create_line_segment(3, input.start, endpoint)?;
         let sector = world.shell_ray_sector(
             &*kernel,
@@ -1506,22 +1530,17 @@ fn ray_brep_solve(
 enum Checked<T> {
     /// It succeeded.
     Value(T),
-    /// It failed and the status is ignored, as upstream.
-    Ignored,
-    /// It failed and, with
-    /// [`crate::kernel::UpstreamFixes::shell_inner_shell_of_statuses`], decides.
+    /// It failed, and that decides (fork 4038552, WR-497): upstream ignores the status.
     Decides,
 }
 
-/// The status-checked variant of an ignored upstream call: with
-/// [`crate::kernel::UpstreamFixes::shell_inner_shell_of_statuses`] an `Err` decides;
-/// without it the error is ignored, except [`SolidError::Unported`].
-fn checked<T>(k: &Kernel, r: Result<T>) -> Result<Checked<T>> {
+/// The status-checked variant of an ignored upstream call: an `Err` decides, except
+/// [`SolidError::Unported`] or a cancellation, which propagates.
+fn checked<T>(r: Result<T>) -> Result<Checked<T>> {
     match r {
         Ok(v) => Ok(Checked::Value(v)),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) if k.fixes.shell_inner_shell_of_statuses => Ok(Checked::Decides),
-        Err(_) => Ok(Checked::Ignored),
+        Err(_) => Ok(Checked::Decides),
     }
 }
 
@@ -1551,19 +1570,16 @@ pub fn is_inner_shell_of_tri(
 ///
 /// Upstream ignores the statuses of the closure traversal, the bounding box, the
 /// sample points, the ray solve, the classification insert and the crossing face's
-/// evaluations; the opt-in
-/// [`crate::kernel::UpstreamFixes::shell_inner_shell_of_statuses`] (fork 4038552)
-/// returns [`SM_UNSURE`] when the closure, the box, the sample points or a crossing
-/// face's point or normal cannot be computed, and goes on to the next ray when the ray
-/// cannot be solved or classified.
+/// evaluations. Here (fork 4038552, WR-497) it returns [`SM_UNSURE`] when the closure,
+/// the box, the sample points or a crossing face's point or normal cannot be computed,
+/// and goes on to the next ray when the ray cannot be solved or classified.
 ///
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] where
 /// upstream dereferences null (a wire shell without edge or edge curve, a vertex shell
 /// without vertex, a crossing face without surface or face uses); the errors upstream
-/// does not ignore (default) or every error of the classification walk
-/// ([`SolidError::Unported`] always propagates).
+/// does not ignore; an [`SolidError::Unported`] or cancelled call always propagates.
 #[allow(clippy::too_many_lines)] // one upstream routine
 pub fn is_inner_shell_of(
     k: &mut Kernel,
@@ -1574,11 +1590,10 @@ pub fn is_inner_shell_of(
     use crate::curve::curve::Curve;
     use crate::curve::line::{BoundedLineOptions, Line};
     use crate::geom::extent1d::Extent1d;
-    use crate::geom::extent3d::Extent3d;
     use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
     use crate::intersect::curve_class::p1::CurveClassification;
     use crate::intersect::curve_class::p4::ClassificationInit;
-    use crate::math::{Point3, Vec3, EFF_ZERO};
+    use crate::math::{Vec3, EFF_ZERO};
     use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use crate::nurbs::knots::Side;
     use crate::topology::brep_cache::CacheObject;
@@ -1603,13 +1618,15 @@ pub fn is_inner_shell_of(
                 Some(fu) => crate::topology::topology_traverser::closure_traversal(
                     k, b, &mut marks, fu, &lock, None,
                 ),
-                None => Err(SolidError::null_pointer(OP_ISO)),
+                None => Err(SolidError::topology_missing(
+                    OP_ISO,
+                    "the outer shell's first face use",
+                )),
             };
             let mut lock = lock;
             lock.release(std::slice::from_mut(&mut k.context))?;
-            match checked(k, r)? {
+            match checked(r)? {
                 Checked::Value(c) => is_closed = c,
-                Checked::Ignored => (),
                 Checked::Decides => return Ok(SM_UNSURE),
             }
         }
@@ -1619,20 +1636,16 @@ pub fn is_inner_shell_of(
     }
 
     // get size based on Approx Brep bounding box
-    let bbox = checked(
+    let bbox = checked(qbrep::calculate_bounding_box(
         k,
-        qbrep::calculate_bounding_box(
-            k,
-            &mut *b,
-            BoundingBoxOptions {
-                approx: true,
-                ..BoundingBoxOptions::default()
-            },
-        ),
-    )?;
+        &mut *b,
+        BoundingBoxOptions {
+            approx: true,
+            ..BoundingBoxOptions::default()
+        },
+    ))?;
     let mut bbox = match bbox {
         Checked::Value(x) => x,
-        Checked::Ignored => Extent3d::new(),
         Checked::Decides => return Ok(SM_UNSURE),
     };
     bbox.expand_absolute(1.0);
@@ -1668,7 +1681,7 @@ pub fn is_inner_shell_of(
             // SmFaceuse::GetPointsInFace (which resets its outputs first; a failure
             // here leaves them empty)
             let r = crate::topology::face::p2::points_in_face(k, b, f, smp_cnt);
-            match checked(k, r)? {
+            match checked(r)? {
                 Checked::Value(points) => {
                     let mut pv = points.pv;
                     if orientation == OrientType::Opposite {
@@ -1678,7 +1691,6 @@ pub fn is_inner_shell_of(
                     }
                     smp_pv = pv;
                 }
-                Checked::Ignored => smp_pv.clear(),
                 Checked::Decides => return Ok(SM_UNSURE),
             }
         } else if is_wire_shell {
@@ -1691,17 +1703,14 @@ pub fn is_inner_shell_of(
                 .curve
                 .clone()
                 .ok_or_else(|| null("wire edge without curve"))?;
-            let mut point = Point3::UNDEF;
             for jj in 0..smp_cnt {
                 // sample the curve and pick varying directions for the vector
-                match checked(
-                    k,
+                let point = match checked(
                     curve.evaluate_point(k, ivl.evaluate((jj + 1) as f64 / (smp_cnt + 1) as f64)),
                 )? {
-                    Checked::Value(p) => point = p,
-                    Checked::Ignored => (),
+                    Checked::Value(p) => p,
                     Checked::Decides => return Ok(SM_UNSURE),
-                }
+                };
                 let mut dir = Vec3::new(
                     k.rng.next_signed_unit(),
                     k.rng.next_signed_unit(),
@@ -1750,9 +1759,8 @@ pub fn is_inner_shell_of(
             ));
 
             // intersect line with Brep
-            let mut solutions = match checked(k, ray_brep_solve(k, b, &line, tol))? {
+            let mut solutions = match checked(ray_brep_solve(k, b, &line, tol))? {
                 Checked::Value(s) => s,
-                Checked::Ignored => crate::geom::solution_array::SolutionArray::new(),
                 Checked::Decides => continue,
             };
 
@@ -1831,7 +1839,7 @@ pub fn is_inner_shell_of(
                     solutions.as_slice(),
                     0,
                 );
-                if matches!(checked(k, r)?, Checked::Decides) {
+                if matches!(checked(r)?, Checked::Decides) {
                     continue;
                 }
             }
@@ -1882,16 +1890,15 @@ pub fn is_inner_shell_of(
                     .surface
                     .as_ref()
                     .ok_or_else(|| null("crossing face without surface"))?;
-                let pv0 = checked(k, surface.evaluate_point(k, uv))?;
+                let pv0 = checked(surface.evaluate_point(k, uv))?;
                 if matches!(pv0, Checked::Decides) {
                     return Ok(SM_UNSURE);
                 }
-                let normal =
-                    match checked(k, surface.evaluate_normal(k, uv, Side::Left, Side::Left))? {
-                        Checked::Value(n) => n,
-                        Checked::Ignored => Vec3::UNDEF,
-                        Checked::Decides => return Ok(SM_UNSURE),
-                    };
+                let normal = match checked(surface.evaluate_normal(k, uv, Side::Left, Side::Left))?
+                {
+                    Checked::Value(n) => n,
+                    Checked::Decides => return Ok(SM_UNSURE),
+                };
 
                 // figure out which shell is being exited and which shell is being
                 // entered
@@ -2100,7 +2107,7 @@ mod tests {
         assert_eq!(faceuse_sibling_links(&brep, b).unwrap(), (Some(c), Some(c)));
         // Remove of a member that is not in the list is upstream's SM_ERR status
         let e = shell_remove_faceuse(&mut brep, s, a).unwrap_err();
-        assert!(matches!(e, SolidError::Upstream { .. }));
+        assert!(e.upstream_status().is_some());
         // PostInsert into an empty shell makes its head; the type is not touched
         shell_post_insert_faceuse(&mut brep, t, a).unwrap();
         assert_eq!(

@@ -37,7 +37,6 @@ const R: f64 = 2.0;
 
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = true;
     k
 }
@@ -358,16 +357,11 @@ fn the_record_is_the_fork_s_and_reads_back() {
             let tol = if ft == FileType::Binary { 0.0 } else { 1e-9 };
             assert!((p - want).length() <= tol, "{ft:?}: {p:?} != {want:?}");
 
-            // without the flag (or with only one of the two) the type is refused, as the
-            // pinned reader refuses it
-            for (gn, def) in [(false, false), (true, false), (false, true)] {
-                let mut off = Kernel::default();
-                off.fixes.fillet_gn_section_generator = gn;
-                off.fixes.fillet_round_as_definition = def;
-                let mut r = DatabaseReader::new();
-                r.open_for_read(bytes.clone(), ft);
-                assert!(Surface::read_from_db(&off, PROCEDURAL_BLEND_TYPE, &mut r, 30).is_err());
-            }
+            // without the flag the type is refused, as the pinned reader refuses it
+            let off = Kernel::default();
+            let mut r = DatabaseReader::new();
+            r.open_for_read(bytes.clone(), ft);
+            assert!(Surface::read_from_db(&off, PROCEDURAL_BLEND_TYPE, &mut r, 30).is_err());
         }
     }
 }

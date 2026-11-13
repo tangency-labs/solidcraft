@@ -907,7 +907,7 @@ fn fail(e: &SolidError) -> Fail {
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
         Ok(_) => Ok(0.0),
-        Err(SolidError::Upstream { code, .. }) => Ok(f64::from(*code)),
+        Err(up_err) if solidcore::error::upstream_status(up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
         Err(e) => Err(fail(e)),
     }
 }
@@ -1066,7 +1066,7 @@ fn put_samples(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
             }
             Err(e) => {
                 o.push(match e {
-                    SolidError::Upstream { code, .. } => f64::from(code),
+                    up_err if solidcore::error::upstream_status(&up_err).is_some() => f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
                     _ => -1.0,
                 });
                 o.extend([0.0, 0.0, 0.0]);

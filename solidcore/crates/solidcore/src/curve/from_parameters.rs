@@ -190,19 +190,33 @@ pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve>
     Ok(Curve::from(e))
 }
 
-/// A pcurve's numbers as the kernel's UV trim of an edge over `interval` (the edge's interval
-/// in the kernel's parameter): the record's pcurve runs along the edge over the edge's own
-/// interval in the record, and the kernel's trim runs along the edge over the edge's kernel
-/// interval, so its knots are mapped affinely from the pcurve's domain onto `interval` (copied
-/// as they are where the two are the same). Its points are scaled by `scale` in u and v: a
-/// plane face's kernel parameters are the record's times its axes' lengths (`[1, 1]`
-/// elsewhere, copied).
+/// Map a pcurve's entire natural support onto `interval` and scale its UV
+/// coordinates. This is for callers that intend to remap the whole support.
+/// A B-rep edge may occupy only part of that support: its importer must use
+/// [`uv_trim_on_edge`] with the record edge's actual interval instead.
 ///
 /// # Errors
 ///
 /// `InvalidInput` for a spline whose knots do not fit its points or a pcurve or interval of no
 /// length; those of the constructors.
 pub fn uv_trim(c: &Record2, interval: &Extent1d, scale: [f64; 2]) -> Result<Curve> {
+    let source = c
+        .interval()
+        .ok_or_else(|| SolidError::invalid_input(OP_TRIM, "invalid pcurve interval"))?;
+    uv_trim_on_edge(c, source, interval, scale)
+}
+
+/// Rebuild a pcurve while mapping the record edge parameter to the kernel edge
+/// parameter. The pcurve's own support may extend beyond either edge endpoint.
+///
+/// # Errors
+/// Refuses invalid edge intervals or malformed UV spline data.
+pub fn uv_trim_on_edge(
+    c: &Record2,
+    source: [f64; 2],
+    interval: &Extent1d,
+    scale: [f64; 2],
+) -> Result<Curve> {
     let bad = |reason: &'static str| SolidError::invalid_input(OP_TRIM, reason);
     let [su, sv] = scale;
     let same = su == 1.0 && sv == 1.0;
@@ -238,14 +252,35 @@ pub fn uv_trim(c: &Record2, interval: &Extent1d, scale: [f64; 2]) -> Result<Curv
         return Err(bad("too few knots"));
     };
     let (lo, hi) = (interval.min(), interval.max());
-    if !(s_hi > s_lo) {
+    let [from_lo, from_hi] = source;
+    if !(s_lo.is_finite()
+        && s_hi.is_finite()
+        && s_hi > s_lo
+        && from_lo.is_finite()
+        && from_hi.is_finite()
+        && from_hi > from_lo
+        && lo.is_finite()
+        && hi.is_finite()
+        && hi > lo)
+    {
         return Err(bad("the pcurve's domain has no length"));
     }
-    let mapped: Vec<f64> = if (s_lo, s_hi) == (lo, hi) {
+    let mapped: Vec<f64> = if (from_lo, from_hi) == (lo, hi) {
         knots.to_vec()
     } else {
-        let by = (hi - lo) / (s_hi - s_lo);
-        knots.iter().map(|s| lo + (s - s_lo) * by).collect()
+        let by = (hi - lo) / (from_hi - from_lo);
+        knots
+            .iter()
+            .map(|s| {
+                if *s == from_lo {
+                    lo
+                } else if *s == from_hi {
+                    hi
+                } else {
+                    lo + (s - from_lo) * by
+                }
+            })
+            .collect()
     };
     Ok(Curve::from(spline(&mapped, &rows, 2, OP_TRIM)?))
 }
@@ -273,9 +308,11 @@ pub struct RecordCurve {
 /// The record of the kernel's edge curve `c` over `interval` (its kernel parameter), the
 /// inverse of [`from_parameters`] and [`conic_on_form`]:
 ///
-/// - **Line:** the line through the curve's points at the interval's ends, over `[0, 1]`. A
-///   kernel line is affine in its parameter (its point plus the parameter times its vector),
-///   so this is the same line, the record's parameter an affine image of the kernel's.
+/// - **Line:** the line as the kernel holds it, its point and its point plus its vector, over
+///   the STEP parameters of the interval's ends (`ConvertTFromNURBSToSTEP`); where those run
+///   down, the vector and the parameters are negated so the interval increases. This is what
+///   SolidCraft's flat export wrote (`FlatFromBrep`'s line origin and direction, its range in
+///   STEP parameters), so a line comes back as it went in, not reparameterised onto `[0, 1]`.
 /// - **Circle, ellipse:** the label on the conic's own frame (copied, not rebuilt by a cross
 ///   product), its y axis reversed where the conic's NURBS runs against its angle (its own
 ///   `inside_out`, no sampling), with that NURBS as its form, over the kernel's interval.
@@ -298,15 +335,30 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
         return Err(bad("the interval is not finite and increasing"));
     }
     match c.kind() {
-        CurveKind::Line(_) => {
-            let (a, b) = (c.evaluate_point(k, lo)?, c.evaluate_point(k, hi)?);
+        CurveKind::Line(l) => {
+            let can = l.canonical();
+            let (mut s0, mut s1) = (
+                c.convert_t_from_nurbs_to_step(k, lo)?,
+                c.convert_t_from_nurbs_to_step(k, hi)?,
+            );
+            let mut v = can.vector;
+            // a line whose parameter runs against its vector over the edge: the vector
+            // reversed, the parameters negated, so the record's interval increases
+            if s0 > s1 {
+                (s0, s1) = (-s0, -s1);
+                v = -v;
+            }
+            if !(s0.is_finite() && s1.is_finite() && s1 > s0) {
+                return Err(bad("a line's parameters over the edge are not increasing"));
+            }
+            let p = can.point;
             return Ok(RecordCurve {
                 curve: Record::Line {
-                    start: [a.x, a.y, a.z],
-                    end: [b.x, b.y, b.z],
+                    start: [p.x, p.y, p.z],
+                    end: [p.x + v.x, p.y + v.y, p.z + v.z],
                 },
                 nurbs: None,
-                interval: [0.0, 1.0],
+                interval: [s0, s1],
             });
         }
         CurveKind::Ellipse(e) => {
@@ -375,7 +427,7 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
 
 /// The B-spline a curve is (every kernel line, conic and spline is one, its NURB made on a
 /// copy where it has none yet); `None` for the curves that are not.
-fn b_spline_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<Cow<'c, BSplineCurve>>> {
+pub(crate) fn b_spline_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<Cow<'c, BSplineCurve>>> {
     use crate::curve::curve::CurveKind;
     Ok(Some(match c.kind() {
         CurveKind::BSpline(b) => Cow::Borrowed(b),
@@ -518,17 +570,48 @@ fn p3(a: [f64; 3]) -> Point3 {
 }
 
 /// A record frame's origin and axes, the axes checked unit and square to rounding.
-fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3)> {
+/// Unit and square axes, each within 8 ulps of 1: the record construction's
+/// and the exact-form check's shared frame test.
+fn unit_square(x: Vec3, y: Vec3) -> bool {
     let ulps = 8.0 * f64::EPSILON;
-    let (x, y) = (p3(f.x_axis), p3(f.y_axis));
     let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-    if !(unit(x) && unit(y) && x.dot(y).abs() <= ulps) {
+    unit(x) && unit(y) && x.dot(y).abs() <= ulps
+}
+
+fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3)> {
+    let (x, y) = (p3(f.x_axis), p3(f.y_axis));
+    if !unit_square(x, y) {
         return Err(SolidError::invalid_input(
             OP,
             "the frame's axes are not unit and square",
         ));
     }
     Ok((p3(f.origin), x, y))
+}
+
+/// Check an ellipse's attached rational form against its analytic support using
+/// the same exact-class certificate as record construction. Public curve
+/// parameters remain the attached form's parameters.
+pub(crate) fn ellipse_form_is_exact(e: &Ellipse) -> Result<bool> {
+    let placement = e.position();
+    let (o, x, y) = (placement.origin(), placement.x_axis(), placement.y_axis());
+    let (rx, ry) = (e.x_radius(), e.y_radius());
+    if !(rx > 0.0
+        && ry > 0.0
+        && rx.is_finite()
+        && ry.is_finite()
+        && [o.x, o.y, o.z].iter().all(|x| x.is_finite())
+        && unit_square(x, y))
+    {
+        return Ok(false);
+    }
+    let mut form = e.base().clone_exact();
+    for point in form.get_or_create_gw_nurb()?.cpts_mut() {
+        if point.z == NOZ {
+            point.z = 0.0;
+        }
+    }
+    curve_on_quadrics(&form, &quadrics(o, x, y, rx, ry, false))
 }
 
 /// The plane of a conic and its sphere (a circle) or elliptic cylinder (an ellipse), as

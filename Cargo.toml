@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.40.0-rc.3"
+version = "0.41.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -16,23 +16,31 @@ repository = "https://github.com/bherbruck/solidcraft"
 [workspace.dependencies]
 robust = "1.2"
 # internal
+craft-plugin = { path = "crates/craft-plugin" }
+craft-plugin-wasm = { path = "crates/craft-plugin-wasm" }
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-profile = { path = "crates/profile" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
 solidcraft-smlib = { path = "crates/smlib" }
-solidcraft-step = { path = "crates/step" }
 solidcraft-render = { path = "crates/render" }
 solidcraft-dynamics = { path = "crates/dynamics" }
 solidcraft-gpu = { path = "crates/gpu" }
 solidcraft-doc = { path = "crates/doc" }
+# Versioned file formats: the format tag, the version registry and its upgrade, a newer file told
+solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
 solidcraft-engine = { path = "crates/engine" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
+solidcraft-ui-kit = { path = "crates/ui-kit" }
+solidcraft-look = { path = "crates/look" }
 solidcraft-ui-registry = { path = "crates/ui-registry" }
 solidcraft-color = { path = "crates/color" }
 solidcraft-ui-text = { path = "crates/ui-text" }
 solidcraft-theme = { path = "crates/theme" }
+solidcraft-viewport = { path = "crates/viewport" }
+solidcraft-viewport-egui = { path = "crates/viewport-egui" }
+solidcraft-viewport-gpu = { path = "crates/viewport-gpu" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-mcp-server = { path = "crates/mcp-server" }
@@ -47,6 +55,15 @@ solidcore = { path = "solidcore/crates/solidcore" }
 # Geometry as data (solidcore's layers §1, "Record"): the B-rep record, its structural validation
 # and the native body file. Vendored with solidcore, in the same subtree.
 solidcore-record = { path = "solidcore/crates/solidcore-record" }
+# The modelling layer (solidcore's layers §1, "Ops"): the record-level calls SolidCraft makes into the
+# kernel, converting through solidcore-convert.
+solidcore-ops = { path = "solidcore/crates/solidcore-ops" }
+# STEP import and export (vendored with solidcore): the Part 21 parser is solidcore-record's.
+solidcore-step = { path = "solidcore/crates/solidcore-step" }
+# Geometry made drawable (solidcore's layers §3): the one mesher, SolidCraft's, moved into the
+# subtree (RFC 0003, item 1.1), with the display mesh and its levels of detail, the types
+# SolidCraft's meshes are. Vendored with solidcore, in the same subtree.
+solidcore-tess = { path = "solidcore/crates/solidcore-tess" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
 
@@ -63,12 +80,24 @@ schemars = "1.2"
 serde_path_to_error = "0.1"
 log = "0.4"
 sha2 = "0.10"
+# Provenance: the CBOR manifest encoding (RFC 8949), COSE_Sign1 records (RFC 9052) and Ed25519
+# (RFC 8032). All pure Rust and permissive (Apache-2.0; BSD-3-Clause), so the browser build and
+# `cargo xtask licences --check` keep working.
+ciborium = { version = "0.2", default-features = false, features = ["std"] }
+serde_bytes = "0.11"
+coset = "0.4"
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "zeroize"] }
+# OpenPGP detached-signature verification (MIT OR Apache-2.0; pure Rust, builds for wasm with
+# its `wasm` feature). GnuPG signs for a key on a smartcard; no key material is copied out.
+pgp = { version = "=0.21.1", default-features = false, features = ["wasm"] }
 moxcms = { version = "0.8.1", default-features = false, features = ["extended_range"] }
 semver = "1"
 
 # constrained Delaunay + Ruppert refinement for trimmed faces (MIT OR Apache-2.0).
 spade = { version = "2.15", default-features = false, features = ["std"] }
 rayon = "1.12"
+# Native render-memory admission; RAM-only queries through a safe MIT-licensed API.
+sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 
 # packages (3MF)
 zip = { version = "9", default-features = false, features = ["deflate"] }

@@ -59,6 +59,7 @@ const FIXED: &[FileAction] = &[
     FileAction::Save,
     FileAction::SaveAs,
     FileAction::SaveJson,
+    FileAction::VerifySignature,
     DESIGN_PROPERTIES,
     FileAction::Undo,
     FileAction::Redo,
@@ -103,6 +104,7 @@ fn id_of(action: &FileAction) -> (String, Option<Value>) {
         FileAction::Save => fixed("ui.file.save"),
         FileAction::SaveAs => fixed("ui.file.save_as"),
         FileAction::SaveJson => fixed("ui.file.save_json"),
+        FileAction::VerifySignature => fixed("file.verify"),
         FileAction::Export(format) => ("ui.file.export".into(), Some(json!({ "format": format }))),
         FileAction::ExportMesh(format) => ("ui.file.export_mesh".into(), Some(json!({ "format": format }))),
         FileAction::Command(command) => fixed(command),
@@ -172,6 +174,7 @@ fn menu_bar(app: &SolveApp, recent: &[String]) -> MenuBar {
         item(app.tr("ui.save"), &FileAction::Save),
         item(&more("ui.save_as"), &FileAction::SaveAs),
         item(app.tr_label("Save As JSON\u{2026}"), &FileAction::SaveJson),
+        item(app.tr("cmd.file.verify"), &FileAction::VerifySignature),
         Item::sep(),
     ]);
     file.extend(EXPORTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
@@ -342,8 +345,8 @@ mod tests {
         leaves(&bar.menus, &mut entries);
         entries.retain(|i| i.id != "-");
         // App menu 2 + Quit; File: New, Open, 1 recent, Clear, 3 inserts, Save, Save As, JSON,
-        // 7 exports, Properties; Edit 2; Window 1; Help 7.
-        assert_eq!(entries.len(), 3 + 4 + 3 + 3 + 7 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
+        // Verify Signature, 7 exports, Properties; Edit 2; Window 1; Help 7.
+        assert_eq!(entries.len(), 3 + 4 + 3 + 4 + 7 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
         for item in &entries {
             assert!(entry_of(&item.id, item.params.as_ref()).is_some(), "`{}` {:?} runs nothing", item.id, item.params);
         }

@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
 use crate::SolveApp;
-use solidcraft_engine::render::{Camera, job::CancelToken};
+use solidcraft_engine::render::job::CancelToken;
+use solidcraft_viewport::Camera;
 
 pub(super) const LIMIT: usize = 16;
 #[cfg(not(target_arch = "wasm32"))]

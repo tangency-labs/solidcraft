@@ -5,6 +5,7 @@ use crate::ui_kit;
 use crate::ui_kit::{choice_row, expr_row, expr_row_positive, hint_row, hint_row_positive};
 use solidcraft_engine::kernel::Continuity;
 
+/// The command whose icon and label head a dialog of `kind`, when it has one.
 pub(super) fn command(kind: &Kind) -> Option<&'static str> {
     match kind {
         Kind::Material { .. } => Some("material.assign"),
@@ -44,6 +45,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
         Kind::Construct { command, .. } => Some(command),
+        Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
         Kind::Split => Some("solid.split_body"),
         Kind::DeleteFaces => Some("face.delete"),
@@ -82,6 +84,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             _ => k.simple_metadata().map(|(command, _)| command),
         },
         Kind::Frame(_) => Some("frame.member"),
+        Kind::EndCap(_) => Some("frame.end_cap"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
@@ -97,6 +100,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_assembly::Asm::MotionLink { .. } => Some("joint.motion_link"),
             crate::dialogs_assembly::Asm::Coupling(f) => Some(f.command),
             crate::dialogs_assembly::Asm::Cam(_) => Some("joint.cam"),
+            crate::dialogs_assembly::Asm::Constrain(_) => Some("assembly.constraint.create"),
             crate::dialogs_assembly::Asm::Trace(_) => Some("motion.trace"),
             crate::dialogs_assembly::Asm::Drive { .. } => Some("joint.drive"),
             crate::dialogs_assembly::Asm::Interference { .. } => Some("inspect.interference"),
@@ -283,7 +287,7 @@ fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Ma
 fn fillet_turn_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, setback: &mut Option<String>) {
     let before = extra.get("turn").cloned();
     let row = ui.scope(|ui| form_row(ui, "ui.fillet_turn", |ui| extra_choice(ui, extra, "fi_turn", "turn", &FILLET_TURNS)));
-    row.response.on_hover_text(tr("ui.fillet_turn_tip"));
+    row.response.backing_on_hover_text(tr("ui.fillet_turn_tip"));
     if extra.get("turn") != before.as_ref() {
         settle_fillet_options(extra, "turn", setback);
     }
@@ -307,6 +311,32 @@ const MAX_COIL_REVOLUTIONS: i64 = 200;
 fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String, max: i64) -> bool {
     let eval = |text: &str| doc.eval(text.trim(), solidcraft_engine::doc::expr::Kind::Unitless).ok();
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
+}
+
+/// One rectangular pattern direction (`index` 0 or 1) as its own titled group: the direction's
+/// pick, then its Quantity, Spacing and (for features) Alignment, in the same order for both
+/// directions, so a direction's settings sit together (#9634).
+fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
+    let (key, title, quantity_label, spacing_label) = if index == 0 {
+        ("pattern_direction1", "Direction 1", "Quantity", "Spacing")
+    } else {
+        ("pattern_direction2", "Direction 2", "Quantity 2", "Spacing 2")
+    };
+    let features = d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES);
+    ui_kit::section(ui, key, title, true, |ui| {
+        let mut enter = false;
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, index + 1..index + 2);
+        if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut d.kind {
+            let (count, spacing) = if index == 0 { (count, spacing) } else { (count2, spacing2) };
+            enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
+            enter |= expr_row(ui, spacing_label, spacing);
+        }
+        if features {
+            feature_pattern_alignment_row(ui, &mut d.extra, index);
+        }
+        enter
+    })
+    .unwrap_or(false)
 }
 
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
@@ -338,6 +368,7 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
     }
 }
 
+/// The dialog's form: its hints, inputs and value rows. True when Enter was pressed in a field.
 pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let t = Tokens::get();
     let mut enter = false;
@@ -377,10 +408,17 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     if let Some(key) = manage_hint {
         ui_kit::text(ui, tr(key), ui_kit::Text::Hint("manage"));
     }
+    // Plane, Axis or Point: which method its picks chose, and that more picks choose again.
+    if let Some(hint) = d.auto.as_ref().map(super::auto::hint) {
+        ui_kit::text(ui, &hint, ui_kit::Text::Hint("auto"));
+    }
     placement_row(d, ui, app);
     if crate::hole_refs::takes(d) {
         // Each reference edge with its distance (#37, #6380).
         enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names, app.preferences.length_decimals);
+    } else if matches!(d.kind, Kind::PatternRect { .. }) {
+        // Each direction's pick shows in its own group, with its quantity and spacing (#9634).
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -394,7 +432,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::Part(k) => enter |= crate::dialogs_parts::rows(app, ui, k, &d.inputs),
         Kind::PartSize(k) => enter |= crate::dialogs_part_size::rows(app, ui, k),
         Kind::SaveMesh(k) => enter |= crate::dialogs_save_mesh::rows(app, ui, k, &mut d.inputs),
-        Kind::ViewDxf { dashed, tolerance } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance),
+        Kind::ViewDxf { dashed, tolerance, zero_origin } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance, zero_origin),
         Kind::ViewNavigator(form) => crate::view_gizmo::rows(app, ui, form, &d.inputs),
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::Sketch => {
@@ -660,15 +698,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 });
             }
         }
-        Kind::PatternRect { count, spacing, count2, spacing2 } => {
-            enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
-            enter |= expr_row(ui, "Spacing", spacing);
-            enter |= quantity_row(ui, &app.session.doc, "Quantity 2", count2);
-            enter |= expr_row(ui, "Spacing 2", spacing2);
-            if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
-                feature_pattern_alignment_row(ui, &mut d.extra, 0);
-                feature_pattern_alignment_row(ui, &mut d.extra, 1);
-            }
+        Kind::PatternRect { .. } => {
+            enter |= pattern_direction_group(app, d, ui, 0);
+            enter |= pattern_direction_group(app, d, ui, 1);
         }
         Kind::PatternCirc { count, angle } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
@@ -677,7 +709,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
             }
         }
-        Kind::Hole { kind, opts, .. } => {
+        Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } => {
             let doc = &app.session.doc;
             let eval = |e: &str, k| doc.eval(e, k).ok();
             // Each option shows the hole it makes while hovered (dialogs_hole::preview).
@@ -710,10 +742,19 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 ui_kit::dropdown_previews(ui, "hole_kind", kind, &HOLE_LABELS, |ui, i| preview(ui, Choice::Type(i)));
             });
             form_row(ui, "Hole Tap Type", |ui| {
-                let mut tap = usize::from(opts.tapped);
-                ui_kit::dropdown_previews(ui, "hole_tap", &mut tap, &["Simple", "Tapped"], |ui, i| preview(ui, Choice::Tapped(i == 1)));
-                opts.tapped = tap == 1;
+                let mut tap = if opts.tapped { 2 } else { usize::from(opts.clearance) };
+                ui_kit::dropdown_previews(ui, "hole_tap", &mut tap, &["Simple", "ui.hole_clearance", "Tapped"], |ui, i| preview(ui, Choice::Tap(i)));
+                opts.clearance = tap == 1;
+                opts.tapped = tap == 2;
             });
+            // A clearance hole for a bolt: its size and fit set the diameter (ISO 273).
+            if opts.clearance {
+                enter |= crate::dialogs_hole::clearance_rows(ui, opts);
+                // A counterbore for a cap screw: its head sets the counterbore (#12321).
+                if *kind == 1 {
+                    crate::dialogs_hole::head_row(ui, opts, cb_diameter, cb_depth);
+                }
+            }
             if opts.tapped {
                 enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread, &mut opts.drill);
                 crate::dialogs_thread::hole_hand_row(ui, &mut opts.hand);
@@ -789,6 +830,20 @@ pub(crate) fn primitive_label(key: &str) -> &str {
         "pitch" => "ui.pitch",
         "section_size" => "ui.section_size",
         _ => key,
+    }
+}
+
+/// Cylinder and Sphere take their size as a diameter or a radius (#6609). Switching converts the
+/// size, so the part stays as it is, and OK sends the one shown.
+fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
+    let Some(field) = fields.iter_mut().find(|(k, _)| matches!(*k, "diameter" | "radius")) else { return };
+    let current = usize::from(field.0 == "radius");
+    let mut selected = current;
+    form_row(ui, "Size", |ui| ui_kit::segmented(ui, &mut selected, &["Diameter", "Radius"], Default::default()));
+    if selected != current {
+        let diameter = selected == 0;
+        field.1 = crate::length_input::scaled(&field.1, diameter);
+        field.0 = if diameter { "diameter" } else { "radius" };
     }
 }
 
@@ -949,9 +1004,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             } else {
                 &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin")]
             };
-            for (label, key) in [("From Snap", "from_snap"), ("To Snap", "to_snap")] {
+            // A planar To face as the plane it lies in: the moved face comes onto it along its
+            // normal only, without sliding across to the picked point.
+            let to_snaps: &[(&str, &str)] = if *components {
+                snaps
+            } else {
+                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin"), ("Onto Plane", "plane")]
+            };
+            for (label, key, choices) in [("From Snap", "from_snap", snaps), ("To Snap", "to_snap", to_snaps)] {
                 form_row(ui, label, |ui| {
-                    extra_choice(ui, &mut d.extra, key, key, snaps);
+                    extra_choice(ui, &mut d.extra, key, key, choices);
                 });
             }
             if *components {
@@ -1045,6 +1107,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
             let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
+            if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
+                round_size_row(ui, fields);
+            }
             for (k, v) in fields.iter_mut() {
                 if from_sketch && (*k == "diameter" || *k == "section_size") {
                     continue;
@@ -1096,6 +1161,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(k) => enter |= crate::dialogs_frame::rows(app, ui, k, &d.inputs),
+        Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
         Kind::Section { offset, flip, hatch } => {
@@ -1322,10 +1388,76 @@ mod tests {
         h.app.session.selection = vec![a, b];
         h.step(&json!({"start":"solid.chamfer"})).unwrap();
         h.frames(4);
+        // Picks on two bodies run one command per body, each with its own body and edge (#12453).
+        let bodies: Vec<String> = h.app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
         let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-        let (cmd, p) = commands.first().unwrap();
-        assert_eq!(*cmd, "solid.chamfer");
-        assert!(p.get("body").is_none(), "{p}");
+        assert_eq!(commands.len(), 2, "{commands:?}");
+        for ((cmd, p), body) in commands.iter().zip(&bodies) {
+            assert_eq!(*cmd, "solid.chamfer");
+            assert_eq!(p["body"], json!(body), "{p}");
+            assert_eq!(p["edges"].as_array().unwrap().len(), 1, "{p}");
+        }
+    }
+
+    #[test]
+    fn fillet_picks_on_a_split_body_round_both_halves() {
+        // (#12453) The two halves of a split body share their section edges, so a pick on each
+        // half names no single body: each half's edge goes in its own command, and both halves round.
+        let mut h = Harness::new();
+        sample(&mut h);
+        h.app.run("solid.box", json!({"length":20,"width":10,"height":10,"corner":[0,0,0],"operation":"new","body_name":"Block"})).unwrap();
+        h.app.run("solid.split_body", json!({"body":"Block","plane":{"origin":[10,0,0],"normal":[1,0,0]}})).unwrap();
+        let halves: Vec<String> = h.app.session.world_state().unwrap().bodies.iter().skip(1).map(|b| b.name.clone()).collect();
+        assert_eq!(halves.len(), 2, "{halves:?}");
+        let left = edge_sel(&h.app.session, Vec3::new(5.0, 0.0, 10.0)).unwrap();
+        let right = edge_sel(&h.app.session, Vec3::new(15.0, 0.0, 10.0)).unwrap();
+        // The section edge both halves share: on main the engine refuses its point ("lies on edges of 2 bodies").
+        let section = edge_sel(&h.app.session, Vec3::new(10.0, 5.0, 10.0)).unwrap();
+        let section_body = match &section {
+            Sel::Edge { body, .. } => body.clone(),
+            other => panic!("{other:?}"),
+        };
+        h.app.session.selection = vec![left, right, section];
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.frames(4);
+        let before: Vec<f64> = {
+            let st = h.app.session.world_state().unwrap();
+            halves.iter().map(|name| st.body(name).unwrap().measure().unwrap().volume).collect()
+        };
+        let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(commands.len(), 2, "{commands:?}");
+        // The section edge goes in the command of the body edge_sel gave it, and no other.
+        let on_section = |p: &Value| p["edges"].as_array().unwrap().iter().any(|e| e[0] == json!(10.0) && e[2] == json!(10.0));
+        for (_, p) in &commands {
+            assert_eq!(on_section(p), p["body"] == json!(section_body), "{p}");
+        }
+        for (cmd, mut p) in commands {
+            assert_eq!(cmd, "solid.fillet");
+            p["radius"] = json!(1);
+            h.app.run(&cmd, p).unwrap();
+        }
+        let st = h.app.session.world_state().unwrap();
+        for (name, volume) in halves.iter().zip(before) {
+            let after = st.body(name).unwrap().measure().unwrap().volume;
+            assert!(after < volume, "{name} should lose volume from its rounded edge: {volume} -> {after}");
+        }
+    }
+
+    #[test]
+    fn fillet_picks_on_two_bodies_cannot_edit_a_feature() {
+        // Editing keeps only one command (apply_commands), so picks on two bodies are refused, not dropped (#12453).
+        let mut h = Harness::new();
+        sample(&mut h);
+        h.app.run("solid.box", json!({"length":20,"width":10,"height":10,"corner":[0,0,0],"operation":"new","body_name":"Block"})).unwrap();
+        h.app.run("solid.split_body", json!({"body":"Block","plane":{"origin":[10,0,0],"normal":[1,0,0]}})).unwrap();
+        let left = edge_sel(&h.app.session, Vec3::new(5.0, 0.0, 10.0)).unwrap();
+        let right = edge_sel(&h.app.session, Vec3::new(15.0, 0.0, 10.0)).unwrap();
+        h.app.session.selection = vec![left, right];
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.frames(4);
+        h.app.dialog.as_mut().unwrap().editing = Some((1, None));
+        let err = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap_err();
+        assert!(err.contains("one body"), "{err}");
     }
 
     #[test]

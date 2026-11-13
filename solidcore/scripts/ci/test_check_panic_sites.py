@@ -1,6 +1,7 @@
 """check_panic_sites.py: site keys, proofs, the list ratchet (clippy messages are synthetic)."""
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+import subprocess
 import tempfile
 import unittest
 
@@ -266,6 +267,54 @@ class Main(unittest.TestCase):
             self.assertEqual(c.main(argv), 1)
 
 
+
+
+def commit(repo, files):
+    """A git repository at `repo` with one commit holding `files` ({path: text})."""
+    for name, text in files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text)
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@invalid"]
+    subprocess.run(git + ["init", "-q"], check=True)
+    subprocess.run(git + ["add", "."], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "base"], check=True)
+
+
+class Paths(unittest.TestCase):
+    """#13623: Windows paths, and the list inside a repository it is a folder of."""
+
+    def test_a_windows_span_is_a_library_site(self):
+        src = "fn f(v: &mut Vec<u8>, i: usize) {\n    v.remove(i);\n}\n"
+        msg = remove(src)
+        msg["message"]["spans"][0]["file_name"] = "crates\\solidcore\\src\\a.rs"
+        self.assertEqual([r["file"] for r in rows(src, [msg])], [LIB])
+
+    def test_the_base_list_is_read_with_a_windows_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            commit(Path(tmp), {"plan/panic-sites.tsv": c.write_list([row()])})
+            list_path = c.LIST
+            c.LIST = PureWindowsPath("plan/panic-sites.tsv")
+            try:
+                self.assertEqual(c.base_list(Path(tmp), "HEAD"), [row()])
+            finally:
+                c.LIST = list_path
+
+    def test_the_base_list_is_read_in_a_folder_of_the_repository(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            commit(Path(tmp), {"solidcore/plan/panic-sites.tsv": c.write_list([row()])})
+            self.assertEqual(c.base_list(Path(tmp) / "solidcore", "HEAD"), [row()])
+
+    def test_the_base_list_is_read_from_a_commit_of_the_folder_alone(self):
+        # CI's base inside SolidCraft: a commit whose tree is `solidcore/` alone.
+        with tempfile.TemporaryDirectory() as tmp:
+            outer, alone = Path(tmp, "outer"), Path(tmp, "alone")
+            alone.mkdir()
+            commit(alone, {"plan/panic-sites.tsv": c.write_list([row()])})
+            outer.mkdir()
+            commit(outer, {"solidcore/plan/panic-sites.tsv": c.write_list([row(n="2")])})
+            git = ["git", "-C", str(outer)]
+            subprocess.run(git + ["fetch", "-q", str(alone), "HEAD:refs/alone"], check=True)
+            self.assertEqual(c.base_list(outer / "solidcore", "refs/alone"), [row()])
 
 
 class Messages(unittest.TestCase):

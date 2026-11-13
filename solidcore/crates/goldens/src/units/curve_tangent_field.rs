@@ -362,7 +362,9 @@ fn domain(d: Option<[f64; 4]>) -> Result<Option<Extent2d>, HarnessError> {
 fn status(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1,
     }
 }

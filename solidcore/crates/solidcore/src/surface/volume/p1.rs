@@ -427,7 +427,10 @@ impl Volume {
     /// [`SolidError::Unported`] for the unported kinds.
     pub fn copy(&self, simple_map_only: bool) -> Result<Self> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::sm_err("surface::volume::p1::Volume::copy")),
+            VolumeKind::Base => Err(SolidError::surface_failed(
+                "surface::volume::p1::Volume::copy",
+                "a plain volume cannot be copied",
+            )),
             VolumeKind::Transform(_)
             | VolumeKind::BSpline(_)
             | VolumeKind::Bend(_)
@@ -921,7 +924,10 @@ impl Volume {
         }
         // check input - number of supported derivatives is exceeded
         if n > MAX_DERIV {
-            return Err(SolidError::sm_err(OP_EVAL));
+            return Err(SolidError::surface_failed(
+                OP_EVAL,
+                "a derivative order above the volume's maximum was asked",
+            ));
         }
         let next_map = if opts.with_compounding {
             self.next_map.as_deref()
@@ -967,7 +973,10 @@ impl Volume {
     pub fn map(&self, in_point: Point3, n: usize, opts: &EvalOptions) -> Result<Vec<Vec3>> {
         // check input - number of supported derivatives is exceeded
         if n > MAX_DERIV {
-            return Err(SolidError::sm_err(OP_MAP));
+            return Err(SolidError::surface_failed(
+                OP_MAP,
+                "a derivative order above the volume's maximum was asked",
+            ));
         }
         let next_map = if opts.with_compounding {
             self.next_map.as_deref()
@@ -1134,8 +1143,9 @@ impl Volume {
     ) -> Result<Vec<Vec3>> {
         // check state
         if n > MAX_DERIV {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::surface_failed(
                 "surface::volume::p1::Volume::orient_directional_derivs",
+                "a derivative order above the volume's maximum was asked",
             ));
         }
         // make the evaluation: exact tangent values, zero sampling
@@ -1258,8 +1268,9 @@ impl Volume {
         opts: &EvalOptions,
     ) -> Result<Vec<Vec3>> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::sm_err(
+            VolumeKind::Base => Err(SolidError::surface_failed(
                 "surface::volume::p1::Volume::evaluate_simple",
+                "a plain volume has no evaluation",
             )),
             VolumeKind::Transform(t) => t.evaluate_simple(param_point, n),
             VolumeKind::BSpline(b) => b.evaluate_simple(param_point, n, opts),
@@ -1318,8 +1329,9 @@ impl Volume {
     /// [`SolidError::Unported`] for the unported kinds.
     pub fn inv_evaluate_guess_point_simple(&self, proj_point: Point3) -> Result<Vec<Point3>> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::sm_err(
+            VolumeKind::Base => Err(SolidError::surface_failed(
                 "surface::volume::p1::Volume::inv_evaluate_guess_point_simple",
+                "a plain volume has no inversion guess",
             )),
             VolumeKind::Transform(t) => t.inv_evaluate_guess_point_simple(proj_point),
             VolumeKind::BSpline(b) => b.inv_evaluate_guess_point_simple(proj_point),
@@ -1328,8 +1340,9 @@ impl Volume {
             VolumeKind::Bend(b) => match b.inv_evaluate_guess_point_simple(proj_point) {
                 (points, true) => Ok(points),
                 // the guesses written with SM_ERR are dropped (callers propagate it)
-                (_, false) => Err(SolidError::sm_err(
+                (_, false) => Err(SolidError::surface_failed(
                     "surface::bend_volume::BendVolume::inv_evaluate_guess_point_simple",
+                    "the bend volume's inversion guess failed",
                 )),
             },
         }
@@ -1664,7 +1677,10 @@ impl EvalNFunctions for FindPvIntersect<'_> {
             || dv.length_squared() < EFF_ZERO_SQ
             || dw.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_PV));
+            return Err(SolidError::surface_failed(
+                OP_PV,
+                "a volume tangent has zero length",
+            ));
         }
 
         // get gap vector
@@ -2626,10 +2642,10 @@ mod tests {
         // a B-spline volume cannot (no USE_VOLUMES upstream)
         let mut s = Volume::new(VolumeKind::BSpline(b_spline()));
         let before = s.kind().clone();
-        assert!(matches!(
-            s.transform(&ax, None),
-            Err(SolidError::Upstream { code: 1001, .. })
-        ));
+        assert_eq!(
+            s.transform(&ax, None).unwrap_err().upstream_status(),
+            Some(1001)
+        );
         assert_eq!(s.kind(), &before);
     }
 

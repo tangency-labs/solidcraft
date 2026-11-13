@@ -19,6 +19,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::nurbs::crv_adv::p1::BARE_FLAG_REASON;
 use solidcore::nurbs::crv_approx::{
     approx_circ_arc_with_crv_data, approx_nurbs_with_non_rat_crv, arc_cpts_function,
@@ -248,7 +249,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 /// (the recursion limit of the Bezier arc length), `-1` for anything else.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Nlib { code, .. } => f64::from(code.code()),
+        e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         SolidError::NotConverged { operation, .. } if operation.starts_with("nurbs::bezier") => {
             1000.0
         }

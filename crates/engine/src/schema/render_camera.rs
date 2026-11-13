@@ -35,7 +35,7 @@ const MAX_ASPECT: f64 = 1e6;
 /// refuse an explicit `up`, while a render camera keeps both `roll` and `up`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(transparent)]
-pub struct RenderCamera(pub solidcraft_render::Camera);
+pub struct RenderCamera(pub solidcraft_viewport::Camera);
 
 impl JsonSchema for RenderCamera {
     fn schema_name() -> Cow<'static, str> {

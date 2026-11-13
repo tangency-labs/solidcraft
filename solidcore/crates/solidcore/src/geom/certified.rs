@@ -23,6 +23,22 @@ pub fn above(a: f64, b: f64) -> bool {
     matches!(a.partial_cmp(&b), Some(core::cmp::Ordering::Greater))
 }
 
+/// The next double above `x` (`f64::next_up` needs Rust 1.86; the MSRV is 1.85). The
+/// sign branches prevent integer wrap: positive finite bits are below +infinity's, and
+/// negative nonzero bits are above the sign bit. NaN and +infinity are returned as is.
+#[must_use]
+pub(crate) fn next_up(x: f64) -> f64 {
+    if x.is_nan() || x == f64::INFINITY {
+        x
+    } else if x == 0.0 {
+        f64::from_bits(1)
+    } else if x > 0.0 {
+        f64::from_bits(x.to_bits() + 1)
+    } else {
+        f64::from_bits(x.to_bits() - 1)
+    }
+}
+
 /// The answer of comparing a certified quantity with a tolerance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -207,6 +223,25 @@ pub fn scaled(x: Bounded, s: f64) -> Bounded {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn next_up_keeps_signed_zero_subnormals_and_extreme_values() {
+        let tiny = f64::from_bits(1);
+        for (value, expected) in [
+            (0.0, tiny),
+            (-0.0, tiny),
+            (tiny, 2.0 * tiny),
+            (-tiny, -0.0),
+            (1.0, 1.0 + f64::EPSILON),
+            (-1.0, -1.0 + f64::EPSILON / 2.0),
+            (f64::MAX, f64::INFINITY),
+            (f64::NEG_INFINITY, -f64::MAX),
+            (f64::INFINITY, f64::INFINITY),
+        ] {
+            assert_eq!(next_up(value).to_bits(), expected.to_bits());
+        }
+        assert!(next_up(f64::NAN).is_nan());
+    }
 
     /// A bound below half an ulp of the value: the rounded sum is the value, but the exact one
     /// may be above it, so it is not proved at most the value (it was `Yes`).

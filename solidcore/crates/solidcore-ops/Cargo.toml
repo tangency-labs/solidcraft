@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 publish = false
-rust-version.workspace = true
+# solidcore-record needs Rust 1.88 (edition 2024 let chains).
+rust-version = "1.88"
 repository = "https://github.com/tangency-labs/solidcore"
 keywords = ["cad", "brep", "nurbs", "modelling"]
 categories = ["science"]
@@ -15,6 +16,11 @@ categories = ["science"]
 solidcore = { path = "../solidcore" }
 solidcore-record = { path = "../solidcore-record" }
 solidcore-convert = { path = "../solidcore-convert" }
+
+[features]
+# Each ops call's kernel profile (`session::profiled`): the kernel's profiler (solidcore's
+# `profile` feature), scoped per call. Off by default: without it ops has no profiling code.
+profile = ["solidcore/profile"]
 
 # The kernel rig corpus's entries are JSON, their records gzip: read by its runner
 # (tests/kernel_cases.rs) and by the unit tests' corpus cases (src/test_corpus.rs).

@@ -22,7 +22,10 @@
     clippy::indexing_slicing
 )] // test helpers
 
-use solidcore::blend::blend_refusal::{round_too_small, tangent_chain, BlendRefusal, NotBlendable};
+use solidcore::blend::blend_refusal::{
+    round_too_small, tangent_chain, BlendRefusal, NotBlendable, SetbackTooLongWhy,
+    SetbackTooShortWhy,
+};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
@@ -368,26 +371,54 @@ fn a_setback_asked_that_does_not_fit_or_stops_short_is_refused() {
         }
         (s.do_filleting(&mut k, None), v)
     };
+    // the upright edge, 20 long, is the shortest: its bound is open (a setback of 20 would leave
+    // its round no length), so the refusal names 20 less a thousand of its tolerances
+    let tol = {
+        let mut k = kernel(|_| {});
+        let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
+        edge::tolerance(&b, pick(&k, &b, at[2])).unwrap()
+    };
+    let want = 20.0 - 1000.0 * tol;
     let (r, v) = run(20.0);
     let err = r.unwrap_err();
     assert_eq!(err.sm_status(), Some(SM_ERR));
-    assert!(
-        matches!(
-            err,
-            SolidError::BlendRefused {
-                refusal: BlendRefusal::SetbackTooLong { vertex, largest },
-                ..
-            } if vertex == v && largest == 20.0
-        ),
-        "{err:?}"
-    );
+    let named = match err {
+        SolidError::BlendRefused {
+            refusal:
+                BlendRefusal::SetbackTooLong {
+                    vertex,
+                    largest,
+                    why: SetbackTooLongWhy::Overlap,
+                },
+            ..
+        } if vertex == v => largest,
+        other => panic!("{other:?}"),
+    };
+    assert!((named - want).abs() <= 1e-12, "{named} against {want}");
+    // the named size builds; just above it is refused by the same test
+    run(named).0.unwrap();
+    match run(named + 1e-9).0 {
+        Err(SolidError::BlendRefused {
+            refusal:
+                BlendRefusal::SetbackTooLong {
+                    why: SetbackTooLongWhy::Overlap,
+                    ..
+                },
+            ..
+        }) => {}
+        other => panic!("{other:?}"),
+    }
     let (r, v) = run(0.0);
     let err = r.unwrap_err();
     assert!(
         matches!(
             err,
             SolidError::BlendRefused {
-                refusal: BlendRefusal::SetbackTooShort { vertex, least },
+                refusal: BlendRefusal::SetbackTooShort {
+                    vertex,
+                    least,
+                    why: SetbackTooShortWhy::RailsCross,
+                },
                 ..
             } if vertex == v && (least - 5.0).abs() <= 1e-9
         ),
@@ -434,11 +465,79 @@ fn a_setback_asked_past_a_far_cut_names_the_largest_with_its_ease() {
     let want = 35.0 - 1.0 - 1000.0 * tol;
     let largest = match r {
         Err(SolidError::BlendRefused {
-            refusal: BlendRefusal::SetbackTooLong { vertex, largest },
+            refusal:
+                BlendRefusal::SetbackTooLong {
+                    vertex,
+                    largest,
+                    why: SetbackTooLongWhy::PastRails,
+                },
             ..
         }) if vertex == v => largest,
         other => panic!("{other:?}"),
     };
     assert!((largest - want).abs() <= 1e-9, "{largest} against {want}");
     run(largest).0.unwrap();
+}
+
+/// #3145: at an N x N corner (the vertex named set back, no fill asked) a setback set on the
+/// corner that leaves an edge no length is refused by the overlap test, naming the shortest
+/// edge's length less a thousand of its tolerances (its bound is open); set that, the corner
+/// builds, and just above it is refused by the same test.
+#[test]
+fn an_n_by_n_setback_that_overlaps_names_the_open_bound_less_the_margin() {
+    let at = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
+    let corner = Point3::new(60.0, 40.0, 20.0);
+    let run = |setback: f64| -> (Result<(), SolidError>, VertexId, f64) {
+        let mut k = kernel(|f| {
+            f.fillet_exact_round_classes = false;
+            f.face_swap_uv_transposes_trims = false;
+        });
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
+        let edges: Vec<EdgeId> = at.iter().map(|&p| pick(&k, &b, p)).collect();
+        let tol = edge::tolerance(&b, edges[2]).unwrap();
+        let v = b
+            .vertices()
+            .ids()
+            .find(|&v| b.vertex(v).unwrap().point.distance(corner) < 1e-9)
+            .unwrap();
+        let xs = vec![FilletSurfaceGeneratorType::Circular; 3];
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_per_edge_constant_radius(&mut k, &edges, &[5.0; 3], &xs, 1, 1.0)
+            .unwrap();
+        s.add_set_back_vertex(v);
+        s.create_corners(&k, None).unwrap();
+        for c in s.fillet_corners().unwrap() {
+            if s.corner(c).unwrap().vertex == Some(v) {
+                s.set_corner_setback(c, setback).unwrap();
+            }
+        }
+        (s.do_filleting(&mut k, None), v, tol)
+    };
+    let (r, v, tol) = run(20.0);
+    let want = 20.0 - 1000.0 * tol;
+    let named = match r {
+        Err(SolidError::BlendRefused {
+            refusal:
+                BlendRefusal::SetbackTooLong {
+                    vertex,
+                    largest,
+                    why: SetbackTooLongWhy::Overlap,
+                },
+            ..
+        }) if vertex == v => largest,
+        other => panic!("{other:?}"),
+    };
+    assert!((named - want).abs() <= 1e-12, "{named} against {want}");
+    run(named).0.unwrap();
+    match run(named + 1e-9).0 {
+        Err(SolidError::BlendRefused {
+            refusal:
+                BlendRefusal::SetbackTooLong {
+                    why: SetbackTooLongWhy::Overlap,
+                    ..
+                },
+            ..
+        }) => {}
+        other => panic!("{other:?}"),
+    }
 }

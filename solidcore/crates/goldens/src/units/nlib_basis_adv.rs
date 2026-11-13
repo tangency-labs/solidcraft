@@ -28,6 +28,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::nurbs::basis_adv as ba;
 use solidcore::nurbs::knots::{KnotVector, Side};
 use solidcore::SolidError;
@@ -108,7 +109,9 @@ fn rust_err(e: &SolidError) -> Output {
         return d;
     }
     match e {
-        SolidError::Nlib { code, .. } => Output::err(format!("nlib_{}", code.code())),
+        e if nlib_number(e).is_some() => {
+            Output::err(format!("nlib_{}", nlib_number(e).unwrap_or_default()))
+        }
         other => Output::err(format!("rust: {other}")),
     }
 }

@@ -130,7 +130,7 @@
     "what": "as report-peg-front-and-concave-rounds-together-r2, on the peg exported to STEP and read back"
   },
   "expressible": false,
-  "gallery_note": "The new view shows the completed round at the front junction of the convex bar edge and the concave cylinder arc. This is the STEP export/import case. The inset shows the whole part.",
+  "gallery_note": "the R2 case on the peg written to STEP and read back: the same rounds (the front one at z = 8 on the front and y = 2 on the top, the arc's up to z = 12 on the wall), turning into each other at x = 40.",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

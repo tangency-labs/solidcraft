@@ -34,30 +34,127 @@ use crate::body::{finish, Body, Expect};
 use crate::error::status as kernel_status;
 use crate::order::{self, Order};
 use crate::session::with_body;
-use crate::{Error, Result};
+use crate::{Error, OffsetRefusal, Result};
 
 /// The largest offset distance or wall the operations take.
 const MAX_DISTANCE: f64 = 1e6;
 
-/// An offset's kernel error as the operation's: walls that touch ([`Error::WallsTouch`]), a wall
-/// whose face's offset folds ([`Error::WallFolds`], with the largest wall the kernel names), a
-/// vertex moved past an edge's other end ([`Error::Unsupported`]), any other as
-/// [`crate::error::status`].
-fn status(e: SolidError) -> Error {
-    match e.kind() {
-        ErrorKind::OffsetWallsTouch => Error::WallsTouch,
-        ErrorKind::OffsetFolds => {
-            let largest = match e.failure().map(|f| &f.reason) {
-                Some(Reason::Offset(OffsetFailure::Folds { largest, .. })) => Some(*largest),
-                _ => None,
-            };
-            Error::WallFolds { largest }
-        }
-        ErrorKind::OffsetEdgeVanishes => {
-            Error::Unsupported("a vertex moved past the other end of an edge")
-        }
-        _ => kernel_status(e),
+/// What [`Error::Unsupported`] says for an offset that moves a vertex past an edge's other end.
+const EDGE_VANISHES: &str = "a vertex moved past the other end of an edge";
+
+/// An offset's kernel error as the operation's: its offset refusal where it is one
+/// ([`typed`]), else as [`crate::error::status`].
+fn status(e: SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
+    typed(&e, index).unwrap_or_else(|| kernel_status(e))
+}
+
+/// A kernel error as ops' offset refusal, for a caller that holds no [`Order`] of the body (any
+/// face it names is unnamed): what the offset operations give for it ([`typed`]), `None` where
+/// they give the kernel's status instead.
+#[must_use]
+pub fn refusal(e: &SolidError) -> Option<Error> {
+    typed(e, &|_| None)
+}
+
+/// The offset refusal a kernel error is, the one routing [`status`] and [`refusal`] share: a
+/// refusal the kernel gives a reason for by that reason ([`offset_refused`]), its face through
+/// `index`; one without by its kind ([`by_kind`]); `None` for any other error.
+fn typed(e: &SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Option<Error> {
+    if let Some(Reason::Offset(o)) = e.failure().map(|f| &f.reason) {
+        return Some(offset_refused(*o, e.entity(), index));
     }
+    by_kind(e.kind())
+}
+
+/// The operation's error for an offset refusal of `kind` that has one of its own: walls that
+/// touch ([`Error::WallsTouch`]), a wall that folds ([`Error::WallFolds`], no largest wall
+/// named), a vertex moved past an edge's other end ([`Error::Unsupported`]).
+fn by_kind(kind: ErrorKind) -> Option<Error> {
+    match kind {
+        ErrorKind::OffsetWallsTouch => Some(Error::WallsTouch),
+        ErrorKind::OffsetFolds => Some(Error::WallFolds { largest: None }),
+        ErrorKind::OffsetEdgeVanishes => Some(Error::Unsupported(EDGE_VANISHES)),
+        _ => None,
+    }
+}
+
+/// The kernel's offset refusal `o` as the operation's error: walls that touch
+/// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`], with the
+/// largest wall the kernel names), a vertex moved past an edge's other end
+/// ([`Error::Unsupported`]), and every other reason as [`Error::OffsetRefused`] (#14783): why,
+/// and the face the failure is about (`entity`, the reason's own unless the kernel set another)
+/// through `index` (`None` where it names none, or one `index` does not find). A reason this
+/// version does not name yet takes the error of its class where that has one ([`by_kind`]), as
+/// it did before it had a reason; it and a phrase are otherwise said by their class and in the
+/// kernel's words ([`unnamed`], #15035).
+fn offset_refused(
+    o: OffsetFailure,
+    entity: Option<EntityRef>,
+    index: &dyn Fn(FaceId) -> Option<usize>,
+) -> Error {
+    let face = match entity {
+        Some(EntityRef::Face(f)) => index(f),
+        _ => None,
+    };
+    let why = match o {
+        OffsetFailure::Folds { largest, .. } => {
+            return Error::WallFolds {
+                largest: Some(largest),
+            }
+        }
+        OffsetFailure::WallsTouch { .. } => return Error::WallsTouch,
+        OffsetFailure::EdgeVanishes { .. } => return Error::Unsupported(EDGE_VANISHES),
+        // (the kernel's fold kind also covers an offset not certified regular, which is no
+        // fold: its own reason, #14783)
+        OffsetFailure::NotCertified { distance, .. } => OffsetRefusal::NotCertified { distance },
+        OffsetFailure::Collapses {
+            distance, radius, ..
+        } => OffsetRefusal::Collapses { distance, radius },
+        OffsetFailure::LoopsCross { crossing, .. } => OffsetRefusal::LoopsCross { crossing },
+        OffsetFailure::DistanceUnresolved {
+            distance,
+            resolution,
+        } => OffsetRefusal::DistanceUnresolved {
+            distance,
+            resolution,
+        },
+        OffsetFailure::ToleranceUnresolved { tolerance } => {
+            OffsetRefusal::ToleranceUnresolved { tolerance }
+        }
+        OffsetFailure::SeamOpened { .. } => OffsetRefusal::SeamOpened,
+        OffsetFailure::ExactCurveUncut => OffsetRefusal::ExactCurveUncut,
+        OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
+        OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
+        OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
+        OffsetFailure::Unsound { what } => OffsetRefusal::Unsound { what },
+        // the kernel's phrase causes (`OffsetFailure::is_phrase`), and a reason the kernel adds
+        // later: still classed and said, never a bare status
+        other => match by_kind(other.kind()) {
+            Some(e) => return e,
+            None => unnamed(&other),
+        },
+    };
+    Error::OffsetRefused { face, why }
+}
+
+/// A kernel offset failure ops does not name, as [`OffsetRefusal::Phrase`]: the kernel's class
+/// of it, whether it is a defect, and its own statement of it.
+fn unnamed(o: &OffsetFailure) -> OffsetRefusal {
+    OffsetRefusal::Phrase {
+        class: o.kind(),
+        defect: o.is_defect(),
+        phrase: o.to_string(),
+    }
+}
+
+/// A face's record index through `order`, the [`Order`] of the call's body.
+fn in_order(order: &Order) -> impl Fn(FaceId) -> Option<usize> + '_ {
+    move |f| order.faces.iter().position(|&x| x == f)
+}
+
+/// A face's index among the faces of `b`, for a call that takes no [`Order`].
+fn in_list(b: &Brep) -> impl Fn(FaceId) -> Option<usize> + '_ {
+    move |f| b.face_list().iter().position(|&x| x == f)
 }
 
 /// A distance or wall: finite, not zero, at most [`MAX_DISTANCE`] across.
@@ -165,7 +262,7 @@ pub fn shell(body: &Body, order: &Order, open: &[usize], thickness: f64) -> Resu
         }
         match shell_brep_full(k, b, thickness, &open) {
             Ok(made) => replace(k, b, made, expect),
-            Err(e) => Ok(Err(status(e))),
+            Err(e) => Ok(Err(status(e, &in_order(order)))),
         }
     })?
 }
@@ -222,7 +319,7 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
                 }
                 OffsetFacesRefusal::NotExact => Error::NotExact,
                 OffsetFacesRefusal::NoEffect => Error::NoEffect,
-                OffsetFacesRefusal::None => status(e),
+                OffsetFacesRefusal::None => status(e, &in_order(order)),
             }));
         }
         let moved = std::mem::take(b);
@@ -254,12 +351,12 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<()> {
         if symmetric {
             match offset_brep_simple(k, b, offset_options(back)) {
                 Ok(moved) => *b = moved,
-                Err(e) => return Ok(Err(status(e))),
+                Err(e) => return Ok(Err(status(e, &in_list(b)))),
             }
         }
         match shell_brep_full(k, b, thickness, &[]) {
             Ok(made) => replace(k, b, made, expect),
-            Err(e) => Ok(Err(status(e))),
+            Err(e) => Ok(Err(status(e, &in_list(b)))),
         }
     })?
 }
@@ -279,7 +376,7 @@ pub fn offset_sheet(body: &Body, distance: f64) -> Result<()> {
         let expect = Expect::of(k, b)?;
         match offset_brep_simple(k, b, offset_options(distance)) {
             Ok(made) => replace(k, b, made, expect),
-            Err(e) => Ok(Err(status(e))),
+            Err(e) => Ok(Err(status(e, &in_list(b)))),
         }
     })?
 }
@@ -366,8 +463,9 @@ fn refused(r: DraftRefusal) -> Error {
 /// face the body does not have, a body that is not a valid solid facing out, or a pull in the
 /// neutral plane for a plane face;
 /// [`Error::Unsupported`] for a face the kernel cannot draft (what it is), or a face drafted past
-/// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face; the kernel's
-/// other errors; those of [`finish`].
+/// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face;
+/// [`Error::OffsetRefused`] for a face the kernel refuses with a reason; the kernel's other
+/// errors; those of [`finish`].
 pub fn draft(
     body: &Body,
     order: &Order,
@@ -402,14 +500,14 @@ pub fn draft(
             match draft_surface(k, b, f, &the_draft) {
                 Ok(Ok(s)) => surfaces.push(s),
                 Ok(Err(r)) => return Ok(Err(refused(r))),
-                Err(e) => return Ok(Err(kernel_status(e))),
+                Err(e) => return Ok(Err(status(e, &in_order(order)))),
             }
         }
         // the marks live for this call only: put on the picked faces, read and removed once the
         // kernel has moved them (a refused call puts the body back as it came in, unmarked)
         mark_moved(b, &picked)?;
         if let Err(e) = local_operation_simple(k, b, &picked, surfaces) {
-            return Ok(Err(status(e)));
+            return Ok(Err(status(e, &in_order(order))));
         }
         if !moved_faces(b)? {
             return Ok(Err(Error::NoEffect));

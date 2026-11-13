@@ -441,7 +441,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "built, opt-in",
+                    "text": "built",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Regular",
@@ -1717,7 +1717,7 @@
                 ],
                 "runs": [
                   {
-                    "text": "Today's executive (offset_executive), which runs S1 under shell_one_construction",
+                    "text": "Today's executive (offset_executive), which runs S1",
                     "style": {
                       "font_family": "Helvetica",
                       "font_style": "Regular",

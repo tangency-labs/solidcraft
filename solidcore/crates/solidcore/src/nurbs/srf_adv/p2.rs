@@ -13,10 +13,10 @@
 //! Deviations:
 //! - [`eval_pt_normal_deriv`] returns the five derivatives in a struct instead of
 //!   `ND[k][l]`.
-//! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number
 //!   instead of a flag plus the global `NL_ERROR` record.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::index::oob;
 use crate::nurbs::knots::Side;
@@ -46,7 +46,7 @@ pub struct NormalDerivs {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Numerical`] when `1 / |S_u x S_v|` is out of range (degenerate
+/// [`NurbsFailure::Numerical`] when `1 / |S_u x S_v|` is out of range (degenerate
 /// point); the errors of [`Surface::derivs`].
 pub fn eval_pt_normal_deriv(
     sur: &Surface,
@@ -95,7 +95,7 @@ pub fn eval_pt_normal_deriv(
     // Derivatives of |S_u x S_v|.
     let sm = s.dot(s).sqrt();
     if float_op_is_bad(1.0, sm, FloatOp::Division) {
-        return Err(SolidError::nlib(OP, NlibCode::Numerical));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
     }
     let os = 1.0 / sm;
     let mut mlt = os;
@@ -184,10 +184,7 @@ mod tests {
         let e = eval_pt_normal_deriv(&s, 0.3, 0.6, Side::Left, Side::Left);
         assert!(matches!(
             e,
-            Err(SolidError::Nlib {
-                code: NlibCode::Numerical,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Numerical))
         ));
     }
 }

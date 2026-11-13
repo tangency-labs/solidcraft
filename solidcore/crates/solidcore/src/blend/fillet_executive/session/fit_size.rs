@@ -7,8 +7,7 @@
 //! `LargestSizeOnItsFaces` and `BandsMeetAt` (`SmFilletSolver.cpp`, `SmFilletSolver.h`) and
 //! the executive's `NoteFitOfPolygonsTakenWhole` and the circle-top fit of
 //! `CreateFilletBrep` (`SmFilletExecutive.cpp`) in commits a3d6d81 and 49f393d; 5e8c9c1
-//! brackets each bound strictly inside its search (twice the blend's own size). They run
-//! only with the opt-in `Kernel::fixes.fillet_gn_section_generator`.
+//! brackets each bound strictly inside its search (twice the blend's own size).
 //!
 //! | Rust                          | Upstream (fork)                                  |
 //! |-------------------------------|--------------------------------------------------|
@@ -33,7 +32,7 @@ use crate::blend::fillet_executive::session::ball_regular::{
 };
 use crate::blend::fillet_executive::session::SolverObject;
 use crate::blend::fillet_executive::FitKind;
-use crate::blend::fillet_solver::p1::FilletSolverType;
+use crate::blend::fillet_solver::p1::{test_manifold_tangent_rollover, FilletSolverType};
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
@@ -92,12 +91,12 @@ impl Through {
         let base = self
             .bases
             .get(rail)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the rail's base surface"))?;
         let mut on = base.evaluate_point(k, uv)?;
         let slot = solver
             .base_mut()
             .surface_mut(rail)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         let off = slot.surface.surface.evaluate_point_extending(k, uv)?;
         if let Some(extended) = slot.surface.surface.extended_base_surface() {
             if !base.natural_uv_domain_with_nurb(k)?.contains_point(uv, 0.0)
@@ -134,15 +133,29 @@ pub fn ball_through(
     max: f64,
     ratio: Option<[f64; 2]>,
 ) -> Result<Option<(f64, f64)>> {
+    Ok(ball_through_at(k, target, solver, lk, q, max, ratio)?.map(|(rho, chord, _)| (rho, chord)))
+}
+
+/// [`ball_through`], with the filleted edge's parameter where the ball's centre lies square
+/// to it.
+fn ball_through_at(
+    k: &Kernel,
+    target: &Brep,
+    solver: &mut SolverObject,
+    lk: usize,
+    q: Point3,
+    max: f64,
+    ratio: Option<[f64; 2]>,
+) -> Result<Option<(f64, f64, f64)>> {
     let ratio = ratio.unwrap_or([1.0, 1.0]);
     let (bases, radii) = {
         let base = solver.base();
         let s0 = base
             .surface(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         let s1 = base
             .surface(1)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         (
             [
                 s0.surface.base_surface().clone(),
@@ -176,7 +189,10 @@ pub fn ball_through(
         foot_at: Point3::UNDEF,
     };
     let (Some(base_k), Some(domain_k)) = (st.bases.get(lk), st.domains.get(lk)) else {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::blend_missing(
+            OP,
+            "the rail's base surface and domain",
+        ));
     };
     let drop = base_k.drop_point::<NoObject>(k, q, domain_k, &DropPointOptions::default())?;
     if !drop.success {
@@ -191,7 +207,10 @@ pub fn ball_through(
     let h = |st: &mut Through, solver: &mut SolverObject, rho: f64| -> Result<Option<f64>> {
         let c = q + n * (rho * ratio_k);
         let (Some(base_j), Some(domain_j)) = (st.bases.get(lj), st.domains.get(lj)) else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(
+                OP,
+                "the other rail's base surface and domain",
+            ));
         };
         let foot = base_j.drop_point::<NoObject>(
             k,
@@ -245,10 +264,11 @@ pub fn ball_through(
         let edgeuse = solver
             .base()
             .edgeuse(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let e = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-        let curve =
-            edge::evaluation_curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+        let e = eu::edge(target, edgeuse)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+        let curve = edge::evaluation_curve(target, e)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
         let ivl = edge::interval(target, e)?;
         let dropped = curve.drop_point(
             k,
@@ -263,7 +283,7 @@ pub fn ball_through(
         let found = dropped.success
             && (edge::is_closed(target, e)?
                 || (dropped.parameter > ivl.min() + ends && dropped.parameter < ivl.max() - ends));
-        return Ok(found.then_some((rho, chord)));
+        return Ok(found.then_some((rho, chord, dropped.parameter)));
     }
     Ok(None)
 }
@@ -274,12 +294,22 @@ pub fn ball_through(
 /// face's boundary (an edge not the filleted one nor at its ends) and the other face, with
 /// what it sizes. `None` where no boundary point bounds it, or for a radius law.
 ///
+/// Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled
+/// over a smooth far edge of its face, the whole length, rolls on the face beyond, and its
+/// face's boundary is that face's: less the edges it rolled over, and with the edges at their
+/// ends taken as the side edges the rail ends on (as those at the filleted edge's ends). The
+/// face it rolled off lies inside the band and does not bound it. Each boundary point of a
+/// solver with a rolled rail sizes it only where the solver's own ball of that size touches
+/// that point, or where that cannot be told ([`rolls_through`]): the ball through it may lie
+/// on another sheet of the rolled-onto face's surface (beyond a boss, against the extension
+/// of the other face). Such a solver of another kind than a constant ball is not sized.
+///
 /// # Errors
 ///
-/// Those of [`ball_through`] and the topology lookups.
+/// Those of [`ball_through`], [`rolls_through`] and the topology lookups.
 pub fn largest_size_on_its_faces(
     k: &Kernel,
-    target: &Brep,
+    target: &mut Brep,
     solver: &mut SolverObject,
     only: Option<FaceId>,
 ) -> Result<Option<(f64, FitKind)>> {
@@ -315,18 +345,45 @@ pub fn largest_size_on_its_faces(
     } else {
         return Ok(None);
     }
-    let blended = eu::edge(target, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let blended = eu::edge(target, eu0)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let v0 = edge::vertex(target, blended)?;
     let ends = [v0, edge::other_vertex(target, blended, v0)?];
+    let rolled = solver.base().rolled_faces;
+    let tangency = solver.base().tangency_tolerance;
+    let confirm = rolled.iter().any(Option::is_some);
+    if confirm && kind != FitKind::Radius {
+        // the confirmation rolls the solver's ball: a rolled rail of another kind is not
+        // sized (the rollover rolls only constant balls)
+        return Ok(None);
+    }
     for (rail, edgeuse) in [eu0, eu1].into_iter().enumerate() {
-        let Some(face) = eu::face(target, edgeuse)? else {
+        let Some(own) = eu::face(target, edgeuse)? else {
             continue;
         };
+        // the face the rail rolls on: its own, or the face beyond the smooth edge it rolled
+        // over; that edge, and the vertices it ends the rail at
+        let onto = rolled.get(rail).copied().flatten();
+        let face = onto.unwrap_or(own);
         if only.is_some_and(|f| f != face) {
             continue;
         }
+        let mut over: Vec<EdgeId> = Vec::new();
+        let mut rail_ends: Vec<Option<VertexId>> = ends.to_vec();
+        if onto.is_some() {
+            for e in crate::topology::face::p4::edges(target, face, None, false, None)? {
+                if edge::faces(target, e, None)?.contains(&own)
+                    && test_manifold_tangent_rollover(k, target, e, tangency)?.0
+                {
+                    let p0 = edge::vertex(target, e)?;
+                    let p1 = edge::other_vertex(target, e, p0)?;
+                    rail_ends.extend([p0, p1].into_iter().flatten().map(Some));
+                    over.push(e);
+                }
+            }
+        }
         for e in crate::topology::face::p4::edges(target, face, None, false, None)? {
-            if e == blended {
+            if e == blended || over.contains(&e) {
                 continue;
             }
             let Some(curve) = edge::evaluation_curve(target, e)? else {
@@ -334,15 +391,27 @@ pub fn largest_size_on_its_faces(
             };
             let p0 = edge::vertex(target, e)?;
             let p1 = edge::other_vertex(target, e, p0)?;
-            if ends.contains(&p0) || ends.contains(&p1) {
-                continue; // a side edge at an end of the blended edge: the rail ends on it
+            if rail_ends.contains(&p0) || rail_ends.contains(&p1) {
+                continue; // a side edge at an end of the rail: the rail ends on it
             }
             let curve = curve.clone();
             let ivl = edge::interval(target, e)?;
-            let rho_at = |solver: &mut SolverObject, t: f64| -> Result<f64> {
+            let mut rho_at = |solver: &mut SolverObject, t: f64| -> Result<f64> {
                 let q = curve.evaluate_point(k, ivl.evaluate(smos_max(0.0, smos_min(1.0, t))))?;
+                if confirm {
+                    // a ball of a solver with a rolled rail (a constant ball): no bound where
+                    // the solver does not roll it, kept where its section is not found
+                    let through = ball_through_at(k, &*target, solver, rail, q, max, Some(ratio))?;
+                    let Some((rho, _, at)) = through else {
+                        return Ok(BIG_DOUBLE);
+                    };
+                    return Ok(match rolls_through(k, target, solver, rail, q, rho, at)? {
+                        Some(false) => BIG_DOUBLE,
+                        Some(true) | None => rho,
+                    });
+                }
                 Ok(
-                    match ball_through(k, target, solver, rail, q, max, Some(ratio))? {
+                    match ball_through(k, &*target, solver, rail, q, max, Some(ratio))? {
                         Some((rho, chord)) => {
                             if kind == FitKind::Chord {
                                 chord
@@ -397,6 +466,68 @@ pub fn largest_size_on_its_faces(
     Ok(found.map(|r| (r, kind)))
 }
 
+/// Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): whether the
+/// ball of radius `rho` that `solver` rolls, in its section at its filleted edge's `t`,
+/// touches its face `rail` at `q`, within the solver's 3D tolerance; `None` where that cannot
+/// be told (no single ball, or no section found). A ball through a boundary
+/// point that touches the other face's surface ([`ball_through`]) is not always the solver's:
+/// past a boss a rail rolled onto, it may touch that surface on the boss's far side and the
+/// other face's surface extended beyond the face, where the solver's ball never rolls. The
+/// solver's radius is its own again after.
+///
+/// # Errors
+///
+/// Those of the section solve and the evaluations.
+fn rolls_through(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    rail: usize,
+    q: Point3,
+    rho: f64,
+    t: f64,
+) -> Result<Option<bool>> {
+    let base = solver.base();
+    let tol = base.approx_tol_3d;
+    // without its offset surface, edge use or edge curve, it cannot be told
+    let Some(own) = base.surface(0)?.map(|s| s.surface.offset_distance().abs()) else {
+        return Ok(None);
+    };
+    let Some(edgeuse) = base.edgeuse(0)? else {
+        return Ok(None);
+    };
+    let Some(e) = eu::edge(target, edgeuse)? else {
+        return Ok(None);
+    };
+    let Some(curve) = edge::evaluation_curve(target, e)? else {
+        return Ok(None);
+    };
+    let side = if rail == 0 {
+        SrfIndex::First
+    } else {
+        SrfIndex::Second
+    };
+    if !set_ball_radius(solver, rho)? {
+        return Ok(None); // no single ball
+    }
+    let contact = (|| -> Result<Option<Point3>> {
+        let Some(pnt) = ball_section_at(k, target, solver, &curve, t, None)? else {
+            return Ok(None);
+        };
+        let Some(slot) = solver.base().surface(rail)? else {
+            return Ok(None);
+        };
+        Ok(Some(
+            slot.surface
+                .base_surface()
+                .evaluate_point(k, pnt.uv_pos(side))?,
+        ))
+    })();
+    set_ball_radius(solver, own)?;
+    let contact = contact?;
+    Ok(contact.map(|on| on.distance(q) <= tol))
+}
+
 /// `SmFilletSolver::BandsMeetAt(rOther, lMine, lTheirs, ...)`: the radius at which this
 /// constant ball's rail on its face `mine` first reaches into the band `other` takes off
 /// the same face (its face `theirs`), both blends at that radius. `None` where the two do
@@ -425,23 +556,24 @@ pub fn bands_meet_at(
     let own = this
         .base()
         .surface(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
         .surface
         .offset_distance()
         .abs();
     let other_own = other
         .base()
         .surface(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
         .surface
         .offset_distance()
         .abs();
     if !((other_own - own).abs() <= EFF_ZERO * (1.0 + own)) {
         return Ok(None); // no single size: their radii differ
     }
-    let e = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let e = eu::edge(target, edgeuse)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let curve = edge::evaluation_curve(target, e)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
         .clone();
     let ivl = edge::interval(target, e)?;
     let side = if mine == 0 {
@@ -466,7 +598,7 @@ pub fn bands_meet_at(
             let q = this
                 .base()
                 .surface(mine)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
                 .surface
                 .base_surface()
                 .evaluate_point(k, pnt.uv_pos(side))?;
@@ -607,8 +739,8 @@ pub fn polygon_fit(
     let mut middle = Point3::new(0.0, 0.0, 0.0);
     let mut ends: Vec<(Point3, Point3)> = Vec::new();
     for &e in &edges {
-        let curve =
-            edge::evaluation_curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve = edge::evaluation_curve(target, e)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
         let ivl = edge::interval(target, e)?;
         let a = curve.evaluate_point(k, ivl.min())?;
         let b = curve.evaluate_point(k, ivl.max())?;
@@ -618,8 +750,8 @@ pub fn polygon_fit(
     // t (ax x + ay y + b) is edge i's ball radius at (x, y)
     let mut lines: Vec<[f64; 4]> = Vec::new();
     for (&e, &(pa, pb)) in edges.iter().zip(&ends) {
-        let curve =
-            edge::evaluation_curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve = edge::evaluation_curve(target, e)?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
         let half = curve.evaluate_point(k, edge::interval(target, e)?.evaluate(0.5))?;
         // straight: its middle on the chord
         let chord = pb - pa;
@@ -662,7 +794,7 @@ pub fn polygon_fit(
             .solver
             .base()
             .surface(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
             .surface
             .offset_distance()
             .abs();
@@ -793,7 +925,7 @@ pub fn circle_top_fit(
             * solver
                 .base()
                 .surface(0)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
                 .surface
                 .offset_distance()
                 .abs();
@@ -850,7 +982,7 @@ pub fn corner_takes_per_radius(
         let tangent = pv
             .get(1)
             .copied()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the curve's tangent"))?;
         *d = (if at_start { tangent } else { -tangent }).unitize()?;
     }
     let Some(&along) = dir.get(this) else {

@@ -1,4 +1,6 @@
 newer_file_feature
+frame_end_cap
+  remap_refs: ends[0].member.feature, ends[0].plane.base.base.feature
 body_transfer
   remap_bodies: bodies[0]
 sketch
@@ -133,6 +135,10 @@ coil
 coil_profile
   sketches: [1]
   remap_refs: sketch
+cell_grid
+  sketches: [1]
+  remap_refs: sketch
+  remap_bodies: targets[0]
 sheet_base
   sketches: [1]
   remap_refs: sketch

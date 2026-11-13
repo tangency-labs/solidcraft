@@ -39,7 +39,7 @@ fn body_names(s: &Session, p: &Value, cmd: &str, allow_boundary: bool) -> Result
     if names.is_empty() || names.len() > 1000 || names.iter().collect::<BTreeSet<_>>().len() != names.len() {
         return Err(bad(cmd, "bodies must list 1..1000 distinct existing definition bodies"));
     }
-    if s.doc.marker.is_some() && !allow_boundary {
+    if s.doc.marker.is_some_and(|m| m < s.doc.features.len()) && !allow_boundary {
         return Err(bad(cmd, "finish timeline rollback before transferring bodies"));
     }
     let state = s.model.state();

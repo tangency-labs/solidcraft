@@ -248,36 +248,80 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, ParamChanged { body: ParamChangedBody::One(Box::new(one)), param_warnings: Vec::new() })
 }
 
-/// The point a length dimension keeps when its value changes: the first it measures from (a
-/// line's start). None for other dimensions.
-fn dimension_start(sk: &Sketch, kind: &ConstraintKind) -> Option<usize> {
+/// Points a driving dimension keeps when its own parameter changes. A length keeps the first
+/// point it measures from (a line's start, #6070). A point-to-line distance is a construction
+/// offset measured from the reference line, so that line stays and the offset point moves.
+fn dimension_held_points(sk: &Sketch, kind: &ConstraintKind) -> Vec<usize> {
     match kind {
-        ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => Some(*p),
-        ConstraintKind::Length { l, .. } => match sk.curves.get(*l)?.kind {
-            CurveKind::Line { a, .. } => Some(a),
-            _ => None,
+        ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => vec![*p],
+        ConstraintKind::Length { l, .. } => match sk.curves.get(*l).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, .. }) => vec![*a],
+            _ => Vec::new(),
         },
-        _ => None,
+        ConstraintKind::PointLineDistance { l, .. } => reference_line_ends(sk, *l),
+        _ => Vec::new(),
     }
 }
 
+fn reference_line_ends(sk: &Sketch, line: usize) -> Vec<usize> {
+    match sk.curves.get(line).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => vec![*a, *b],
+        _ => Vec::new(),
+    }
+}
+
+/// Held points for a construction offset whose expression mentions `name`, not for an ordinary
+/// dimension that happens to reference it. A parallel offset holds the reference line. A
+/// horizontal or vertical offset is a distance from the sketch origin, and holds that origin.
+fn construction_offset_hold(sk: &Sketch, kind: &ConstraintKind) -> Vec<usize> {
+    match kind {
+        ConstraintKind::PointLineDistance { l, .. } => reference_line_ends(sk, *l),
+        ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } if sk.point_index("origin") == Some(*p) => vec![*p],
+        _ => Vec::new(),
+    }
+}
+
+/// The points to hold while `name` changes. The first dimension whose parameter is `name` wins,
+/// as it did before, including when that dimension holds nothing. An earlier dimension that only
+/// mentions `name` in its expression is skipped when it holds no points, so it cannot hide that
+/// direct dimension. A construction offset is the expression match that does hold its reference.
+fn held_for_parameter(sketch: &Sketch, doc: &solidcraft_doc::Document, name: &str) -> Option<Vec<usize>> {
+    let mut offset = None;
+    for c in sketch.constraints.iter().filter(|c| !c.driven) {
+        let Some(param) = c.param.as_deref() else { continue };
+        if param == name {
+            let points = dimension_held_points(sketch, &c.kind);
+            return (!points.is_empty()).then_some(points);
+        }
+        let mentions = doc.param(param).is_some_and(|p| expr::references(&p.expr).iter().any(|r| r == name));
+        if !mentions {
+            continue;
+        }
+        let points = construction_offset_hold(sketch, &c.kind);
+        if points.is_empty() || offset.is_some() {
+            continue;
+        }
+        offset = Some(points);
+    }
+    offset
+}
+
 /// A length dimension driven by `name` keeps its first point where it is when the value
-/// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). The
-/// sketch is solved here with that point held, before the design evaluates from its stored
-/// positions. Where holding it can't solve (a symmetry moves both ends), evaluation solves as
-/// before.
+/// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). A
+/// construction offset whose expression mentions `name` keeps its reference instead. An ordinary
+/// dimension that merely references `name` (a length of `width * 2`) is left to the normal
+/// solve, so both ends can still move. The sketch is solved here with those points held, before
+/// the design evaluates from its stored positions. Where holding them can't solve (a symmetry
+/// moves both ends), evaluation solves as before. A sketch that already has offset curves pins
+/// that dimension's first point and runs the full solve, so a tangent cap does not jump to
+/// another branch (#4823).
 fn keep_dimension_start(s: &mut Session, name: &str) {
-    let targets: Vec<(u64, usize)> = s
+    let targets: Vec<(u64, Vec<usize>)> = s
         .doc
         .features
         .iter()
         .filter_map(|f| match &f.kind {
-            FeatureKind::Sketch { sketch, .. } => sketch
-                .constraints
-                .iter()
-                .find(|c| !c.driven && c.param.as_deref() == Some(name))
-                .and_then(|c| dimension_start(sketch, &c.kind))
-                .map(|p| (f.id, p)),
+            FeatureKind::Sketch { sketch, .. } => held_for_parameter(sketch, &s.doc, name).map(|points| (f.id, points)),
             _ => None,
         })
         .collect();
@@ -285,19 +329,20 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
         return;
     }
     let vals = s.doc.evaluation_values();
-    for (id, start) in targets {
+    for (id, points) in targets {
         let Ok(stored) = sketch_store::read(&s.doc, id) else { continue };
         let mut trial = stored.clone();
         if s.doc.apply_dimension_values(&vals, &mut trial).is_err() {
             continue;
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
-        let hold = Hold { points: vec![start], radii: Vec::new() };
         let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() {
+            let hold = Hold { points, radii: Vec::new() };
             solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation()
         } else {
             // A solve against stale offset points can stretch an attached cap into a different
             // tangency branch. Keep the start through the complete solve/refresh sequence.
+            let Some(&start) = points.first() else { continue };
             let Some(p) = trial.points.get_mut(start) else { continue };
             p.fixed = true;
             s.doc

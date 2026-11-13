@@ -12,6 +12,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)] // test helpers
 
 use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::{SolutionRequested, SolverOperation};
 use solidcore::geom::vector2d::Point2;
@@ -41,7 +42,8 @@ struct Spec {
     ease: Option<f64>,
     /// Every edge rounded and every corner set back and eased, else the three at `CORNER`.
     all: bool,
-    /// The curvature-continuous blend (`G2` blend curve at thirds), else the round.
+    /// The curvature-continuous blend (the order-2 G^n section at its default, equal area
+    /// thumbweight), else the round.
     g2_blend: bool,
 }
 
@@ -73,13 +75,12 @@ fn build(spec: Spec) -> (Kernel, Brep, Vec<FaceId>) {
     {
         let mut s = FilletSession::new(&mut k, &mut b).unwrap();
         s.set_mark_corner_patches(true);
-        let (xsect, continuity) = if spec.g2_blend {
-            s.set_blend_curve_at_thirds(true);
-            (2, 2)
+        let (xsect, continuity, w) = if spec.g2_blend {
+            (2, 2, GN_DEFAULT_THUMBWEIGHT)
         } else {
-            (1, 1)
+            (1, 1, 1.0)
         };
-        s.prepare_constant_radius_edges(&mut k, &edges, 8.0, xsect, continuity, 1.0)
+        s.prepare_constant_radius_edges(&mut k, &edges, 8.0, xsect, continuity, w)
             .unwrap();
         // the corners set back (`AddSetBackVertex`): no Ball is built there
         let set_back: Vec<_> = s

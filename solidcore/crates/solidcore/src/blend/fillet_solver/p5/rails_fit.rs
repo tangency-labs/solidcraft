@@ -110,6 +110,27 @@ pub fn is_knife_edge(
 /// `SM_ERR` for an edge with no loop edge use on the material side; those of the
 /// sector test.
 pub fn is_concave_edge(k: &Kernel, target: &mut Brep, edge_id: EdgeId) -> Result<bool> {
+    match material_use(target, edge_id)? {
+        Some(use_) => eu2::is_convex_radial_sector(k, target, use_, 10, false, 0.0),
+        None => Err(SolidError::blend_failed(
+            OP,
+            "the edge has no material edge use",
+        )),
+    }
+}
+
+/// Whether the edge bounds material: a use of it in a loop of a shell of a region that is
+/// not a void (where [`is_concave_edge`] judges it). A sheet's edges bound none.
+///
+/// # Errors
+///
+/// Those of the topology queries.
+pub fn edge_bounds_material(target: &Brep, edge_id: EdgeId) -> Result<bool> {
+    Ok(material_use(target, edge_id)?.is_some())
+}
+
+/// The first use of the edge in a loop of a shell of a region that is not a void.
+fn material_use(target: &Brep, edge_id: EdgeId) -> Result<Option<crate::topology::EdgeuseId>> {
     for use_ in edge::edgeuses(target, edge_id, None, None)? {
         if !eu::is_loop_edgeuse(target, use_)? {
             continue;
@@ -124,9 +145,9 @@ pub fn is_concave_edge(k: &Kernel, target: &mut Brep, edge_id: EdgeId) -> Result
         if target.region(region)?.is_void() != 0 {
             continue;
         }
-        return eu2::is_convex_radial_sector(k, target, use_, 10, false, 0.0);
+        return Ok(Some(use_));
     }
-    Err(SolidError::sm_err(OP))
+    Ok(None)
 }
 
 /// `sm_InsideMaterial` (fork, WR-631): whether a rail that leaves `face` near `point`
@@ -159,7 +180,8 @@ pub fn inside_material(k: &Kernel, target: &mut Brep, face: FaceId, point: Point
             nearest = Some(e);
         }
     }
-    let nearest = nearest.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let nearest =
+        nearest.ok_or_else(|| SolidError::blend_missing(OP, "the edge nearest the point"))?;
     is_concave_edge(k, target, nearest)
 }
 
@@ -183,10 +205,12 @@ fn leaves_past_an_end(
 ) -> Result<bool> {
     let fil_eu = solver
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let fil_edge = eu::edge(target, fil_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's first edge use"))?;
+    let fil_edge = eu::edge(target, fil_eu)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge use's edge"))?;
     // `NER(pEdgeCurve)` before either test
-    edge::curve(target, fil_edge)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    edge::curve(target, fil_edge)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's curve"))?;
 
     // Across or through the face's side edge at an end.
     let (leave_edge, leave_vertex) = match (leave.point_class(), leave.object()) {
@@ -256,23 +280,28 @@ fn past_closed_corner(
 ) -> Result<bool> {
     let fil_eu = solver
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let fil_edge = eu::edge(target, fil_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's first edge use"))?;
+    let fil_edge = eu::edge(target, fil_eu)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge use's edge"))?;
     if edge::start_vertex(target, fil_edge)? != edge::end_vertex(target, fil_edge)? {
         return Ok(false);
     }
-    let edge_curve = edge::curve(target, fil_edge)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let edge_curve = edge::curve(target, fil_edge)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's curve"))?;
     let ivl = edge::interval(target, fil_edge)?;
     let at_start = edge_curve.evaluate(k, ivl.min(), 1, false, true)?;
     let at_end = edge_curve.evaluate(k, ivl.max(), 1, true, true)?;
     let (Some(&vertex), Some(&t0), Some(&t1)) = (at_start.first(), at_start.get(1), at_end.get(1))
     else {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::blend_missing(
+            OP,
+            "the filleted edge's end tangents",
+        ));
     };
     let normal = t0.unitize()? + t1.unitize()?;
     let on_rail = rail.evaluate(k, rail_param, 1, !entering, true)?;
     let (Some(&point), Some(&heading)) = (on_rail.first(), on_rail.get(1)) else {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::blend_missing(OP, "the rail's tangent"));
     };
     let side = (point - vertex).dot(normal);
     let ahead = heading.dot(normal);
@@ -296,9 +325,11 @@ fn beyond_end_section(
 ) -> Result<Option<usize>> {
     let fil_eu = solver
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let fil_edge = eu::edge(target, fil_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
-    let edge_curve = edge::curve(target, fil_edge)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's first edge use"))?;
+    let fil_edge = eu::edge(target, fil_eu)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge use's edge"))?;
+    let edge_curve = edge::curve(target, fil_edge)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's curve"))?;
     let ivl = edge::interval(target, fil_edge)?;
     let leave_point = rail.evaluate_point(k, rail_param)?;
     let dropped = edge_curve.drop_point(
@@ -311,7 +342,10 @@ fn beyond_end_section(
         SolverOperation::Minimize,
     )?;
     if !dropped.success {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the leave point does not drop onto the filleted edge",
+        ));
     }
     let foot = edge_curve.evaluate_point(k, dropped.parameter)?;
     for (index, end) in [ivl.min(), ivl.max()].into_iter().enumerate() {
@@ -381,18 +415,18 @@ impl FilletSolver {
                 let rail = fillets
                     .geom(id)?
                     .rail(ii)
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the fillet geometry's rail"))?;
                 let curve = edge::curve(fillets.brep(), rail)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?
                     .clone();
                 let face = fillets
                     .fillet_edge(rail)?
                     .original_face()
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the rail's original face"))?;
                 let primary = eu::primary_edgeuse(fillets.brep(), rail)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the rail's primary edge use"))?;
                 let mate = eu::mate(fillets.brep(), primary)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the rail edge use's mate"))?;
                 let mut cc = CurveClassification::new(k);
                 cc.reset(
                     k,
@@ -414,7 +448,9 @@ impl FilletSolver {
                     .map(|cc| cc.intervals().to_vec());
                 fillets.fillet_edge_mut(rail)?.curve_class = attached;
                 classified?;
-                let intervals = intervals.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let intervals = intervals.ok_or_else(|| {
+                    SolidError::blend_missing(OP, "the rail's curve classification")
+                })?;
 
                 let n = intervals.len();
                 let off_face = |j: usize| {
@@ -439,9 +475,9 @@ impl FilletSolver {
                     while off_face(j_last + 1) {
                         j_last += 1;
                     }
-                    let last = intervals
-                        .get(j_last)
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let last = intervals.get(j_last).ok_or_else(|| {
+                        SolidError::blend_missing(OP, "the rail's last face interval")
+                    })?;
                     // Where the rail leaves the face: the first interval ends there, the
                     // others start.
                     let (leave, d_leave) = if j == 0 {
@@ -519,14 +555,15 @@ impl FilletSolver {
                     fit = false;
                     if judge_material {
                         // the rail's point nearest the middle of the filleted edge
-                        let fil_eu = solver
-                            .solver()
-                            .edgeuse(0)?
-                            .ok_or_else(|| SolidError::null_pointer(OP))?;
-                        let fil_edge = eu::edge(target, fil_eu)?
-                            .ok_or_else(|| SolidError::null_pointer(OP))?;
-                        let fil_curve = edge::curve(target, fil_edge)?
-                            .ok_or_else(|| SolidError::null_pointer(OP))?;
+                        let fil_eu = solver.solver().edgeuse(0)?.ok_or_else(|| {
+                            SolidError::blend_missing(OP, "the solver's first edge use")
+                        })?;
+                        let fil_edge = eu::edge(target, fil_eu)?.ok_or_else(|| {
+                            SolidError::blend_missing(OP, "the filleted edge use's edge")
+                        })?;
+                        let fil_curve = edge::curve(target, fil_edge)?.ok_or_else(|| {
+                            SolidError::blend_missing(OP, "the filleted edge's curve")
+                        })?;
                         let mid = fil_curve
                             .evaluate_point(k, edge::interval(target, fil_edge)?.evaluate(0.5))?;
                         let dropped = curve.drop_point(
@@ -539,7 +576,10 @@ impl FilletSolver {
                             SolverOperation::Minimize,
                         )?;
                         if !dropped.success {
-                            return Err(SolidError::sm_err(OP));
+                            return Err(SolidError::blend_failed(
+                                OP,
+                                "the filleted edge's middle does not drop onto the rail",
+                            ));
                         }
                         let on_rail = curve.evaluate_point(k, dropped.parameter)?;
                         if inside_material(k, target, face, on_rail)? {
