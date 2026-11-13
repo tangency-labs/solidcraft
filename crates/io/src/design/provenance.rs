@@ -1278,6 +1278,31 @@ mod tests {
     }
 
     #[test]
+    fn a_changed_drawing_or_plugin_part_was_not_covered_by_the_signature() {
+        use solidcraft_doc::drawing::{Drawing, Source};
+        use solidcraft_doc::ids::IdSource;
+        use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, PaperSize};
+        let mut ids = IdSource::seeded(3890);
+        let mut doc = Document::new("Plate");
+        let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
+        let mut drawing = Drawing::new("Assembly", "en-GB", "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &Default::default(), &mut ids).unwrap();
+        let id = drawing.allocate_id(&mut ids).unwrap();
+        drawing.sources.push(Source { id });
+        doc.drawings.push(std::sync::Arc::new(drawing));
+        doc.plugin_data.insert("demo/state.bin".into(), solidcraft_doc::canvas::base64_encode(b"state"));
+        let bytes = signed(&doc, &TestSigner::new(7), &ProvenanceChain::default());
+        assert_eq!(report(&bytes).unwrap().status, ProvenanceStatus::Valid);
+        let entries = read_entries(&bytes);
+        for prefix in ["drawings/", "plugins/"] {
+            let name = entries.keys().find(|n| n.starts_with(prefix)).unwrap_or_else(|| panic!("no {prefix} part saved")).clone();
+            let mut changed = entries[&name].clone();
+            changed.push(b' ');
+            let tampered = replace_entry(&bytes, &name, &changed);
+            assert_eq!(report(&tampered).unwrap().status, ProvenanceStatus::NotCovered, "{name}");
+        }
+    }
+
+    #[test]
     fn an_unsigned_container_has_no_report() {
         let bytes = write_design_container(&Document::new("Plate")).unwrap();
         assert_eq!(report(&bytes), None);
