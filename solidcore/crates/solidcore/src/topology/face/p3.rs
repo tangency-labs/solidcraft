@@ -7,7 +7,7 @@
 //! | Rust                                         | Upstream                                  |
 //! |----------------------------------------------|-------------------------------------------|
 //! | [`compute_loop_orientation`], [`compute_loop_orientation_3d`] | `SmFace::ComputeLoopOrientation` |
-//! | [`create_composites`]                        | `SmFace::CreateComposites`                |
+//! | [`create_composites`], [`create_composites_with_edges`] | `SmFace::CreateComposites` |
 //! | [`create_uv_trim_curves`], [`create_uv_trim_curves_notified`], [`UvTrimCurveGaps`] | `SmFace::CreateUVTrimCurves` |
 //! | [`face_intersect`], [`FaceIntersectOptions`], [`FaceIntersection`], [`IntersectObject`] | `SmFace::FaceIntersect` |
 //! | [`notify`]                                   | `SmFace::Notify`                          |
@@ -546,18 +546,37 @@ pub fn notify(
 /// edge loops); [`SolidError::InvalidInput`] when the loop counts exceed the curves or
 /// orientations returned (upstream reads past them).
 pub fn create_composites(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<CompositeCurve>> {
+    Ok(create_composites_with_edges(k, b, f)?
+        .into_iter()
+        .map(|(composite, _)| composite)
+        .collect())
+}
+
+/// [`create_composites`], each composite with the edge of each of its segments, in
+/// segment order (not upstream: the skin's face sources, tangency-labs/solidcore#3139).
+///
+/// # Errors
+///
+/// Those of [`create_composites`].
+pub fn create_composites_with_edges(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+) -> Result<Vec<(CompositeCurve, Vec<EdgeId>)>> {
     // init output
     let mut composites = Vec::new();
 
     // Create List of Curves from Face Loops
     let fc = face2::create_curves_from_face(k, b, f, OrientType::Same, true, false)?;
     let mut curves = fc.curves_3d.unwrap_or_default().into_iter();
+    let mut edges = fc.edges.into_iter();
 
     // for every loop
     let mut count = 0usize;
     for &num_crv in &fc.curve_loops {
         let mut senses = Vec::new();
         let mut loop_curves = Vec::new();
+        let mut loop_edges = Vec::new();
 
         // for every edge in the loop
         for _ in 0..num_crv {
@@ -574,16 +593,15 @@ pub fn create_composites(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<Comp
             // build Curve and Senses array
             loop_curves.push(curve);
             senses.push(orient != OrientType::Opposite);
+            // (the edges add no failure: a caller checks there is one per segment)
+            loop_edges.extend(edges.next());
         }
 
         // build CompositeCurve
-        composites.push(CompositeCurve::with_curves(
-            3,
-            loop_curves,
-            true,
-            Some(&senses),
-            None,
-        )?);
+        composites.push((
+            CompositeCurve::with_curves(3, loop_curves, true, Some(&senses), None)?,
+            loop_edges,
+        ));
     }
 
     // all done

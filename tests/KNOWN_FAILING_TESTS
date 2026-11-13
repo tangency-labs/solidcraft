@@ -11,9 +11,7 @@ solidcraft-cli::action_matrix::action_matrix_sample 2 baseline actions fail: 2 s
 solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/83-boundary-loop-thicken does not load: step 8, the offset of face 0 by -1 is not proved regular, so thicken is refused with no size named
 solidcraft-engine::cmd::edit::tests::inserting_variable_fillet_control_preserves_parameters_at_existing_positions solidcore refuses a variable fillet whose law has a corner (solidcore#430)
 solidcraft-engine::extent_tests::cut_to_the_far_side_of_a_curved_wall main's mesh-based version (#8634) not taken; the exact replacement is to come
-solidcraft-engine::face_name_tests::a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone main's edge lookup by a stored point (#11286) finds the edge on the display mesh (edge_near on the body's mesh), not taken; the exact replacement is to come
 solidcraft-engine::hole_face_tests::a_hole_wider_than_the_part_says_it_removes_all_of_it a 40 mm hole at (10, 10) touches the plate's edge y = 30 at one point; the kernel parts the plate there into 2 bodies, the test wants truck's 1, as on SMLib
-solidcraft-engine::measure_centre_tests::a_fillet_round_a_boss_reports_its_radius the round at the foot of a boss is not an analytic torus of minor radius 3, so no face of the body is (the test finds none to measure), as on SMLib
 solidcraft-engine::tests::chord_and_variable_fillets its 2 → 4 → 2 waist: solidcore refuses a variable fillet whose law has a corner (solidcore#430)
 solidcraft-engine::tests::fillet_fit_taper_closes_to_a_point fillet status 1001 on the taper fit (radius 16 closing to 0), as on C++
 solidcraft-engine::tests::mirror_placed::dragging_a_mirrored_part_meshes_its_copies_once a copy of a copy drawn from its first copy's triangles (#10101) is triangulated differently from a fresh mesh of it, where truck's meshes are the same under a rigid move, as on SMLib
@@ -23,5 +21,4 @@ solidcraft-kernel::blend_variable::tests::variable_radius_with_a_corner_through_
 solidcraft-kernel::corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box at set backs 11 to 15 the G2 corner patch bulges past the box, as on C++
 solidcraft-kernel::corner_g2::tests::curvature_rounds_meet_at_a_g2_corner the corner between curvature rounds jumps 2.07 in curvature over 538 stations on solidcore; the test wants it curvature continuous, as SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310 builds it
 solidcraft-kernel::corner_g2::tests::the_box_corner_g2_patch_is_a_closed_solid_curvature_continuous_to_its_neighbours the fitted G2 corner patch bulges 1.7e-5 past the box, as on C++
-solidcraft-kernel::native::tests::box_and_fillet_have_stable_wire_records the box-edge round's wire record differs from the fixture at solidcore 8ddce9016 (a value 3 is 5): the fixture is re-blessed (NATIVE_BREP_BLESS=1) once the change is shown right
 solidcraft-smlib::ops::tests::a_variable_round_with_a_corner_in_its_law_is_its_balls_union solidcore refuses a variable fillet whose law has a corner (solidcore#430)

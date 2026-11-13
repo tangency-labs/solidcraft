@@ -67,6 +67,8 @@ pub struct DocSlot {
 /// waits in the same slot, so showing the tab again picks up exactly where it was left.
 #[derive(Default)]
 struct DocWork {
+    /// Shared panel content belongs to the design, independently of its current placement.
+    bom: Option<crate::bom_panel::BomPanel>,
     dialog: Option<crate::dialogs::Dialog>,
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
@@ -79,12 +81,14 @@ struct DocWork {
 /// computing after OK can't wait (its result belongs to the window thread): that dialog is
 /// cancelled, as without the preference.
 fn take_work(app: &mut SolveApp) -> DocWork {
+    let bom = app.bom.take();
     if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
         crate::dialogs::cancel(app);
         app.tool = None;
-        return DocWork::default();
+        return DocWork { bom, ..DocWork::default() };
     }
     DocWork {
+        bom,
         dialog: app.dialog.take(),
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
@@ -97,6 +101,8 @@ fn take_work(app: &mut SolveApp) -> DocWork {
 /// design's history rolled back for an edit, and only the dialog's Cancel or OK puts it back.
 /// `before`: the session's revision before the switch moved it on to refresh the views.
 fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
+    app.bom = work.bom;
+    crate::bom_panel::set_focus_pending(app, true);
     // That refresh is not a change to the design: the edit's Cancel must still see the design
     // it left (`Session::restore_editor` compares revisions), as `PendingFeatureEdit` does.
     if let Some(state) = &mut work.editing_state {
@@ -308,6 +314,11 @@ impl Documents {
         self.slots.iter_mut().filter_map(Option::as_mut)
     }
 
+    /// The background slot (a tab not shown) holding the design with `uid`.
+    pub(crate) fn background_slot_mut(&mut self, uid: u64) -> Option<&mut DocSlot> {
+        self.slots.iter_mut().flatten().find(|slot| slot.session.uid == uid)
+    }
+
     /// The designs in the tabs not shown.
     pub(crate) fn background(&self) -> impl Iterator<Item = &Session> {
         self.slots.iter().filter_map(Option::as_ref).map(|slot| &slot.session)
@@ -324,6 +335,12 @@ impl Documents {
     /// [`Self::active_tab`], without numbering a tab not asked for yet (0).
     pub(crate) fn current_tab(&self) -> u64 {
         self.active_tab
+    }
+
+    /// Whether the tab numbered `tab` is still open: the one shown, or one behind it. A file
+    /// operation bound to a tab that is gone has nothing left to land in.
+    pub(crate) fn tab_open(&self, tab: u64) -> bool {
+        self.active_tab == tab || self.slots.iter().flatten().any(|slot| slot.tab == tab)
     }
 
     /// Number of open designs (at least the active one).
@@ -402,7 +419,6 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     crate::dim_view::cancel();
     app.params = None;
     app.design_properties = None;
-    app.bom = None;
     app.cancel_view_animation();
     app.viewport.orbit_free = None;
     app.preview.reset();
@@ -448,6 +464,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // So does the host's pre-command check: every tab is held to it.
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
+    crate::print_face_ui::sync(&mut app.session, &app.preferences);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     app.session.invalidate_view(out_rev);
@@ -673,6 +690,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::semantic_content::leave_document(app);
         crate::dialogs::cancel(app);
         app.tool = None;
+        app.bom = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
@@ -721,6 +739,11 @@ pub fn import(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     let mut doc = solidcraft_engine::io::read_design(text.as_bytes()).map_err(|e| e.to_string())?;
     if let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
         doc.name = name.to_string();
+    }
+    // Like a design opened from a file, it comes in without its print faces unless they are kept
+    // (#11512); dropped before the session starts, so it still opens saved with nothing to undo.
+    if !app.preferences.keep_print_faces {
+        doc.print_faces.clear();
     }
     let replaced = app.docs.active;
     open_tab(app, Session::opened(doc, None))?;
@@ -827,6 +850,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
         app.tool = None;
+        app.bom = None;
         app.session.replace_design(Session::default());
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);
@@ -998,19 +1022,72 @@ fn dirty(app: &SolveApp, i: usize) -> bool {
     app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| s.session.is_dirty())
 }
 
+/// A tab's name: the file a saved design was opened or saved as (without its extension), so a
+/// Save As shows the new name; an unsaved design, or one renamed since it was saved, shows its
+/// design name. The Browser's top row shows the same name (#7267).
+///
+/// With the `names_from_file` preference off, every tab shows the design's own name, as before.
+pub(crate) fn tab_name(app: &SolveApp, session: &Session) -> String {
+    if app.preferences.names_from_file { session.save_as_name() } else { session.doc.name.clone() }
+}
+
 /// Tab names (with an unsaved-changes flag), in order.
 pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
     if app.docs.slots.is_empty() {
-        return vec![(app.session.doc.name.clone(), app.session.is_dirty())];
+        return vec![(tab_name(app, &app.session), app.session.is_dirty())];
     }
     app.docs
         .slots
         .iter()
         .map(|s| match s {
-            Some(d) => (d.session.doc.name.clone(), d.session.is_dirty()),
-            None => (app.session.doc.name.clone(), app.session.is_dirty()),
+            Some(d) => (tab_name(app, &d.session), d.session.is_dirty()),
+            None => (tab_name(app, &app.session), app.session.is_dirty()),
         })
         .collect()
+}
+
+/// Cached title inputs, separate from document identity: equal visible titles need no update.
+#[derive(Default)]
+pub(crate) struct WindowTitle {
+    initialized: bool,
+    design: Option<(String, String, bool)>,
+}
+
+impl WindowTitle {
+    fn update(&mut self, name: Option<&str>, dirty: bool, language: &str) -> Option<String> {
+        let unchanged = match (&self.design, name) {
+            (None, None) => true,
+            (Some((old_name, old_language, old_dirty)), Some(name)) => old_name == name && old_language == language && *old_dirty == dirty,
+            _ => false,
+        };
+        if self.initialized && unchanged {
+            return None;
+        }
+        self.initialized = true;
+        self.design = name.map(|name| (name.to_owned(), language.to_owned(), dirty));
+        Some(match name {
+            Some(name) => {
+                let name = solidcraft_ui_text::Locale::for_language(language).given_name(name);
+                format!("{name}{} — SolidCraft", if dirty { " *" } else { "" })
+            }
+            None => "SolidCraft".into(),
+        })
+    }
+}
+
+/// Derive from the live session after UI actions, including tab switches and asynchronous saves.
+/// Embedded applications leave the host's page/window chrome entirely alone.
+pub(crate) fn sync_window_title(app: &mut SolveApp, ctx: &egui::Context) {
+    if app.embedded || app.embed_editor {
+        return;
+    }
+    // The start page can overlay existing designs; only its untouched launch/last-close
+    // session represents no open design. Documents::count includes that placeholder.
+    let no_design = app.home.open && app.docs.count() == 1 && active_is_blank(app);
+    let name = (!no_design).then_some(app.session.doc.name.as_str());
+    if let Some(title) = app.window_title.update(name, app.session.is_dirty(), &app.preferences.language) {
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(title));
+    }
 }
 
 /// A design open in another tab, as Insert Design offers it (#8570): its name, its file (`None`:
@@ -1599,6 +1676,101 @@ fn renaming_tab(app: &SolveApp) -> bool {
 
 #[cfg(test)]
 mod tests {
+    fn title_commands(app: &mut SolveApp) -> Vec<String> {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(Default::default(), |ui| sync_window_title(app, ui.ctx()));
+        output.textures_delta.clear();
+        output
+            .viewport_output
+            .into_iter()
+            .filter(|(id, _)| *id == egui::ViewportId::ROOT)
+            .flat_map(|(_, output)| output.commands)
+            .filter_map(|command| match command {
+                egui::ViewportCommand::Title(title) => Some(title),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn window_title_tracks_live_design_save_rename_switch_and_open() {
+        let mut a = app();
+        a.home.open = false;
+        let initial = a.session.doc.name.clone();
+        assert_eq!(title_commands(&mut a), [format!("{initial} — SolidCraft")]);
+        assert!(title_commands(&mut a).is_empty(), "unchanged frames send no command");
+        a.session.execute("component.rename", &json!({"component": 0, "name": "Bracket"})).unwrap();
+        assert_eq!(title_commands(&mut a), ["Bracket * — SolidCraft"]);
+        let path = std::env::temp_dir().join(format!("solidcraft-window-title-{}.solidcraft", std::process::id()));
+        let path = path.to_string_lossy().into_owned();
+        a.session.execute("file.save", &json!({"path": path})).unwrap();
+        let saved = a.session.doc.name.clone();
+        assert_eq!(title_commands(&mut a), [format!("{saved} — SolidCraft")]);
+        a.session.execute("component.rename", &json!({"component": 0, "name": "Housing"})).unwrap();
+        assert_eq!(title_commands(&mut a), ["Housing * — SolidCraft"]);
+        a.session.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(title_commands(&mut a), [format!("{saved} — SolidCraft")]);
+        new_tab(&mut a);
+        let blank = a.session.doc.name.clone();
+        assert_eq!(title_commands(&mut a), [format!("{blank} — SolidCraft")]);
+        switch(&mut a, 0);
+        assert_eq!(title_commands(&mut a), [format!("{saved} — SolidCraft")]);
+        switch(&mut a, 1);
+        title_commands(&mut a);
+        a.open_path(&path);
+        assert_eq!(title_commands(&mut a), [format!("{saved} — SolidCraft")]);
+        a.session.execute("component.rename", &json!({"component": 0, "name": "Saved copy"})).unwrap();
+        assert_eq!(title_commands(&mut a), ["Saved copy * — SolidCraft"]);
+        let copy = format!("{path}.copy.solidcraft");
+        a.session.execute("file.save_as", &json!({"path": copy})).unwrap();
+        let copy_name = std::path::Path::new(&copy).file_stem().unwrap().to_str().unwrap();
+        assert_eq!(title_commands(&mut a), [format!("{copy_name} — SolidCraft")]);
+        a.open_path(&path);
+        assert_eq!(title_commands(&mut a), [format!("{saved} — SolidCraft")]);
+        std::fs::remove_file(copy).unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn window_title_respects_home_and_embedded_hosts() {
+        let mut a = app();
+        a.home.open = true;
+        assert_eq!(title_commands(&mut a), ["SolidCraft"]);
+        assert!(title_commands(&mut a).is_empty());
+        a.home.open = false;
+        let name = a.session.doc.name.clone();
+        assert_eq!(title_commands(&mut a), [format!("{name} — SolidCraft")]);
+        for editor in [false, true] {
+            let mut embedded = app();
+            embedded.home.open = false;
+            embedded.embedded = !editor;
+            embedded.embed_editor = editor;
+            assert!(title_commands(&mut embedded).is_empty(), "the host owns the title");
+        }
+    }
+
+    #[test]
+    fn window_title_keeps_existing_design_when_start_page_is_shown() {
+        let mut a = app();
+        a.home.open = false;
+        a.session.execute("component.rename", &json!({"component": 0, "name": "Bracket"})).unwrap();
+        assert_eq!(title_commands(&mut a), ["Bracket * — SolidCraft"]);
+        a.home.open = true;
+        assert!(title_commands(&mut a).is_empty(), "opening the start page does not close the design");
+        close(&mut a, 0, true);
+        assert_eq!(title_commands(&mut a), ["SolidCraft"], "closing the last design leaves only the blank placeholder");
+    }
+
+    #[test]
+    fn window_title_formats_dirty_state_and_suppresses_unchanged_titles() {
+        let mut title = WindowTitle::default();
+        assert_eq!(title.update(Some("Plate"), false, "en").as_deref(), Some("Plate — SolidCraft"));
+        assert!(title.update(Some("Plate"), false, "en").is_none());
+        assert_eq!(title.update(Some("Plate"), true, "en").as_deref(), Some("Plate * — SolidCraft"));
+        assert_eq!(title.update(None, true, "en").as_deref(), Some("SolidCraft"));
+        assert!(title.update(None, false, "fr").is_none());
+    }
+
     #[test]
     fn reopening_saved_design_preserves_dirty_session_and_view() {
         let mut a = super::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -1676,6 +1848,22 @@ mod tests {
         a.home.open = true;
         assert!(reuse_path(&mut a, "renamed.solidcraft").unwrap());
         assert!(!a.home.open);
+    }
+
+    #[test]
+    fn saved_tabs_show_file_names_and_unsaved_tabs_keep_design_names() {
+        let mut a = app();
+        let design = a.session.doc.name.clone();
+        assert_eq!(tabs_info(&a)[0].0, design);
+        a.session.path = Some("parts/bracket.solidcraft".into());
+        assert_eq!(tabs_info(&a)[0].0, "bracket");
+        // Save As under a new revision name: the tab follows the file, not the design's first name.
+        a.session.path = Some("parts/bracket rev B.solidcraft".into());
+        assert_eq!(tabs_info(&a)[0].0, "bracket rev B");
+        new_tab(&mut a);
+        let names: Vec<String> = tabs_info(&a).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names.first().map(String::as_str), Some("bracket rev B"));
+        assert_eq!(names.len(), 2);
     }
 
     #[test]

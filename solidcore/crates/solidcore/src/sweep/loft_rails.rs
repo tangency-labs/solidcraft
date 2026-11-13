@@ -10,6 +10,7 @@
 //! | Rust                 | Upstream |
 //! |----------------------|----------|
 //! | [`loft_rails`]       | (none; SolidCraft's `railed`, then the loft) |
+//! | [`sweep_two_rails`]  | (none; the two-rail sweep, The NURBS Book §10.4) |
 //! | [`RailSection`]      | (none; SolidCraft's `Section`) |
 //! | [`RailLoftOptions`]  | (none) |
 //! | `station_map` (private) | (none; SolidCraft's `station_map`) |
@@ -57,13 +58,28 @@
 //! (the station shrinks to nothing, within `1e-6` of the loft's size, SolidCraft's convention);
 //! a tolerance not finite and positive.
 //!
+//! **One profile along two rails ([`sweep_two_rails`]).** The two-rail sweep (Piegl and
+//! Tiller, *The NURBS Book*, 2nd ed., §10.4: a sweep as a skin through placed sections): an open
+//! profile whose ends lie on the two rails' starts (within the body tolerance) is placed at
+//! stations of the rails' common parameter (each rail's natural range mapped linearly onto
+//! `[0, 1]`): at `f` the rails' points `A`, `B`, the chord `c = B - A`, its unit `ĉ` and size
+//! `k = |c| / |c0|`, and the direction of travel `d`, the mean of the rails' unit tangents made
+//! square to the chord. Each control point `x` of the profile goes to `A + M (x - A0)`, `M` the
+//! frame turning `d0` onto `d` unsized and `ĉ0` onto `ĉ` sized by `k`, the third way `d × ĉ`
+//! sized by `k` ([`RailFit::Scale`]) or kept ([`RailFit::Stretch`]). The chord lands on the
+//! chord, so the profile's ends lie on the rails at every station; at `f = 0` the map is the
+//! identity, so the profile is swept as drawn. The stations are placed and certified by the
+//! same loop as the loft's (`skin_and_certify`), each rail bounded against the skin's guided
+//! edge. Refused, naming why: a closed profile or one asked to close or cap (two-rail sweeps
+//! take open profiles), profile curves not end to end, the profile's ends not on the rails'
+//! starts, rails starting the opposite ways, rails meeting (the chord within `1e-6` of the
+//! size), the mean tangent along the chord.
+//!
 //! Deviations: SolidCraft crosses a rail's polyline from the previous crossing on; here a rail
 //! is a kernel curve crossed exactly ([`crate::sweep::stations`]), so a rail crossing a station's
 //! or section's plane more than once is refused instead of taking the next crossing. SolidCraft
 //! places a fixed count of stations evenly and does not bound the skin between them; here they
 //! are placed where the certificate asks. No recursion: the refinement is a loop.
-
-pub mod certificate;
 
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -71,6 +87,7 @@ use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use crate::nurbs::certificate;
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::crv_fit::p1::{interp_given_params, interp_knot_vector};
 use crate::nurbs::knots::{KnotVector, Side};
@@ -160,7 +177,7 @@ pub struct RailedLoft {
 /// A section curve as plain numbers: degree, full knots, Euclidean control points, weights
 /// (`None` for a polynomial curve).
 #[derive(Debug, Clone)]
-struct Plain {
+pub(crate) struct Plain {
     degree: usize,
     knots: Vec<f64>,
     points: Vec<Point3>,
@@ -361,7 +378,7 @@ fn wire_point(curves: &[(Plain, NurbCurve)], g: f64) -> Result<Point3> {
 }
 
 /// A station's curves, and per rail its parameter and point there.
-type StationAt = (Vec<Plain>, Vec<(f64, Point3)>);
+pub(crate) type StationAt = (Vec<Plain>, Vec<(f64, Point3)>);
 
 /// An affine move: `x` goes to `to + m (x - from)`.
 struct Affine {
@@ -710,11 +727,11 @@ impl<'a> Loft<'a> {
 
 /// A wire of the loft: a section's curves or a station's, at loft parameter `(span, f)`, and
 /// per rail the rail's parameter and point there.
-struct Wire {
-    span: usize,
-    f: f64,
-    curves: Vec<Plain>,
-    hits: Vec<(f64, Point3)>,
+pub(crate) struct Wire {
+    pub(crate) span: usize,
+    pub(crate) f: f64,
+    pub(crate) curves: Vec<Plain>,
+    pub(crate) hits: Vec<(f64, Point3)>,
 }
 
 /// The loft through `sections` guided by `rails` (module docs).
@@ -759,6 +776,251 @@ pub fn loft_rails(
             hits,
         });
     }
+    skin_and_certify(
+        k,
+        wires,
+        spans,
+        rails,
+        opts,
+        &mut |k: &Kernel, i: usize, f: f64| loft.station(k, i, f),
+    )
+}
+
+/// One open profile swept along two rails (module docs, "One profile along two rails"): the
+/// profile's curves `profile`, end to end, its start on the start of `rails[0]` and its end on
+/// the start of `rails[1]` (or the other way round), placed at stations of the rails' common
+/// parameter and skinned, each rail certified within `opts.tolerance` of the skin's guided edge
+/// (`skin_and_certify`). `opts.closed` and `opts.cap` must be false. The bounds are per rail,
+/// in the order given.
+///
+/// # Errors
+///
+/// `InvalidInput` and `Unsupported` for the refusals the module names;
+/// [`crate::error::sweep::SweepFailure::RailPastStationCap`] where the certificate is not met
+/// within [`RailLoftOptions::max_wires`]; those of the evaluations, the skin and the bound.
+pub fn sweep_two_rails(
+    k: &mut Kernel,
+    profile: &[&Curve],
+    rails: [&Curve; 2],
+    opts: &RailLoftOptions,
+) -> Result<RailedLoft> {
+    if !(opts.tolerance.is_finite() && opts.tolerance > 0.0) {
+        return Err(invalid("a sweep's tolerance is finite and positive"));
+    }
+    if !(1..=3).contains(&opts.degree) {
+        return Err(invalid("a sweep's skin degree is 1 to 3"));
+    }
+    if opts.closed || opts.cap {
+        return Err(unsupported(
+            "a closed or capped two-rail sweep: two-rail sweeps take open profiles",
+        ));
+    }
+    if profile.is_empty() || profile.len() > MAX_CURVES {
+        return Err(invalid("a profile has 1 to 1000 curves"));
+    }
+    let tol = k.tolerances.zone_tol_3d;
+    let mut curves = Vec::new();
+    for c in profile {
+        let plain = Plain::of(c)?;
+        let nurb = plain.nurb()?;
+        curves.push((plain, nurb));
+    }
+    // end to end, open
+    let mut ends = Vec::new();
+    for (plain, nurb) in &curves {
+        ends.push((plain.point_at(nurb, 0.0)?, plain.point_at(nurb, 1.0)?));
+    }
+    for w in ends.windows(2) {
+        if let [(_, end), (start, _)] = w {
+            if end.distance(*start) > tol {
+                return Err(invalid("a profile's curves do not run end to end"));
+            }
+        }
+    }
+    let (Some(&(a0, _)), Some(&(_, b0))) = (ends.first(), ends.last()) else {
+        return Err(invalid("a profile has 1 to 1000 curves"));
+    };
+    if a0.distance(b0) <= tol {
+        return Err(unsupported(
+            "a closed profile: two-rail sweeps take open profiles",
+        ));
+    }
+    // which rail starts at the profile's start
+    let [r0, r1] = rails;
+    let (s0, s1) = (rail_at(k, r0, 0.0)?, rail_at(k, r1, 0.0)?);
+    let swapped = if s0.1.distance(a0) <= tol && s1.1.distance(b0) <= tol {
+        false
+    } else if s1.1.distance(a0) <= tol && s0.1.distance(b0) <= tol {
+        true
+    } else {
+        return Err(invalid(
+            "a profile whose ends are not on the rails' starts: each rail starts at an end of the profile",
+        ));
+    };
+    let ordered: [&Curve; 2] = if swapped { [r1, r0] } else { [r0, r1] };
+    let mut lo = Point3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut hi = Point3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for (plain, _) in &curves {
+        for q in &plain.points {
+            if !(q.x.is_finite() && q.y.is_finite() && q.z.is_finite()) {
+                return Err(invalid("a profile's control point is not finite"));
+            }
+            lo = Point3::new(lo.x.min(q.x), lo.y.min(q.y), lo.z.min(q.z));
+            hi = Point3::new(hi.x.max(q.x), hi.y.max(q.y), hi.z.max(q.z));
+        }
+    }
+    let (a, b) = if swapped { (s1, s0) } else { (s0, s1) };
+    if a.2.dot(b.2) <= 0.0 {
+        return Err(invalid(
+            "two rails starting the opposite ways: they run from the profile's two ends the same way",
+        ));
+    }
+    let chord = b.1 - a.1;
+    let size = lo.distance(hi).max(chord.length());
+    let (across, d) = chord_frame(chord, a.2, b.2, size)?;
+    let sweep = Birail {
+        profile: curves.iter().map(|(p, _)| p.clone()).collect(),
+        rails: ordered,
+        origin: a.1,
+        along: d,
+        across,
+        length: chord.length(),
+        size,
+        fit: opts.fit,
+    };
+    let start = Wire {
+        span: 0,
+        f: 0.0,
+        curves: sweep.profile.clone(),
+        hits: vec![(a.0, a.1), (b.0, b.1)],
+    };
+    let (curves1, hits1) = sweep.station(k, 1.0)?;
+    let end = Wire {
+        span: 0,
+        f: 1.0,
+        curves: curves1,
+        hits: hits1,
+    };
+    let rail_list: Vec<&Curve> = ordered.to_vec();
+    let mut made = skin_and_certify(
+        k,
+        vec![start, end],
+        1,
+        &rail_list,
+        opts,
+        &mut |k: &Kernel, _span: usize, f: f64| sweep.station(k, f),
+    )?;
+    if swapped {
+        made.bounds.reverse();
+    }
+    Ok(made)
+}
+
+/// Rail `c` at the common parameter `f` (its natural range mapped linearly onto `[0, 1]`): the
+/// parameter, the point and the unit tangent.
+fn rail_at(k: &Kernel, c: &Curve, f: f64) -> Result<(f64, Point3, Vec3)> {
+    let iv = c.natural_interval();
+    let t = iv.min() + (iv.max() - iv.min()) * f;
+    let d = c.evaluate(k, t, 1, f >= 1.0, true)?;
+    let (Some(&q), Some(&dq)) = (d.first(), d.get(1)) else {
+        return Err(invalid("a rail's derivative"));
+    };
+    let dq = dq
+        .unitize()
+        .map_err(|_| invalid("a rail with no tangent"))?;
+    Ok((t, q, dq))
+}
+
+/// The unit chord and the direction of travel at a station: the chord `chord` between the
+/// rails' points, the mean of their unit tangents `t0`, `t1` made square to it.
+fn chord_frame(chord: Vec3, t0: Vec3, t1: Vec3, size: f64) -> Result<(Vec3, Vec3)> {
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(chord.length() > 1e-6 * size.max(1e-9)) {
+        return Err(invalid(
+            "the two rails come together: the sweep would shrink to nothing",
+        ));
+    }
+    let across = chord
+        .unitize()
+        .map_err(|_| invalid("the two rails come together"))?;
+    let mean = (t0 + t1) * 0.5;
+    let along = mean - across * mean.dot(across);
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(along.length() > 1e-6) {
+        return Err(invalid(
+            "the rails run along the line between them: the sweep has no direction",
+        ));
+    }
+    let along = along
+        .unitize()
+        .map_err(|_| invalid("the rails run along the line between them"))?;
+    Ok((across, along))
+}
+
+/// A two-rail sweep's construction: its profile and the frame it is drawn in at the start.
+struct Birail<'a> {
+    profile: Vec<Plain>,
+    rails: [&'a Curve; 2],
+    /// The first rail's start, where the profile's start lies.
+    origin: Point3,
+    /// The direction of travel at the start.
+    along: Vec3,
+    /// The unit chord at the start.
+    across: Vec3,
+    /// The chord's length at the start.
+    length: f64,
+    size: f64,
+    fit: RailFit,
+}
+
+impl Birail<'_> {
+    /// The profile placed at the common parameter `f`, and each rail's parameter and point there.
+    fn station(&self, k: &Kernel, f: f64) -> Result<StationAt> {
+        let [r0, r1] = self.rails;
+        let (a, b) = (rail_at(k, r0, f)?, rail_at(k, r1, f)?);
+        let chord = b.1 - a.1;
+        let (across, along) = chord_frame(chord, a.2, b.2, self.size)?;
+        let m = rail_frame(
+            self.along,
+            self.across,
+            along,
+            across,
+            chord.length() / self.length,
+            self.fit,
+        );
+        let placed = Affine {
+            from: self.origin,
+            to: a.1,
+            m,
+        };
+        let curves = self
+            .profile
+            .iter()
+            .map(|c| c.with(c.points.iter().map(|q| placed.apply(*q)).collect()))
+            .collect();
+        Ok((curves, vec![(a.0, a.1), (b.0, b.1)]))
+    }
+}
+
+/// The loft's skin-and-certificate loop (module docs, "Where the stations go, and the
+/// certificate"): from the wires `wires` (the sections, each with its rails' crossings, `spans`
+/// spans between them), a station placed by `station(k, span, f)` at each span's middle, the
+/// wires skinned, each rail bounded against the skin on every span between neighbouring wires,
+/// and a span whose bound is above the tolerance given a station at its middle, until every
+/// span is certified; past [`RailLoftOptions::max_wires`] refused, naming the bound reached.
+///
+/// # Errors
+///
+/// [`crate::error::sweep::SweepFailure::RailPastStationCap`] past the wire cap; those of
+/// `station`, the skin and the bound.
+fn skin_and_certify(
+    k: &mut Kernel,
+    mut wires: Vec<Wire>,
+    spans: usize,
+    rails: &[&Curve],
+    opts: &RailLoftOptions,
+    station: &mut dyn FnMut(&Kernel, usize, f64) -> Result<StationAt>,
+) -> Result<RailedLoft> {
     // one station at each span's middle
     let mut pending: Vec<(usize, f64)> = (0..spans).map(|i| (i, 0.5)).collect();
     // the largest bound the last skin proved (none before the first)
@@ -776,7 +1038,7 @@ pub fn loft_rails(
             .into_error());
         }
         for (i, f) in pending.drain(..) {
-            let (curves, hits) = loft.station(k, i, f)?;
+            let (curves, hits) = station(&*k, i, f)?;
             wires.push(Wire {
                 span: i,
                 f,

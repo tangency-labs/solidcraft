@@ -2,7 +2,7 @@
 //! export command of each format (`file.export_step`, `file.export_stl`, `file.export_3mf`,
 //! `file.export_obj`, `file.export_urdf`), which take what `file.export` takes for that format,
 //! without `format`, and `doc.open` and the recovery commands (`doc.recovery_list`,
-//! `doc.recover`, `doc.recovery_discard`).
+//! `doc.recover`, `doc.recovery_discard`), and local import-cache maintenance.
 
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -52,9 +52,8 @@ pub struct ExportStepParams {
     pub bodies: Option<StringList>,
 }
 
-/// Export bodies as a mesh file: binary STL for `file.export_stl`, OBJ for `file.export_obj`
-/// (the colours of the bodies go in a material library, `.mtl`, written next to it). The file
-/// has that format whatever the path's extension.
+/// Export bodies as an OBJ mesh file (`file.export_obj`), the colours of the bodies in a material
+/// library, `.mtl`, written next to it. The file is OBJ whatever the path's extension.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportMeshParams {
@@ -66,6 +65,26 @@ pub struct ExportMeshParams {
     /// How closely the mesh follows curved faces. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+}
+
+/// Export bodies as a binary STL file (`file.export_stl`), whatever the path's extension.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExportStlParams {
+    /// The file to write.
+    pub path: String,
+    /// The bodies to export, by name. Default: every body.
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+    /// How closely the mesh follows curved faces. Default: standard.
+    #[serde(default)]
+    pub quality: Option<MeshQualityParam>,
+    /// True writes each body with a print face (`body.print_face`) laid on it, as a slicer export
+    /// lays it: turned so the face points down at Z = 0, its centre of mass over the origin. Each
+    /// body is laid on its own, so several land on the origin together. Default: false, every body
+    /// as it lies in the design.
+    #[serde(default)]
+    pub lay_on_print_faces: Option<bool>,
 }
 
 /// Export bodies as a 3MF file, whatever the path's extension.
@@ -83,6 +102,11 @@ pub struct Export3mfParams {
     /// What each object in the file holds. Default: body.
     #[serde(default)]
     pub objects: Option<ObjectsParam>,
+    /// As `file.export_stl`'s: true writes each body with a print face laid on it. A body that is
+    /// one of the parts of an object (`objects: component`) stays as it lies, so the object keeps
+    /// its shape. Default: false.
+    #[serde(default)]
+    pub lay_on_print_faces: Option<bool>,
 }
 
 /// Export the whole assembly as a robot description (URDF), with an STL mesh for each link
@@ -140,6 +164,10 @@ pub struct ExportParams {
     /// URDF only: each joint's velocity limit, a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// STL and 3MF only: true writes each body with a print face laid on it, as
+    /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
+    #[serde(default)]
+    pub lay_on_print_faces: Option<bool>,
 }
 
 fn export_required(schema: &mut Schema) {
@@ -179,8 +207,17 @@ fn names<E: serde::de::Error>(m: &Map<String, Value>) -> Result<Option<StringLis
 impl<'de> Deserialize<'de> for ExportParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let m = Map::<String, Value>::deserialize(d)?;
-        let mut out =
-            ExportParams { path: None, format: None, bodies: None, quality: None, objects: None, mesh_prefix: None, effort: None, velocity: None };
+        let mut out = ExportParams {
+            path: None,
+            format: None,
+            bodies: None,
+            quality: None,
+            objects: None,
+            mesh_prefix: None,
+            effort: None,
+            velocity: None,
+            lay_on_print_faces: None,
+        };
         // The handler reads `path` first and refuses anything but a name it can write to; the
         // other keys are read only once it has one, and the format is known.
         out.path = match m.get("path") {
@@ -230,12 +267,19 @@ impl<'de> Deserialize<'de> for ExportParams {
                 _ => return Err(refuse(format!("`objects` must be body or component, not {v}"))),
             },
         };
+        out.lay_on_print_faces = match m.get("lay_on_print_faces") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(false)) => Some(false),
+            Some(Value::Bool(true)) if matches!(format, Format::StlBinary | Format::StlAscii | Format::ThreeMf | Format::ThreeMfTagged) => Some(true),
+            Some(Value::Bool(true)) => return Err(refuse("`lay_on_print_faces` is for STL and 3MF: other formats are not printed")),
+            Some(_) => return Err(refuse("`lay_on_print_faces` must be true or false")),
+        };
         Ok(out)
     }
 }
 
 /// What `file.export_step`, `file.export_stl`, `file.export_3mf` and `file.export_obj` return.
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Default, Serialize, JsonSchema)]
 pub struct ExportResult {
     /// The file written.
     pub path: String,
@@ -247,6 +291,13 @@ pub struct ExportResult {
     /// OBJ only: every file written, the material library first and the mesh file last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
+    /// With `lay_on_print_faces` only: the bodies that were written laid on their print face.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub print_faces: Vec<String>,
+    /// With `lay_on_print_faces` only: a warning for each body that has a print face but was
+    /// written as it lies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -402,6 +453,18 @@ impl JsonSchema for MaxPoints {
     }
 }
 
+/// `history` of `doc.open`: rebuild a FreeCAD file's sketches and features, or bring in only
+/// its solids.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryParam {
+    /// The file's sketches and features, when every one rebuilds and they build what the file
+    /// holds; otherwise the solids come in with a warning.
+    Features,
+    /// Only the file's solids, as one Import feature.
+    Solids,
+}
+
 /// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
 /// earlier release), a `.dxf` or `.svg` drawing (a new, unsaved design with an XY sketch, with
 /// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
@@ -427,6 +490,10 @@ pub struct OpenParams {
     /// its parts) into a new history folder named `Group #N`. Default: false.
     #[serde(default)]
     pub folder: Option<bool>,
+    /// For a FreeCAD file only (ignored for other files): its sketches and features rebuilt as
+    /// SolidCraft features, or only its solids as one Import feature. Default: features.
+    #[serde(default)]
+    pub history: Option<HistoryParam>,
     /// For a 3MF, STL, OBJ or glTF file only (refused for any other): true moves the mesh so its
     /// box is centred on X and Y with its base on Z = 0. Default: false.
     #[serde(default)]
@@ -435,6 +502,10 @@ pub struct OpenParams {
     /// elsewhere). Default: false.
     #[serde(default)]
     pub read_only: Option<bool>,
+    /// For a STEP or IGES file: false recomputes the import without reading or writing the local
+    /// saved-model cache. Default: true.
+    #[serde(default)]
+    pub reuse_import: Option<bool>,
     /// For a point cloud, STL, OBJ or PLY file: the unit its coordinates are in, scaled to
     /// millimetres as it is read (refused for a 3MF or glTF file, which states its own; ignored
     /// for other files). Default: mm.
@@ -596,6 +667,17 @@ pub struct OpenedFile {
     /// A mesh file opened with `origin`: the shift [x, y, z] that moved it to the origin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moved_to_origin: Option<Vec<f64>>,
+    /// STEP and IGES only: the SHA-256 of the file's exact bytes, as lower-case hex.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_sha256: Option<String>,
+    /// STEP and IGES only: true when an unchanged earlier import was reused from the local
+    /// saved-model cache, false when the file was imported afresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_reused: Option<bool>,
+    /// A FreeCAD file only: `"features"` when its sketches and features were rebuilt; absent
+    /// when its solids came in as one Import feature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -734,6 +816,16 @@ pub enum FileExportResult {
     File(ExportResult),
     /// URDF.
     Urdf(UrdfExportResult),
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImportCacheClearParams {}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ImportCacheClearResult {
+    /// Number of cached imports removed. Open designs and stand-up answers are retained.
+    pub removed: usize,
 }
 
 #[cfg(test)]

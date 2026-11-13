@@ -961,27 +961,9 @@ fn limit_inner_cross_derivs(net: &mut Net, k: usize) -> Result<()> {
 /// the module notes.
 pub fn fill_n_sided_hole(
     cur: &mut [Curve],
-    der: Option<&mut [Option<Curve>]>,
-    eps: f64,
-    center: Option<(Vec3, Vec3)>,
-) -> Result<NSidedFill> {
-    fill_n_sided_hole_with(cur, der, eps, center, false)
-}
-
-/// [`fill_n_sided_hole`] with the opt-in fix of WR-461 (#1170): with `stay_inside`,
-/// the cross-boundary derivatives across the inner curves are shortened where their
-/// cubic blend from the opposite boundary would cross that boundary's tangent
-/// plane (see `limit_inner_cross_derivs`).
-///
-/// # Errors
-///
-/// As [`fill_n_sided_hole`].
-pub fn fill_n_sided_hole_with(
-    cur: &mut [Curve],
     mut der: Option<&mut [Option<Curve>]>,
     eps: f64,
     center: Option<(Vec3, Vec3)>,
-    stay_inside: bool,
 ) -> Result<NSidedFill> {
     const OP: &str = OP_FILL;
 
@@ -1406,9 +1388,10 @@ pub fn fill_n_sided_hole_with(
         net.make_compatible(i, k)?;
     }
 
-    if stay_inside {
-        limit_inner_cross_derivs(&mut net, k)?;
-    }
+    // Not upstream (WR-461, #1170): the cross-boundary derivatives across the inner
+    // curves are shortened where their cubic blend from the opposite boundary would cross
+    // that boundary's tangent plane.
+    limit_inner_cross_derivs(&mut net, k)?;
 
     // Fit bicubically blended Coons patches into each rectangular hole.
     let mut sur_a: Vec<Surface> = Vec::with_capacity(k + 1);

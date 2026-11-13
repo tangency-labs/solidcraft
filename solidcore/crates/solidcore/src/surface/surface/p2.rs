@@ -291,6 +291,7 @@ use crate::surface::ball_patch::{BallPatch, BALL_PATCH_TYPE};
 use crate::surface::cone::Cone;
 use crate::surface::curve_bounded_surface::CurveBoundedSurface;
 use crate::surface::offset_surface::OffsetSurface;
+use crate::surface::plane::p2::PlaneIntersectWarning;
 use crate::surface::plane::Plane;
 use crate::surface::procedural_blend::corner::CornerDefinition;
 use crate::surface::procedural_blend::exact::ExactRound;
@@ -3147,8 +3148,9 @@ impl Surface {
         }
     }
 
-    /// `IntersectWithPlane`: the special-case intersection with `plane` and whether
-    /// the general intersector is still needed. The `SmPlane` override
+    /// `IntersectWithPlane`: the special-case intersection with `plane`, whether
+    /// the general intersector is still needed, and the plane override's warning
+    /// ([`PlaneIntersectWarning`], never set by the other kinds). The `SmPlane` override
     /// ([`Plane::intersect_with_plane`]; `plane` is taken as without owner) and the
     /// surface of revolution's (whose special cases use only the plane, the other
     /// domain and the tolerance); the other ported kinds run the base default, which
@@ -3168,7 +3170,8 @@ impl Surface {
         _use_surface_edges: [bool; 2],
         approx_tol_3d: Option<f64>,
         _ang_tol_rad: Option<f64>,
-    ) -> Result<(bool, SurfaceIntersection)> {
+    ) -> Result<(bool, SurfaceIntersection, Option<PlaneIntersectWarning>)> {
+        let no_warning = |(more, x): (bool, SurfaceIntersection)| (more, x, None);
         match self.kind_with_nurb(k)? {
             SurfaceKind::Plane(s) => s.intersect_with_plane_owned(
                 k,
@@ -3182,24 +3185,26 @@ impl Surface {
                 ],
             ),
             // the plane is taken as without owner; this cone's face tolerance is for WR-510
-            SurfaceKind::Cone(s) => s.intersect_with_plane_owned(
-                k,
-                uv_domain,
-                plane,
-                crate::surface::plane::p2::PlaneOwner::NoFace,
-                other_uv_domain,
-                approx_tol_3d,
-                [self.owner_zone_tol_3d(), None],
-            ),
-            SurfaceKind::Sphere(s) => {
-                s.intersect_with_plane(k, uv_domain, plane, other_uv_domain, approx_tol_3d)
-            }
-            SurfaceKind::Torus(s) => {
-                s.intersect_with_plane(k, plane, other_uv_domain, approx_tol_3d)
-            }
-            SurfaceKind::SurfOfRevolution(s) => {
-                s.intersect_with_plane(k, plane, other_uv_domain, approx_tol_3d)
-            }
+            SurfaceKind::Cone(s) => s
+                .intersect_with_plane_owned(
+                    k,
+                    uv_domain,
+                    plane,
+                    crate::surface::plane::p2::PlaneOwner::NoFace,
+                    other_uv_domain,
+                    approx_tol_3d,
+                    [self.owner_zone_tol_3d(), None],
+                )
+                .map(no_warning),
+            SurfaceKind::Sphere(s) => s
+                .intersect_with_plane(k, uv_domain, plane, other_uv_domain, approx_tol_3d)
+                .map(no_warning),
+            SurfaceKind::Torus(s) => s
+                .intersect_with_plane(k, plane, other_uv_domain, approx_tol_3d)
+                .map(no_warning),
+            SurfaceKind::SurfOfRevolution(s) => s
+                .intersect_with_plane(k, plane, other_uv_domain, approx_tol_3d)
+                .map(no_warning),
             // SmSurfOfExtrusion::IntersectWithPlane (same signature: an override); the
             // plane is taken as without owner, as for the plane above
             SurfaceKind::SurfOfExtrusion(s) => s
@@ -3212,14 +3217,20 @@ impl Surface {
                     other_uv_domain,
                     approx_tol_3d,
                 )
-                .map(|x| (x.needs_more_intersections, SurfaceIntersection::from(x))),
+                .map(|x| {
+                    (
+                        x.needs_more_intersections,
+                        SurfaceIntersection::from(x),
+                        None,
+                    )
+                }),
             SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::BallPatch(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
-            | SurfaceKind::SrfInVolume(_) => base_intersect_with_plane(),
+            | SurfaceKind::SrfInVolume(_) => base_intersect_with_plane().map(no_warning),
         }
     }
 
@@ -6170,6 +6181,7 @@ impl DerivSurfDefinition<'_> {
                 intersections_with_rails: Some(params),
                 deriv_surfs: Some([None, None]),
                 degree,
+                section_params: None,
             },
         )
     }

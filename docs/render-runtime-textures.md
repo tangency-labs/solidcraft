@@ -128,7 +128,7 @@ mapped-surface normal corruption; captured filtering and face precedence remain
 authoritative.
 The map-free opaque specialization has one private media-stack entry; the
 general pipeline retains sixteen. The authored nested-media policy still controls
-admission and boundary transitions. Captured scene options select at most six cached programs.
+admission and boundary transitions. Captured scene options select at most three cached programs.
 
 The independent progressive device requests six storage buffers per shader
 stage. An adapter limited to fewer cannot install this executor; raster and

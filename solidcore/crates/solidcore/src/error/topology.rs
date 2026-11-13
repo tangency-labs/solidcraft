@@ -292,11 +292,6 @@ mod tests {
     /// `Upstream` status, except the file listed (with the bare sites it may still hold).
     #[test]
     fn the_topology_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting(
-            "topology",
-            53,
-            // held back: the face-orientation repair's final status 1 (upstream `TRUE`)
-            &[("topology/brep/p9.rs", 1)],
-        );
+        super::super::bare_scan::assert_waiting("topology", 53, &[]);
     }
 }

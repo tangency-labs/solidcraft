@@ -752,6 +752,28 @@ fn editing_a_box_or_cylinder_shows_its_placement_and_keeps_it() {
     assert_eq!(stored(&h, cylinder_id), base);
 }
 
+/// A box placed by its centre opens for editing with Center chosen and its centre in the fields,
+/// and a new length grows it on both sides (#14487).
+#[test]
+fn editing_a_box_placed_by_its_centre_keeps_it_centred() {
+    let mut h = design("mm");
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 10, "center": [50, 0, 0]})).unwrap();
+    h.frames(2);
+    let id = h.app.session.doc.features[0].id;
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert_shown(&h, &[("X", "50".into()), ("Y", "0".into()), ("Z", "0".into())]);
+    type_into(&mut h, "length", "30");
+    h.frames(2);
+    let sent = sent(&h);
+    let p = sent.get("params").unwrap_or(&sent);
+    assert!(p.get("center").is_some() && p.get("corner").is_none(), "{sent}");
+    ok(&mut h);
+    let made = bounds(&mut h.app.session);
+    assert_near(made[0].0, [35.0, -5.0, -5.0]);
+    assert_near(made[0].1, [65.0, 5.0, 5.0]);
+}
+
 #[test]
 fn the_cylinder_dialog_takes_its_base_point() {
     let mut h = design("mm");
@@ -1006,4 +1028,27 @@ fn a_point_selected_in_the_open_sketch_still_places_the_sphere_when_the_sketch_e
     h.frames(3);
     assert!(h.app.session.active_sketch.is_none(), "the sphere ends the sketch");
     assert_eq!(sent(&h)["center"], json!([12.0, 7.0, 20.0]));
+}
+
+#[test]
+fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
+    // #11230: the Point input wakes snap points (a hole's centre, an edge's middle, a face's
+    // centre), and a snapped point fills the placement fields.
+    for cmd in ["solid.box", "solid.sphere", "solid.torus"] {
+        let mut h = design("mm");
+        h.app.start(cmd);
+        h.frames(3);
+        assert!(crate::snap_wake::wanted(&h.app), "{cmd}");
+        let point = solidcore_record::Vec3::new(5.0, 7.5, 0.0);
+        let hit = crate::viewport::Hit::Vertex { body: String::new(), point };
+        let sel = h.app.dialog.as_ref().and_then(|d| d.active_input()).and_then(|i| i.accepts(&hit, None, |_, _| false));
+        let Some(sel) = sel else { panic!("{cmd}: the snap point is not taken") };
+        crate::viewport::dialog_pick(&mut h.app, &hit, sel);
+        h.frames(2);
+        let want: Vec<(&str, String)> = [("X", "5 mm"), ("Y", "7.5 mm"), ("Z", "0 mm")].iter().map(|(k, v)| (*k, v.to_string())).collect();
+        assert_shown(&h, &want);
+        // Off in Preferences, nothing wakes.
+        h.app.preferences.snap_points = false;
+        assert!(!crate::snap_wake::wanted(&h.app), "{cmd}");
+    }
 }

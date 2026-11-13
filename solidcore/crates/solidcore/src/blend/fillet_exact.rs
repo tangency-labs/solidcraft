@@ -2530,47 +2530,11 @@ fn keep_definition(
             "the fillet geometry's surface",
         ));
     };
-    keep_round_if_proved(k, surface, round, inputs.tol)?;
+    // The round keeps its definition only where it is proved; a net the certificate refuses
+    // refuses the fillet (definitions-and-certificates.md §7.1, §7.4), never kept bare.
+    round.recertify(k, surface)?;
+    surface.set_exact_round(Some(round));
     Ok(())
-}
-
-/// `round` kept on `net` where it is proved ([`ExactRound::recertify`]), returning whether it
-/// was. The class is read within `tol`, the body's tolerance, and the certificate to rounding.
-/// A net the certificate cannot prove on its class's surface (`check_exact_net`'s refusal),
-/// but that lies within `tol` of it ([`ExactRound::miss`]), is the round all the same: it
-/// keeps no definition and is built. A canal round whose computed spine is not exactly on
-/// both supports' offsets (a plane and a cylinder a few degrees off square,
-/// tangency-labs/solidcraft#14000) is one.
-/// A net further off the class than `tol` is built wrongly, and stays an error, as does the
-/// circle class's own refusal (its net certified on its own torus, #3066).
-///
-/// # Errors
-///
-/// The certificate's refusal of a net more than `tol` off the class, or of supports that
-/// give the class no surface; those of the certificate and of [`ExactRound::miss`].
-pub fn keep_round_if_proved(
-    k: &Kernel,
-    net: &mut Surface,
-    round: ExactRound,
-    tol: f64,
-) -> Result<bool> {
-    match round.recertify(k, net) {
-        Ok(_) => {
-            net.set_exact_round(Some(round));
-            Ok(true)
-        }
-        Err(e) => {
-            let off = matches!(
-                &e,
-                SolidError::InvalidInput { operation, .. }
-                    if *operation == crate::surface::implicit::OP_EXACT
-            );
-            match off.then(|| round.miss(k, net)).transpose()?.flatten() {
-                Some(miss) if miss <= tol => Ok(false),
-                _ => Err(e),
-            }
-        }
-    }
 }
 
 /// [`calc_exact_fillet_geom`]'s build by the class (`CalcExactFilletGeom`), without the

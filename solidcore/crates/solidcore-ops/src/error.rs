@@ -3,6 +3,8 @@
 
 use solidcore::SolidError;
 
+pub use solidcore::topology::brep::SolidTest;
+
 /// SMLib's `SM_ERR_INVALID_INPUT`, the status of input the kernel refuses.
 pub const INVALID_INPUT: i32 = solidcore::error::SM_ERR_INVALID_INPUT;
 
@@ -18,6 +20,11 @@ pub enum Error {
     Empty,
     /// The kernel reported success, but a solid input gave a result that is not a closed solid.
     NotSolid,
+    /// A body that is not a closed solid facing out, and the test it fails (the kernel's
+    /// [`SolidTest`], the first that fails in the order the tests run). [`Error::NotSolid`]
+    /// stays for the calls that return it; [`crate::Body::check_solid`] returns this one.
+    #[non_exhaustive]
+    NotSolidBecause(SolidTest),
     /// No room for the operation: an inward offset (a shell's wall, faces moved in) leaves none
     /// inside the body, or a blend is larger than the faces it rolls on allow.
     NoRoom,
@@ -85,6 +92,10 @@ pub enum Error {
     /// The kernel reported success but the operation did nothing: a blend that made no face, a
     /// face move or draft that moved no face, an extension shorter than the side can carry.
     NoEffect,
+    /// Curves on a face that do not divide it into regions ([`crate::trim`]): an open curve
+    /// whose ends reach neither the face's boundary nor another curve leaves a slit, and curves
+    /// off the face cut nothing.
+    CurveDoesNotCut,
     /// The answer is not exact in the input's geometry.
     NotExact,
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
@@ -182,6 +193,23 @@ pub enum Error {
     /// The kernel found its own state inconsistent part way through a call, or was called
     /// before the preparation it needs.
     Exception,
+    /// The kernel found one of its own invariants broken part way through a call (the
+    /// kernel's `SolidError::PortInvariant`): its class, that it is a defect, the operation, and
+    /// what did not hold. Not [`Error::Exception`], which ops' own consistency checks and a
+    /// missing preparation still give.
+    #[non_exhaustive]
+    Invariant {
+        /// The kernel's class of the failure (`SolidError::kind`, today
+        /// [`solidcore::error::ErrorKind::PortInvariant`]).
+        class: solidcore::error::ErrorKind,
+        /// True: the failure is the kernel's fault, not a fact of the input (a consistency check
+        /// of its own that did not hold), a bug to report, not a refusal.
+        defect: bool,
+        /// The kernel operation whose invariant failed.
+        operation: &'static str,
+        /// What did not hold.
+        reason: &'static str,
+    },
     /// A contact test the kernel's certified bracket of the boundary distance does not decide
     /// (`solidcore::query::contact`): the tolerance lies inside `[lower, upper]` (or the
     /// boundaries are apart but one body's enclosure of the other is not decided), or a
@@ -197,6 +225,15 @@ pub enum Error {
     },
     /// The application cancelled the call.
     Cancelled,
+    /// A body built from a record whose blend face's net its definition does not certify (the
+    /// kernel's `DefinitionNotCertified`): the face, by its index in the body's face order, and
+    /// the bound ε its definition states.
+    DefinitionNotCertified {
+        /// The face's index in the body's face order.
+        face: usize,
+        /// The bound the definition states.
+        eps: f64,
+    },
     /// Ops was called from inside a kernel call or from the failure callback.
     Reentered,
     /// A record the conversion cannot carry to the kernel, and why.
@@ -239,10 +276,16 @@ pub enum Error {
     /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
     /// `BlendRefusal::SetbackTooShort`, whose `why` says which).
     SetbackTooShort {
-        /// The corner's vertex index.
-        vertex: usize,
+        /// The corner's vertex index; `None` where the vertex is no longer the body's.
+        vertex: Option<usize>,
         /// The least setback.
         least: f64,
+        /// The corner's point, where the kernel's session notes it.
+        at: Option<[f64; 3]>,
+        /// Whether a setback of `least` builds the corner: its fill's test named it (not the
+        /// rails', which `least` passes only), and the kernel's fill is the corner (no other
+        /// patch replaces it).
+        builds: bool,
     },
     /// A corner's setback that does not fit on its edges, or on its rounds where a far
     /// corner cuts one (the kernel's `BlendRefusal::SetbackTooLong`): one below `largest`
@@ -275,11 +318,25 @@ pub enum Error {
         /// Why.
         why: OffsetRefusal,
     },
+    /// A fillet or chamfer the kernel fails with a reason it states in words (its
+    /// `BlendFailure`, which replaced a bare status): the kernel's class of the failure, the
+    /// status it stands for, and the kernel's statement of it. Transitional, as
+    /// [`OffsetRefusal::Phrase`] is: each reason gets a type of its own once the kernel gives
+    /// it a cause of its own.
+    BlendFailed {
+        /// The kernel's class of the failure.
+        class: solidcore::error::ErrorKind,
+        /// The status the failure stands for (1001 `SM_ERR`, ...).
+        status: i32,
+        /// The kernel's statement of it.
+        phrase: String,
+    },
 }
 
 /// Why the kernel refuses an offset or a draft ([`Error::OffsetRefused`]), as its
-/// `OffsetFailure` names it.
+/// `OffsetFailure` names it. More reasons get names of their own, so match it with a wildcard.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum OffsetRefusal {
     /// The face's offset by `distance` is not proved regular, and no wall size would help:
     /// the face bends towards that side nowhere the kernel's sizing looked, so no radius of
@@ -336,10 +393,18 @@ pub enum OffsetRefusal {
         /// What the built body fails.
         what: solidcore::error::offset::Unsoundness,
     },
-    /// A reason this version of ops does not name yet: the kernel's own statement of it.
-    Other {
-        /// The kernel's statement of its reason.
-        message: String,
+    /// A failure the kernel states only in words so far: a routine's own failure (its phrase
+    /// causes `Failed`, `Missing`, `InvalidValue` and `Inconsistent`), or a reason this version
+    /// of ops does not name yet. Transitional: each gets a variant of its own here once the
+    /// kernel gives it a cause of its own.
+    Phrase {
+        /// The kernel's class of the failure.
+        class: solidcore::error::ErrorKind,
+        /// True when the failure is the kernel's fault, not a fact of the input (a consistency
+        /// check of its own that did not hold): a bug to report, not a refusal.
+        defect: bool,
+        /// The kernel's statement of it.
+        phrase: String,
     },
 }
 
@@ -353,9 +418,10 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "its offset by {distance} collapses (a radius of curvature {radius})"
             ),
-            OffsetRefusal::LoopsCross { crossing } => {
-                write!(f, "its offset's loops cross ({crossing:?})")
-            }
+            OffsetRefusal::LoopsCross { crossing } => write!(
+                f,
+                "its offset's loops cross in a way the offset cannot resolve: {crossing}"
+            ),
             OffsetRefusal::DistanceUnresolved {
                 distance,
                 resolution,
@@ -388,8 +454,8 @@ impl std::fmt::Display for OffsetRefusal {
                     "a gap in its offset's loops cannot be bridged within tolerance"
                 )
             }
-            OffsetRefusal::Unsound { what } => write!(f, "the body built is unsound ({what:?})"),
-            OffsetRefusal::Other { message } => write!(f, "{message}"),
+            OffsetRefusal::Unsound { what } => write!(f, "{what}"),
+            OffsetRefusal::Phrase { phrase, .. } => f.write_str(phrase),
         }
     }
 }
@@ -448,6 +514,45 @@ pub enum FitKind {
     Chord,
 }
 
+impl RoomReason {
+    /// The reason in words, as a fillet's message gives it.
+    #[must_use]
+    pub const fn words(self) -> &'static str {
+        match self {
+            RoomReason::BallDoesNotFit => "the rolling ball does not fit a face it rolls on",
+            RoomReason::RailLeavesFace => "a contact line leaves the face it rolls on",
+            RoomReason::FaceConsumed => "the blends take the whole of a face they roll on",
+            RoomReason::BandsOverlap => {
+                "one blend runs inside the band another takes off a face they share"
+            }
+            RoomReason::BallsFold => "the rolling ball folds over itself along the edge",
+            RoomReason::OffsetFolds => "a face curves tighter than the offset along it",
+            RoomReason::CutsThePart => "the blend would cut the part in pieces",
+            RoomReason::BreaksThrough => {
+                "the blend would break through a wall into the hollow behind it"
+            }
+            RoomReason::OffsetCollapses => {
+                "the ball is as wide as a face it rolls on, so its centre stays put and the round cannot end at the edge's end"
+            }
+            RoomReason::CornersTakeWholeEdge => "its corners take the whole of the edge",
+            RoomReason::RunsIntoMaterial => "the blend runs off a face into the material",
+        }
+    }
+}
+
+impl FitKind {
+    /// The size's name, as a fillet's message names it ("the largest radius that fits").
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            FitKind::Radius => "radius",
+            FitKind::Distance => "distance",
+            FitKind::Scale => "scale",
+            FitKind::Chord => "chord width",
+        }
+    }
+}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -458,6 +563,9 @@ impl std::fmt::Display for Error {
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
+            Error::NotSolidBecause(test) => {
+                write!(f, "the body is not a closed solid facing out: {test}")
+            }
             Error::NoRoom => write!(f, "no room"),
             Error::RailPastTolerance {
                 asked,
@@ -468,6 +576,9 @@ impl std::fmt::Display for Error {
                 "the loft's guided edges were asked within {asked} of their rails; at {wires} wires the bound proved is {reached}"
             ),
             Error::WallsTouch => write!(f, "the offset's walls meet"),
+            Error::DefinitionNotCertified { face, eps } => {
+                write!(f, "the definition of face {face} does not certify its net within {eps}")
+            }
             Error::TooLarge { size, kind, .. } => {
                 write!(f, "too large: the largest {kind:?} that fits is {size}")
             }
@@ -492,6 +603,7 @@ impl std::fmt::Display for Error {
                 "the room runs out at {at} along the edge (largest radius there {largest})"
             ),
             Error::NoEffect => write!(f, "the operation did nothing"),
+            Error::CurveDoesNotCut => write!(f, "the curves do not divide the face into regions"),
             Error::NotExact => write!(f, "not exact in the input's geometry"),
             Error::Profile(r) => write!(
                 f,
@@ -539,6 +651,18 @@ impl std::fmt::Display for Error {
             }
             Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
+            Error::Invariant {
+                class,
+                defect,
+                operation,
+                reason,
+            } => {
+                let defect = if *defect { ", a defect to report" } else { "" };
+                write!(
+                    f,
+                    "solidcore broke its own invariant in {operation} ({class}{defect}): {reason}"
+                )
+            }
             Error::ContactUndecided {
                 other,
                 lower,
@@ -571,9 +695,18 @@ impl std::fmt::Display for Error {
                 f,
                 "the round of edge {edge} is too small to change the part: the smallest is {smallest}"
             ),
-            Error::SetbackTooShort { vertex, least } => {
+            Error::SetbackTooShort {
+                vertex: Some(vertex),
+                least,
+                ..
+            } => {
                 write!(f, "the setback at vertex {vertex} is shorter than {least}")
             }
+            Error::SetbackTooShort {
+                vertex: None,
+                least,
+                ..
+            } => write!(f, "the setback at a corner is shorter than {least}"),
             Error::SetbackTooLong { vertex, largest } => {
                 write!(f, "the setback at vertex {vertex} does not fit: below {largest} fits")
             }
@@ -589,6 +722,9 @@ impl std::fmt::Display for Error {
                 Some(face) => write!(f, "the offset is refused at face {face}: {why}"),
                 None => write!(f, "the offset is refused: {why}"),
             },
+            Error::BlendFailed { status, phrase, .. } => {
+                write!(f, "the blend failed (status {status}): {phrase}")
+            }
         }
     }
 }
@@ -600,7 +736,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// A kernel error as the operation's, by its type: a kernel status where it stands for one
 /// (input refused, not converged, the kernel's other failures), a refusal of what the kernel does
-/// not support or has not ported, a cancellation, or an inconsistency the kernel found in itself.
+/// not support or has not ported, a cancellation, a broken invariant of the kernel's
+/// ([`Error::Invariant`]), or a call made before the preparation it needs.
 #[must_use]
 pub(crate) fn status(e: SolidError) -> Error {
     use solidcore::error::{SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NOT_CONVERGING};
@@ -615,9 +752,13 @@ pub(crate) fn status(e: SolidError) -> Error {
         SolidError::Unsupported { reason, .. } => Error::Unsupported(reason),
         SolidError::Unported { upstream, .. } => Error::Unported(upstream),
         SolidError::Cancelled { .. } => Error::Cancelled,
-        SolidError::PortInvariant { .. } | SolidError::PreparationRequired { .. } => {
-            Error::Exception
-        }
+        e @ SolidError::PortInvariant { operation, reason } => Error::Invariant {
+            class: e.kind(),
+            defect: true,
+            operation,
+            reason,
+        },
+        SolidError::PreparationRequired { .. } => Error::Exception,
         // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for
         e => Error::Status(e.sm_status().unwrap_or(SM_ERR)),

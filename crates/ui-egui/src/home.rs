@@ -153,11 +153,44 @@ fn cache_path(key: &str) -> Option<std::path::PathBuf> {
     key.hash(&mut h);
     meta.len().hash(&mut h);
     meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.hash(&mut h);
-    let root = std::env::var_os("LOCALAPPDATA")
-        .or_else(|| std::env::var_os("XDG_CACHE_HOME"))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    Some(root.join("SolidCraft").join("thumbnails").join(format!("{:016x}.png", h.finish())))
+    Some(pictures_dir()?.join(format!("{:016x}.png", h.finish())))
+}
+
+/// How long a picture no recent design has asked for is kept.
+#[cfg(not(target_arch = "wasm32"))]
+const KEEP_PICTURES: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
+
+#[cfg(test)]
+thread_local! {
+    /// A test that ages pictures on purpose keeps them in its own folder, so the once-a-run sweep
+    /// another test starts cannot delete them between the aging and the read.
+    static TEST_PICTURES: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Where Home keeps its pictures: the per-user cache folder, which is still there after a restart,
+/// so a design that has not changed is not rebuilt for its picture at every launch.
+#[cfg(not(target_arch = "wasm32"))]
+fn pictures_dir() -> Option<std::path::PathBuf> {
+    // Tests never touch the user's real folder.
+    #[cfg(test)]
+    let own = TEST_PICTURES.with(|d| d.borrow().clone()).unwrap_or_else(|| std::env::temp_dir().join("SolidCraft").join("thumbnails"));
+    #[cfg(test)]
+    let dir = Some(own);
+    #[cfg(not(test))]
+    let dir = Some(solidcraft_engine::recovery::cache_dir()?.join("thumbnails"));
+    dir
+}
+
+/// Delete the pictures not read for [`KEEP_PICTURES`], once a run, off the window thread: saving a
+/// design leaves its earlier picture behind (the file's identity changed), and nothing else removes it.
+#[cfg(not(target_arch = "wasm32"))]
+fn clean_old_pictures() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if let Some(dir) = pictures_dir() {
+            solidcraft_engine::slicer_files::sweep(&dir, std::time::SystemTime::now(), KEEP_PICTURES);
+        }
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -166,8 +199,11 @@ fn cached(key: &str) -> Option<egui::ColorImage> {
     if std::fs::metadata(&path).ok()?.len() > 512 * 1024 {
         return None;
     }
-    let bytes = std::fs::read(path).ok()?;
-    decode_thumbnail(bytes)
+    let bytes = std::fs::read(&path).ok()?;
+    let img = decode_thumbnail(bytes)?;
+    // A picture still in use is not old: [`clean_old_pictures`] goes by this time.
+    let _ = std::fs::File::options().write(true).open(&path).and_then(|f| f.set_modified(std::time::SystemTime::now()));
+    Some(img)
 }
 
 fn decode_thumbnail(bytes: Vec<u8>) -> Option<egui::ColorImage> {
@@ -383,6 +419,7 @@ fn start_jobs(h: &mut HomeState) {
     let (tx, rx) = std::sync::mpsc::channel();
     let stop = h.stop.clone();
     let spawned = std::thread::Builder::new().name("thumbnails".into()).spawn(move || {
+        clean_old_pictures();
         // Prefer local PNGs; even the metadata checks belong off the window thread.
         keys.sort_by_key(|k| !cache_path(k).is_some_and(|p| p.exists()));
         let Some(cold) = read_pictures(keys, &tx) else { return };
@@ -1248,6 +1285,41 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         assert!(decode_thumbnail(vec![0; 600_000]).is_none());
         assert!(decode_thumbnail(vec![0; 24]).is_none());
+    }
+
+    /// A picture Home still reads is kept by the sweep of old pictures; one no design reads any
+    /// more (the design was saved again, so its identity changed) goes once it is old.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn reading_a_picture_keeps_it_from_the_sweep_of_old_ones() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let own = std::env::temp_dir().join(format!("solidcraft-kept-pictures-{}-{nonce}", std::process::id()));
+        TEST_PICTURES.with(|d| *d.borrow_mut() = Some(own.clone()));
+        let design = std::env::temp_dir().join(format!("solidcraft-kept-thumb-{}-{nonce}.sc", std::process::id()));
+        std::fs::write(&design, b"design").unwrap();
+        let key = design.to_string_lossy().into_owned();
+        let png = cache_path(&key).unwrap();
+        assert!(png.starts_with(pictures_dir().unwrap()));
+        std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+        let rgba = vec![128u8; THUMB[0] * THUMB[1] * 4];
+        std::fs::write(&png, solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap()).unwrap();
+        let age = |png: &std::path::Path| std::fs::metadata(png).unwrap().modified().unwrap().elapsed().unwrap_or_default();
+        let make_old = |png: &std::path::Path| {
+            let then = std::time::SystemTime::now() - 2 * KEEP_PICTURES;
+            std::fs::File::options().write(true).open(png).unwrap().set_modified(then).unwrap();
+        };
+        let sweep = || solidcraft_engine::slicer_files::sweep(png.parent().unwrap(), std::time::SystemTime::now(), KEEP_PICTURES);
+        make_old(&png);
+        assert!(cached(&key).is_some());
+        assert!(age(&png) < KEEP_PICTURES, "reading the picture marks it as in use");
+        sweep();
+        assert!(png.exists(), "a picture in use is kept");
+        make_old(&png);
+        sweep();
+        assert!(!png.exists(), "a picture nothing read for a month goes");
+        std::fs::remove_file(design).unwrap();
+        std::fs::remove_dir_all(own).unwrap();
+        TEST_PICTURES.with(|d| *d.borrow_mut() = None);
     }
 
     /// STEP opens deliberately have no save path, but their source still gets a cache entry.

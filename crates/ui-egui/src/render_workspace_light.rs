@@ -1262,7 +1262,7 @@ fn vector_field(
     let mut changed = false;
     for ((index, component), axis) in value.iter_mut().enumerate().zip(["X", "Y", "Z"]) {
         ui_kit::row(ui, &format!("{label} {axis}"), |ui| {
-            let response = ui_kit::number_field(ui, component, range.clone(), 0.1, suffix);
+            let response = ui_kit::compact_number_field(ui, component, range.clone(), 0.1, suffix);
             crate::scenario::publish_target(&format!("render:light:{key}:{index}"), response.rect);
             changed |= accepted(&response);
         });

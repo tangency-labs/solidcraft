@@ -120,8 +120,8 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
     let size = size::face_size(&s, &uv::domain(&s), &rules);
     let loops = std::slice::from_ref(&l);
     let mut stats = PlanStats::default();
-    assert!(plan_face(0, "spline", &poles::Face::new(s.clone(), 0.0), loops, &rules, size, 0.0, &mut stats, Lenient::No).is_err());
-    let Ok(fp) = plan_face(0, "spline", &poles::Face::new(s.clone(), 0.0), loops, &rules, size, 0.0, &mut stats, Lenient::Yes) else { panic!("a lenient fill") };
+    assert!(plan_face(0, "spline", &poles::Face::new(s.clone(), 0.0), loops, &rules, size, 0.0, &mut stats, Lenient::No, Purpose::Display).is_err());
+    let Ok(Planned::Face(fp)) = plan_face(0, "spline", &poles::Face::new(s.clone(), 0.0), loops, &rules, size, 0.0, &mut stats, Lenient::Yes, Purpose::Display) else { panic!("a lenient fill") };
     assert!(!fp.triangles.is_empty());
     assert!(fp.uv.len() > fp.fixed.len(), "{} points, {} on the boundary", fp.uv.len(), fp.fixed.len());
     // Each point inside the face on the surface where its parameters put it.
@@ -138,7 +138,7 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
 fn a_face_filled_leniently_is_named_in_the_stats() {
     let (s, l, rules) = a_face_crossing_itself();
     let size = size::face_size(&s, &uv::domain(&s), &rules);
-    let Ok((fp, stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, None) else { panic!("filled leniently") };
+    let Ok((Planned::Face(fp), stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, None, Purpose::Display) else { panic!("filled leniently") };
     assert!(!fp.triangles.is_empty());
     assert_eq!((stats.planar, stats.structured, stats.delaunay), (0, 0, 0));
     let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
@@ -155,7 +155,7 @@ fn a_face_untangling_cannot_resolve_is_filled_leniently_and_named() {
     let (s, l, rules) = a_face_crossing_itself();
     let size = size::face_size(&s, &uv::domain(&s), &rules);
     let why = "face 7 (spline): boundary crosses itself: edges [1, 2] run closer together than their chords can follow";
-    let Ok((fp, stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, Some(why)) else { panic!("filled leniently") };
+    let Ok((Planned::Face(fp), stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, Some(why), Purpose::Display) else { panic!("filled leniently") };
     assert!(!fp.triangles.is_empty());
     let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
     assert_eq!(lenient.face, 7);
@@ -511,7 +511,7 @@ fn a_sliver_whose_vertices_come_twice_is_still_drawn() {
     pts[5] = pts[4];
     let l = seam::Loop { uv, pts: pts.clone() };
     let size = size::face_size(&s, &uv::domain(&s), &rules);
-    let Ok((fp, stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, None) else { panic!("planned") };
+    let Ok((Planned::Face(fp), stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, None, Purpose::Display) else { panic!("planned") };
     assert!(!fp.triangles.is_empty(), "the face has triangles");
     assert_eq!(stats.lenient.len(), 1, "{:?}", stats.lenient);
     for t in &fp.triangles {

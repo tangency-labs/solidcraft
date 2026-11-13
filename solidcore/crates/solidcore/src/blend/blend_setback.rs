@@ -138,7 +138,7 @@ const OP: &str = "blend::blend_setback";
 
 /// `SM_ERR`.
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::blend_failed(OP, "the setback corner's construction could not continue")
 }
 
 // ---- the ease of a round into another section before its setback ----------------------
@@ -348,7 +348,7 @@ pub fn ease_surface_of(
 ) -> Result<BSplineSurface> {
     let part = |s: &Surface| -> Result<BSplineSurface> {
         Ok(crate::topology::brep::p3::with_nurb(k, s)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "a round surface's NURB form"))?
             .into_owned())
     };
     let blend = |s: &Surface| matches!(s.kind(), SurfaceKind::ProceduralBlend(_));
@@ -416,7 +416,7 @@ impl EaseSide<'_> {
             Self::Net(b) => Ok(*b),
             Self::Blend(_, s) => match s.into_kind() {
                 SurfaceKind::ProceduralBlend(pb) => Ok(pb.net),
-                _ => Err(SolidError::null_pointer(OP)),
+                _ => Err(SolidError::blend_missing(OP, "the procedural blend's net")),
             },
         }
     }
@@ -792,7 +792,7 @@ impl Refusal {
     /// `SM_SB_FAIL(.., SM_ERR, reason)`.
     fn sm_err(reason: &'static str) -> Self {
         Self {
-            error: sm_err(),
+            error: SolidError::blend_failed(OP, reason),
             reason: Some(reason),
         }
     }
@@ -1259,7 +1259,12 @@ fn round_jets(
     // Copy, then SM_CAST_PTR(SmBSplineSurface, pCopy) (NER): an analytic round's NURB, a
     // procedural blend's net
     let mut s = crate::topology::brep::p3::with_nurb(kernel, round.surface)?
-        .ok_or_else(|| Refusal::from(SolidError::null_pointer(OP)))?
+        .ok_or_else(|| {
+            Refusal::from(SolidError::blend_missing(
+                OP,
+                "the round surface's NURB form",
+            ))
+        })?
         .into_owned();
     let p = s.degree(along);
     let dom = s.natural_uv_domain();
@@ -3137,6 +3142,34 @@ mod tests {
             EaseRamp { from: 2.0, to: 4.0 },
         ];
         assert!(ease_law_on_span(&ramps, 2.5, 3.0).is_err());
+    }
+
+    /// Two ramps over one span are a typed `Failed`, with the `SM_ERR` status the bare
+    /// status had; a refusal's error carries its reason.
+    #[test]
+    fn two_ramps_over_one_span_are_a_typed_failure() {
+        let ramps = [
+            EaseRamp { from: 0.0, to: 4.0 },
+            EaseRamp { from: 1.0, to: 5.0 },
+        ];
+        let err = ease_law_on_span(&ramps, 2.0, 3.0).unwrap_err();
+        assert!(matches!(
+            err.blend_failure(),
+            Some(crate::error::blend::BlendFailure::Failed(_))
+        ));
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        let refusal = Refusal::sm_err("why");
+        assert_eq!(
+            refusal.error.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Failed("why"))
+        );
+        assert_eq!(
+            crate::error::upstream_status(&refusal.error),
+            Some(crate::error::SM_ERR)
+        );
     }
 
     /// The round of radius r along axis a of the box corner `x, y, z >= 0` over `[s, s + len]`,

@@ -679,10 +679,11 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
             let width = crate::sketch_dims::locked_value(app, t, "Width").unwrap_or_else(|| (2.0 * dir.cross(p[2].0 - p[0].0).abs()).max(1e-3));
             json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "width": width})
         }
-        // A midpoint or on-curve snap goes as itself, so the point is held there (#4691); a
-        // snap to an existing point goes as its place, where `connect` joins them.
+        // A midpoint, on-curve, crossing or body-vertex snap goes as itself, so the point is held
+        // there (#4691, #15387); a snap to an existing point goes as its place, where `connect`
+        // joins them.
         "sketch.point" => match &p[0].1 {
-            Some(id) if ["mid:", "on:", "vertex:"].iter().any(|k| id.starts_with(k)) => json!({"point": id}),
+            Some(id) if ["mid:", "on:", "vertex:", "x:"].iter().any(|k| id.starts_with(k)) => json!({"point": id}),
             _ => json!({"point": xy(&p[0])}),
         },
         _ => return Err(format!("drawing {} is not supported", t.cmd)),
@@ -878,20 +879,31 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
 
 /// An origin axis as a pick of `tool`, or None when the tool does not take it. Symmetry's third
 /// pick may be an axis along the sketch's own x or y (#1075), which the command names `x` / `y`;
-/// either Coincident pick may be any origin axis: the sketch's own `x` / `y`, otherwise its
-/// reference, which the command projects.
+/// either pick of Coincident, Collinear and Tangent (#15461) may be any origin axis: the sketch's
+/// own `x` / `y`, otherwise its reference, which the command projects.
 fn axis_pick(app: &SolveApp, tool: &Tool, name: &str) -> Option<String> {
     match tool.cmd {
         // Symmetry takes no axis reference, so the axis isn't taken when a curve or point of the
         // sketch has its `x` / `y` as id: the command would read that entity instead.
         "sketch.constraint.symmetry" if tool.picks.len() == 2 => own_axis(app, name).map(str::to_string),
-        // The sketch's own `x` / `y`, unless a curve or point of the sketch is called that; then
-        // the axis reference, which can't be mistaken for it.
-        "sketch.constraint.coincident" => {
-            own_axis(app, name).map(str::to_string).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name}).to_string()))
-        }
+        cmd if cmd == "sketch.constraint.coincident" || takes_axis_curve(cmd) => axis_operand(app, name).map(|v| match v {
+            Value::String(id) => id,
+            other => other.to_string(),
+        }),
         _ => None,
     }
+}
+
+/// The curve-pair constraints whose `a` / `b` may be an origin axis: a line on it, a curve
+/// touching it (#15461).
+pub(crate) fn takes_axis_curve(command: &str) -> bool {
+    matches!(command, "sketch.constraint.tangent" | "sketch.constraint.collinear")
+}
+
+/// Origin axis `name` as a constraint operand: the sketch's own `x` / `y`, unless a curve or point
+/// of the sketch is called that; then the axis reference, which can't be mistaken for it.
+pub(crate) fn axis_operand(app: &SolveApp, name: &str) -> Option<Value> {
+    own_axis(app, name).map(|id| json!(id)).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name})))
 }
 
 /// The sketch's own `x` / `y` that origin axis `name` lies along, unless a curve or point of the
@@ -1228,6 +1240,7 @@ pub(crate) fn preview_curve(
                     degree: if t.cmd == "sketch.spline.control_point_5" { 5 } else { 3 },
                     periodic,
                     nurbs: None,
+                    handles: Vec::new(),
                 },
                 None,
             )

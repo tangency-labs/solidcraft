@@ -295,6 +295,33 @@ fn chain_points(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec2>> {
     Ok(pts)
 }
 
+/// The curves of a chain as connected segments in sketch coordinates, in order, with lines
+/// and arcs kept exact (see [`chain_points`] for the polyline form).
+fn chain_segs(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Seg2>> {
+    let mut segs: Vec<Seg2> = Vec::new();
+    for id in ids {
+        let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
+        segs.extend(ss.sketch.segs(ci));
+    }
+    let Some(first) = segs.first().copied() else { return Err(DocError::Invalid("no curves".into())) };
+    // Orient the first segment toward the second, then chain.
+    let mut chain = vec![first];
+    if let Some(n) = segs.get(1)
+        && (first.start().dist(n.start()) < 1e-6 || first.start().dist(n.end()) < 1e-6)
+    {
+        chain[0] = first.reversed();
+    }
+    for s in segs.iter().skip(1) {
+        let prev = chain.last().map(Seg2::end).unwrap_or_default();
+        let s = if s.end().dist(prev) < s.start().dist(prev) { s.reversed() } else { *s };
+        if s.start().dist(prev) > 1e-5 {
+            return Err(DocError::Invalid("the contour curves are not connected end to end".into()));
+        }
+        chain.push(s);
+    }
+    Ok(chain)
+}
+
 /// A rib wall: the band swept from the curves across the plane by `depth` (or to the body),
 /// `t` thick about the sketch plane.
 fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool) -> Result<Body> {
@@ -587,13 +614,7 @@ pub(super) fn sheet_eval(
         }
         FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
-            for id in curves {
-                let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
-                if !ss.sketch.segs(ci).iter().all(|s| matches!(s, Seg2::Line { .. })) {
-                    return Err(DocError::Invalid("not supported yet: arcs in a contour flange (use lines; the bends are made for you)".into()));
-                }
-            }
-            let pts = chain_points(&ss, curves)?;
+            let segs = chain_segs(&ss, &ss.chain_order(curves)?)?;
             let w = val(vals, distance, Kind::Length)?;
             if !(w > 0.0) {
                 return Err(DocError::Invalid("the contour flange distance must be positive".into()));
@@ -601,10 +622,21 @@ pub(super) fn sheet_eval(
             let r = doc.sheet_rule(rule.as_deref());
             let rv = doc.rule_values(vals, &r)?;
             let plane = if *reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
-            let pts: Vec<Vec2> = if *reverse { pts.iter().map(|p| Vec2::new(p.x, -p.y)).collect() } else { pts };
+            let segs: Vec<Seg2> = if *reverse {
+                segs.iter()
+                    .map(|s| match *s {
+                        Seg2::Arc { center, radius, start, sweep } => {
+                            Seg2::Arc { center: Vec2::new(center.x, -center.y), radius, start: -start, sweep: -sweep }
+                        }
+                        other => other.map_controls(|p| Vec2::new(p.x, -p.y)),
+                    })
+                    .collect()
+            } else {
+                segs
+            };
             // Mirroring the sketch swaps the material side too.
             let name = new_name(st, f, 0);
-            let sh = sheet::contour_flange(&name, &r.name, &rv, &plane, &pts, w, *flip != *reverse)?;
+            let sh = sheet::contour_flange_path(&name, &r.name, &rv, &plane, &segs, w, *flip != *reverse)?;
             let solid = sh.solid()?;
             st.bodies.push(ModelBody::new(name, solid, f.id));
             st.sheets.push(sh);

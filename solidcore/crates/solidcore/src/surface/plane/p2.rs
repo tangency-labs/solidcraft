@@ -9,7 +9,8 @@
 //! |--------------------------------------------|---------------------------------------------------|
 //! | [`Plane::create_offset_surface`]           | `CreateOffsetSurface`                             |
 //! | `global_surface_intersect_into` (via [`Surface::global_surface_intersect`]) | `GlobalSurfaceIntersect` |
-//! | [`Plane::intersect_with_plane`]            | `IntersectWithPlane`                              |
+//! | [`Plane::intersect_with_plane`], [`PlaneIntersectWarning`] | `IntersectWithPlane`              |
+//! | [`stop_on_warning`]                        | `SER(IntersectWithPlane(...))` in `GlobalSurfaceIntersect` |
 //! | [`Plane::trim_curve_to_plane_domain`]      | `TrimCurveToPlaneDomain`                          |
 //! | [`Plane::is_nurb_surface_plane`]           | `IsNurbSurfacePlane` (static)                     |
 //! | [`Plane::transform`]                       | `Transform`                                       |
@@ -20,10 +21,14 @@
 //! | [`Plane::make_new_plane_ellipse`]          | `MakeNewPlaneEllipse`                             |
 //!
 //! Deviations:
-//! - **Plane first with a torus (opt-in, not upstream).** With
-//!   `fixes.plane_first_torus_section_exact` (WR-721, #2405) `GlobalSurfaceIntersect` takes a
-//!   torus's own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV
-//!   curves swapped as for a surface of revolution); upstream has no torus case and marches it.
+//! - **Analytic contacts.** A clipped line or ellipse whose whole extent is below
+//!   the geometric tolerance is returned as a point curve at the interval midpoint,
+//!   including a trailing interval at the source curve's end. The extent bound
+//!   includes arithmetic rounding.
+//! - **Plane first with a torus (not upstream).** `GlobalSurfaceIntersect` takes a torus's
+//!   own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV curves
+//!   swapped as for a surface of revolution; WR-721, #2405); upstream has no torus case and
+//!   marches it.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments are
 //!   dropped. `GlobalSurfaceIntersect`'s and `IntersectWithPlane`'s optional output
 //!   arrays are always filled ([`SurfaceIntersection`]; a plane/plane intersection has
@@ -49,7 +54,10 @@
 //!   contributes no solutions. `IsNurbSurfacePlane` returns a status through its
 //!   `SmBoolean` (`SER`): upstream's "`TRUE` without plane" is an `Err` here.
 //!   `SmMatrix::SolveLinearSystem`'s near-singular warning, which upstream returns
-//!   through `SER`, is [`SolidError::Upstream`] with `SM_ERR_WARNING`.
+//!   through `SER` as `SM_ERR_WARNING`, is returned with the (empty) result as
+//!   [`PlaneIntersectWarning::NearlySingular`], not as an error. `GlobalSurfaceIntersect`
+//!   stops on it as upstream's `SER` does ([`stop_on_warning`]: a surface failure whose
+//!   comparison status is `SM_ERR_WARNING`).
 //! - **Upstream fix WR-652 / #1056.** The opt-in
 //!   [`crate::kernel::UpstreamFixes::plane_recognition_origin_after_axes`] places a
 //!   recognised plane's origin using its final orthogonal axes. It is off by default
@@ -65,11 +73,13 @@
 //!   [`SolidError::Unported`].
 
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
-use crate::error::{ignore_status, ignored, Result, SolidError, SM_ERR_WARNING};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_WARNING};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::certified::{self, next_up};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -105,6 +115,50 @@ const OP_PP: &str = "surface::plane::p2::Plane::intersect_with_plane";
 const OP_NURB: &str = "surface::plane::p2::Plane::is_nurb_surface_plane";
 const OP_XFORM: &str = "surface::plane::p2::Plane::transform";
 const OP_TRIM: &str = "surface::plane::p2::Plane::trim_with_domain";
+
+/// A warning [`Plane::intersect_with_plane`] returns with its result. It is not a
+/// failure of the intersection: the caller decides whether to stop on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PlaneIntersectWarning {
+    /// The linear system for the start point of the planes' line is nearly singular (a
+    /// pivot below `SM_EFF_ZERO`), so the line is not built: the result holds no curve.
+    /// Upstream returns `SM_ERR_WARNING` here.
+    NearlySingular,
+}
+
+impl PlaneIntersectWarning {
+    /// The error of a caller that stops on this warning, as upstream's callers stop on
+    /// the `SM_ERR_WARNING` status (`SER`): a failure of the plane/plane intersection
+    /// whose comparison status ([`SolidError::sm_status`]) is `SM_ERR_WARNING`.
+    #[must_use]
+    pub fn into_error(self) -> SolidError {
+        match self {
+            Self::NearlySingular => Failure::new(
+                OP_PP,
+                SurfaceFailure::Failed("the planes' line is nearly singular to solve for"),
+            )
+            .with_status(SM_ERR_WARNING)
+            .into_error(),
+        }
+    }
+}
+
+/// A [`Plane::intersect_with_plane`] result as a caller that stops on its warning takes
+/// it (upstream's `SER(IntersectWithPlane(...))`): the result without the warning, or the
+/// warning's error ([`PlaneIntersectWarning::into_error`]).
+///
+/// # Errors
+///
+/// The warning's error, when there is a warning.
+pub fn stop_on_warning(
+    (needs_more, intersection, warning): (bool, SurfaceIntersection, Option<PlaneIntersectWarning>),
+) -> Result<(bool, SurfaceIntersection)> {
+    match warning {
+        Some(w) => Err(w.into_error()),
+        None => Ok((needs_more, intersection)),
+    }
+}
 
 /// A curve handle of `TrimCurveToPlaneDomain`'s intersections: an id (`0` the curve,
 /// `1..=4` the boundary lines, `10 +` those for their analytic replacements) and the
@@ -641,10 +695,16 @@ impl Plane {
     /// the domain mid-point sizes `)`. Both planes are taken as without owner (see the
     /// module docs).
     ///
+    /// The third value is a warning, not a failure: [`PlaneIntersectWarning::NearlySingular`]
+    /// when the linear solve for the line's start point is nearly singular, with no curve
+    /// and no further intersection needed (upstream returns `SM_ERR_WARNING` there). A
+    /// caller that stops on it, as upstream's `SER` callers do, passes the result through
+    /// [`stop_on_warning`].
+    ///
     /// # Errors
     ///
-    /// Those of the boxes and of the linear solve (`SM_ERR_WARNING` when nearly
-    /// singular); those of [`BSplineCurve::create_degenerate_curve`].
+    /// Those of the boxes and of the linear solve; those of
+    /// [`BSplineCurve::create_degenerate_curve`].
     pub fn intersect_with_plane(
         &self,
         k: &Kernel,
@@ -652,7 +712,7 @@ impl Plane {
         other: &Self,
         other_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
-    ) -> Result<(bool, SurfaceIntersection)> {
+    ) -> Result<(bool, SurfaceIntersection, Option<PlaneIntersectWarning>)> {
         self.intersect_with_plane_owned(
             k,
             uv_domain,
@@ -674,13 +734,13 @@ impl Plane {
         other_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
         owners: [PlaneOwner; 2],
-    ) -> Result<(bool, SurfaceIntersection)> {
+    ) -> Result<(bool, SurfaceIntersection, Option<PlaneIntersectWarning>)> {
         // init output
         let mut out = SurfaceIntersection::default();
 
         // no work - looking for self-intersections; planes have no self-intersections
         if core::ptr::eq(self, other) {
-            return Ok((false, out));
+            return Ok((false, out, None));
         }
 
         // locals
@@ -709,7 +769,7 @@ impl Plane {
         if len_sq < ang_tol_sq {
             // Planes are parallel.
             if self.base.gw_nurb().is_none() || other.base.gw_nurb().is_none() {
-                return Ok((false, out));
+                return Ok((false, out, None));
             }
 
             // get plane1 and plane2 bounding and pseudo boxes
@@ -718,7 +778,7 @@ impl Plane {
 
             // no work - when bounding or pseudo boxes are disjoint
             if bbox1.are_disjoint(&bbox2, 0.0) || pbox1.are_disjoint(&pbox2, None) {
-                return Ok((false, out));
+                return Ok((false, out, None));
             }
 
             // let sPnt2 = plane2 midPoint projected to plane1
@@ -728,11 +788,11 @@ impl Plane {
             // no work - planes are parallel not coincident
             let dist = origin_other.distance(pnt2);
             if dist > tol {
-                return Ok((false, out));
+                return Ok((false, out, None));
             }
 
             // more work needed - planes are coincident
-            return Ok((true, out));
+            return Ok((true, out, None));
         }
 
         // Arrive here when planes are not parallel.
@@ -767,11 +827,8 @@ impl Plane {
         // let sStartPt = solution x in Ax=b
         let sol = mat.solve_linear_system(&rhs)?;
         if sol.near_singular {
-            return Err(SolidError::Upstream {
-                operation: OP_PP,
-                code: SM_ERR_WARNING,
-                entity: None,
-            });
+            // (SER: upstream returns the solve's SM_ERR_WARNING at once, with no curve)
+            return Ok((false, out, Some(PlaneIntersectWarning::NearlySingular)));
         }
         let [x0, x1, x2] = <[f64; 3]>::try_from(sol.x.as_slice())
             .map_err(|_| SolidError::invalid_input(OP_PP, "linear solution size"))?;
@@ -786,7 +843,7 @@ impl Plane {
             out.surface2_uv_curves.push(None);
             out.curve_types.push(TsectCurveType::Crossing);
             out.deviations.push(0.0);
-            return Ok((false, out));
+            return Ok((false, out, None));
         }
 
         // Create a bounded line
@@ -820,7 +877,7 @@ impl Plane {
         if (this_bounded && other_bounded)
             && (bbox1.are_disjoint(&bbox2, 0.0) || pbox1.are_disjoint(&pbox2, None))
         {
-            return Ok((false, out));
+            return Ok((false, out, None));
         }
 
         // Init the line length to be longer than both bounding boxes
@@ -845,7 +902,7 @@ impl Plane {
 
         // when line segment doesn't intersect both plane domains
         if !this_found || !other_found {
-            return Ok((false, out));
+            return Ok((false, out, None));
         }
 
         // when segment is short - return degenerate curve xsect
@@ -857,7 +914,7 @@ impl Plane {
             out.surface2_uv_curves.push(None);
             out.curve_types.push(TsectCurveType::Touching);
             out.deviations.push(0.0);
-            return Ok((false, out));
+            return Ok((false, out, None));
         }
 
         // create output line and set outputs
@@ -875,7 +932,7 @@ impl Plane {
         out.surface2_uv_curves.push(None);
         out.curve_types.push(TsectCurveType::Crossing);
         out.deviations.push(0.0);
-        Ok((false, out))
+        Ok((false, out, None))
     }
 
     // ---- curves -----------------------------------------------------------------------
@@ -1096,6 +1153,37 @@ impl Plane {
             let mut new_curve = curve.copy(k)?;
             // may snap sIvl by tol to existing knots (status ignored)
             ignore_status(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+            // A full circle has coincident endpoints. Bound the whole analytic
+            // interval using its diameter and arc length, with signed sizes by magnitude.
+            // Round each computed upper bound outward, including norm underflow.
+            let extent = match new_curve.kind() {
+                CurveKind::Line(line) => {
+                    let length = certified::distance(Vec3::ZERO, line.line_vector());
+                    let length_upper = next_up(length.value + length.bound);
+                    let interval = line.step_interval();
+                    let span_upper = next_up((interval.max() - interval.min()).abs());
+                    let scaled_length_upper = next_up(length_upper * line.line_scale().abs());
+                    Some(next_up(scaled_length_upper * span_upper))
+                }
+                CurveKind::Ellipse(ellipse) => {
+                    let radius = max2(ellipse.x_radius().abs(), ellipse.y_radius().abs());
+                    let interval = ellipse.step_interval();
+                    let angle_upper = next_up((interval.max() - interval.min()).abs());
+                    let radians_per_degree_upper = next_up(next_up(PI) / 180.0);
+                    let radius_angle_upper = next_up(radius * angle_upper);
+                    let arc_length_upper = next_up(radius_angle_upper * radians_per_degree_upper);
+                    // Multiplication by two is exact when the diameter is finite.
+                    Some(min2(2.0 * radius, arc_length_upper))
+                }
+                _ => None,
+            };
+            let point_contact = tol_3d.is_finite()
+                && extent.is_some_and(|extent| extent.is_finite() && extent < tol_3d);
+            if point_contact {
+                let interval = new_curve.natural_interval();
+                let point = new_curve.evaluate_point(k, interval.mid())?;
+                new_curve = Curve::from(BSplineCurve::create_degenerate_curve(3, point)?);
+            }
             curves_3d.push(new_curve);
         }
 
@@ -1490,8 +1578,8 @@ impl Plane {
 ///
 /// # Errors
 ///
-/// Those of [`Plane::intersect_with_plane`]; [`SolidError::Unported`] from the general
-/// intersector.
+/// Those of [`Plane::intersect_with_plane`], and its warning's error
+/// ([`stop_on_warning`]); [`SolidError::Unported`] from the general intersector.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq>(
     k: &Kernel,
@@ -1517,14 +1605,14 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
         SurfaceKind::Plane(other_plane) => {
             // (whether each plane has a face: SmSurface::GetFace, and its tolerance)
             let owners = [PlaneOwner::of(this)?, PlaneOwner::of(other)?];
-            (need_nurb_intersection, *out) = plane.intersect_with_plane_owned(
+            (need_nurb_intersection, *out) = stop_on_warning(plane.intersect_with_plane_owned(
                 k,
                 uv_domain,
                 other_plane,
                 other_uv_domain,
                 approx_tol_3d,
                 owners,
-            )?;
+            )?)?;
         }
         // cone/plane special case intersection (SmCone_TYPE and SmCylinder_TYPE):
         // SmCone::IntersectWithPlane, which hides the surface of revolution's; the
@@ -1592,9 +1680,9 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
             need_nurb_intersection = x.needs_more_intersections;
             *out = SurfaceIntersection::from(x);
         }
-        // Not upstream (WR-721, #2405, opt-in): the torus's own plane section, as for a
-        // surface of revolution (upstream has no SmTorus case: the default branch)
-        SurfaceKind::Torus(torus) if k.fixes.plane_first_torus_section_exact => {
+        // Not upstream (WR-721, #2405): the torus's own plane section, as for a surface of
+        // revolution (upstream has no SmTorus case: the default branch)
+        SurfaceKind::Torus(torus) => {
             // the plane's boxes take its face's tolerance
             let need = torus.intersect_with_plane_owned_into(
                 k,
@@ -1607,8 +1695,7 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
             core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
             need_nurb_intersection = need?;
         }
-        SurfaceKind::Torus(_)
-        | SurfaceKind::BSpline(_)
+        SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
         | SurfaceKind::CurveBounded(_)
@@ -1833,7 +1920,8 @@ mod tests {
         let a = Plane::from_normal(Vec3::ZERO, Vec3::Z);
         let b = Plane::from_normal(Vec3::new(1.0, 0.0, 0.0), Vec3::X);
         let d = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
-        let (more, x) = a.intersect_with_plane(k, &d, &b, &d, None).unwrap();
+        let (more, x, warning) = a.intersect_with_plane(k, &d, &b, &d, None).unwrap();
+        assert_eq!(warning, None);
         assert!(!more);
         assert_eq!(x.curves_3d.len(), 1);
         assert_eq!(x.curve_types, vec![TsectCurveType::Crossing]);
@@ -1848,19 +1936,227 @@ mod tests {
             &Extent2d::from_bounds(-4.0, -2.0, 4.0, 2.0),
         );
         c.make_nurb().unwrap();
-        let (_, x) = rect()
+        let (_, x, _) = rect()
             .intersect_with_plane(k, &dom(), &c, &c.step_uv_domain(), None)
             .unwrap();
         assert_eq!(x.curves_3d.len(), 1);
 
         // coincident planes need the general intersector, parallel ones give nothing
-        let (more, x) = rect()
+        let (more, x, _) = rect()
             .intersect_with_plane(k, &dom(), &rect(), &dom(), None)
             .unwrap();
         assert!(more && x.curves_3d.is_empty());
         let r = rect();
-        let (more, _) = r.intersect_with_plane(k, &dom(), &r, &dom(), None).unwrap();
+        let (more, _, _) = r.intersect_with_plane(k, &dom(), &r, &dom(), None).unwrap();
         assert!(!more);
+    }
+
+    /// The plane/plane intersection's near-singular warning (upstream `SM_ERR_WARNING`)
+    /// comes back with the result, and a caller that stops on it
+    /// (`GlobalSurfaceIntersect`, the fillet's planar case, which ignores the error)
+    /// gets the status it got before.
+    #[test]
+    fn issue_15020_the_near_singular_warning_reaches_the_callers_that_stop_on_it() {
+        let e = stop_on_warning((
+            false,
+            SurfaceIntersection::default(),
+            Some(PlaneIntersectWarning::NearlySingular),
+        ))
+        .unwrap_err();
+        assert_eq!(e.sm_status(), Some(SM_ERR_WARNING));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_WARNING));
+        assert_eq!(e.operation(), OP_PP);
+        assert_eq!(e.entity(), None);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert!(e.surface_failure().is_some());
+        assert!(e.is_status_answer());
+        assert!(ignored(Err::<(), _>(e)).unwrap().is_none());
+
+        // without a warning the result passes through
+        let k = &Kernel::default();
+        let a = Plane::from_normal(Vec3::ZERO, Vec3::Z);
+        let b = Plane::from_normal(Vec3::new(1.0, 0.0, 0.0), Vec3::X);
+        let d = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let r = a.intersect_with_plane(k, &d, &b, &d, None).unwrap();
+        assert_eq!(r.2, None);
+        let (more, x) = stop_on_warning(r).unwrap();
+        assert!(!more);
+        assert_eq!(x.curves_3d.len(), 1);
+    }
+
+    #[test]
+    fn clipping_preserves_a_large_arc_on_a_short_parameter_interval() {
+        let k = Kernel::default();
+        let interval = Extent1d::from_min_max(0.999_999_999_998_075_2, 1.0);
+        let mut arc = Ellipse::new_circle(
+            &k,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_min_max(0.0, 90.0),
+            2.0,
+            &EllipseOptions::default(),
+        )
+        .unwrap();
+        arc.edit_parameterization(&k, &interval, true, None)
+            .unwrap();
+        let curve = Curve::from(arc);
+        let output = rect()
+            .trim_curve_to_plane_domain(&k, &dom(), &curve, 1e-6)
+            .unwrap();
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].natural_interval(), interval);
+        for t in [interval.min(), interval.mid(), interval.max()] {
+            assert_eq!(
+                output[0].evaluate_point(&k, t).unwrap(),
+                curve.evaluate_point(&k, t).unwrap()
+            );
+        }
+        assert!(!output[0].is_degenerate(&k, 1e-6, None).unwrap());
+    }
+
+    #[test]
+    fn clipping_keeps_the_size_of_signed_analytic_geometry() {
+        let k = Kernel::default();
+        let plane = rect();
+        for sign in [-1.0, 1.0] {
+            let circle = Curve::from(
+                Ellipse::new_circle(
+                    &k,
+                    Vec3::ZERO,
+                    Vec3::X,
+                    Vec3::Y,
+                    Extent1d::from_min_max(0.0, 360.0),
+                    sign * 2.0,
+                    &EllipseOptions::default(),
+                )
+                .unwrap(),
+            );
+            let line = Curve::from(Line::bounded(
+                Vec3::ZERO,
+                Vec3::X,
+                &Extent1d::from_min_max(-1.0, 1.0),
+                &BoundedLineOptions {
+                    scale: sign * 2.0,
+                    ..BoundedLineOptions::default()
+                },
+            ));
+            for curve in [line, circle] {
+                let result = plane
+                    .trim_curve_to_plane_domain(&k, &dom(), &curve, 1e-6)
+                    .unwrap();
+                assert_eq!(result.len(), 1);
+                let interval = result[0].natural_interval();
+                let a = result[0].evaluate_point(&k, interval.min()).unwrap();
+                let b = result[0].evaluate_point(&k, interval.mid()).unwrap();
+                assert!(a.distance(b) > 1.0, "the signed curve retains its extent");
+            }
+        }
+    }
+
+    #[test]
+    fn clipping_retains_a_curve_at_the_extent_rounding_boundary() {
+        let k = Kernel::default();
+        let tolerance = 0.91;
+        // The computed line extent is below 0.91. Its exact extent from the f64
+        // inputs exceeds 0.91, so the curve must stay when the bound is uncertain.
+        let line = Curve::from(Line::bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            &Extent1d::from_min_max(-0.3, 0.4),
+            &BoundedLineOptions {
+                scale: 1.3,
+                ..BoundedLineOptions::default()
+            },
+        ));
+        let circle = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 360.0),
+                tolerance / 2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        for curve in [line, circle] {
+            let output = rect()
+                .trim_curve_to_plane_domain(&k, &dom(), &curve, tolerance)
+                .unwrap();
+            assert_eq!(output.len(), 1);
+            assert!(matches!(
+                output[0].kind(),
+                CurveKind::Line(_) | CurveKind::Ellipse(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn clipped_sub_tolerance_tails_are_point_contacts() {
+        let k = Kernel::default();
+        let plane = rect();
+        let tolerance = 1e-6;
+        let line = Curve::from(
+            Line::create_line_segment(
+                3,
+                Vec3::new(-10.0, 0.0, 0.0),
+                Vec3::new(-5.0 + 1e-10, 0.0, 0.0),
+                None,
+            )
+            .unwrap(),
+        );
+        let arc = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::new(-5.0, 0.0, 0.0),
+                -Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 90.0 + 1e-8),
+                2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        for curve in [line, arc] {
+            let contacts = plane
+                .trim_curve_to_plane_domain(&k, &dom(), &curve, tolerance)
+                .unwrap();
+            assert_eq!(contacts.len(), 1, "keep the boundary contact");
+            let contact = &contacts[0];
+            let interval = contact.natural_interval();
+            let start = contact.evaluate_point(&k, interval.min()).unwrap();
+            let end = contact.evaluate_point(&k, interval.max()).unwrap();
+            assert_eq!(start, end, "a contact has no edge extent");
+            assert!((start.x + 5.0).abs() < tolerance);
+            assert_eq!(
+                contact
+                    .evaluate(&k, interval.evaluate(0.5), 1, false, false)
+                    .unwrap()[1],
+                Vec3::ZERO
+            );
+        }
+
+        // Endpoint coincidence alone does not make a contact: retain the full
+        // circle inside the rectangle, including its nonzero tangent.
+        let circle = Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Extent1d::from_min_max(0.0, 360.0),
+                2.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        );
+        let curves = plane
+            .trim_curve_to_plane_domain(&k, &dom(), &circle, tolerance)
+            .unwrap();
+        assert_eq!(curves.len(), 1);
+        assert!(!curves[0].is_degenerate(&k, tolerance, None).unwrap());
     }
 
     #[test]

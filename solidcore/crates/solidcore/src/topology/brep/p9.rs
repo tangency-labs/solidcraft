@@ -5,7 +5,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`find_infinite_region`] | `SmBrep::FindInfiniteRegion` |
-//! | [`orient_sheet_surfaces`] | `SmBrep::OrientSheetSurfaces` |
+//! | [`orient_sheet_surfaces`], [`OrientSheetNote`] | `SmBrep::OrientSheetSurfaces` |
 //! | [`make_shell_vertex`], [`make_shell_vertex_with_kernel_context`] | `SmBrep::MakeShellVertex` |
 //! | [`make_vertex_loop`] | `SmBrep::MakeVertexLoop` |
 //! | [`make_vertex_split_edge`], [`make_vertex_split_edge_with_kernel_context`] | `SmBrep::MakeVertexSplitEdge` |
@@ -32,8 +32,10 @@
 //! loop transfer errors must decrease the source list length, otherwise return an
 //! error instead of looping forever. Incomplete edgeuse pairs and native null
 //! dereferences return `InvalidInput`; nonfinite split parameters retain native
-//! refusal/output behavior. `OrientSheetSurfaces` preserves the native final TRUE
-//! status (1), distinct from its early `SM_SUCCESS` (0). Mutation success paths
+//! refusal/output behavior. `OrientSheetSurfaces` returns its native final TRUE
+//! status (1), distinct from its early `SM_SUCCESS` (0), as a note with its success
+//! ([`OrientSheetNote::Reoriented`]); callers that stop on it use
+//! [`OrientSheetNote::into_error`] (status 1). Mutation success paths
 //! remain uncertified while part 2 and face notification dependencies defer;
 //! passing refusal/projection comparisons do not certify those paths.
 //! Opt-in ([`UpstreamFixes::new_edge_vertex_tolerance_covers_gap`](crate::kernel::UpstreamFixes::new_edge_vertex_tolerance_covers_gap),
@@ -52,7 +54,8 @@
 //! (the fork's work count, tangency-labs/smlib@edf7414); it changes no result.
 
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, Result, SolidError, SM_ERR};
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignore_status, Failure, Result, SolidError, SM_ERR};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::object::NotifyOperation;
@@ -468,8 +471,51 @@ fn is_intersector_approx(curve: &Curve) -> Result<bool> {
     }
 }
 
+/// A note [`orient_sheet_surfaces`] returns with its success. It is not a failure: the
+/// caller decides whether to stop on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OrientSheetNote {
+    /// The sheet was not oriented, so its faces were walked from the given face and
+    /// turned to agree with it. Upstream returns `TRUE` (status `1`) here, where an
+    /// already oriented sheet returns `SM_SUCCESS`.
+    Reoriented,
+}
+
+impl OrientSheetNote {
+    /// The error of a caller that stops on this note, as upstream's callers stop on the
+    /// status `1` (a status other than `SM_SUCCESS`): a failure of the orientation whose
+    /// comparison status ([`SolidError::sm_status`]) is `1`.
+    #[must_use]
+    pub fn into_error(self) -> SolidError {
+        match self {
+            Self::Reoriented => Failure::new(
+                OP,
+                TopologyFailure::Failed("the sheet's faces were turned to agree"),
+            )
+            .with_status(1)
+            .into_error(),
+        }
+    }
+
+    /// `result` as a caller that stops on the note takes it: `Ok` without a note, the
+    /// note's error ([`OrientSheetNote::into_error`]) with one.
+    ///
+    /// # Errors
+    ///
+    /// Those of `result`, and the note's error.
+    pub fn stop_on_note(result: Result<Option<Self>>) -> Result<()> {
+        match result? {
+            Some(note) => Err(note.into_error()),
+            None => Ok(()),
+        }
+    }
+}
+
 /// `OrientSheetSurfaces`. `same=true` is upstream's default orientation policy. The
 /// face UV swaps' edit notifications (each face's and its surface's) go through `env`.
+/// `Ok(None)` for a sheet that was already oriented (after its UV swap when `same` is
+/// false); [`OrientSheetNote::Reoriented`] when its faces were walked and turned.
 ///
 /// # Errors
 /// `SM_ERR` for a face not in the B-rep or a B-rep that is not a sheet; those of the
@@ -481,7 +527,7 @@ pub fn orient_sheet_surfaces(
     face: Option<FaceId>,
     same: bool,
     env: &mut edge::NotifyEnv<'_>,
-) -> Result<()> {
+) -> Result<Option<OrientSheetNote>> {
     let faces = brep_faces(b)?;
     let Some(face) = face.filter(|face| faces.contains(face)) else {
         return Err(SolidError::topology_failed(
@@ -500,7 +546,7 @@ pub fn orient_sheet_surfaces(
                 k.fixes.brep_edit_statuses_pass_on,
             )?)?;
         }
-        return Ok(());
+        return Ok(None);
     }
     crate::geom::context::with_mark_lock(k, crate::geom::context::ALL_MARKS, |k, mark| {
         use crate::topology::topology_traverser::{Entity, Marks};
@@ -532,11 +578,7 @@ pub fn orient_sheet_surfaces(
             }
         }
         // Upstream's final return is TRUE (1), unlike the earlier SM_SUCCESS (0).
-        Err(SolidError::Upstream {
-            operation: OP,
-            code: 1,
-            entity: None,
-        })
+        Ok(Some(OrientSheetNote::Reoriented))
     })?
 }
 
@@ -2775,6 +2817,62 @@ fn drop_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The face-orientation repair's final status 1 (upstream `TRUE`) comes back as
+    /// [`OrientSheetNote::Reoriented`] on the success path, and a caller that stops on it
+    /// (the Boolean slice with its statuses passed on, the split by a sheet) gets the
+    /// status 1 it got before.
+    #[test]
+    fn issue_15020_reorienting_a_sheet_returns_its_note_with_the_result() {
+        let mut k = Kernel::default();
+        let lines = [
+            (Point3::ZERO, Point3::new(1.0, 0.0, 0.0)),
+            (Point3::new(1.0, 0.0, 0.0), Point3::new(1.0, 1.0, 0.0)),
+        ]
+        .map(|(a, b)| Curve::from(crate::curve::line::Line::from_points(a, b, 3)));
+        let mut b = crate::sweep::api_brep::create_linear_sweep(
+            &mut k,
+            &[Some(&lines[0]), Some(&lines[1])],
+            Vec3::Z,
+            1.0,
+            false,
+        )
+        .unwrap();
+        b.set_editing_enabled(true);
+        let faces = brep_faces(&b).unwrap();
+        assert_eq!(faces.len(), 2);
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = crate::geom::attribute::AttributeStore::default();
+        let mut env = edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+
+        // an oriented sheet: SM_SUCCESS, no note
+        assert!(is_oriented_sheet(&mut k, &b).unwrap());
+        let r = orient_sheet_surfaces(&mut k, &mut b, Some(faces[0]), true, &mut env);
+        assert_eq!(r, Ok(None));
+
+        // turn one face over: the repair walks the faces and returns its note
+        let mut marks = crate::topology::topology_traverser::Marks::default();
+        swap_face_uv(&k, &mut b, &mut marks, faces[1], &mut env).unwrap();
+        assert!(!is_oriented_sheet(&mut k, &b).unwrap());
+        let r = orient_sheet_surfaces(&mut k, &mut b, Some(faces[0]), true, &mut env);
+        assert_eq!(r, Ok(Some(OrientSheetNote::Reoriented)));
+        assert!(is_oriented_sheet(&mut k, &b).unwrap());
+
+        // a caller that stops on the note gets the status 1 the repair returned before
+        let e = OrientSheetNote::stop_on_note(r).unwrap_err();
+        assert_eq!(e.sm_status(), Some(1));
+        assert_eq!(e.upstream_status(), Some(1));
+        assert_eq!(e.operation(), OP);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert_eq!(e.entity(), None);
+        assert!(e.topology_failure().is_some());
+        assert_eq!(OrientSheetNote::stop_on_note(Ok(None)), Ok(()));
+    }
 
     mod notifications {
         use super::*;

@@ -390,6 +390,7 @@ impl FilletSession<'_> {
             measured.push(wedge);
         }
         let mut chamfers = Vec::new();
+        let mut knives = Vec::new();
         let mut first = Vec::new();
         let mut second = Vec::new();
         for (index, &id) in edges.iter().enumerate() {
@@ -430,6 +431,7 @@ impl FilletSession<'_> {
                 first.push(d);
                 second.push(d);
                 chamfers.push(None);
+                knives.push(id);
                 continue;
             }
             let wedge = measured
@@ -480,6 +482,7 @@ impl FilletSession<'_> {
                 solver.base_mut().chamfer = chamfer;
             }
         }
+        self.objects.knife_chamfers.extend(knives);
         Ok(offsets)
     }
 }
