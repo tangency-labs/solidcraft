@@ -2,8 +2,7 @@
 //! plane's equation.
 //!
 //! Upstream: the SolidCraft fork's `source/SMLib/src/SmFilletGeom.cpp`
-//! (tangency-labs/smlib@5bdcddf, with @14a6daa's quarter points and start direction), under
-//! WR-682's `fillet_surface_plane_curve_on_plane_equation`.
+//! (tangency-labs/smlib@5bdcddf, with @14a6daa's quarter points and start direction; WR-682).
 //!
 //! | Rust                  | Upstream               |
 //! |-----------------------|------------------------|
@@ -15,7 +14,16 @@
 //! net's bound is within the tenth of `tol` the curve is held to (#2510). An end goes onto
 //! the crossing by the least 3D step, not `OntoPlane`'s least uv step, and the curve ends
 //! there, not at the given point (#2907): a point within `tol` of both surfaces is what the
-//! vertices are, and the curve is held to the crossing itself.
+//! vertices are, and the curve is held to the crossing itself. Not the fork's: a station off
+//! the surface's domain in a direction the surface is not closed in is the curve leaving the
+//! surface, and the trace refuses it (`SM_ERR`), where the fork marches on along the
+//! B-spline's extrapolation (the goldens' generated `blend.fillet_geom_p2` case `gen0014`
+//! reached u = -6e5 on a surface of domain [0, 1]). Bounds: the march
+//! and the refinement together hold at most [`MAX_STATIONS`] stations; a curve whose spans
+//! still miss the exact curve when refining would pass it can't be fitted (`SM_ERR`), as when
+//! its 20 passes run out. Each pass splits every span that misses, so without the bound a
+//! curve that never fits doubles its stations each pass (the goldens' generated
+//! `blend.fillet_geom_p2` case `gen0014` ran out of memory).
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // a NaN must take the failing branch, as upstream
 
@@ -26,6 +34,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::procedural_blend::NetScope;
@@ -34,6 +43,9 @@ use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 
 const OP: &str = "blend::fillet_geom::surface_plane_curve::surface_plane_curve";
+
+/// The most stations the trace holds, marched and refined.
+const MAX_STATIONS: usize = 100_000;
 
 /// The three curves of [`surface_plane_curve`].
 #[derive(Debug)]
@@ -65,10 +77,9 @@ fn first_derivs(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(Vec3, Vec3
     };
     let d = surface.evaluate(k, uv, 1, 1, flags)?;
     let at = |i: usize, j: usize| {
-        d.get(i)
-            .and_then(|row| row.get(j))
-            .copied()
-            .ok_or_else(|| SolidError::sm_err(OP))
+        d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
+            SolidError::blend_failed(OP, "the surface's evaluation has no first derivatives")
+        })
     };
     Ok((at(0, 0)?, at(1, 0)?, at(0, 1)?))
 }
@@ -160,7 +171,10 @@ impl Tracer<'_> {
         let len = t.length();
         if !(len > 0.0) {
             // the surface touches the plane
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the surface touches the plane",
+            ));
         }
         let (mut a, mut b) = (gv / len, -gu / len);
         let mut t = t * (1.0 / len);
@@ -221,8 +235,8 @@ fn hermite(dim: u64, control: &[Point3], mult: &[usize], knots: &[f64]) -> Resul
 /// # Errors
 ///
 /// `SM_ERR` for an end off the surface or the plane, a surface that touches the plane, a
-/// curve that turns back before its end, a step that vanishes, or curves that can't be
-/// fitted; those of the evaluations and the point drops.
+/// curve that turns back before its end or leaves the surface's domain, a step that
+/// vanishes, or curves that can't be fitted; those of the evaluations and the point drops.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
 pub fn surface_plane_curve(
     k: &Kernel,
@@ -234,7 +248,7 @@ pub fn surface_plane_curve(
     tol: f64,
     ang_tol: f64,
 ) -> Result<SurfacePlaneCurves> {
-    let fail = || SolidError::sm_err(OP);
+    let fail = |what| SolidError::blend_failed(OP, what);
     // the curve is held to a tenth of `tol` of the exact one: a blend by its definition
     // whose net's bound is within that evaluates as its net (#2510)
     let _scope = NetScope::within(k, 0.1 * tol);
@@ -248,7 +262,7 @@ pub fn surface_plane_curve(
     );
     let det_g = g11 * g22 - g12 * g12;
     if !(det_g > 0.0) {
-        return Err(fail());
+        return Err(fail("the plane's axes are parallel"));
     }
     let tr = Tracer {
         k,
@@ -283,12 +297,23 @@ pub fn surface_plane_curve(
         let on = surf.evaluate_point(k, *uv)?;
         if !ok || on.distance(p) > tol || (p - origin).dot(normal).abs() > tol {
             // an end is off the surface or the plane
-            return Err(fail());
+            return Err(fail("an end is off the surface or the plane"));
         }
         *x = on;
     }
     let [start_uv, stop_uv] = end_uv;
     let [start_x, stop_x] = end_x;
+    // the curve stays on the surface: within its domain, but across a seam it is closed over
+    let closed =
+        |param| -> Result<bool> { Ok(surf.is_closed(k, &dom, param, Some(tol), false)?.0) };
+    let (closed_u, closed_v) = (closed(SurfParamType::U)?, closed(SurfParamType::V)?);
+    let on_domain = |uv: Point2| {
+        let (lo, hi) = (dom.min(), dom.max());
+        let pad = |a: f64, b: f64| 1.0e-12 * (1.0 + a.abs() + b.abs());
+        let (pu, pv) = (pad(lo.x, hi.x), pad(lo.y, hi.y));
+        (closed_u || (uv.x >= lo.x - pu && uv.x <= hi.x + pu))
+            && (closed_v || (uv.y >= lo.y - pv && uv.y <= hi.y + pv))
+    };
 
     // the stations: from the start, along the level line, to the end
     let (t0, r0) = tr.tangent(start_uv, start_dir.unwrap_or(end - start))?;
@@ -299,14 +324,14 @@ pub fn surface_plane_curve(
         rate: r0,
     }];
     let mut h = 0.0625 * start.distance(end);
-    for _ in 0..100_000 {
-        let last = *st.last().ok_or_else(fail)?;
+    for _ in 0..MAX_STATIONS {
+        let last = *st.last().ok_or_else(|| fail("the trace has no station"))?;
         if last.x.distance(end) <= 1.5 * h {
             // the last step: onto the end itself
             let (te, re) = tr.tangent(stop_uv, last.t)?;
             if te.dot(last.t) < 0.0 {
                 // the curve turns back before its end
-                return Err(fail());
+                return Err(fail("the curve turns back before its end"));
             }
             st.push(Station {
                 uv: stop_uv,
@@ -320,7 +345,7 @@ pub fn surface_plane_curve(
         let (_, su, sv, _) = tr.eval(last.uv)?;
         let speed = (su * last.rate.x + sv * last.rate.y).length();
         if !(speed > 0.0) {
-            return Err(fail());
+            return Err(fail("the trace's tangent has no speed on the surface"));
         }
         let mut next = Point2::new(
             last.uv.x + h * last.rate.x / speed,
@@ -333,6 +358,10 @@ pub fn surface_plane_curve(
             turned = Some((tn, rn, tn.angle_between(last.t)?));
         }
         match turned {
+            Some(_) if !on_domain(next) => {
+                // the curve leaves the surface
+                return Err(fail("the curve leaves the surface's domain"));
+            }
             Some((tn, rn, turn)) if turn <= ang_tol => {
                 let x = surf.evaluate_point(k, next)?;
                 st.push(Station {
@@ -349,7 +378,7 @@ pub fn surface_plane_curve(
                 h *= 0.5;
                 if h < 1.0e-9 * tr.scale {
                     // the trace's step vanished
-                    return Err(fail());
+                    return Err(fail("the trace's step vanished"));
                 }
             }
         }
@@ -374,7 +403,7 @@ pub fn surface_plane_curve(
         let (mut cp3, mut cp_uv, mut cp_pl) = (Vec::new(), Vec::new(), Vec::new());
         for (j, pair) in st.windows(2).enumerate() {
             let ([a, b], (Some(&sa), Some(&sb))) = (pair, (s.get(j), s.get(j + 1))) else {
-                return Err(fail());
+                return Err(fail("a span has no arc length"));
             };
             let third = (sb - sa) / 3.0;
             let (ra, rb) = (
@@ -408,7 +437,7 @@ pub fn surface_plane_curve(
         let mut off: Vec<(usize, Point2)> = Vec::new();
         for j in 0..st.len().saturating_sub(1) {
             let (Some(&sa), Some(&sb)) = (s.get(j), s.get(j + 1)) else {
-                return Err(fail());
+                return Err(fail("a span has no arc length"));
             };
             let mut span_ok = true;
             let mut mid_uv = Point2::new(0.0, 0.0);
@@ -439,6 +468,10 @@ pub fn surface_plane_curve(
             });
         }
         // insert those middles as stations
+        if st.len() + off.len() > MAX_STATIONS {
+            // the curves could not be fitted within the tolerance
+            return Err(fail("the curves could not be fitted within the tolerance"));
+        }
         let mut refined = Vec::with_capacity(st.len() + off.len());
         let mut pending = off.iter().peekable();
         for (j, station) in st.iter().enumerate() {
@@ -453,7 +486,7 @@ pub fn surface_plane_curve(
         st = refined;
     }
     // the curves could not be fitted within the tolerance
-    Err(fail())
+    Err(fail("the curves could not be fitted within the tolerance"))
 }
 
 /// Whether the two end points lie on both surfaces, within `tol`, and the surfaces cross at
@@ -533,5 +566,39 @@ mod tests {
         assert!(first.z.abs() <= 1.0e-11, "{first:?}");
         assert!((first.y + 0.01 * first.x).abs() <= 1.0e-11, "{first:?}");
         assert!(first.distance(start) <= 3.0e-6, "{}", first.distance(start));
+    }
+
+    /// An end off the plane: a typed blend failure that keeps the bare `Upstream`'s status
+    /// (#13790).
+    #[test]
+    fn an_end_off_the_plane_is_a_typed_failure() {
+        let k = Kernel::new(&KernelOptions::default());
+        let domain = Extent2d::from_bounds(-50.0, -50.0, 50.0, 50.0);
+        let plane = |o: Point3, u: Vec3, v: Vec3| {
+            Surface::from(Plane::new(o, u, v, Vec2::new(1.0, 1.0), &domain))
+        };
+        let surf = plane(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        // the cutter: x = 0
+        let cutter = plane(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        let (start, end) = (Point3::new(5.0, 0.0, 0.0), Point3::new(0.0, 10.0, 0.0));
+        let e = surface_plane_curve(&k, &surf, &cutter, start, end, None, 1.0e-6, 0.1).unwrap_err();
+        assert_eq!(
+            (e.operation(), e.blend_failure(), e.upstream_status()),
+            (
+                OP,
+                Some(&crate::error::blend::BlendFailure::Failed(
+                    "an end is off the surface or the plane"
+                )),
+                Some(crate::error::SM_ERR)
+            )
+        );
     }
 }

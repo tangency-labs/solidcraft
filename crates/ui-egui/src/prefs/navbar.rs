@@ -181,7 +181,7 @@ fn preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, width: f32)
     let stage = ui_kit::navigation_stage(ui, width);
     scenario::publish_target("prefs:navbar:stage", stage);
     scenario::publish_target("prefs:navbar:preview", stage);
-    let bar = navigation_bar_view::editor_layout(stage, &app.preferences.navigation_bar, |slot| {
+    let bar = ui_kit::nav_bar_layout::editor_layout(stage, &app.preferences.navigation_bar, |slot| {
         ui.painter()
             .layout_no_wrap(navigation_bar_view::slot_text(app, slot).to_owned(), crate::ui_kit::type_face::medium(ui_kit::NAV_TEXT), t.form_ink)
             .size()
@@ -441,7 +441,7 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
         });
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(Tokens::get().space_8, Tokens::get().space_8);
-            for slot in navigation_bar::CATALOGUE {
+            for slot in crate::navigation_slots::CATALOGUE {
                 if slot.kind == NavigationKind::Separator || app.preferences.navigation_bar.slots.iter().any(|id| id == slot.id) {
                     continue;
                 }

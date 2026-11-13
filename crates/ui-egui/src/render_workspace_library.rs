@@ -227,7 +227,7 @@ fn refresh_targets(app: &mut SolveApp, view: &mut View) -> Result<(), String> {
 }
 fn target_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View) {
     ui.label(app.tr("render.library_target"));
-    ui_kit::bounded_cell_editor(
+    let search = ui_kit::bounded_cell_editor(
         ui,
         ui.scope_id().with("render_library_target_search"),
         &mut view.target_query,
@@ -235,6 +235,7 @@ fn target_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View) {
         false,
         128,
     );
+    crate::panel_runtime::register_content_focus(ui.ctx(), &search);
     if ui_kit::button(ui, app.tr("render.material_refresh"), ui_kit::Button::Normal).clicked()
         && let Err(e) = refresh_targets(app, view)
     {
@@ -332,9 +333,7 @@ pub(super) fn open_category(app: &mut SolveApp, kind: &str) {
         "scenes" | "selene_shots" | "lighting" => 3,
         _ => 0,
     };
-    app.ui.show_browser = true;
-    let _ = app.run("view.render_browser", json!({"open":true}));
-    app.preferences.browser_collapsed = false;
+    app.render_workspace.view.library_focus_pending = true;
 }
 pub(super) fn choose(app: &mut SolveApp, view: &mut View, kind: &str, id: &str) -> Result<(), String> {
     switch_kind(view, kind);
@@ -483,98 +482,83 @@ fn matches_entry(entry: &Value, query: &str, category: &str, availability: &str)
             .any(|field| field.to_string().to_lowercase().contains(&query))
 }
 
-pub(super) fn card(app: &mut SolveApp, ui: &mut egui::Ui, bounds: egui::Rect) {
-    let mut side = app.preferences.render_browser_side.clone();
-    let mut width = app.preferences.render_browser_width;
+pub(crate) fn library_title(app: &SolveApp) -> String {
     let stage = app.render_workspace.view.stage;
-    if stage == super::Stage::Look {
-        let view = &mut app.render_workspace.view.library;
-        let compatible = if view.look_tab == 1 {
-            matches!(view.kind.as_str(), "surfaces" | "physical_profiles")
-        } else {
-            LOOK_KINDS.contains(&view.kind.as_str())
-        };
-        if !compatible {
-            let kind = if view.look_tab == 1 { "surfaces" } else { "appearances" };
-            switch_kind(view, kind);
-            view.collection = 0;
-        }
-    }
-    let title = app
-        .tr(if stage == super::Stage::Look && app.render_workspace.view.library.look_tab == 1 {
-            "render.stage_panels.surfaces_references"
-        } else {
-            stage_title(stage)
-        })
-        .to_string();
-    let mut mode = if app.render_workspace.view.library.look_tab == 1 { 2 } else { app.render_workspace.view.library.layout };
-    let mut actions = |ui: &mut egui::Ui| {
-        ui_kit::catalog_scope(ui, |ui| {
-            ui_kit::segmented_icons(
-                ui,
-                &mut mode,
-                &[
-                    ui_kit::IconSegment { key: "render:library-grid", icon: "grid", tip: solidcraft_ui_text::tr("render.library_grid").into() },
-                    ui_kit::IconSegment { key: "render:library-list", icon: "list", tip: solidcraft_ui_text::tr("render.library_list").into() },
-                    ui_kit::IconSegment {
-                        key: "render:library-panel",
-                        icon: "library",
-                        tip: solidcraft_ui_text::tr("render.stage_panels.surfaces_references").into(),
-                    },
-                ],
-                &[],
-            )
-        });
+    let key = if stage == super::Stage::Look && app.render_workspace.view.library.look_tab == 1 {
+        "render.stage_panels.surfaces_references"
+    } else {
+        stage_title(stage)
     };
-    let response = ui_kit::Panel::workspace(
-        ui,
-        ui_kit::WorkspaceOptions {
-            id: "render:appearances",
-            title: &title,
-            icon: "",
-            bounds,
-            fill_height: true,
-            compact: crate::render_ui::compact(app, bounds.width()),
-            editor: false,
-            enabled: true,
-            header_actions: (stage == super::Stage::Look).then_some(&mut actions as &mut dyn FnMut(&mut egui::Ui)),
-        },
-        &mut side,
-        &mut width,
-        |ui| match stage {
-            super::Stage::Look => ui_kit::catalog_scope(ui, |ui| {
-                if app.render_workspace.view.library.look_tab == 0 {
-                    browse_contents(app, ui, true);
-                } else {
-                    surface_panel(app, ui);
-                }
-            }),
-            super::Stage::Light => light_panel(app, ui),
-            super::Stage::Frame => super::shot::presets(app, ui),
-            super::Stage::Output => super::inspector::size_presets(app, ui),
-        },
-    );
+    app.tr(key).to_string()
+}
+
+pub(crate) fn library_mode(app: &SolveApp) -> Option<usize> {
+    let view = &app.render_workspace.view.library;
+    (app.render_workspace.view.stage == super::Stage::Look).then_some(if view.look_tab == 1 { 2 } else { view.layout })
+}
+
+pub(crate) fn set_library_mode(app: &mut SolveApp, mode: usize) {
+    if mode > 2 || app.render_workspace.view.stage != super::Stage::Look {
+        return;
+    }
+    let view = &mut app.render_workspace.view.library;
     let look_tab = usize::from(mode == 2);
     if mode < 2 {
-        app.render_workspace.view.library.layout = mode;
+        view.layout = mode;
     }
-    if look_tab != app.render_workspace.view.library.look_tab {
-        switch_kind(&mut app.render_workspace.view.library, if look_tab == 0 { "appearances" } else { "surfaces" });
-        app.render_workspace.view.library.collection = 0;
-        app.render_workspace.view.library.look_tab = look_tab;
+    if look_tab != view.look_tab {
+        switch_kind(view, if look_tab == 0 { "appearances" } else { "surfaces" });
+        view.collection = 0;
+        view.look_tab = look_tab;
     }
-    app.preferences.render_browser_width = width;
-    let requested =
-        response.as_ref().and_then(|r| r.inner.1).map(str::to_string).or_else(|| (app.preferences.render_browser_side != side).then(|| side.clone()));
-    if let Some(side) = requested {
-        let _ = app.run("view.render_dock", json!({"panel":"browser","side":side}));
+}
+
+fn prepare_look(app: &mut SolveApp) {
+    if app.render_workspace.view.stage != super::Stage::Look {
+        return;
     }
-    crate::shell::register_panel(
-        app,
-        "render:appearances",
-        response.map(|r| r.response.rect),
-        if bounds.width() < 800.0 { None } else { Some(if side == "left" { ui_kit::Edge::Left } else { ui_kit::Edge::Right }) },
-    );
+    let view = &mut app.render_workspace.view.library;
+    let compatible =
+        if view.look_tab == 1 { matches!(view.kind.as_str(), "surfaces" | "physical_profiles") } else { LOOK_KINDS.contains(&view.kind.as_str()) };
+    if !compatible {
+        let kind = if view.look_tab == 1 { "surfaces" } else { "appearances" };
+        switch_kind(view, kind);
+        view.collection = 0;
+    }
+}
+
+fn stage_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage: super::Stage) {
+    match stage {
+        super::Stage::Look => ui_kit::catalog_scope(ui, |ui| {
+            if app.render_workspace.view.library.look_tab == 0 {
+                browse_contents(app, ui, true);
+            } else {
+                surface_panel(app, ui);
+            }
+        }),
+        super::Stage::Light => light_panel(app, ui),
+        super::Stage::Frame => super::shot::presets(app, ui),
+        super::Stage::Output => super::inspector::size_presets(app, ui),
+    }
+}
+
+/// The shared host owns placement and the header. The library owns its catalog and drafts.
+pub(crate) fn shared_library(app: &mut SolveApp, ui: &mut egui::Ui) {
+    prepare_look(app);
+    let stage = app.render_workspace.view.stage;
+    ui_kit::scope(ui, |ui| {
+        if matches!(stage, super::Stage::Frame | super::Stage::Output) {
+            let top = ui.cursor().top();
+            let scroll = egui::ScrollArea::vertical()
+                .id_salt(("render_library_presets", stage.key()))
+                .min_scrolled_height(0.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| stage_contents(app, ui, stage));
+            crate::panel_runtime::report_content_extent(ui, top, scroll.content_size.y, false);
+        } else {
+            stage_contents(app, ui, stage);
+        }
+    });
 }
 
 fn stage_title(stage: super::Stage) -> &'static str {
@@ -605,6 +589,7 @@ const LIGHT_SCOPES: &[(&str, &str)] = &[
 ];
 
 fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let top = ui.cursor().top();
     let mut view = std::mem::take(&mut app.render_workspace.view.library);
     let previous = view.light_scope;
     let labels: Vec<_> = LIGHT_SCOPES.iter().map(|(_, key)| app.tr(key)).collect();
@@ -631,6 +616,7 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::button(ui, app.tr("render.stage_panels.apply"), ui_kit::Button::Normal);
         });
         ui_kit::text(ui, app.tr("render.stage_panels.mine_pending"), ui_kit::Text::Note("render:mine:reason"));
+        crate::panel_runtime::report_content_extent(ui, top, ui.cursor().top() - top, false);
         restore_view(app, view);
         return;
     }
@@ -638,7 +624,8 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let reason =
         if view.light_scope == 3 { Some(app.tr("render.library_specification_only").to_string()) } else { selected_light_reason(app, &view) };
     let layout = ui_kit::CatalogLayout::new(ui, "render:light:catalog", 0);
-    layout.body(ui, |ui| {
+    let body_top = ui.cursor().top();
+    let body_height = layout.body(ui, |ui| {
         let identities: Vec<_> = view.entries.iter().map(|e| format!("render:light:{}", e["id"].as_str().unwrap_or(""))).collect();
         let tiles: Vec<_> = view
             .entries
@@ -667,8 +654,9 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             ui_kit::text(ui, detail["resource"]["description"].as_str().unwrap_or(""), ui_kit::Text::Note("render:specification"));
         }
+        ui.min_size().y
     });
-    layout.footer(ui, |ui| {
+    catalog_footer(&layout, ui, body_top, body_height, |ui| {
         catalog_pages(app, ui, &mut view);
         if let Some(reason) = &reason {
             ui_kit::text(ui, reason, ui_kit::Text::Note("render:light:reason"));
@@ -686,8 +674,21 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     restore_view(app, view);
 }
 
+fn catalog_footer(layout: &ui_kit::CatalogLayout, ui: &mut egui::Ui, body_top: f32, body_height: f32, draw: impl FnOnce(&mut egui::Ui)) {
+    // The catalog allocates a filling scroll body. Use its actual content height
+    // and the footer's content height for a sole side panel's preferred size.
+    let mut footer_height = 0.0;
+    layout.footer(ui, |ui| {
+        draw(ui);
+        footer_height = ui.min_size().y;
+    });
+    let gap = if footer_height > 0.0 { ui.spacing().item_spacing.y } else { 0.0 };
+    crate::panel_runtime::report_content_extent(ui, body_top, body_height + gap + footer_height, false);
+}
+
 fn catalog_search(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, hint: &str) {
     let search = ui_kit::search_field(ui, ui.scope_id().with("render_stage_catalog_search"), &mut view.query, app.tr(hint));
+    crate::panel_runtime::register_content_focus(ui.ctx(), &search);
     crate::scenario::publish_target("render:library-search", search.rect);
     let end = view.query.char_indices().nth(128).map_or(view.query.len(), |(at, _)| at);
     view.query.truncate(end);
@@ -720,6 +721,7 @@ fn catalog_pages(app: &SolveApp, ui: &mut egui::Ui, view: &mut View) {
 }
 fn surface_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut view = std::mem::take(&mut app.render_workspace.view.library);
+    let shared = crate::panel_runtime::shared_content_measurement(ui.ctx());
     let mut scope = usize::from(view.kind == "physical_profiles");
     if ui_kit::segmented(
         ui,
@@ -729,12 +731,16 @@ fn surface_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     ) {
         switch_kind(&mut view, if scope == 0 { "surfaces" } else { "physical_profiles" });
     }
-    if scope == 0 {
+    if scope == 0 && !shared {
         surface_import::controls(app, ui, &mut view);
     }
     catalog_search(app, ui, &mut view, "render.stage_panels.search_surfaces");
     let layout = ui_kit::CatalogLayout::new(ui, "render:surface:catalog", 3);
-    layout.body(ui, |ui| {
+    let body_top = ui.cursor().top();
+    let body_height = layout.body(ui, |ui| {
+        if scope == 0 && shared {
+            surface_import::controls(app, ui, &mut view);
+        }
         for entry in view.entries.clone() {
             let id = entry["id"].as_str().unwrap_or("");
             let label = entry["name"].as_str().or_else(|| entry["resource"]["designation"].as_str()).unwrap_or(id);
@@ -750,8 +756,9 @@ fn surface_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         }
+        ui.min_size().y
     });
-    layout.footer(ui, |ui| {
+    catalog_footer(&layout, ui, body_top, body_height, |ui| {
         catalog_pages(app, ui, &mut view);
         if let Some(id) = view.selected.clone() {
             if scope == 0 {
@@ -1024,6 +1031,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
     let hint = solidcraft_ui_text::format("render.search_appearances", &[("count", &count.to_string())]);
     let query = if view.collection == 0 { &mut view.query } else { &mut view.collection_query };
     let search = ui_kit::search_field(ui, ui.scope_id().with("render_library_search"), query, &hint);
+    crate::panel_runtime::register_content_focus(ui.ctx(), &search);
     query.truncate(query.char_indices().nth(128).map_or(query.len(), |(at, _)| at));
     crate::scenario::publish_target("render:library-search", search.rect);
     if search.changed() {
@@ -1159,67 +1167,71 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
     let layout = ui_kit::CatalogLayout::new(ui, "render:library:catalog", 0);
     let mut selected = None;
     let mut dragged = None;
+    let body_top = ui.cursor().top();
     // Keep each catalog/collection's independent scroll position.
-    ui.push_id((&view.kind, view.collection), |ui| {
-        layout.body(ui, |ui| {
-            if entries.is_empty() {
-                ui_kit::text(ui, app.tr("render.library_empty"), ui_kit::Text::Note("render.library_empty"));
-            }
-            if view.layout == 0 {
-                let tiles: Vec<_> = entries
-                    .iter()
-                    .zip(&identities)
-                    .zip(&tips)
-                    .map(|(((kind, id, entry), identity), tip)| ui_kit::SphereTile {
-                        id: identity,
-                        name: entry["name"].as_str().unwrap_or(id),
-                        sphere: tile_sphere(entry),
-                        selected: view.kind == *kind && view.selected.as_ref() == Some(id),
-                        users: usage_for(entry, &used).map_or_else(|| user_count(entry), user_count),
-                        tip,
-                        badge: Some(tile_badge(app, entry)),
-                    })
-                    .collect();
-                if applicable_count > 0 {
-                    ui_kit::text(ui, app.tr("render.library_applicable"), ui_kit::Text::Inline);
-                    (selected, dragged) = ui_kit::sphere_grid_drag(ui, tiles.get(..applicable_count).unwrap_or_default());
+    let body_height = ui
+        .push_id((&view.kind, view.collection), |ui| {
+            layout.body(ui, |ui| {
+                if entries.is_empty() {
+                    ui_kit::text(ui, app.tr("render.library_empty"), ui_kit::Text::Note("render.library_empty"));
                 }
-                if applicable_count < tiles.len() {
+                if view.layout == 0 {
+                    let tiles: Vec<_> = entries
+                        .iter()
+                        .zip(&identities)
+                        .zip(&tips)
+                        .map(|(((kind, id, entry), identity), tip)| ui_kit::SphereTile {
+                            id: identity,
+                            name: entry["name"].as_str().unwrap_or(id),
+                            sphere: tile_sphere(entry),
+                            selected: view.kind == *kind && view.selected.as_ref() == Some(id),
+                            users: usage_for(entry, &used).map_or_else(|| user_count(entry), user_count),
+                            tip,
+                            badge: Some(tile_badge(app, entry)),
+                        })
+                        .collect();
                     if applicable_count > 0 {
-                        ui_kit::text(ui, app.tr("render.library_other"), ui_kit::Text::Inline);
-                    }
-                    let (other, other_drag) = ui_kit::sphere_grid_drag(ui, tiles.get(applicable_count..).unwrap_or_default());
-                    selected = selected.or(other.map(|i| i + applicable_count));
-                    dragged = dragged.or(other_drag.map(|i| i + applicable_count));
-                }
-            } else {
-                for (index, ((kind, id, entry), tip)) in entries.iter().zip(&tips).enumerate() {
-                    if index == 0 && applicable_count > 0 {
                         ui_kit::text(ui, app.tr("render.library_applicable"), ui_kit::Text::Inline);
-                    } else if index == applicable_count && applicable_count > 0 {
-                        ui_kit::text(ui, app.tr("render.library_other"), ui_kit::Text::Inline);
+                        (selected, dragged) = ui_kit::sphere_grid_drag(ui, tiles.get(..applicable_count).unwrap_or_default());
                     }
-                    let mut item = ui_kit::MenuItem::new(id, entry["name"].as_str().unwrap_or(id), "appearance");
-                    item.highlighted = view.kind == *kind && view.selected.as_ref() == Some(id);
-                    let r = item.search_row(
-                        ui,
-                        query,
-                        &format!(
-                            "{} / {}",
-                            if kind == "appearances" { entry["category"].as_str().unwrap_or(app.tr("render.library_in_design")) } else { id },
-                            short_availability(app, entry.pointer("/projection/status").and_then(Value::as_str))
-                        ),
-                        None,
-                    );
-                    crate::scenario::publish_target(identities.get(index).map(String::as_str).unwrap_or("render:library:item"), r.rect);
-                    if r.backing_on_hover_text(tip).clicked() {
-                        selected = Some(index);
+                    if applicable_count < tiles.len() {
+                        if applicable_count > 0 {
+                            ui_kit::text(ui, app.tr("render.library_other"), ui_kit::Text::Inline);
+                        }
+                        let (other, other_drag) = ui_kit::sphere_grid_drag(ui, tiles.get(applicable_count..).unwrap_or_default());
+                        selected = selected.or(other.map(|i| i + applicable_count));
+                        dragged = dragged.or(other_drag.map(|i| i + applicable_count));
+                    }
+                } else {
+                    for (index, ((kind, id, entry), tip)) in entries.iter().zip(&tips).enumerate() {
+                        if index == 0 && applicable_count > 0 {
+                            ui_kit::text(ui, app.tr("render.library_applicable"), ui_kit::Text::Inline);
+                        } else if index == applicable_count && applicable_count > 0 {
+                            ui_kit::text(ui, app.tr("render.library_other"), ui_kit::Text::Inline);
+                        }
+                        let mut item = ui_kit::MenuItem::new(id, entry["name"].as_str().unwrap_or(id), "appearance");
+                        item.highlighted = view.kind == *kind && view.selected.as_ref() == Some(id);
+                        let r = item.search_row(
+                            ui,
+                            query,
+                            &format!(
+                                "{} / {}",
+                                if kind == "appearances" { entry["category"].as_str().unwrap_or(app.tr("render.library_in_design")) } else { id },
+                                short_availability(app, entry.pointer("/projection/status").and_then(Value::as_str))
+                            ),
+                            None,
+                        );
+                        crate::scenario::publish_target(identities.get(index).map(String::as_str).unwrap_or("render:library:item"), r.rect);
+                        if r.backing_on_hover_text(tip).clicked() {
+                            selected = Some(index);
+                        }
                     }
                 }
-            }
-        });
-    });
-    layout.footer(ui, |ui| {
+                ui.min_size().y
+            })
+        })
+        .inner;
+    catalog_footer(&layout, ui, body_top, body_height, |ui| {
         if !stage_card {
             let menu = ui_kit::dropdown_menu(ui, "render_library_filters", app.tr("render.library_filters"), |ui| {
                 if view.collection == 0 {
@@ -1678,7 +1690,8 @@ fn physical_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
         }
     }
     ui.label(app.tr("render.physical_material_name"));
-    ui_kit::bounded_cell_editor(ui, ui.scope_id().with("physical_reference_name"), &mut view.physical_name, "", false, 128);
+    let name = ui_kit::bounded_cell_editor(ui, ui.scope_id().with("physical_reference_name"), &mut view.physical_name, "", false, 128);
+    crate::panel_runtime::register_content_focus(ui.ctx(), &name);
     if ui_kit::button(ui, app.tr("render.stage_panels.prepare_plan"), ui_kit::Button::Normal).clicked() {
         let result =
             app.run("render.library.physical.prepare", json!({"id":id,"name":view.physical_name,"acknowledge_reference":true})).and_then(|plan| {
@@ -1725,8 +1738,11 @@ fn availability_label<'a>(app: &'a SolveApp, status: Option<&str>) -> &'a str {
 
 /// Focus the existing library card from the viewport Appearance menu.
 pub(super) fn focus_library(app: &mut SolveApp) {
+    app.render_workspace.view.library_focus_pending = true;
+    let _ = app.run("view.render_stage", json!({"stage":"look"}));
     let view = &mut app.render_workspace.view.library;
     view.collection = 0;
+    view.look_tab = 0;
     switch_kind(view, "appearances");
 }
 
@@ -1782,6 +1798,13 @@ mod studio_browser_tests {
             method: h.app.render_workspace.view.method,
             snapshot: patch(&h.app).unwrap(),
         }
+    }
+
+    fn click_mode(h: &mut crate::scenario::Harness, action: &str) {
+        let panel = super::super::test_panel(&h.app, "render-library").unwrap();
+        let rect = panel.actions.iter().find(|(id, _)| id.0 == action).unwrap().1;
+        let at = crate::panel_runtime::egui_rect(rect).center();
+        h.step(&json!({"click":[at.x, at.y]})).unwrap();
     }
 
     #[test]
@@ -1912,7 +1935,7 @@ mod studio_browser_tests {
         // catalog mode; merely changing a captured resource does not navigate UI.
         h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
         h.frames(3);
-        h.step(&json!({"click":{"handle":"render:library-panel"}})).unwrap();
+        click_mode(&mut h, "references");
         h.frames(3);
         assert_eq!(h.app.render_workspace.view.library.look_tab, 1);
         let mut view = std::mem::take(&mut h.app.render_workspace.view.library);
@@ -2035,7 +2058,7 @@ mod studio_browser_tests {
         if kind == "surfaces" {
             h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
             h.frames(3);
-            h.step(&json!({"click":{"handle":"render:library-panel"}})).unwrap();
+            click_mode(&mut h, "references");
             let mut view = std::mem::take(&mut h.app.render_workspace.view.library);
             choose(&mut h.app, &mut view, kind, id).unwrap();
             refresh_targets(&mut h.app, &mut view).unwrap();
@@ -2156,7 +2179,7 @@ mod studio_browser_tests {
         // catalog mode; merely changing a captured resource does not navigate UI.
         h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
         h.frames(3);
-        h.step(&json!({"click":{"handle":"render:library-panel"}})).unwrap();
+        click_mode(&mut h, "references");
         h.frames(3);
         assert_eq!(h.app.render_workspace.view.library.look_tab, 1);
         let mut view = std::mem::take(&mut h.app.render_workspace.view.library);
@@ -2442,10 +2465,10 @@ mod studio_browser_tests {
         let look = h.app.session.doc.appearances.bodies.get("Sample").unwrap().clone();
         h.app.run("appearance.favorite", json!({"look":look,"favorite":true})).unwrap();
         assert!(h.app.preferences.render_library_favorites.contains(&("appearances".into(), id.clone())));
-        h.step(&json!({"click":{"handle":"render:library-list"}})).unwrap();
+        click_mode(&mut h, "list");
         h.frames(3);
         assert_eq!(h.app.render_workspace.view.library.layout, 1);
-        h.step(&json!({"click":{"handle":"render:library-grid"}})).unwrap();
+        click_mode(&mut h, "grid");
         h.frames(3);
         assert_eq!(h.app.render_workspace.view.library.layout, 0);
         assert_eq!(h.app.session.doc.to_json(), before);
@@ -2503,8 +2526,8 @@ mod studio_browser_tests {
                 let output = final_frame.unwrap();
                 let image = ui_kit::raster_ui(&ctx, output.shapes, output.pixels_per_point, ctx.content_rect(), &textures);
                 image.save(std::path::Path::new(&dir).join(if dark { "appearances-dark.png" } else { "appearances-light.png" })).unwrap();
-                let card = h.app.shell.workspace_panels["render:appearances"].0;
-                assert_eq!(card.width(), 266.0);
+                let section = super::super::test_panel(&h.app, "render-library").unwrap();
+                let card = crate::panel_runtime::egui_rect(section.outer);
                 let card_image = image::imageops::crop_imm(
                     &image,
                     card.left().round() as u32,
@@ -2517,9 +2540,9 @@ mod studio_browser_tests {
                 if let Some(reference) = std::env::var_os("SOLIDCRAFT_LIBRARY_REFERENCE") {
                     let reference = image::open(reference).unwrap().to_rgba8();
                     let reference = image::imageops::crop_imm(&reference, 8, 487, 266, 356).to_image();
-                    let mut pair = image::RgbaImage::new(532, card_image.height().max(reference.height()));
+                    let mut pair = image::RgbaImage::new(reference.width() + card_image.width(), card_image.height().max(reference.height()));
                     image::imageops::overlay(&mut pair, &reference, 0, 0);
-                    image::imageops::overlay(&mut pair, &card_image, 266, 0);
+                    image::imageops::overlay(&mut pair, &card_image, i64::from(reference.width()), 0);
                     pair.save(std::path::Path::new(&dir).join(if dark {
                         "reference-left-current-right-dark.png"
                     } else {
@@ -2544,11 +2567,24 @@ mod studio_browser_tests {
             h.app.run("view.render_stage", json!({"stage":stage})).unwrap();
             h.frames(3);
             assert_eq!(stage_title(h.app.render_workspace.view.stage), key);
-            let browser = h.app.shell.workspace_panels["render:browser"].0;
-            let panel = h.app.shell.workspace_panels["render:appearances"].0;
-            let strip = h.app.shell.workspace_panels["render:shots_strip"].0;
-            assert_eq!(panel.top() - browser.bottom(), Tokens::get().space_8, "{stage}: {browser:?} {panel:?} {strip:?}");
-            assert_eq!(strip.top() - panel.bottom(), Tokens::get().space_8, "{stage}: {browser:?} {panel:?} {strip:?}");
+            use crate::panel_runtime::{HostControlTarget, HostPointerTarget, egui_rect};
+            let browser = super::super::test_panel(&h.app, "render-browser").unwrap();
+            let library = super::super::test_panel(&h.app, "render-library").unwrap();
+            let shots = super::super::test_panel(&h.app, "render-shots").unwrap();
+            assert_eq!(browser.zone, library.zone);
+            assert!(shots.inline && shots.zone == solidcraft_engine::panels::Zone::Bottom);
+            let browser = egui_rect(browser.outer);
+            let panel = egui_rect(library.outer);
+            let strip = egui_rect(shots.outer);
+            assert!(browser.bottom() <= panel.top() && panel.bottom() <= strip.top(), "{stage}: {browser:?} {panel:?} {strip:?}");
+            let controls = &h.app.universal_panel_frame().unwrap().controls;
+            assert!(
+                controls.iter().any(|control| {
+                    matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Header { instance }) if *instance == library.instance)
+                        && control.accessible_name == h.app.tr(key)
+                }),
+                "missing library title for {stage}"
+            );
         }
         assert_eq!(h.app.session.doc.to_json(), before);
     }

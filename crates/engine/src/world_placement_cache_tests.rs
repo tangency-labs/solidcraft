@@ -143,6 +143,7 @@ fn placement_dependent_cross_component_cuts_still_evaluate_and_undo() {
                 width: "10".into(),
                 height: "4".into(),
                 operation: Operation::NewBody,
+                centred: false,
             },
             None,
         )
@@ -159,6 +160,7 @@ fn placement_dependent_cross_component_cuts_still_evaluate_and_undo() {
                 width: "2".into(),
                 height: "6".into(),
                 operation: Operation::Cut,
+                centred: false,
             },
             None,
         )

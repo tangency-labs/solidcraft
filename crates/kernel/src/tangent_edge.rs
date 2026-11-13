@@ -116,7 +116,7 @@ impl<'a> Use<'a> {
     /// The outward unit normal at the pcurve's point at `t`; `Ok(None)` where it is undefined (a
     /// pole: a zero of the normal).
     fn normal(&self, t: f64) -> Result<Option<Vec3>> {
-        let uv = solidcraft_geom::brep::pcurve::eval(self.pcurve, t).ok_or_else(|| failed(format!("a pcurve at {t}")))?;
+        let uv = solidcore_ops::pcurve::eval(self.pcurve, t).ok_or_else(|| failed(format!("a pcurve at {t}")))?;
         let (_, su, sv) = self.surface.derivs(uv[0], uv[1]).ok_or_else(|| failed(format!("a face at ({}, {})", uv[0], uv[1])))?;
         let n = su.cross(sv);
         if !(n.len() > DEGENERATE * su.len() * sv.len()) {

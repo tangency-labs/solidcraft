@@ -63,7 +63,10 @@ pub use host::{
     LinearColourEncoding, LinearMasterInfo, PreparedSubmission, PreviewInfo, RenderFrame, RenderPreview, RetainedMetadata,
 };
 pub use host_memory::{HostMemoryAdmission, HostMemorySource, NativeMemoryPolicy};
-pub use image::{Admission, ImageTask, TaskPoll, admit, admit_geometry, admit_geometry_with_limits};
+pub use image::{
+    Admission, BodyRole, ImageTask, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow, Projection, Supersample, TaskPoll,
+    admit, admit_geometry, admit_geometry_with_limits, admit_picture,
+};
 pub use lens::ThinLens;
 pub use lighting::{AreaLight, AreaLights, DirectionalLights, MAX_AREA_LIGHTS, MAX_DIRECTIONAL_LIGHTS, StudioLighting, Sun, ToneMap};
 pub use png::PngTask;
@@ -125,6 +128,11 @@ pub struct JobOptions {
     pub tone_map: ToneMap,
     /// Optional final spatial filter. Raw progressive accumulation remains unchanged.
     pub denoise: bool,
+    /// Optional, biased firefly control for GPU path tracing. From the first bounce on, each
+    /// contribution is scaled so its largest channel is at most this linear radiance, keeping
+    /// its hue. Absent keeps every contribution, so the image is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clamp_indirect: Option<f64>,
     #[serde(skip_serializing_if = "DenoiseSettings::is_default")]
     pub denoise_settings: DenoiseSettings,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -133,6 +141,10 @@ pub struct JobOptions {
     #[serde(skip_serializing_if = "single_supersample")]
     pub supersampling: u32,
 }
+
+/// Bounds of [`JobOptions::clamp_indirect`]. Both ends are normal `f32` values, so the shader
+/// never sees a limit that rounds to zero (off) or to infinity.
+pub const CLAMP_INDIRECT_RANGE: std::ops::RangeInclusive<f64> = 0.000_001..=1_000_000.0;
 
 impl Default for JobOptions {
     fn default() -> Self {
@@ -156,6 +168,7 @@ impl Default for JobOptions {
             lighting: None,
             tone_map: ToneMap::default(),
             denoise: false,
+            clamp_indirect: None,
             denoise_settings: DenoiseSettings::default(),
             denoise_diagnostics: false,
             supersampling: 1,
@@ -243,6 +256,12 @@ impl JobOptions {
         }
         if let Some(lens) = self.lens {
             lens.validate()?;
+        }
+        if self.clamp_indirect.is_some_and(|limit| !limit.is_finite() || !CLAMP_INDIRECT_RANGE.contains(&limit)) {
+            return Err(JobError::new(
+                ErrorCode::InvalidRequest,
+                "clamp_indirect must be a finite radiance from 0.000001 to 1000000; omit it to keep every contribution",
+            ));
         }
         if !(1..=MAX_SAMPLES_PER_PIXEL).contains(&self.samples)
             || !(1..=u32::from(MAX_PATH_DEPTH)).contains(&self.max_depth)
@@ -1596,6 +1615,32 @@ mod runtime_request_roundtrip_tests {
             assert!(decoded.validate().is_ok());
         }
         assert_eq!(serde_json::from_value::<RaytraceOptions>(serde_json::json!({})).unwrap(), RaytraceOptions::default());
+    }
+
+    #[test]
+    fn gpu_indirect_clamp_is_off_by_default_bounded_and_roundtrips() {
+        use serde_json::json;
+        // Off unless asked for, and an absent value is not written, so older requests match.
+        assert_eq!(JobOptions::default().clamp_indirect, None);
+        assert!(serde_json::to_value(JobOptions::default()).unwrap().get("clamp_indirect").is_none());
+        for absent in [json!({}), json!({"clamp_indirect":null})] {
+            assert_eq!(serde_json::from_value::<JobOptions>(absent).unwrap(), JobOptions::default());
+        }
+        for limit in [0.000_001, 0.5, 8.0, 1_000_000.0] {
+            let options: JobOptions = serde_json::from_value(json!({"clamp_indirect":limit})).unwrap();
+            options.validate().unwrap();
+            assert_eq!(options.clamp_indirect, Some(limit));
+            let value = serde_json::to_value(options).unwrap();
+            assert_eq!(value["clamp_indirect"], json!(limit));
+            assert_eq!(serde_json::from_value::<JobOptions>(value).unwrap(), options);
+        }
+        for limit in [0.0, -0.0, -1.0, 0.000_000_9, 1_000_000.5, f64::MIN_POSITIVE, f64::MAX, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            let options = JobOptions { clamp_indirect: Some(limit), ..Default::default() };
+            let error = options.validate().unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidRequest, "{limit}");
+            assert!(error.message.contains("clamp_indirect"), "{limit}: {}", error.message);
+        }
+        assert!(serde_json::from_value::<JobOptions>(json!({"clamp_indirect":"8"})).is_err());
     }
 
     #[test]

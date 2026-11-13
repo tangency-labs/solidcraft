@@ -16,6 +16,7 @@ use solidcraft_geom::Aabb3;
 use super::contact_sweep::{ContactGeometry, Member};
 use super::{drive_with_contact, joint_id, keyed, occurrences, path_world, study_index, traced_point, values_at};
 use crate::params::{bad, bool_, num};
+use crate::schema::motion::PartPlace;
 use crate::schema::motion_analysis::{CollidingPair, MotionInterference, MotionPlot, PlotSeries, PlottedPoint, StudyStop};
 use crate::{EngineError, Result, Session};
 
@@ -31,7 +32,8 @@ pub const PLOT_DOC: &str = "study: id|name; joints?: [id|name] (default: every j
 
 pub const INTERFERENCE_DOC: &str = "study: id|name; occurrences?: [ids or names] (two or more, checked against each other; \
      default every occurrence), with against?: [ids or names] (then each of `occurrences` is checked only against these, such \
-     as an arm against the parts it must miss), or contact_sets?: true (the pairs of the design's contact sets); samples? \
+     as an arm against the parts it must miss), or contact_sets?: true (the pairs of the design's contact sets); exclude_pairs?: [[a, b]] (occurrences by id or name: \
+     pairs of bodies under a and b are not checked); samples? \
      (2…1000, default the study's steps + 1); budget_s?: seconds (above 0, at most 86400; default a fixed work budget): the \
      time the check may take instead, looked at between samples, for a mechanism such as a gear train that needs longer → collisions: [{a, b, first_step, last_step, steps: [[from, to]…] (the step ranges where they overlap), \
      volume_mm3 (the most volume they share at a sample, worked out exactly from the bodies), deepest_step (the first sample \
@@ -50,7 +52,9 @@ const MAX_SERIES: usize = 256;
 /// Most collision work over a whole study (see `ContactGeometry::hits`).
 const MAX_WORK: usize = 500_000_000;
 /// Longest time an interference check may be given (`budget_s`): a day, as `inspect.interference`.
-const MAX_BUDGET_S: f64 = 86_400.0;
+pub(super) const MAX_BUDGET_S: f64 = 86_400.0;
+/// Most pairs `exclude_pairs` may list.
+const MAX_EXCLUDED: usize = 10_000;
 /// Most colliding pairs whose overlap volume is worked out, and most body booleans that takes
 /// over the whole study (one per pair of overlapping bodies at each sample a pair collides).
 const MAX_VOLUMES: usize = 16;
@@ -321,7 +325,7 @@ fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usi
         };
         for body in st.bodies.iter().filter(|x| doc.model_body_component(x) == comp && !x.body.is_mesh()) {
             let frame = doc.model_body_offset(body).map(|o| mat_mul(&m, o)).unwrap_or(m);
-            let local = body.mesh().bounds();
+            let local = body.body.exact_bounds().unwrap_or_else(|_| body.outline_bounds());
             let mut world = Aabb3::EMPTY;
             for c in 0..8 {
                 let pick = |bit: usize, lo: f64, hi: f64| if c & bit == 0 { lo } else { hi };
@@ -411,7 +415,44 @@ pub(super) fn checked_pairs(s: &Session, p: &Value, cmd: &str) -> Result<Contact
         let a = occurrences(s, p, cmd)?;
         geometry.keep_pairs(|x, y| (a.contains(&x) && b.contains(&y)) || (a.contains(&y) && b.contains(&x)));
     }
+    geometry.exclude(&excluded_pairs(s, p, cmd)?);
     Ok(geometry)
+}
+
+/// `exclude_pairs`: `[[a, b]…]`, occurrences by id or name (#5963).
+pub(super) fn excluded_pairs(s: &Session, p: &Value, cmd: &str) -> Result<Vec<(u64, u64)>> {
+    let list = match p.get("exclude_pairs") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(list)) => list,
+        Some(_) => return Err(bad(cmd, "`exclude_pairs` must list pairs: [[a, b]…]")),
+    };
+    if list.len() > MAX_EXCLUDED {
+        return Err(bad(cmd, format!("`exclude_pairs` lists more than {MAX_EXCLUDED} pairs")));
+    }
+    list.iter()
+        .map(|pair| match pair.as_array().map(Vec::as_slice) {
+            Some([a, b]) => {
+                let ids = occurrences(s, &json!({"occurrences": [a, b]}), cmd)?;
+                match ids.as_slice() {
+                    [a, b] => Ok((*a, *b)),
+                    _ => Err(bad(cmd, "each of `exclude_pairs` names two different occurrences")),
+                }
+            }
+            _ => Err(bad(cmd, "each of `exclude_pairs` is a pair: [a, b]")),
+        })
+        .collect()
+}
+
+/// Where a body placed through `path` (occurrence ids, from the top) sits: its component and
+/// the occurrences' names (#5963).
+pub(crate) fn part_place(doc: &Document, path: &[u64]) -> PartPlace {
+    let occurrence = |id: &u64| doc.occurrences.iter().find(|o| o.id == *id);
+    let component = path.last().and_then(occurrence).map(|o| o.component).unwrap_or(0);
+    PartPlace {
+        component: doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default(),
+        path: path.iter().map(|id| occurrence(id).map(|o| o.name.clone()).unwrap_or_default()).collect(),
+        path_ids: path.to_vec(),
+    }
 }
 
 pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {

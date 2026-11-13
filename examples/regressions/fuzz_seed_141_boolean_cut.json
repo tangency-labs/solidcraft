@@ -1,0 +1,10 @@
+{
+  "description": "Issue #10: fuzzer seed 141. Revolve a section, then cut a sphere. The boolean cut's result is refused as \"SMLib's result is not a closed solid\". Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test that fails without the fix.",
+  "commands": [
+    {"command": "sketch.create", "params": {"plane": "XZ"}},
+    {"command": "sketch.rectangle.two_point", "params": {"p0": [7.5, 0], "p1": [22.5, 27.5]}},
+    {"command": "sketch.finish", "params": {}},
+    {"command": "solid.revolve", "params": {"angle": "360 deg", "axis": "Z"}},
+    {"command": "solid.sphere", "params": {"center": [22.5, -10.0, -12.5], "operation": "cut", "radius": 10.0}}
+  ]
+}

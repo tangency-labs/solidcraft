@@ -4,12 +4,14 @@
 //! and the hole r 7, axes 2.5 apart, so the hole's tube passes out through the arc's offset.
 //! SolidCraft's `smlib_shell` (the fork's C++) reports 1001 on its plate. Pinned SMLib
 //! 1.0.1 shells this reconstruction open at the top and fails it open at y = 20 with
-//! `SM_ERR` (1001), through `SmApiShellBrepFull` and through a bare `ShellBrep`; the port
-//! does the same, with the same values (the `offset.offset_executive_p2` cases
+//! `SM_ERR` (1001), through `SmApiShellBrepFull` and through a bare `ShellBrep` (the
+//! historical `offset.offset_executive_p2` cases
 //! `issue1795_plate_{api,static}_shell_2_*`; WR-617).
 //!
-//! `shell_open_at_the_top_shells_as_upstream` and `shell_open_at_y20_fails_as_upstream`
-//! pin those default results (the API path, as `smlib_shell` calls it).
+//! `shell_open_at_the_top_is_valid_on_the_default_split_path` checks the corrected
+//! top-open result, including validity rather than only matching historical counts.
+//! `shell_open_at_y20_is_valid_and_keeps_the_input` checks the side-open result and
+//! preserves the borrowed input's topology and vertex positions.
 //! `issue_1795_extended_edges_mated` (ignored) shells the plate under WR-344's opt-in
 //! `offset_extended_edges_mated`, the setting that made the top-open shell fail before its
 //! refinement; `issue_1795_y20_read_back` (ignored) shells the y = 20 case on every
@@ -90,52 +92,84 @@ fn options(create_offset_solid: bool) -> ShellOptions {
     }
 }
 
-/// The default fixes shell the plate through the API as pinned SMLib 1.0.1 does (the
-/// difftest case agrees to 0): a closed manifold solid of 16 faces, 37 edges and 24
-/// vertices. Volume 9655.150697869625 since #2890 (precise properties integrate from the
-/// trims' base; it was 9655.150582612916): against the closed form 9655.150444016748
-/// (the plate less the blind hole less the cavity inset 2, open at z = 27.5, with the hole's
-/// offset r 7 to x = 9.5 in it) +2.5e-4 (2.6e-8 relative; it was +1.4e-4), within the
-/// volume's accuracy (1e-6).
+/// Default vertex splitting builds a valid closed solid of 16 faces, 36 edges and
+/// 24 vertices. The old 37-edge result split one straight edge at a vertex one mm
+/// off its curve, hidden by a 4.166 mm vertex tolerance; validity must reject that.
+/// The volume reference is pinned at relative tolerance 1e-9. The independent closed
+/// form is 9655.150444016748 (the plate less the blind hole less the cavity inset 2,
+/// open at z = 27.5, excluding the hole's offset r 7 to x = 9.5); the measured result's
+/// relative error is 3.2e-8, within the volume integrator's accuracy (1e-6). It was
+/// 9655.150697869625 (2.6e-8) before the certified offset became the default (#13827):
+/// the shell's non-analytic offsets are certified nets, not `N_SrfOffset`'s fits, and the
+/// volume moves by 5.5e-9 relative with the same faces, edges and vertices.
 #[test]
-fn shell_open_at_the_top_shells_as_upstream() {
+fn shell_open_at_the_top_is_valid_on_the_default_split_path() {
     let mut k = Kernel::default();
     let mut b = drilled(&mut k);
     let open = planar_faces_at(&k, &b, 2, 27.5);
     assert_eq!(open.len(), 1, "the top face");
-    let r = api_shell(&mut k, &mut b, options(false), &open).unwrap();
+    let mut r = api_shell(&mut k, &mut b, options(false), &open).unwrap();
+    for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
+        let checked = check_brep(&mut k, &mut r, level).unwrap();
+        assert!(checked.is_valid(), "{level:?}: {:?}", checked.lines());
+    }
     assert_eq!(
         (
             r.face_list().len(),
             r.edge_list().len(),
             r.vertex_list().len()
         ),
-        (16, 37, 24)
+        (16, 36, 24)
     );
     let label = "1795 shell 2 open at z 27.5";
-    assert!(report(&k, label, Ok(r), Some(9655.150697869625), 1e-9));
+    assert!(report(&k, label, Ok(r), Some(9655.150751213405), 1e-9));
 }
 
-/// Open at y = 20 the default fixes fail the shell with `SM_ERR` (1001, in
-/// `make_faceuse`), as pinned SMLib 1.0.1 does (WR-617; difftest
-/// `issue1795_plate_{api,static}_shell_2_y20*` compare the status), with and without the
-/// offset solid.
+/// The default split path builds the side-open shell, rather than preserving the
+/// historical C++ refusal. Grade the returned geometry before mass queries and
+/// retain the borrowed input's topology and vertex positions.
 #[test]
-fn shell_open_at_y20_fails_as_upstream() {
+fn shell_open_at_y20_is_valid_and_keeps_the_input() {
     for cos in [false, true] {
         let mut k = Kernel::default();
         let mut b = drilled(&mut k);
         let open = planar_faces_at(&k, &b, 1, 20.0);
         assert_eq!(open.len(), 1, "the y = 20 face");
-        let r = api_shell(&mut k, &mut b, options(cos), &open);
-        assert!(
-            matches!(
-                r.as_ref().map_err(solidcore::SolidError::sm_status),
-                Err(Some(1001))
+        let source_faces = b.face_list().to_vec();
+        let source_edges = b.edge_list().to_vec();
+        let source_vertices: Vec<_> = b
+            .vertex_list()
+            .iter()
+            .map(|&v| (v, b.vertex(v).unwrap().point))
+            .collect();
+        let source_tolerance = b.tolerance();
+        let mut r = api_shell(&mut k, &mut b, options(cos), &open).unwrap();
+        solidcore::topology::integrity::check(&r).unwrap();
+        for pass in 0..3 {
+            let checked = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
+            assert!(
+                checked.is_valid(),
+                "create_offset_solid={cos}, pass={pass}: {:?}",
+                checked.lines()
+            );
+        }
+        assert_eq!(
+            (
+                r.face_list().len(),
+                r.edge_list().len(),
+                r.vertex_list().len()
             ),
-            "create_offset_solid={cos}: {:?}",
-            r.map(|b| b.face_list().len())
+            (16, 37, 24)
         );
+        assert_eq!(b.face_list(), source_faces);
+        assert_eq!(b.edge_list(), source_edges);
+        assert_eq!(b.tolerance(), source_tolerance);
+        let after: Vec<_> = b
+            .vertex_list()
+            .iter()
+            .map(|&v| (v, b.vertex(v).unwrap().point))
+            .collect();
+        assert_eq!(after, source_vertices);
     }
 }
 

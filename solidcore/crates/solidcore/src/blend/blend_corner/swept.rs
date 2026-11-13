@@ -184,7 +184,7 @@ pub(crate) fn fmt_g(v: f64) -> String {
 
 /// `sm_TangentAtVertex`: the unit tangent of `e`'s curve at its end on `vertex`.
 fn tangent_at_vertex(k: &Kernel, b: &Brep, e: EdgeId, vertex: VertexId) -> Result<Vec3> {
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul = || SolidError::blend_missing(OP_CLASSIFY, "the edge or its curve");
     let curve = edge::curve(b, e)?.ok_or_else(nul)?;
     let ivl = edge::interval(b, e)?;
     let t = if edge::start_vertex(b, e)? == Some(vertex) {
@@ -207,7 +207,7 @@ fn meridian_angle_deg(w: Vec3, x: Vec3, z: Vec3) -> f64 {
 fn offset_radius(solver: &FilletSolver, rail: usize, op: &'static str) -> Result<f64> {
     let slot = solver
         .surface(rail)?
-        .ok_or_else(|| SolidError::null_pointer(op))?;
+        .ok_or_else(|| SolidError::blend_missing(op, "the rail's offset surface"))?;
     Ok(slot.surface.offset_distance().abs())
 }
 
@@ -235,7 +235,12 @@ pub fn classify_swept(
     tangency_tol_deg: f64,
     solvers: &dyn SweptSolvers,
 ) -> Result<Option<TurnRefusal>> {
-    let nul = || SolidError::null_pointer(OP_CLASSIFY);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_CLASSIFY,
+            "topology or a solver the swept turn's classification reads",
+        )
+    };
     let refuse = |error: FilletErrorType, why: &str| {
         Ok(Some(TurnRefusal {
             error,
@@ -369,8 +374,13 @@ pub fn swept_corner_edge_geom(
     corner: &mut FilletCorner,
     solvers: &dyn SweptSolvers,
 ) -> Result<()> {
-    let nul = || SolidError::null_pointer(OP_BUILD);
-    let err = || SolidError::sm_err(OP_BUILD);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_BUILD,
+            "topology or geometry the swept turn's edges are built from",
+        )
+    };
+    let err = || SolidError::blend_failed(OP_BUILD, "the swept turn's edges could not be built");
     let swept = corner.swept.as_mut().ok_or_else(nul)?;
     swept.delete_surface();
     let side_eu = swept.side_eu;
@@ -579,7 +589,7 @@ fn keep_definition(
     radius: f64,
     tol: f64,
 ) -> Result<()> {
-    let nul = || SolidError::null_pointer(OP_BUILD);
+    let nul = || SolidError::blend_missing(OP_BUILD, "the swept turn's event or its patch");
     let swept = corner.swept.as_ref().ok_or_else(nul)?;
     let eus = corner.solver_eus.as_deref().ok_or_else(nul)?;
     let (Some(&eu1_), Some(&eu2_)) = (eus.first(), eus.get(1)) else {
@@ -607,7 +617,7 @@ pub fn create_swept_patch(
     corner: &mut FilletCorner,
     env: &mut CornerPatchEnv<'_, '_>,
 ) -> Result<()> {
-    let nul = || SolidError::null_pointer(OP_PATCH);
+    let nul = || SolidError::blend_missing(OP_PATCH, "the swept turn's event or topology");
     let swept = corner.swept.as_mut().ok_or_else(nul)?;
     let surface = swept.surface.take().ok_or_else(nul)?;
     // the face takes the surface and the curves
@@ -648,6 +658,35 @@ pub fn create_swept_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A box with its first edge's curve taken away, the edge and its start vertex.
+    fn box_with_curveless_edge() -> (Brep, EdgeId, VertexId) {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0)
+            .unwrap();
+        let e = b.edges().ids().next().unwrap();
+        let v = edge::start_vertex(&b, e).unwrap().unwrap();
+        b.edge_mut(e).unwrap().curve = None;
+        (b, e, v)
+    }
+
+    /// An edge without a curve has no tangent at its vertex: a typed `Missing` failure, with
+    /// the null-pointer status the bare status had.
+    #[test]
+    fn an_edge_without_a_curve_is_a_typed_missing_failure() {
+        let (b, e, v) = box_with_curveless_edge();
+        let err = tangent_at_vertex(&Kernel::default(), &b, e, v).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the edge or its curve"
+            ))
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
+    }
 
     #[test]
     fn fmt_g_is_printf_g() {

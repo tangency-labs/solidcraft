@@ -39,7 +39,9 @@ pub fn face_surface_intersect(
     approx_tol: Option<f64>,
 ) -> Result<SurfaceIntersection> {
     let surface = face::surface(brep, id)?
-        .ok_or_else(|| SolidError::null_pointer("query::face_surface_intersect"))?
+        .ok_or_else(|| {
+            SolidError::query_missing("query::face_surface_intersect", "the face's surface")
+        })?
         .clone_for_evaluation()?;
     let domain = face::uv_domain(brep, id)?;
     let mut services = BrepFaceServices::new(brep);

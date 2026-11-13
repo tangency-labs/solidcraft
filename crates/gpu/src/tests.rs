@@ -1,5 +1,6 @@
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::tess::EvaluateMesh as _;
 use solidcraft_kernel::{Body, BoolOp};
 
 use solidcore_tess::EvalSurface;
@@ -74,7 +75,7 @@ fn a_pipeline_the_device_rejects_is_an_error_not_a_crash() {
     let gpu = ok(TessGpu::new(name, device, queue));
     let body = ok(solidcraft_kernel::torus(Vec3::ZERO, 6.0, 1.5));
     let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
-    assert_eq!(ok(gpu.evaluate(&gpu_form(&plan))).positions.len(), plan.evaluate().positions.len());
+    assert_eq!(ok(gpu.evaluate(&gpu_form(&plan))).positions.len(), plan.evaluate_mesh().positions.len());
 }
 
 /// The shader as the D3D12 backend translates it (naga's HLSL for shader model 5.1, the FXC
@@ -211,7 +212,7 @@ fn gpu_evaluation_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
     for (name, body) in bodies() {
         let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
-        let cpu = plan.evaluate();
+        let cpu = plan.evaluate_mesh();
         let got = ok(gpu.evaluate(&gpu_form(&plan)));
         assert_eq!(got.triangles, cpu.triangles, "{name}");
         assert_eq!(got.tri_face, cpu.tri_face, "{name}");
@@ -241,7 +242,7 @@ fn a_resident_mesh_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
     for (name, body) in bodies() {
         let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: 0.01, angle: Some(std::f64::consts::PI / 9.0) }));
-        let cpu = plan.evaluate();
+        let cpu = plan.evaluate_mesh();
         let mesh = ok(gpu.prepare(&gpu_form(&plan)));
         assert_eq!(mesh.vertex_count as usize, cpu.positions.len(), "{name}");
         assert_eq!(mesh.index_count as usize, cpu.triangles.len() * 3, "{name}");
@@ -306,7 +307,7 @@ fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
     ok(d.poll(wgpu::PollType::wait_indefinitely()));
     let out: Vec<f32> = ok(slice.get_mapped_range()).as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
     for ((plan, part), (name, _)) in plans.iter().zip(&mesh.parts).zip(bodies()) {
-        let cpu = plan.evaluate();
+        let cpu = plan.evaluate_mesh();
         assert_eq!((part.vertices.end - part.vertices.start) as usize, cpu.positions.len(), "{name}");
         assert_eq!((part.indices.end - part.indices.start) as usize, cpu.triangles.len() * 3, "{name}");
         for (k, p) in cpu.positions.iter().enumerate() {
@@ -358,7 +359,7 @@ fn bench_plate() {
             let plan = ok(plate.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(tol)));
             p.push(ms(t));
             let t = std::time::Instant::now();
-            let m = plan.evaluate();
+            let m = plan.evaluate_mesh();
             c.push(ms(t));
             np = m.triangles.len();
             if let Some(gpu) = &gpu {
@@ -375,8 +376,12 @@ fn bench_plate() {
 /// Plans that use every packed field: a plane face with a pinned node, a flipped rational NURBS
 /// face closed along u, and a revolved face with its parameters swapped under a mirroring transform.
 fn synthetic_plans() -> Vec<GeomPlan> {
-    use solidcraft_geom::tess::{EvalCurve, EvalSurface, FacePlan};
-    let plane = EvalSurface::Plane { origin: Vec3::new(1.0, 2.0, 3.0), du: Vec3::new(0.5, 0.0, 0.0), dv: Vec3::new(0.0, 0.25, 0.0) };
+    use solidcraft_geom::tess::{EvalCurve, EvalSurface, FacePlan, to_kernel};
+    let plane = EvalSurface::Plane {
+        origin: to_kernel(Vec3::new(1.0, 2.0, 3.0)),
+        du: to_kernel(Vec3::new(0.5, 0.0, 0.0)),
+        dv: to_kernel(Vec3::new(0.0, 0.25, 0.0)),
+    };
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let ctrl = vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0], [1.0, 0.0, 2.0, 1.0], [w, w, 2.0 * w, w], [0.0, 1.0, 2.0, 1.0]];
     let nurbs = EvalSurface::Nurbs {
@@ -389,8 +394,8 @@ fn synthetic_plans() -> Vec<GeomPlan> {
     let profile = EvalCurve { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], ctrl: vec![[2.0, 0.0, 0.0, 1.0], [3.0, 0.0, 1.5, 1.0]] };
     let revolved = EvalSurface::Revolved {
         profile,
-        origin: Vec3::new(0.0, 0.0, -1.0),
-        axis: Vec3::Z,
+        origin: to_kernel(Vec3::new(0.0, 0.0, -1.0)),
+        axis: to_kernel(Vec3::Z),
         transform: [[-1.0, 0.0, 0.0, 4.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.5]],
         swap: true,
     };
@@ -402,6 +407,7 @@ fn synthetic_plans() -> Vec<GeomPlan> {
         normals: Vec::new(),
         flip,
         triangles: vec![[0, 1, 2], [1, 3, 2]],
+        poles: Vec::new(),
     };
     vec![
         GeomPlan {
@@ -456,7 +462,7 @@ fn plans_pack_to_the_same_bytes() {
     let synthetic: Vec<TessPlan> = synthetic_plans().iter().map(gpu_form).collect();
     let kinds = |k: fn(&EvalSurface) -> bool| synthetic.iter().flat_map(|p| &p.surfaces).filter(|s| k(s)).count();
     assert!(kinds(|s| matches!(s, EvalSurface::Plane { .. })) > 0);
-    assert!(kinds(|s| matches!(s, EvalSurface::Nurbs(_))) > 0 && kinds(|s| matches!(s, EvalSurface::Revolved { .. })) > 0);
+    assert!(kinds(|s| matches!(s, EvalSurface::Nurbs { .. })) > 0 && kinds(|s| matches!(s, EvalSurface::Revolved { .. })) > 0);
     let digests: Vec<u64> = synthetic.iter().map(|p| packed_digest(&[p])).collect();
     let together = packed_digest(&synthetic.iter().collect::<Vec<_>>());
     assert_eq!((digests, together), (vec![5379207237662626536, 16919141291401223349], 4471009163941807655));

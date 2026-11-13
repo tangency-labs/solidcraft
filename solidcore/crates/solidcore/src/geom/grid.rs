@@ -198,10 +198,12 @@ impl<O: Copy> SurfaceGridElement<O> {
             Err(_) => surface.evaluate(k, uv_mid, 1, 1, eval_flags(false))?,
         };
         let at = |i: usize, j: usize| -> Result<Vec3> {
-            eval.get(i)
-                .and_then(|r| r.get(j))
-                .copied()
-                .ok_or_else(|| SolidError::sm_err("geom::grid::SurfaceGridElement::from_leaf_data"))
+            eval.get(i).and_then(|r| r.get(j)).copied().ok_or_else(|| {
+                SolidError::geom_failed(
+                    "geom::grid::SurfaceGridElement::from_leaf_data",
+                    "the leaf has no such sample",
+                )
+            })
         };
         let mid_point = at(0, 0)?;
         let mid_du = at(1, 0)?;
@@ -257,7 +259,7 @@ impl<O: Copy + PartialEq> SurfaceGridElement<O> {
             .tree()
             .ok_or_else(no_tree)?
             .node_owner_object(node)?
-            .ok_or(SolidError::sm_err(OP))?;
+            .ok_or_else(|| SolidError::geom_failed(OP, "the node has no owner object"))?;
         let (uv_domain, pseudo_box) = {
             let patch = cache.patch(node)?;
             (patch.aux.uv_domain, *patch.pseudo_box())
@@ -615,7 +617,8 @@ impl<O: Copy> Grid<O> {
 
         // Upstream's `smos_Calloc` of the voxel array fails softly (`SM_ERR`); above
         // `MAX_ALLOC_BYTES` the port fails the same way without trying.
-        let voxels = try_filled(total, Voxel::default()).ok_or_else(|| SolidError::sm_err(OP))?;
+        let voxels = try_filled(total, Voxel::default())
+            .ok_or_else(|| SolidError::geom_failed(OP, "the voxel array is too large"))?;
 
         Ok(Self {
             bbox: *bbox,
@@ -889,7 +892,9 @@ impl<O: Copy> Grid<O> {
     ) -> Result<()> {
         const OP: &str = "geom::grid::Grid::expand_hierarchy_with";
         let element = self.hierarchy.get(id.0).ok_or_else(|| bad_id(OP))?;
-        let surface = element.surface.ok_or(SolidError::sm_err(OP))?;
+        let surface = element
+            .surface
+            .ok_or_else(|| SolidError::geom_failed(OP, "the element has no surface"))?;
         let expansion_tolerance = element.expansion_tolerance;
 
         // For every Surface subdivision tree node
@@ -909,7 +914,7 @@ impl<O: Copy> Grid<O> {
             let node_class = match &node.data {
                 NodeData::Surface(a) => a.node_class,
                 NodeData::None | NodeData::ObjectList(_) | NodeData::Curve(_) => {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::geom_missing(OP, "the node's surface data"));
                 }
             };
             if node_class == NodeClass::Outside {
@@ -936,7 +941,7 @@ impl<O: Copy> Grid<O> {
     pub fn setup_3ddda(&mut self, start: Point3, vector: Vec3) -> Result<bool> {
         const OP: &str = "geom::grid::Grid::setup_3ddda";
         if vector.length_squared() < EFF_ZERO {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::geom_failed(OP, "the ray has no direction"));
         }
 
         self.dda.ray_point = start;
@@ -948,7 +953,10 @@ impl<O: Copy> Grid<O> {
         if self.bbox.contains_point(rp, 0.0) {
             let (a, outside) = self.voxel_address(rp);
             if outside {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::geom_failed(
+                    OP,
+                    "the start point is outside the grid",
+                ));
             }
             let voxel_box = self.voxel_bbox(signed(a).ok_or_else(|| bad_address(OP))?);
             let (_, t_enter, _) = line_hit(voxel_box.intersect_line(rp, rv)?);
@@ -1210,7 +1218,9 @@ impl<O: Copy + PartialEq> Grid<O> {
     ) -> Result<()> {
         const OP: &str = "geom::grid::Grid::expand_hierarchy";
         let element = self.hierarchy.get(id.0).ok_or_else(|| bad_id(OP))?;
-        let surface = element.surface.ok_or(SolidError::sm_err(OP))?;
+        let surface = element
+            .surface
+            .ok_or_else(|| SolidError::geom_failed(OP, "the element has no surface"))?;
         if cache.surface_handle() != Some(surface) {
             return Err(SolidError::InvalidInput {
                 operation: OP,
@@ -1348,10 +1358,7 @@ mod tests {
         let mut cache = plane_cache(k, Some(3));
         assert!(matches!(
             g.expand_hierarchy(k, h, &mut cache),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR,
-                ..
-            })
+            Err(e) if e.upstream_status() == Some(crate::error::SM_ERR)
         ));
         assert!(matches!(
             g.expand_hierarchy(k, HierarchyId(99), &mut cache),
@@ -1532,10 +1539,7 @@ mod tests {
         let (_, leaves) = top_box_and_leaves(k, &mut anonymous);
         assert!(matches!(
             g.add_surface_node(k, &mut anonymous, leaves[0], &b),
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR,
-                ..
-            })
+            Err(e) if e.upstream_status() == Some(crate::error::SM_ERR)
         ));
         assert!(g.elements().is_empty());
     }

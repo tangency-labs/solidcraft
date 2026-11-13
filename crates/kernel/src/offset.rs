@@ -39,7 +39,7 @@ fn axes(f: &Frame) -> Option<(Vec3, Vec3)> {
 pub(crate) fn surf_of(b: &Brep, face: usize) -> Option<Surf> {
     let f = b.faces.get(face)?;
     // `forward` is about the face's NURBS form, which may run against its surface.
-    let out = crate::assemble::natural_out(b, face)? != solidcraft_geom::brep::label::form_turns(f)?;
+    let out = crate::assemble::natural_out(b, face)? != solidcore_ops::label::form_turns(f)?;
     let sign = if out { 1.0 } else { -1.0 };
     Some(match &f.surface {
         Surface::Plane { origin, u_axis, v_axis } => {
@@ -67,7 +67,7 @@ pub(crate) fn surf_of(b: &Brep, face: usize) -> Option<Surf> {
             let (o, a) = axes(frame)?;
             Surf::Torus { o, a, big: *major_radius, h: 0.0, r: *minor_radius, convex: out }
         }
-        Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::PlacedRevolution { .. } => return None,
+        Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::PlacedRevolution { .. } | Surface::Blend { .. } => return None,
     })
 }
 
