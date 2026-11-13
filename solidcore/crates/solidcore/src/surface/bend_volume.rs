@@ -530,7 +530,9 @@ impl BendVolume {
     /// over `[u_min, u_max] × [-half_angle, half_angle]` (propagating
     /// `±SM_INFINITE_PARAMETER` along unbounded `u` rays), and `proj_box`'s `y_max` is
     /// `max(sin(theta_min), sin(theta_max)) * u_min` when `u_max ==
-    /// SM_INFINITE_PARAMETER` and both end angles are `<= 0` (`WR-59`). The pseudo box
+    /// SM_INFINITE_PARAMETER`, `theta_min < 0` and `theta_max <= 0` (`WR-59`). That
+    /// bound holds for angles in `[-pi, 0]`; for `theta_min < -pi`, a box outside the
+    /// bend's domain, the axis box can miss part of the image. The pseudo box
     /// is left unchanged when `param_box` is inside-out or the neutral distance is 0
     /// or not finite.
     pub fn evaluate_bounding_box_simple(
