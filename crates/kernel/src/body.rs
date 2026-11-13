@@ -81,20 +81,29 @@ pub struct Body {
 pub(crate) struct MeshMemo {
     record: std::sync::Arc<Brep>,
     made: Remembered,
+    /// The mesh path's meshes ([`Body::export_mesh`]), by spec.
+    exported: Remembered<ExportMesh, SpecKey>,
 }
 
 /// Meshes a [`MeshMemo`] keeps at most (the oldest goes first).
 const MEMO_MESHES: usize = 4;
 
-/// Meshes (or their plans) kept for reuse, by tolerance (see [`remembered`]).
-type Remembered<T = Mesh> = std::sync::Mutex<Vec<((u64, u64), std::sync::Arc<T>)>>;
+/// Meshes (or their plans) kept for reuse, by tolerance (see [`remembered`]), or by
+/// [`SpecKey`] for the mesh path's.
+type Remembered<T = Mesh, K = (u64, u64)> = std::sync::Mutex<Vec<(K, std::sync::Arc<T>)>>;
 
-/// The mesh (or plan) at `t` from `kept`, made by `make` and kept (at most [`MEMO_MESHES`]) if
+/// A [`MeshSpec`] as a memo's key: its chord, size and angle bit for bit.
+type SpecKey = (u64, Option<u64>, u64);
+
+fn spec_key(spec: &MeshSpec) -> SpecKey {
+    (spec.chord.to_bits(), spec.size.map(f64::to_bits), spec.min_angle.to_bits())
+}
+
+/// The mesh (or plan) at `key` from `kept`, made by `make` and kept (at most [`MEMO_MESHES`]) if
 /// it isn't there. The lock is held while meshing: threads asking for the same mesh wait for it
 /// rather than make it too.
-fn remembered<T>(kept: &Remembered<T>, t: &MeshTolerance, make: impl FnOnce() -> Result<T>) -> Result<std::sync::Arc<T>> {
+fn remembered<T, K: PartialEq>(kept: &Remembered<T, K>, key: K, make: impl FnOnce() -> Result<T>) -> Result<std::sync::Arc<T>> {
     let Ok(mut made) = kept.lock() else { return make().map(std::sync::Arc::new) };
-    let key = t.key();
     if let Some((_, m)) = made.iter().find(|(k, _)| *k == key) {
         return Ok(m.clone());
     }
@@ -113,6 +122,7 @@ pub(crate) struct SharedDisplay {
     pub(crate) original: Body,
     meshes: Remembered,
     plans: Remembered<solidcraft_geom::tess::TessPlan>,
+    exported: Remembered<ExportMesh, SpecKey>,
 }
 
 impl SharedDisplay {
@@ -121,6 +131,7 @@ impl SharedDisplay {
             original: Body { display_of: None, meshes: None, ..original },
             meshes: std::sync::Mutex::new(Vec::new()),
             plans: std::sync::Mutex::new(Vec::new()),
+            exported: std::sync::Mutex::new(Vec::new()),
         }
     }
 }
@@ -292,6 +303,60 @@ pub struct FaceInfo {
 /// How closely [`Body::mesh`] follows the exact surfaces, and the facet angle a viewport draws
 /// at: the mesher's own (solidcore-tess).
 pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
+/// How [`Body::export_mesh`] meshes a body (the mesh path's spec, its default smallest angle),
+/// and what it reports about the faces.
+pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats};
+
+/// A body meshed on the mesh path ([`Body::export_mesh`]): the mesh, and what the mesh path
+/// reported about its faces.
+#[derive(Clone, Debug)]
+pub struct ExportMesh {
+    /// The triangles, each face's vertices its own (shared within a face, not across faces, so
+    /// creases keep their own normals), with each face's normals and a face index per triangle.
+    pub mesh: Mesh,
+    /// What the mesh path reported: [`PlanStats::unshaped`], [`PlanStats::over_tolerance`],
+    /// [`PlanStats::edges_capped`] among them. Empty for a mesh body.
+    pub stats: PlanStats,
+}
+
+impl ExportMesh {
+    /// A line for each face the mesh path left short of its shape or its tolerance, and each edge
+    /// whose sampling stopped off its chord tolerance: what an export reports as warnings, so a
+    /// mesh that falls short of its spec is never written silently. `spec` is the spec it was
+    /// meshed to.
+    pub fn notes(&self, spec: &MeshSpec) -> Vec<String> {
+        let mut notes = Vec::new();
+        for u in &self.stats.unshaped {
+            let limits = if u.limits.is_empty() {
+                String::from("nothing stopped it")
+            } else {
+                u.limits.iter().map(|l| format!("{l:?}")).collect::<Vec<_>>().join(", ")
+            };
+            notes.push(format!(
+                "face {}: smallest angle {:.2}°, short of the {}° asked (stopped by: {limits})",
+                u.face, u.smallest_angle, spec.min_angle
+            ));
+        }
+        for o in &self.stats.over_tolerance {
+            let caps = o.caps.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ");
+            let how = if o.within { "still within it" } else { "past it" };
+            notes.push(format!(
+                "face {}: its refinement stopped at a bound ({caps}); its triangles lie up to {:.3e} mm off the surface, {how} (chord tolerance {:.3e} mm{})",
+                o.face,
+                o.sag,
+                o.tol,
+                if o.unmeasured > 0 { format!(", {} middles unmeasured", o.unmeasured) } else { String::new() }
+            ));
+        }
+        for e in self.stats.edges_capped.iter().filter(|e| !e.within) {
+            notes.push(format!(
+                "edge {}: its sampling stopped at a bound ({:?}); its chords lie up to {:.3e} mm off the curve, past the {:.3e} mm chord tolerance",
+                e.edge, e.cap, e.sag, e.tol
+            ));
+        }
+        notes
+    }
+}
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
@@ -1140,14 +1205,14 @@ impl Body {
         }
         // A placed copy shows its original's mesh, moved: the part is meshed once for every copy.
         if let Some((shared, m)) = self.display_of.as_deref() {
-            let made = remembered(&shared.meshes, t, || shared.original.mesh_untimed(t))?;
+            let made = remembered(&shared.meshes, t.key(), || shared.original.mesh_untimed(t))?;
             if let Some(placed) = placed_mesh(&made, m) {
                 return Ok(placed);
             }
         }
         match self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.record, &self.record)) {
             Some(memo) => {
-                let kept: std::sync::Arc<Mesh> = remembered(&memo.made, t, || self.mesh_of(&self.mesh_plan_untimed(t)?))?;
+                let kept: std::sync::Arc<Mesh> = remembered(&memo.made, t.key(), || self.mesh_of(&self.mesh_plan_untimed(t)?))?;
                 Ok(Mesh::clone(&kept))
             }
             None => self.mesh_of(&self.mesh_plan_untimed(t)?),
@@ -1170,7 +1235,7 @@ impl Body {
         if let Some((shared, m)) = self.display_of.as_deref()
             && solidcraft_geom::brep::placement::Rigid::of_matrix(m).is_some()
         {
-            return Ok(remembered(&shared.plans, t, || shared.original.mesh_plan_untimed(t))?.transformed(m));
+            return Ok(remembered(&shared.plans, t.key(), || shared.original.mesh_plan_untimed(t))?.transformed(m));
         }
         let size = self.size();
         let (plan, stats) = guard("mesh", || solidcore_tess::plan(&self.record, t, size).map_err(KernelError::from))?;
@@ -1192,11 +1257,61 @@ impl Body {
         self.flagged(solidcraft_geom::tess::EvaluateMesh::evaluate_mesh(plan))
     }
 
+    /// The body meshed on the mesh path (solidcore-tess's `mesh`) to `spec`: **for export and
+    /// mesh bodies, never the viewport** ([`Body::mesh`] is the display's). Every face, planar
+    /// ones included, goes through constrained Delaunay with equilateral seeds and Ruppert
+    /// shaping to `spec.min_angle`; the mesh is closed wherever the B-rep is. Slow by design.
+    ///
+    /// Strict: a face the mesh path cannot mesh, or whose surface does not evaluate at one of its
+    /// nodes, is an error naming it; nothing is filled leniently and no face is left out. Faces
+    /// left short of the angle or the tolerance are meshed and named in the stats
+    /// ([`ExportMesh::notes`]). A mesh body gives its own triangles. Kept for reuse as
+    /// [`Body::mesh`] keeps its meshes: a placed copy gives its original's mesh, placed, and a
+    /// body made by [`Body::keeping_meshes`] keeps the meshes it makes.
+    pub fn export_mesh(&self, spec: &MeshSpec) -> Result<ExportMesh> {
+        crate::profile::timed(crate::profile::Kind::Tessellate, "export_mesh", || self.export_mesh_untimed(spec))
+    }
+
+    fn export_mesh_untimed(&self, spec: &MeshSpec) -> Result<ExportMesh> {
+        if let Some(m) = &self.mesh {
+            return Ok(ExportMesh { mesh: m.to_mesh(), stats: PlanStats::default() });
+        }
+        // A placed copy gives its original's mesh, moved: the part is meshed once for every copy.
+        if let Some((shared, m)) = self.display_of.as_deref() {
+            let made = remembered(&shared.exported, spec_key(spec), || shared.original.export_mesh_untimed(spec))?;
+            if let Some(placed) = placed_mesh(&made.mesh, m) {
+                return Ok(ExportMesh { mesh: placed, stats: made.stats.clone() });
+            }
+        }
+        match self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.record, &self.record)) {
+            Some(memo) => Ok(ExportMesh::clone(&*remembered(&memo.exported, spec_key(spec), || self.export_mesh_made(spec))?)),
+            None => self.export_mesh_made(spec),
+        }
+    }
+
+    /// [`Body::export_mesh`] of this body's own record, made now.
+    fn export_mesh_made(&self, spec: &MeshSpec) -> Result<ExportMesh> {
+        let size = self.size();
+        let (plan, stats) = guard("export mesh", || solidcore_tess::mesh(&self.record, spec, size, None).map_err(KernelError::from))?;
+        let (mesh, refused) = plan.evaluate();
+        if let Some(f) = refused.first() {
+            return Err(KernelError::Failed(format!("mesh: face {}: {}", f.face, f.reason)));
+        }
+        Ok(ExportMesh { mesh, stats })
+    }
+
     /// A copy of this body that keeps the meshes made of it for reuse, for as long as the copy
     /// (or a clone of it) lives: for many operations on one large body at the same tolerance,
     /// such as cutting it down to the region of each of many contacts.
     pub fn keeping_meshes(&self) -> Body {
-        Body { meshes: Some(std::sync::Arc::new(MeshMemo { record: self.record.clone(), made: std::sync::Mutex::new(Vec::new()) })), ..self.clone() }
+        Body {
+            meshes: Some(std::sync::Arc::new(MeshMemo {
+                record: self.record.clone(),
+                made: std::sync::Mutex::new(Vec::new()),
+                exported: std::sync::Mutex::new(Vec::new()),
+            })),
+            ..self.clone()
+        }
     }
 
     /// Planar faces whose boundary crosses itself: two of its loops crossing each other, or a

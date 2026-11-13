@@ -478,16 +478,52 @@ impl MeshQuality {
             Self::Finest => 1e-5,
         }
     }
+
+    /// The chord tolerance for a body of size `size` (its box diagonal): [`MeshQuality::share`]
+    /// of it, never finer than 1 µm.
+    fn chord(self, size: f64) -> f64 {
+        (size * self.share()).max(1e-3)
+    }
+
+    /// The mesh path's spec for a body of size `size`: this quality's chord
+    /// ([`MeshQuality::chord`]), no size asked (the mesh path's default, a fifth of the body's
+    /// extent, less where a face's curvature asks for less) and the default smallest angle
+    /// ([`solidcraft_kernel::MESH_MIN_ANGLE`]).
+    pub fn spec(self, size: f64) -> solidcraft_kernel::MeshSpec {
+        solidcraft_kernel::MeshSpec::chord(self.chord(size))
+    }
 }
 
-/// Fine export mesh for a body (chord tolerance 2e-4 of its size).
+/// The export mesh of a body at standard quality ([`export_mesh_at`]).
 pub fn export_mesh(b: &solidcraft_kernel::Body) -> Result<Mesh> {
     export_mesh_at(b, MeshQuality::Standard)
 }
 
-/// [`export_mesh`] at `quality` (never finer than 1 µm).
+/// The export mesh of a body at `quality` ([`export_mesh_noted`]), its notes logged as warnings.
+/// The exports themselves take [`export_mesh_noted`] and report the notes.
 pub fn export_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<Mesh> {
-    Ok(b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * quality.share()).max(1e-3)))?)
+    let (mesh, notes) = export_mesh_noted(b, quality)?;
+    for n in notes {
+        log::warn!("export mesh: {n}");
+    }
+    Ok(mesh)
+}
+
+/// The export mesh of a body at `quality`: the mesh path ([`solidcraft_kernel::Body::export_mesh`],
+/// to [`MeshQuality::spec`]), never the display's. Strict: a face it cannot mesh fails the
+/// export, naming the face. With it, a note for each face left short of the smallest angle or
+/// the chord tolerance (and each edge whose sampling stopped off it), for the export's warnings.
+pub fn export_mesh_noted(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
+    let spec = quality.spec(b.size());
+    let made = b.export_mesh(&spec)?;
+    let notes = made.notes(&spec);
+    Ok((made.mesh, notes))
+}
+
+/// The display mesh of a body at `quality`'s chord ([`solidcraft_kernel::Body::mesh`]): for the
+/// GLB export, a format for viewing, and the mass properties.
+pub(crate) fn display_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<Mesh> {
+    Ok(b.mesh(&solidcraft_kernel::MeshTolerance::chord(quality.chord(b.size())))?)
 }
 
 /// Distance within which an exported mesh's vertices are welded (STL, 3MF and OBJ alike).
@@ -500,10 +536,11 @@ fn weld_distance(size: f64) -> f64 {
     (size * 1e-6).max(1e-7)
 }
 
-/// Unit-density [`MassProperties`] of a body from its welded [`export_mesh`], the mesh URDF links
-/// take their inertia from; `None` when that mesh does not close (an open surface).
+/// Unit-density [`MassProperties`] of a body from its welded display mesh at standard quality,
+/// the mesh URDF links take their inertia from; `None` when that mesh does not close (an open
+/// surface).
 pub fn mass_properties(b: &solidcraft_kernel::Body) -> Result<Option<MassProperties>> {
-    let m = export_mesh(b)?;
+    let m = display_mesh_at(b, MeshQuality::Standard)?;
     let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(b));
     Ok(Mesh { positions, triangles, ..Mesh::default() }.mass_properties())
 }
@@ -571,6 +608,9 @@ pub struct ObjFiles {
     pub obj: String,
     /// The material library; empty when no body has a colour.
     pub mtl: String,
+    /// [`export_obj`] only: what meshing the bodies reported ([`export_mesh_noted`]), each line
+    /// led by its body's name.
+    pub warnings: Vec<String>,
 }
 
 /// Wavefront OBJ, one object per body, without materials.
@@ -612,7 +652,7 @@ pub fn obj_files(bodies: &[ObjBody<'_>], mtl_name: &str) -> ObjFiles {
         vbase = vb;
         nbase = nb;
     }
-    ObjFiles { obj, mtl }
+    ObjFiles { obj, mtl, warnings: Vec::new() }
 }
 
 /// The mesh of a body, welded as STL and 3MF are ([`weld`]: vertices closer than
@@ -748,9 +788,98 @@ pub fn export_obj(state: &ModelState, bodies: &[String], mtl_name: &str, quality
 
 /// The OBJ export of the given bodies: the mesh file and the material library beside it.
 fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
-    let meshes: Vec<Mesh> = per_body(sel, |b| export_mesh_at(&b.body, quality))?;
+    let (meshes, warnings) = noted(per_placed_body(sel, |b, body| body_mesh(b, body, quality))?);
     let bodies: Vec<ObjBody<'_>> = sel.iter().zip(&meshes).map(|(b, mesh)| ObjBody { name: b.name.as_str(), mesh, color: b.body.color() }).collect();
-    Ok(obj_files(&bodies, mtl_name))
+    Ok(ObjFiles { warnings, ..obj_files(&bodies, mtl_name) })
+}
+
+/// A body's export mesh ([`export_mesh_noted`]) of `body` (`b`'s body, or the same placed as
+/// [`shared_placements`] gives it) with its notes, each led by the body's name.
+fn body_mesh(b: &solidcraft_doc::ModelBody, body: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
+    let (mesh, notes) = export_mesh_noted(body, quality)?;
+    Ok((mesh, notes.into_iter().map(|n| format!("{}: {n}", b.name)).collect()))
+}
+
+/// The bodies of an export as they are meshed: each placement of a component's body (a world
+/// state's computed placement) shows the mesh of the first placement of that body in `sel`,
+/// placed ([`solidcraft_kernel::Body::with_display_share`]), so every placement of one part is
+/// meshed once and its copies are the same triangles, moved. The mesh path is not the same
+/// under a move to the bit: a copy's record is the part's moved, rounded (a rational form's
+/// weighted points round as they move), and its shaping can take other points for so small a
+/// difference. Any other body is meshed as it is, and so is a placement whose vertices are not
+/// its first placement's moved (within the export's weld distance): it is no copy of it.
+fn shared_placements(sel: &[&solidcraft_doc::ModelBody]) -> Vec<solidcraft_kernel::Body> {
+    type Leader = (solidcraft_kernel::DisplayShare, solidcraft_doc::Mat);
+    let mut leaders: std::collections::BTreeMap<(String, u64), Leader> = std::collections::BTreeMap::new();
+    sel.iter()
+        .map(|b| {
+            let (Some(name), key) = (b.source_name.as_ref(), b.source_key()) else { return b.body.clone() };
+            if key == 0 || b.body.is_mesh() {
+                return b.body.clone();
+            }
+            match leaders.get(&(name.clone(), key)) {
+                None => {
+                    let share = solidcraft_kernel::DisplayShare::new(b.body.clone());
+                    leaders.insert((name.clone(), key), (share, b.source_transform));
+                    b.body.clone()
+                }
+                Some((share, first)) => {
+                    let Some(rel) = solidcraft_doc::mat_inverse(first).map(|inv| solidcraft_doc::mat_mul(&b.source_transform, &inv)) else {
+                        return b.body.clone();
+                    };
+                    if !placed_vertices_match(share.original(), &b.body, &rel) {
+                        return b.body.clone();
+                    }
+                    b.body.clone().with_display_share(share, rel)
+                }
+            }
+        })
+        .collect()
+}
+
+/// `copy`'s vertices are `original`'s moved by `m`, in the same order, each within the export's
+/// weld distance ([`weld_distance`]).
+fn placed_vertices_match(original: &solidcraft_kernel::Body, copy: &solidcraft_kernel::Body, m: &solidcraft_doc::Mat) -> bool {
+    let (a, b) = (original.record(), copy.record());
+    let eps = weld_distance(copy.size());
+    a.faces.len() == b.faces.len()
+        && a.edges.len() == b.edges.len()
+        && a.vertices.len() == b.vertices.len()
+        && a.vertices.iter().zip(&b.vertices).all(|(p, q)| {
+            let moved = solidcraft_doc::apply_point(m, Vec3::new(p.point[0], p.point[1], p.point[2]));
+            moved.dist(Vec3::new(q.point[0], q.point[1], q.point[2])) <= eps
+        })
+}
+
+/// `f` for each body of an export and the body it is meshed as ([`shared_placements`]), on
+/// threads (a body at a time each), the results in the order of the bodies. The bodies are
+/// meshed and welded on their own, so the file is the same, byte for byte, as made one body
+/// after the other; of several failing bodies the first one's error is the export's, as it was
+/// then. An assembly of many bodies meshed on one core took most of the export's time.
+fn per_placed_body<R: Send>(
+    sel: &[&solidcraft_doc::ModelBody],
+    f: impl Fn(&solidcraft_doc::ModelBody, &solidcraft_kernel::Body) -> Result<R> + Sync,
+) -> Result<Vec<R>> {
+    let meshed = shared_placements(sel);
+    let pairs: Vec<(&solidcraft_doc::ModelBody, &solidcraft_kernel::Body)> = sel.iter().copied().zip(&meshed).collect();
+    solidcraft_kernel::map_on_threads(&pairs, EXPORT_THREADS, |(b, body)| f(b, body))
+        .into_iter()
+        .zip(sel)
+        .map(|(r, b)| r.unwrap_or_else(|| Err(IoError::Invalid(format!("body {}: meshing it failed", b.name)))))
+        .collect()
+}
+
+/// Results with their notes, as the results and every note in the results' order.
+fn noted<R>(results: Vec<(R, Vec<String>)>) -> (Vec<R>, Vec<String>) {
+    let mut notes = Vec::new();
+    let out = results
+        .into_iter()
+        .map(|(r, n)| {
+            notes.extend(n);
+            r
+        })
+        .collect();
+    (out, notes)
 }
 
 /// Export the given bodies of a model (all when `bodies` is empty) in a format.
@@ -812,6 +941,9 @@ pub fn export_with_quality(
 /// written as one object with those bodies as its parts ([`model_xml_parts`], #8139).
 /// Bodies of a part that are not exported are left out of it. Other formats have no parts.
 /// A 3MF carries `thumbnail` (a PNG) as its package thumbnail; other formats have no place for it.
+///
+/// What meshing the bodies reported ([`export_mesh_noted`]) is logged as warnings;
+/// [`export_with_parts_noted`] returns it for the export's reply.
 #[allow(clippy::too_many_arguments)]
 pub fn export_with_parts(
     state: &ModelState,
@@ -823,22 +955,46 @@ pub fn export_with_parts(
     quality: MeshQuality,
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
+    let (bytes, notes) = export_with_parts_noted(state, bodies, parts, format, name, meta, quality, thumbnail)?;
+    for n in notes {
+        log::warn!("export mesh: {n}");
+    }
+    Ok(bytes)
+}
+
+/// [`export_with_parts`], with what meshing the bodies reported (STL, OBJ and 3MF: each face
+/// the mesh path left short of the smallest angle or the chord tolerance, led by its body's
+/// name), for the export's warnings.
+#[allow(clippy::too_many_arguments)]
+pub fn export_with_parts_noted(
+    state: &ModelState,
+    bodies: &[String],
+    parts: &[(String, Vec<String>)],
+    format: Format,
+    name: &str,
+    meta: &Metadata,
+    quality: MeshQuality,
+    thumbnail: Option<&[u8]>,
+) -> Result<(Vec<u8>, Vec<String>)> {
     let sel = selected(state, bodies)?;
-    Ok(match format {
+    let mut notes = Vec::new();
+    let bytes = match format {
         Format::StlBinary | Format::StlAscii => {
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
             // and the file is closed where faces meet.
-            let meshes: Vec<Mesh> = per_body(&sel, |b| {
-                let m = export_mesh_at(&b.body, quality)?;
+            let meshes: Vec<Mesh>;
+            (meshes, notes) = noted(per_placed_body(&sel, |b, body| {
+                let (m, n) = body_mesh(b, body, quality)?;
                 let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
-                Ok(Mesh { positions, triangles, ..Mesh::default() })
-            })?;
+                Ok((Mesh { positions, triangles, ..Mesh::default() }, n))
+            })?);
             if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() }
         }
         Format::Obj => {
             // One file, so no material library: a mesh file that names a library nobody wrote
             // would come out in the reader's default grey.
-            let meshes: Vec<(String, Mesh)> = per_body(&sel, |b| Ok((b.name.clone(), export_mesh_at(&b.body, quality)?)))?;
+            let meshes: Vec<(String, Mesh)>;
+            (meshes, notes) = noted(per_placed_body(&sel, |b, body| body_mesh(b, body, quality).map(|(m, n)| ((b.name.clone(), m), n)))?);
             obj(&meshes).into_bytes()
         }
         Format::Step => {
@@ -852,7 +1008,8 @@ pub fn export_with_parts(
             solidcraft_kernel::iges_export_bodies(&bs, &step_header(format!("{name}.igs"), meta))?.into_bytes()
         }
         Format::ThreeMf | Format::ThreeMfTagged => {
-            let objs: Vec<MeshObject> = per_body(&sel, |b| mesh_object(b, format == Format::ThreeMfTagged, quality))?;
+            let objs: Vec<MeshObject>;
+            (objs, notes) = noted(per_placed_body(&sel, |b, body| mesh_object(b, body, format == Format::ThreeMfTagged, quality))?);
             let index = |n: &String| sel.iter().position(|b| &b.name == n);
             let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
             write_3mf_parts(&objs, &parts, &threemf_metadata(meta), thumbnail)?
@@ -860,29 +1017,22 @@ pub fn export_with_parts(
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
         Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
-    })
+    };
+    Ok((bytes, notes))
 }
 
 /// Most threads an export meshes its bodies on, as many as the model cache encodes them on.
 const EXPORT_THREADS: usize = 16;
 
-/// `f` for each body of an export, on threads (a body at a time each), the results in the order
-/// of the bodies. The bodies are meshed and welded on their own, so the file is the same, byte
-/// for byte, as made one body after the other; of several failing bodies the first one's error is
-/// the export's, as it was then. An assembly of many bodies meshed on one core took most of the
-/// export's time.
-fn per_body<R: Send>(sel: &[&solidcraft_doc::ModelBody], f: impl Fn(&solidcraft_doc::ModelBody) -> Result<R> + Sync) -> Result<Vec<R>> {
-    solidcraft_kernel::map_on_threads(sel, EXPORT_THREADS, |b| f(b))
-        .into_iter()
-        .zip(sel)
-        .map(|(r, b)| r.unwrap_or_else(|| Err(IoError::Invalid(format!("body {}: meshing it failed", b.name)))))
-        .collect()
-}
-
 /// A body as a 3MF mesh: welded watertight (T-junctions split), coloured, and with `tagged`
 /// each triangle keeps the B-rep face it came from.
-fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality) -> Result<MeshObject> {
-    let m = export_mesh_at(&b.body, quality)?;
+fn mesh_object(
+    b: &solidcraft_doc::ModelBody,
+    body: &solidcraft_kernel::Body,
+    tagged: bool,
+    quality: MeshQuality,
+) -> Result<(MeshObject, Vec<String>)> {
+    let (m, notes) = body_mesh(b, body, quality)?;
     let eps = weld_eps(&b.body);
     // Faces with colours of their own tag their triangles.
     let paint = b.body.paint();
@@ -908,7 +1058,7 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality
         (Vec::new(), 0)
     };
     let transparency = 1.0 - paint.map(|p| p.opacity).unwrap_or(1.0);
-    Ok(MeshObject {
+    let object = MeshObject {
         name: b.name.clone(),
         positions,
         triangles,
@@ -919,7 +1069,8 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality
         tri_faces,
         faces,
         corner_normals: Vec::new(),
-    })
+    };
+    Ok((object, notes))
 }
 
 /// STEP assembly of a design with components: a product per component holding its bodies in
@@ -1520,7 +1671,7 @@ mod tests {
     }
 
     /// The smallest angle the mesh export asks for: `MeshSpec::chord`'s default.
-    const EXPORT_MIN_ANGLE: f64 = 25.0;
+    const EXPORT_MIN_ANGLE: f64 = solidcraft_kernel::MESH_MIN_ANGLE;
 
     /// How far an STL corner's angle may move from the mesh's own when the coordinates are
     /// rounded to `f32` (a relative 6e-8 of each coordinate, on parts of 10 to 30 mm with sides

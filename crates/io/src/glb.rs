@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{Document, Mat, ModelState};
 use solidcraft_geom::Mesh;
 
-use crate::{IoError, MeshQuality, Result, export_mesh_at, selected};
+use crate::{IoError, MeshQuality, Result, display_mesh_at, selected};
 
 /// Largest GLB file written: a quarter of what the format's 32-bit lengths allow, so a model
 /// meshed far too finely is refused before its arrays are built.
@@ -238,7 +238,7 @@ pub fn export_glb(doc: &Document, model: &ModelState, world: &ModelState, bodies
             let face = u32::try_from(face).map_err(|_| IoError::Invalid(format!("{}: face {face} is out of range for GLB", b.name)))?;
             faces.insert(face, add(m));
         }
-        let mesh = export_mesh_at(&b.body, quality)?;
+        let mesh = display_mesh_at(&b.body, quality)?;
         // Under its occurrence, in the component's frame, named as the component names it; a body
         // not placed through an occurrence stays in the world under its world name.
         let placed =

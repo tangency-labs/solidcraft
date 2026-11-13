@@ -143,7 +143,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_OBJ_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
     CommandSpec::new("file.export_urdf", "Export URDF", crate::checked!("file.export_urdf", export_urdf_cmd))
         .icon("export")
         .noundo()
@@ -1759,6 +1759,9 @@ fn export_to(
         return export_glb(s, cmd, path, bodies, quality);
     }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
+    // What meshing the bodies reported (STL and 3MF): each face the mesh path left short of the
+    // smallest angle or the chord tolerance, as the reply's warnings.
+    let mut warnings = Vec::new();
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Design {
         if !bodies.is_empty() {
@@ -1770,7 +1773,8 @@ fn export_to(
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_parts(
+        let bytes;
+        (bytes, warnings) = solidcraft_io::export_with_parts_noted(
             &s.doc.painted(&*s.world_state()?),
             bodies,
             parts,
@@ -1779,10 +1783,11 @@ fn export_to(
             &s.doc.metadata,
             quality,
             export_thumbnail(s, format, bodies).as_deref(),
-        )?
+        )?;
+        bytes
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), ..ExportResult::default() };
+    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -1803,7 +1808,8 @@ fn lay_on_print_faces(p: &Value, cmd: &str, format: Format) -> Result<bool> {
 }
 
 /// Write the bodies as a mesh file (STL or 3MF), each laid on its print face: the file's size, and
-/// which bodies were laid and which were written as they lie.
+/// which bodies were laid and which were written as they lie, with what meshing them reported
+/// among the warnings.
 fn write_laid(
     s: &Session,
     path: &str,
@@ -1816,7 +1822,10 @@ fn write_laid(
     let mut state = s.doc.painted(&*s.world_state()?);
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
     let thumbnail = export_thumbnail(s, format, bodies);
-    let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality, thumbnail.as_deref())?;
+    let mut laid = laid;
+    let (bytes, notes) =
+        solidcraft_io::export_with_parts_noted(&state, bodies, parts, format, &name, &s.doc.metadata, quality, thumbnail.as_deref())?;
+    laid.warnings.extend(notes);
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok((bytes.len(), laid))
 }
@@ -1946,7 +1955,13 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
         }
         written.push(t.clone());
     }
-    Ok(json!({"path": path, "bytes": files.obj.len(), "format": format!("{:?}", Format::Obj), "files": written}))
+    let mut reply = json!({"path": path, "bytes": files.obj.len(), "format": format!("{:?}", Format::Obj), "files": written});
+    // What meshing the bodies reported: each face the mesh path left short of the smallest angle
+    // or the chord tolerance.
+    if !files.warnings.is_empty() {
+        reply["warnings"] = json!(files.warnings);
+    }
+    Ok(reply)
 }
 
 /// The GLB export (#1553): the bodies as placed, with the looks the design shows them in.

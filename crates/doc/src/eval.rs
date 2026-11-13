@@ -245,6 +245,11 @@ impl ModelBody {
     pub fn definition_name(&self) -> &str {
         self.source_name.as_deref().unwrap_or(&self.name)
     }
+    /// For a computed placement (a world state's body of a placed component), the geometry key
+    /// of the model body it places: placements of one body share it. 0 for any other body.
+    pub fn source_key(&self) -> u64 {
+        self.source_key
+    }
     /// Display mesh, computed once: chord tolerance 1/1000 of the body size, and no facet of a
     /// curved face or edge turning more than [`kernel::DISPLAY_ANGLE`], so that a bend or a
     /// hole that is small beside the body is still drawn round.
