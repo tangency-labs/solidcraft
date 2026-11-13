@@ -12,12 +12,12 @@ use crate::ui_kit;
 use solidcraft_theme::Tokens;
 
 /// The sizes, schedules and elbows the window offers (`route.fittings` has them all).
-const SIZES: [&str; 9] = ["1/2 in", "3/4 in", "1 in", "1 1/4 in", "1 1/2 in", "2 in", "2 1/2 in", "3 in", "4 in"];
-const NPS: [f64; 9] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0];
-const SCHEDULES: [&str; 3] = ["Sch 10S", "Sch 40", "Sch 80"];
-const SCHEDULE_IDS: [&str; 3] = ["10S", "40", "80"];
-const ELBOWS: [&str; 2] = ["Long radius", "Short radius"];
-const ELBOW_IDS: [&str; 2] = ["long_radius", "short_radius"];
+const SIZES: &[&str] = &["1/2 in", "3/4 in", "1 in", "1 1/4 in", "1 1/2 in", "2 in", "2 1/2 in", "3 in", "4 in"];
+const NPS: &[f64] = &[0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0];
+const SCHEDULES: &[&str] = &["Sch 10S", "Sch 40", "Sch 80"];
+const SCHEDULE_IDS: &[&str] = &["10S", "40", "80"];
+const ELBOWS: &[&str] = &["Long radius", "Short radius"];
+const ELBOW_IDS: &[&str] = &["long_radius", "short_radius"];
 
 /// The window's state; the routes come from the engine.
 pub struct RoutePanel {
@@ -32,8 +32,8 @@ pub struct RoutePanel {
     pub point: usize,
     pub delta: [String; 3],
     pub carry: bool,
-    /// The routes for a design revision, and the picked route's details.
-    cache: Option<(u64, Value, Value)>,
+    /// The routes for a design tab and revision, and the picked route's details.
+    cache: Option<((u64, u64), Value, Value)>,
     /// What the last action did, or why it was refused.
     pub status: Option<(String, bool)>,
 }
@@ -71,9 +71,20 @@ pub fn parse_points(text: &str) -> Result<Vec<[f64; 3]>, String> {
         if line.is_empty() {
             continue;
         }
-        let v: Vec<f64> = line.split(|c: char| c == ',' || c.is_whitespace()).filter(|s| !s.is_empty()).filter_map(|s| s.parse().ok()).collect();
+        let mut v = Vec::new();
+        for token in line.split(|c: char| c == ',' || c.is_whitespace()).filter(|s| !s.is_empty()) {
+            match token.parse::<f64>() {
+                Ok(x) if x.is_finite() => v.push(x),
+                // A token that is not a number is a point the user did not give: refuse it
+                // rather than dropping it and reading the rest as millimetres.
+                _ => {
+                    let line = (i + 1).to_string();
+                    return Err(solidcraft_ui_text::format("ui.route_bad_point", &[("line", &line)]));
+                }
+            }
+        }
         match v.as_slice() {
-            [x, y, z] if [x, y, z].iter().all(|v| v.is_finite()) => out.push([*x, *y, *z]),
+            [x, y, z] => out.push([*x, *y, *z]),
             _ => {
                 let line = (i + 1).to_string();
                 return Err(solidcraft_ui_text::format("ui.route_bad_point", &[("line", &line)]));
@@ -95,9 +106,11 @@ fn text(v: &Value) -> String {
 impl RoutePanel {
     /// The routes and the picked one's details, for the design as it is now.
     fn data(&mut self, app: &mut SolveApp) -> (Value, Value) {
-        let revision = app.session.revision;
-        if let Some((r, list, got)) = &self.cache
-            && *r == revision
+        // Two open designs can share a revision: the tab is part of the key, or the panel shows
+        // the last design's routes and acts on a same-named route in this one.
+        let revision = (app.docs.active_tab(), app.session.revision);
+        if let Some((key, list, got)) = &self.cache
+            && *key == revision
         {
             return (list.clone(), got.clone());
         }
@@ -131,7 +144,17 @@ impl RoutePanel {
     }
 }
 
+/// Whether a feature editor or a dialog holds the design. A route change made now is not in the
+/// editor's snapshot, so cancelling the editor would drop the route.
+fn editor_open(app: &SolveApp) -> bool {
+    app.pending_feature_edit.is_some() || app.editing_state.is_some() || app.dialog.is_some()
+}
+
 fn build(app: &mut SolveApp, d: &mut RoutePanel) {
+    if editor_open(app) {
+        d.status = Some((solidcraft_ui_text::tr("ui.route_editor_open").to_string(), true));
+        return;
+    }
     let points = match parse_points(&d.points) {
         Ok(p) => p,
         Err(e) => {
@@ -152,6 +175,10 @@ fn build(app: &mut SolveApp, d: &mut RoutePanel) {
 }
 
 fn move_point(app: &mut SolveApp, d: &mut RoutePanel, route: &str, at: &Value) {
+    if editor_open(app) {
+        d.status = Some((solidcraft_ui_text::tr("ui.route_editor_open").to_string(), true));
+        return;
+    }
     let delta: Option<Vec<f64>> = d.delta.iter().map(|s| s.trim().parse::<f64>().ok().filter(|v| v.is_finite())).collect();
     let Some(delta) = delta else {
         d.status = Some((solidcraft_ui_text::tr("ui.route_bad_move").to_string(), true));
@@ -172,9 +199,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Window::new(egui::Id::unique("sc_routes"), "pipe", solidcraft_ui_text::tr("cmd.route.list")).cards(2.0).show_body(ctx, |ui| {
             ui.label(RichText::new(solidcraft_ui_text::tr("ui.route_new")).strong());
             ui_kit::row(ui, "Name", |ui| ui_kit::text_field(ui, &mut d.name, "Route1"));
-            ui_kit::row(ui, "Size", |ui| ui_kit::dropdown(ui, "sc_route_size", &mut d.size, &SIZES));
-            ui_kit::row(ui, solidcraft_ui_text::tr("ui.route_schedule"), |ui| ui_kit::dropdown(ui, "sc_route_schedule", &mut d.schedule, &SCHEDULES));
-            ui_kit::row(ui, solidcraft_ui_text::tr("ui.route_elbows"), |ui| ui_kit::dropdown(ui, "sc_route_elbow", &mut d.elbow, &ELBOWS));
+            ui_kit::row(ui, "Size", |ui| ui_kit::dropdown(ui, "sc_route_size", &mut d.size, SIZES));
+            ui_kit::row(ui, solidcraft_ui_text::tr("ui.route_schedule"), |ui| ui_kit::dropdown(ui, "sc_route_schedule", &mut d.schedule, SCHEDULES));
+            ui_kit::row(ui, solidcraft_ui_text::tr("ui.route_elbows"), |ui| ui_kit::dropdown(ui, "sc_route_elbow", &mut d.elbow, ELBOWS));
             ui.label(RichText::new(solidcraft_ui_text::tr("ui.route_points")).color(t.text_dim));
             ui_kit::text_area(ui, "Points", egui::Id::unique("sc_route_points"), &mut d.points, 6, 20_000);
             ui.horizontal(|ui| {
@@ -269,28 +296,32 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::status_line(ui, msg, if *error { ui_kit::StatusTone::Error } else { ui_kit::StatusTone::Dim });
             }
         });
-    if do_build {
-        build(app, &mut d);
-    }
-    if let Some(name) = d.picked.clone() {
-        if do_move {
-            let at = got["points"].get(d.point).cloned().unwrap_or(Value::Null);
-            move_point(app, &mut d, &name, &at);
+    if (do_build || do_move || do_edit || do_delete) && editor_open(app) {
+        d.status = Some((solidcraft_ui_text::tr("ui.route_editor_open").to_string(), true));
+    } else {
+        if do_build {
+            build(app, &mut d);
         }
-        if do_edit {
-            let p = json!({"route": name, "nps": NPS.get(d.size).copied().unwrap_or(1.0), "schedule": SCHEDULE_IDS.get(d.schedule).copied().unwrap_or("40"),
-                           "elbow": ELBOW_IDS.get(d.elbow).copied().unwrap_or("long_radius")});
-            let r = app.run("route.edit", p);
-            d.done(r, solidcraft_ui_text::tr("ui.route_rebuilt"));
-        }
-        if do_delete {
-            let r = app.run("route.delete", json!({"route": name}));
-            d.cache = None;
-            d.status = Some(match r {
-                Ok(_) => (solidcraft_ui_text::format("ui.route_deleted", &[("route", &name)]), false),
-                Err(e) => (e, true),
-            });
-            d.picked = None;
+        if let Some(name) = d.picked.clone() {
+            if do_move {
+                let at = got["points"].get(d.point).cloned().unwrap_or(Value::Null);
+                move_point(app, &mut d, &name, &at);
+            }
+            if do_edit {
+                let p = json!({"route": name, "nps": NPS.get(d.size).copied().unwrap_or(1.0), "schedule": SCHEDULE_IDS.get(d.schedule).copied().unwrap_or("40"),
+                               "elbow": ELBOW_IDS.get(d.elbow).copied().unwrap_or("long_radius")});
+                let r = app.run("route.edit", p);
+                d.done(r, solidcraft_ui_text::tr("ui.route_rebuilt"));
+            }
+            if do_delete {
+                let r = app.run("route.delete", json!({"route": name}));
+                d.cache = None;
+                d.status = Some(match r {
+                    Ok(_) => (solidcraft_ui_text::format("ui.route_deleted", &[("route", &name)]), false),
+                    Err(e) => (e, true),
+                });
+                d.picked = None;
+            }
         }
     }
     if !closed {
@@ -308,6 +339,21 @@ mod tests {
         crate::i18n::install();
         assert_eq!(parse_points("0, 0, 0\n\n 1000 0 0\n1000,800,0").unwrap(), vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [1000.0, 800.0, 0.0]]);
         assert_eq!(parse_points("0, 0, 0\n1, 2").unwrap_err(), "Line 2: give x, y, z in mm.");
+        // A token that is not a number is refused, not dropped.
+        assert_eq!(parse_points("100 cm, 0, 0").unwrap_err(), "Line 1: give x, y, z in mm.");
+        assert_eq!(parse_points("0, bad, 100, 0").unwrap_err(), "Line 1: give x, y, z in mm.");
+    }
+
+    #[test]
+    fn a_route_change_is_refused_while_a_feature_editor_is_open() {
+        let mut h = Harness::new();
+        h.app.start("solid.box");
+        h.frames(4);
+        assert!(h.app.dialog.is_some(), "the box's editor is open");
+        let mut d = RoutePanel::default();
+        build(&mut h.app, &mut d);
+        assert!(d.status.as_ref().is_some_and(|(_, error)| *error), "{:?}", d.status);
+        assert_eq!(h.app.run("route.list", json!({})).unwrap()["routes"], json!([]), "nothing was built");
     }
 
     #[test]

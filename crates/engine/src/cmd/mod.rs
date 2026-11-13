@@ -285,6 +285,8 @@ impl CommandSpec {
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
         (self.enabled)(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
+        // The host's check runs before every command, the ones a command runs included.
+        s.check_command(self, p)?;
         let r = (self.run)(s, p);
         // A parameter error that did not name the command names it here (see `Session::execute`).
         match r {

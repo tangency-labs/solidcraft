@@ -240,6 +240,13 @@ render.status                     rendering: images, cameras, stages
 render.surface.import             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.list               rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+route.create                      pipe routes build from the spec in crates/engine/src/cmd/route_tests.rs::create_builds_pipes_and_elbows_welded_and_held_and_keeps_the_route
+route.delete                      pipe routes in crates/engine/src/cmd/route_tests.rs::edit_changes_the_schedule_and_elbow_and_delete_removes_the_route
+route.edit                        pipe routes in crates/engine/src/cmd/route_tests.rs::edit_changes_the_schedule_and_elbow_and_delete_removes_the_route
+route.fittings                    the size tables only; crates/engine/src/cmd/route_tests.rs::the_library_lists_every_size_with_its_fittings
+route.get                         reads a route back; crates/engine/src/cmd/route_tests.rs::a_renamed_route_keeps_its_component_name_in_the_list_and_after_an_edit
+route.list                        reads routes back; crates/engine/src/cmd/route_tests.rs::a_renamed_route_keeps_its_component_name_in_the_list_and_after_an_edit
+route.move_point                  pipe routes in crates/engine/src/cmd/route_tests.rs::moving_a_point_rebuilds_the_route_with_the_new_cut_lengths
 select.clear                      the selection
 select.filter                     the selection
 select.same_look                  the selection

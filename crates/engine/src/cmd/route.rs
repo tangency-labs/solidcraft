@@ -163,7 +163,16 @@ fn stored(s: &Session, cmd: &str, name: &str) -> Result<(u64, Value)> {
 fn stored_spec(s: &Session, cmd: &str, name: &str) -> Result<(u64, Spec, Value)> {
     let (id, rec) = stored(s, cmd, name)?;
     let spec = rec.get("spec").ok_or_else(|| bad(cmd, format!("route `{name}` has no spec")))?;
-    Ok((id, spec_of(cmd, spec)?, rec))
+    let mut spec = spec_of(cmd, spec)?;
+    // The component's name is the route's identity (`route_component` looks it up); the name in
+    // the stored spec goes stale when `component.rename` renames the sub-assembly. A name that
+    // cannot name the route's pieces keeps the spec's own.
+    if let Some(c) = s.doc.components.iter().find(|c| c.id == id)
+        && rp::name_ok(&c.name)
+    {
+        spec.name = c.name.clone();
+    }
+    Ok((id, spec, rec))
 }
 
 fn route_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
@@ -437,8 +446,9 @@ fn get(s: &mut Session, p: &Value) -> Result<Value> {
     let bodies = rec.get("bodies").cloned().unwrap_or(Value::Null);
     let built: Map<String, Value> =
         bodies.as_object().map(|b| b.iter().map(|(k, v)| (k.clone(), json!({"bodies": v}))).collect()).unwrap_or_default();
+    let component_name = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_else(|| spec.name.clone());
     Ok(json!({
-        "route": spec.name,
+        "route": component_name,
         "component": comp,
         "spec": rec.get("spec"),
         "points": rp::nodes(&spec).map_err(|e| bad(cmd, e))?,
@@ -458,7 +468,7 @@ fn list(s: &mut Session, _: &Value) -> Result<Value> {
         let pipes: Vec<&Piece> = pieces.iter().filter(|p| p.kind == Kind::Pipe).collect();
         let nps = spec.all_segments().ok().and_then(|v| v.first().map(|x| x.2));
         routes.push(json!({
-            "name": spec.name,
+            "name": c.name,
             "component": c.id,
             "nps": nps,
             "schedule": schedule_word(spec.schedule),

@@ -5737,6 +5737,16 @@ fn a_command_check_can_count_the_features() {
 }
 
 #[test]
+fn a_command_check_sees_a_route_that_runs_nested_commands() {
+    let mut s = Session::default();
+    s.set_command_check(Some(refusing("component.create")));
+    let before = s.doc.components.len();
+    let r = s.execute("route.create", &json!({"name": "L", "nps": 1.0, "points": [[0, 0, 0], [500, 0, 0], [500, 400, 0]]}));
+    assert!(matches!(&r, Err(EngineError::Refused { cmd, .. }) if cmd == "component.create"), "{r:?}");
+    assert_eq!(s.doc.components.len(), before, "the refused nested command left no component");
+}
+
+#[test]
 fn a_command_check_that_panics_refuses_the_command() {
     let mut s = Session::default();
     s.set_command_check(Some(std::sync::Arc::new(|_: &str, _: &Value, _: &Session| -> std::result::Result<(), String> { panic!("host bug") })));
