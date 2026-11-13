@@ -234,6 +234,9 @@ fn keep_selection(ui: &Ui, response: &Response, len: usize) -> Option<CCursorRan
 pub fn menu(ui: &Ui, response: &mut Response, text: &mut dyn TextBuffer, field: Field) {
     let id = response.id;
     let len = text.as_str().chars().count();
+    if response.has_focus() {
+        super::keyboard_focus::note_focused_text(ui.ctx(), id, len);
+    }
     let range = keep_selection(ui, response, len);
     if response.secondary_clicked() {
         let clip = clipboard_text();

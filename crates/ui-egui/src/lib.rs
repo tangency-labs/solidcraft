@@ -3367,6 +3367,8 @@ impl SolveApp {
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
         params_dialog::install_expressions(ctx);
+        // Tab or Shift+Tab into any text or number box selects its text, app-wide.
+        ui_kit::install_keyboard_focus(ctx);
         // Shortcuts run here, before `ui` installs the language scope: a tool started by its
         // key must build its translated hint in the user's language, not in English.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);
