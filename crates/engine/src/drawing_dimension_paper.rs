@@ -258,10 +258,12 @@ impl Drag {
 pub(crate) enum NotDragged {
     /// What it measures has no place on its view.
     NoPlace,
-    /// A chain's texts each sit over their own member.
-    ChainText,
+    /// A chain's or a set's texts each sit on their own member.
+    MemberTexts,
     /// Between the ends of two silhouettes or faces: a line across them runs beyond one of them.
     BetweenEnds,
+    /// Between a set's outermost points on its two sides: its lines stand outside what it measures.
+    WithinSet,
     /// Its text's size waits for a font to fall back to, and the drag needs it.
     TextWaits,
 }
@@ -269,7 +271,8 @@ pub(crate) enum NotDragged {
 /// The offset and text place that lay `dimension` out where `drag` puts it ([`pieces`] turned round),
 /// read as `resolved` on the view through `frame`, its text in the drawing's `lettering`: its text's
 /// centre at a [`Drag::Text`] point, its line through a [`Drag::Line`] one. A line drag keeps the
-/// text's place, but a radial one's text turns with its leader; an angle's offset keeps its sign.
+/// text's place, but a radial one's text turns with its leader; an angle's offset keeps its sign. A
+/// chain's or a set's texts sit on their members, so only its line is dragged.
 pub(crate) fn dragged(
     dimension: &Dimension,
     resolved: &Resolved,
@@ -293,12 +296,26 @@ pub(crate) fn dragged(
         (DimensionKind::Silhouettes { direction, .. } | DimensionKind::Faces { direction, .. }, &[a0, a1, b0, b1], _) => {
             across_dragged([a0, a1], [b0, b1], *direction, place, drag, &half)
         }
-        (DimensionKind::Chain { .. }, _, Drag::Text(_)) => Err(NotDragged::ChainText),
+        (DimensionKind::Chain { .. } | DimensionKind::Baseline { .. } | DimensionKind::Ordinate { .. }, _, Drag::Text(_)) => {
+            Err(NotDragged::MemberTexts)
+        }
         // Its members share the line `offset` from the middle of its two ends.
         (DimensionKind::Chain { direction, .. }, points, Drag::Line(p)) => {
             let (Some(first), Some(last)) = (points.first(), points.last()) else { return Err(NotDragged::NoPlace) };
             let coords = LineCoords::forward(*direction, *last - *first).ok_or(NotDragged::NoPlace)?;
             Ok((encode_text(&DimFrame::Linear { p0: *first, p1: *last, dir: coords.unit }, p).y, place))
+        }
+        // Its nearest line (a baseline's first member's, an ordinate's leaders' end) is the offset past
+        // the outermost point on the offset's side: on the side whose outermost point gives that sign.
+        (DimensionKind::Baseline { direction, .. } | DimensionKind::Ordinate { direction, .. }, points, Drag::Line(p)) => {
+            let coords = set_coords(points, *direction).ok_or(NotDragged::NoPlace)?;
+            for side in [1.0, -1.0] {
+                let offset = coords.across(p) - coords.reach(points, side);
+                if (offset >= 0.0) == (side > 0.0) {
+                    return Ok((offset, place));
+                }
+            }
+            Err(NotDragged::WithinSet)
         }
         // Its arc is the offset's size round the vertex, its text towards its place.
         (DimensionKind::Angle { .. } | DimensionKind::Cone { .. }, &[a0, a1, b0, b1], _) => {
@@ -395,7 +412,7 @@ fn baseline(
     set: &impl Fn(Option<&str>) -> Text,
 ) -> Option<Vec<Piece>> {
     let (origin, targets) = points.split_first()?;
-    let coords = LineCoords::forward(direction, *targets.last()? - *origin)?;
+    let coords = set_coords(points, direction)?;
     let side = if offset < 0.0 { -1.0 } else { 1.0 };
     let outer = coords.reach(points, side);
     let value = |i: usize| resolved.members.get(i).map_or(0.0, |m| m.measured.value);
@@ -423,8 +440,8 @@ fn ordinate(
     set: &impl Fn(Option<&str>) -> Text,
     out: &mut Drawn,
 ) -> Option<()> {
-    let (origin, targets) = points.split_first()?;
-    let coords = LineCoords::forward(direction, *targets.last()? - *origin)?;
+    let (_, targets) = points.split_first()?;
+    let coords = set_coords(points, direction)?;
     let side = if offset < 0.0 { -1.0 } else { 1.0 };
     let end = coords.reach(points, side) + offset;
     let numbers = std::iter::once(Some("0")).chain((0..targets.len()).map(|i| resolved.members.get(i).map(|m| m.text.as_str())));
@@ -447,6 +464,13 @@ fn ordinate(
         out.text(text, centre, reading);
     }
     Some(())
+}
+
+/// The coordinates of a set's line ([`LineCoords::forward`]), from its origin (the first of `points`) to
+/// its last target. None for a set with no target.
+fn set_coords(points: &[Vec2], direction: LinearDirection) -> Option<LineCoords> {
+    let (origin, targets) = points.split_first()?;
+    LineCoords::forward(direction, *targets.last()? - *origin)
 }
 
 /// A line between two silhouettes or faces, each from one end to the other, at the ends on the side `offset`

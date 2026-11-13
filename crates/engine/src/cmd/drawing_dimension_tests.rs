@@ -1250,6 +1250,7 @@ fn hostile_dimension_params_never_panic() {
         ),
         (EDIT, json!({"dimension": id, "set": {"text_to_mm": [210, 180], "decimals": 1}})),
         (EDIT, json!({"dimension": chain, "set": {"line_through_mm": [150, 190], "direction": "horizontal"}})),
+        (EDIT, json!({"dimension": set, "set": {"line_through_mm": [200, 120], "direction": "vertical"}})),
         (INSPECT, json!({"dimension": id})),
         (REPAIR, json!({"dimension": lost, "slot": "edge", "pick": {"edge": {"body": "Box", "index": 0}}})),
         (REPAIR, json!({"dimension": lost_chain, "slot": 1, "pick": {"corner": {"edges": [{"body": "Box", "index": 0}, {"point": [0, 0, 15]}]}}})),
@@ -2820,6 +2821,29 @@ fn each_kind_takes_a_line_through_a_sheet_point() {
     assert!((text.dist(centre) - (6.0 + read["record"]["offset_mm"].as_f64().unwrap())).abs() < 1e-9, "{read}");
 }
 
+/// A set's line dragged through a sheet point runs through it past what the set measures (the box's
+/// front, from y 135 to 165). A baseline from the bottom left corner to the right corners: through
+/// (200, 190), offset 25 and its nearest line there; through (200, 120), offset -15 and its nearest
+/// line there. An ordinate from the top left corner to the bottom right: through (200, 190), every
+/// leader ends there.
+#[test]
+fn a_sets_line_is_dragged_through_a_sheet_point() {
+    let (mut s, view) = front_view();
+    let baseline = add(&mut s, view, json!({"baseline": {"origin": [0, 0, 0], "targets": [[80, 0, 0], [80, 0, 30]], "direction": "horizontal"}}));
+    for (y, offset, above) in [(190.0, 25.0, true), (120.0, -15.0, false)] {
+        let (changed, read) = drag_to(&mut s, &baseline, json!({"line_through_mm": [200, y]}));
+        assert_eq!(changed, json!(["offset_mm"]), "{y}: {read}");
+        assert!((read["record"]["offset_mm"].as_f64().unwrap() - offset).abs() < 1e-9, "{y}: {read}");
+        let heights = layout_lines(&read, "dimension_lines").into_iter().flatten().map(|p| p.y);
+        let nearest = if above { heights.fold(f64::INFINITY, f64::min) } else { heights.fold(f64::NEG_INFINITY, f64::max) };
+        assert!((nearest - y).abs() < 1e-9, "{y}: {read}");
+    }
+    let ordinate = add(&mut s, view, json!({"ordinate": {"origin": [0, 0, 30], "targets": [[80, 0, 0]], "direction": "horizontal"}}));
+    let (_, read) = drag_to(&mut s, &ordinate, json!({"line_through_mm": [200, 190]}));
+    let leaders = layout_lines(&read, "extension_lines");
+    assert!(leaders.len() == 2 && leaders.iter().all(|l| l.last().is_some_and(|end| (end.y - 190.0).abs() < 1e-9)), "{read}");
+}
+
 /// A text dragged to a point of its sheet (`text_to_mm`) has its box's centre there: a length's, the
 /// distance between the side faces', an angle's and a hole's diameter's, each moved off its line; and
 /// a text of two lines, its box taller, as the length's.
@@ -2874,8 +2898,9 @@ fn a_drag_lands_where_an_exploded_view_draws_it() {
 }
 
 /// A drag with no place to put the dimension is refused, in words that say why, and the drawing and its
-/// undo steps are as they were: a chain's text (each sits on its member); a line between the side faces'
-/// ends (no offset draws it there); a drag with the fields it sets, or two drags; a point that puts the
+/// undo steps are as they were: a chain's or a set's text (each sits on its member); a line between the
+/// side faces' ends, or between the highest and lowest points a set measures (no offset draws it there);
+/// a drag with the fields it sets, or two drags; a point that puts the
 /// text or the line off the paper; a dimension whose view the sheet can't draw (shaded with lines); and
 /// one that lost its edge.
 #[test]
@@ -2884,6 +2909,8 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
     let length = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}))["dimension"].clone();
     let chain = add(&mut s, view, json!({"chain": {"points": [[0, 0, 0], [80, 0, 0], [80, 0, 30]]}}))["dimension"].clone();
     let faces = add(&mut s, view, json!({"faces": {"a": [0, 20, 15], "b": [80, 20, 15]}}))["dimension"].clone();
+    let across = json!({"baseline": {"origin": [0, 0, 0], "targets": [[80, 0, 0], [80, 0, 30]], "direction": "horizontal"}});
+    let set = add(&mut s, view, across)["dimension"].clone();
     fn refuses(s: &mut Session, cases: &[(&Value, Value, &str)]) {
         let (before, steps) = (s.drawing("test").unwrap().to_json().unwrap(), s.undo.len());
         for (id, set, why) in cases {
@@ -2896,8 +2923,10 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
     refuses(
         &mut s,
         &[
-            (&chain, json!({"text_to_mm": [200, 190]}), "a chain's texts sit on its members"),
+            (&chain, json!({"text_to_mm": [200, 190]}), "a chain's or a set's texts sit on their members"),
+            (&set, json!({"text_to_mm": [200, 190]}), "a chain's or a set's texts sit on their members"),
             (&faces, json!({"line_through_mm": [200, 150]}), "runs beyond their ends"),
+            (&set, json!({"line_through_mm": [200, 150]}), "outside what it measures"),
             (&length, json!({"text_to_mm": [200, 190], "text": "centred"}), "a drag sets `offset_mm` and `text` itself"),
             (&length, json!({"line_through_mm": [200, 190], "offset_mm": 5}), "a drag sets `offset_mm` and `text` itself"),
             (&length, json!({"text_to_mm": [200, 190], "line_through_mm": [200, 190]}), "a drag each"),

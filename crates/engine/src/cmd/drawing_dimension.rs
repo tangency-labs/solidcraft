@@ -98,7 +98,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              radial dimension's, direction?: a chain's, a set's or a silhouettes one's, targets?: a set's {remove?: [numbers from 0, \
              each once], add?: [corners]}, taken out first, then added after the rest, the set kept as one dimension; a drag, instead \
              of offset_mm and text: text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: [x, y], a point its line, \
-             arc or leader passes through, each in paper mm from the sheet's lower-left corner, as inspect's layout} → \
+             arc or leader (a set's nearest line or its leaders' end) passes through, each in paper mm from the sheet's lower-left corner, as inspect's layout} → \
              {dimension, changed: [fields]}. What it measures stays, a set's targets aside: to measure something else, add a new \
              one; a set its view can't measure after the change, or a target on a part the view doesn't draw, is refused. One undo \
              step, none when nothing changes; no model is evaluated.",
@@ -526,8 +526,9 @@ fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag) -> Result<(f64, 
     dragged(dimension, &r, &on.frame, &lettering, drag.seen_from(on.centre)).map_err(|why| {
         let words = match why {
             NotDragged::NoPlace => NO_PLACE,
-            NotDragged::ChainText => "a chain's texts sit on its members: drag its line",
+            NotDragged::MemberTexts => "a chain's or a set's texts sit on their members: drag its line",
             NotDragged::BetweenEnds => "the line between silhouettes or faces runs beyond their ends: drag it past one of them",
+            NotDragged::WithinSet => "a set's lines stand outside what it measures: drag past its outermost point on one side",
             NotDragged::TextWaits => TEXT_WAITS,
         };
         bad(EDIT, words)

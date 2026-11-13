@@ -812,7 +812,7 @@ fn off_the_line(layout: &Layout, p: Vec2) -> f64 {
 /// 30°, with its text of one line or two, at points either side of it; a cylinder and two faces either
 /// side of their ends, and refused between them; an angle's and a cone's arc round their vertex through
 /// the point; a radius's leader turned to it, the text as far out as before; a sphere's text; and a
-/// chain's line, whose text isn't dragged.
+/// chain's line, whose texts aren't dragged.
 #[test]
 fn a_dragged_dimension_lays_out_where_it_was_dragged() {
     let (frame, fonts) = (view_at("1:1"), PaperFonts::new("", "en", true));
@@ -879,7 +879,42 @@ fn a_dragged_dimension_lays_out_where_it_was_dragged() {
     let p = at(25.0, -12.0);
     let moved = after(&chain, &holes, Drag::Line(p));
     assert!(moved.arrows.len() == 6 && moved.arrows.iter().all(|(tip, _)| close(tip.y, p.y)), "{moved:?}");
-    assert_eq!(dragged(&chain, &holes, &frame, &fonts, Drag::Text(p)), Err(NotDragged::ChainText));
+    assert_eq!(dragged(&chain, &holes, &frame, &fonts, Drag::Text(p)), Err(NotDragged::MemberTexts));
+}
+
+/// A set's line dragged through a point ([`dragged`]) runs through it past what it measures: a
+/// baseline's nearest member's line, above the holes or below them, and every ordinate leader's end.
+/// A point between the highest hole and the lowest is refused, as is a text drag, whose numbers sit
+/// on their members.
+#[test]
+fn a_sets_line_is_dragged_past_its_outermost_point() {
+    let (frame, fonts) = (view_at("1:1"), PaperFonts::new("", "en", true));
+    let member = |value: f64| Member { measured: Measured { value, foreshortened: false }, text: format!("{value:.2}") };
+    let mut holes = read(&[[0.0, 0.0], [10.0, 5.0], [30.0, 0.0], [60.0, 8.0]], "60");
+    holes.text = None;
+    holes.members = vec![member(10.0), member(30.0), member(60.0)];
+    let at = Vec2::new;
+    let baseline = DimensionKind::Baseline { origin: corner(), targets: Vec::new(), direction: LinearDirection::Horizontal };
+    let ordinate = DimensionKind::Ordinate { origin: corner(), targets: Vec::new(), direction: LinearDirection::Horizontal };
+    let after = |kind: &DimensionKind, drag: Drag| {
+        let d = dimension(kind.clone(), 10.0, TextPlace::Centred);
+        let (offset_mm, text) = dragged(&d, &holes, &frame, &fonts, drag).unwrap_or_else(|why| panic!("{drag:?}: {why:?}"));
+        laid(&Dimension { offset_mm, text, ..d }, &holes, &frame).unwrap().group
+    };
+    // Above, 12 past the highest hole (y 8); below, 15 past the lowest (y 0).
+    for (p, above) in [(at(25.0, 20.0), true), (at(25.0, -15.0), false)] {
+        let tips = parts(&after(&baseline, Drag::Line(p))).1;
+        let heights = tips.iter().map(|tip| tip.y);
+        let nearest = if above { heights.fold(f64::INFINITY, f64::min) } else { heights.fold(f64::NEG_INFINITY, f64::max) };
+        assert!(tips.len() == 6 && close(nearest, p.y), "{p:?}: {tips:?}");
+        let leaders = parts(&after(&ordinate, Drag::Line(p))).0;
+        assert!(leaders.len() == 4 && leaders.iter().all(|l| l.last().is_some_and(|end| close(end.y, p.y))), "{p:?}: {leaders:?}");
+    }
+    for kind in [baseline, ordinate] {
+        let d = dimension(kind, 10.0, TextPlace::Centred);
+        assert_eq!(dragged(&d, &holes, &frame, &fonts, Drag::Line(at(25.0, 4.0))), Err(NotDragged::WithinSet));
+        assert_eq!(dragged(&d, &holes, &frame, &fonts, Drag::Text(at(25.0, 20.0))), Err(NotDragged::MemberTexts));
+    }
 }
 
 /// Any measured points and offsets, at the sizes and shapes that break layouts (zero spans, equal
