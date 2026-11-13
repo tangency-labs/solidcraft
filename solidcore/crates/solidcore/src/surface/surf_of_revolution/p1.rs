@@ -38,10 +38,9 @@
 //! - **A whole turn within rounding (#2928, not upstream).** `MakeNurbWithSweepParams` sweeps
 //!   a window past 360° by no more than `SM_EFF_ZERO` of a turn as the whole turn, where
 //!   upstream asks `CreateCircleSegment` for the span as is and is refused past 360°.
-//! - **Meridians keep their kind (opt-in, not upstream).** With
-//!   `fixes.plane_first_torus_section_exact` (WR-721, #2405), `IntersectWithPlane` through the
-//!   axis rotates a circle generator (a torus's) as the circle it is, where upstream rotates
-//!   its `SmBSplineCurve` part.
+//! - **Meridians keep their kind (not upstream).** `IntersectWithPlane` through the axis
+//!   rotates a circle generator (a torus's) as the circle it is, where upstream rotates its
+//!   `SmBSplineCurve` part (WR-721, #2405).
 //! - **Derived class.** `SmSurfOfRevolution` derives from `SmBSplineSurface`; the base
 //!   object is the [`SurfOfRevolution::base`] field. The surface joins
 //!   [`crate::surface::surface::SurfaceKind`] with the units porting its remaining
@@ -1739,20 +1738,16 @@ impl SurfOfRevolution {
                     trans.translate(-self.position.origin());
                     trans.rotate_about_axis(rot_ang_rad, axis);
                     trans.translate(self.position.origin());
-                    let crv = match gen.kind() {
-                        // Not upstream (WR-721, #2405, opt-in): a circle generator (a
-                        // torus's) rotated as the circle it is, so the meridian keeps its
-                        // kind
-                        CurveKind::Ellipse(_) if k.fixes.plane_first_torus_section_exact => {
-                            let mut c = gen.clone();
-                            c.transform(k, &trans, None)?;
-                            c
-                        }
-                        _ => {
-                            let mut c = gen_base(&gen)?.copy();
-                            c.transform(&trans, None)?;
-                            Curve::from(c)
-                        }
+                    // Not upstream (WR-721, #2405): a circle generator (a torus's) rotated
+                    // as the circle it is, so the meridian keeps its kind
+                    let crv = if let CurveKind::Ellipse(_) = gen.kind() {
+                        let mut c = gen.clone();
+                        c.transform(k, &trans, None)?;
+                        c
+                    } else {
+                        let mut c = gen_base(&gen)?.copy();
+                        c.transform(&trans, None)?;
+                        Curve::from(c)
                     };
 
                     if side == 1 {

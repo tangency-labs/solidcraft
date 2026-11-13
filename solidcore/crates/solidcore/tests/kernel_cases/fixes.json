@@ -178,6 +178,5 @@
   "fillet_overflow_trim_at_creases",
   "fillet_section_end_trim_at_creases",
   "fillet_overflow_crease_along_edge",
-  "plane_first_torus_section_exact",
   "keep_exact_pcurves"
 ]

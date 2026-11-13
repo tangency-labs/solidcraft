@@ -517,7 +517,7 @@ These are the pairs solved in closed form; every other pair is traced.
 | plane/surface of revolution | plane through the axis; square to it | the generator rotated in; circles | `surface/surf_of_revolution/p1.rs` |
 | revolution/revolution | same axis, planar generators | circles at the generators' intersections | `surf_of_revolution/p3.rs` |
 | plane/extrusion, extrusion/extrusion or cylinder | extrusion parallel to the plane or to the other | lines along the extrusion | `surface/surf_of_extrusion/p2.rs` |
-| plane/torus | square to the axis; through it | circles; meridian circles | `surface/torus.rs` (plane side: `plane_first_torus_section_exact`, WR-721) |
+| plane/torus | square to the axis; through it | circles; meridian circles | `surface/torus.rs` (plane side: `surface/plane/p2.rs`, WR-721) |
 
 How each is made exactly: the curve's defining data (a centre, axes and radii, or a line's points)
 are computed from the two surfaces' frames, and the curve is stored as its rational form (an

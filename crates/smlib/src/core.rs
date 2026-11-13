@@ -256,7 +256,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cone_unbounded_parameterized_as_nurb = true;
     f.fillet_round_as_definition = true;
     f.fillet_overflow_crease_along_edge = true;
-    f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
     f.planar_section_face_tolerance = true;
     f.face_swap_uv_transposes_trims = true;
