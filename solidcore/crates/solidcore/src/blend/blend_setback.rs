@@ -142,6 +142,14 @@ fn sm_err() -> SolidError {
     SolidError::blend_failed(OP, "the setback corner's construction could not continue")
 }
 
+/// A stage of the setback corner that failed with no reason the kernel names (a defect,
+/// [`crate::error::blend::BlendFailure::StageFailed`]): a fill that is not the one its
+/// construction builds. Its origin is the caller's line.
+#[track_caller]
+fn stage_failed() -> SolidError {
+    SolidError::blend(OP, crate::error::blend::BlendFailure::StageFailed)
+}
+
 // ---- the ease of a round into another section before its setback ----------------------
 
 /// `SmEaseRamp`: a stretch of a fillet surface's rail parameter over which its sections ease:
@@ -2972,12 +2980,12 @@ pub fn containment(k: &Kernel, fill: &Fill, faces: &[Face], convex: bool, tol: f
 /// parts have no test yet.
 ///
 /// # Errors
-/// As [`containment`]'s; `SM_ERR` for a fill that is not the setback split's (`2n` patches
-/// of one span) or whose faces meet in no one point.
+/// As [`containment`]'s; a stage failure for a fill that is not the setback split's (`2n`
+/// patches of one span), `SM_ERR` for one whose faces meet in no one point.
 pub fn containment_kept(k: &Kernel, fill: &Fill, faces: &[Face], tol: f64) -> Result<f64> {
     let n = fill.round.len();
     if n < 3 || fill.patches.len() != 2 * n || fill.face.len() != n {
-        return Err(sm_err());
+        return Err(stage_failed());
     }
     let mut convex = Vec::new();
     for m in 0..n {
@@ -3025,12 +3033,12 @@ pub fn containment_kept(k: &Kernel, fill: &Fill, faces: &[Face], tol: f64) -> Re
     Ok(worst)
 }
 
-/// A one-span patch's homogeneous net (`SM_ERR` for more than one span or a weight not
-/// positive).
+/// A one-span patch's homogeneous net (a stage failure for more than one span or a weight
+/// not positive).
 fn net_of(patch: &BSplineSurface) -> Result<Net> {
     let canonical = patch.canonical()?;
     if canonical.u_knots.len() != 2 || canonical.v_knots.len() != 2 {
-        return Err(sm_err());
+        return Err(stage_failed());
     }
     let rational = canonical.weights.len() == canonical.control_points.len();
     let mut pts = Vec::new();
@@ -3041,7 +3049,7 @@ fn net_of(patch: &BSplineSurface) -> Result<Net> {
             1.0
         };
         if !(w > 0.0) {
-            return Err(sm_err());
+            return Err(stage_failed());
         }
         pts.push([pt.x * w, pt.y * w, pt.z * w, w]);
     }
