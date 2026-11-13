@@ -102,8 +102,7 @@ fn cut(
             return Ok(Err(Error::Argument));
         }
         let (a, map) = brep_copy_mapped(k, &g)?;
-        let Some([f]) = face_copies(&map, &[src])
-            .and_then(|v| <[FaceId; 1]>::try_from(v).ok())
+        let Some([f]) = face_copies(&map, &[src]).and_then(|v| <[FaceId; 1]>::try_from(v).ok())
         else {
             return Ok(Err(Error::Argument));
         };

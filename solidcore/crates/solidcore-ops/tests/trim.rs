@@ -85,8 +85,14 @@ fn a_closed_curve_cuts_a_sheet_in_two() {
     let [(inner, inner_area), (outer, outer_area)] = two(&cut, &regions);
     assert!(rel(inner_area, 100.0) < 1e-6, "inside {inner_area}");
     assert!(rel(outer_area, 300.0) < 1e-6, "outside {outer_area}");
-    assert!(on_sheet(inner.inside) && in_middle(inner.inside), "{inner:?}");
-    assert!(on_sheet(outer.inside) && !in_middle(outer.inside), "{outer:?}");
+    assert!(
+        on_sheet(inner.inside) && in_middle(inner.inside),
+        "{inner:?}"
+    );
+    assert!(
+        on_sheet(outer.inside) && !in_middle(outer.inside),
+        "{outer:?}"
+    );
     let (_, co) = cut.to_record().unwrap();
     let inside = remove_faces(&cut, &co, &[outer.face]).unwrap();
     assert_eq!(inside.counts().unwrap()[0], 1, "keep inside: one face");
@@ -136,7 +142,11 @@ fn bad_asks_are_refused() {
     let split = |f, c: &[Curve], t| split_face_by_curves(&b, &o, f, c, t).err();
     assert_eq!(split(1, &curves, TOL), Some(Error::Argument), "no face 1");
     assert_eq!(split(0, &[], TOL), Some(Error::Argument), "no curve");
-    assert_eq!(split(0, &curves, f64::NAN), Some(Error::Argument), "tolerance");
+    assert_eq!(
+        split(0, &curves, f64::NAN),
+        Some(Error::Argument),
+        "tolerance"
+    );
     assert_eq!(split(0, &curves, 0.0), Some(Error::Argument), "tolerance");
     let remove = |faces: &[usize]| remove_faces(&b, &o, faces).err();
     assert_eq!(remove(&[]), Some(Error::Argument), "no face");
