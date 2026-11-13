@@ -2881,6 +2881,12 @@ pub(crate) fn start_from_sketch(app: &mut SolveApp, command: &str, sketch: u64) 
     let _ = app.run("select.set", json!({ "items": items }));
     app.start(command);
     if let Some(d) = app.dialog.as_mut() {
+        if n == 0
+            && let Some(input) = d.inputs.first_mut()
+        {
+            // The sketch has no profile: drop the default pick from another sketch.
+            input.items.clear();
+        }
         d.work_from_sketch(sketch);
     }
     sync_feature_edit(app);
@@ -4468,6 +4474,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         for input in &mut d.inputs {
             input.items.clear();
         }
+        // The edges picked for the feature just applied belong to it: a Tangent Chain toggle must
+        // not bring them back into the next one.
+        d.picked_edges.clear();
         d.active = 0;
         d.error = None;
         d.refused = None;

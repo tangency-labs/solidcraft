@@ -783,6 +783,51 @@ fn several_features_from_one_used_sketch_with_apply() {
         let r = h.call("ui.start", json!({"command": "solid.extrude", "params": bad}));
         assert!(r["ok"] == false && h.app.dialog.is_none(), "{bad}: {r}");
     }
+    // A sketch with no profile opens with nothing picked, never another sketch's profile.
+    let empty = h.app.run("sketch.create", json!({"plane": "XZ"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let r = h.call("ui.start", json!({"command": "solid.extrude", "params": {"sketch": empty}}));
+    assert_eq!(r["ok"], true, "{r}");
+    h.settle();
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.inputs[0].items.is_empty()), "no fallback profile from another sketch");
+    crate::dialogs::cancel(&mut h.app);
+    h.settle();
+}
+
+/// #6940: Apply in a fillet window starts the next fillet with no edges, and forgets the edges it
+/// applied, so a Tangent Chain toggle cannot bring them back into the next one.
+#[test]
+fn apply_in_a_fillet_window_forgets_the_applied_edges() {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    for (id, params) in [
+        ("sketch.create", json!({"plane": "XY"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 20})),
+        ("solid.fillet", json!({"edges": [[40, 10, 20]], "radius": 2})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    // The fillet's own editor resolves its edge to a pick; reuse that pick in a new fillet window.
+    let id = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(id);
+    let picks = h.app.dialog.as_ref().unwrap().picked_edges.clone();
+    assert_eq!(picks.len(), 1);
+    crate::dialogs::cancel(&mut h.app);
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    h.app.start("solid.fillet");
+    h.settle();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = picks.clone();
+    d.picked_edges = picks;
+    h.settle();
+    h.step(&json!({"click": {"handle": "dialog:apply"}})).unwrap();
+    h.settle();
+    let d = h.app.dialog.as_ref().expect("Apply keeps the window open");
+    assert!(d.inputs[0].items.is_empty() && d.picked_edges.is_empty(), "the next fillet starts with no edges");
 }
 
 /// #8127: a sketch inside an inserted fastener, opened from its row in the browser, activates the
