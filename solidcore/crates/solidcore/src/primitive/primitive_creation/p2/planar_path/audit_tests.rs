@@ -347,8 +347,8 @@ fn audit_483_planar_failures_release_owned_bodies_and_stop() {
 #[test]
 fn audit_483_planar_trim_stops_before_second_operand_after_failure() {
     let (profiles, _) = inputs();
-    let cutting = as_bspline(&profiles[0]).unwrap();
     let mut k = Kernel::default();
+    let cutting = as_bspline(&k, &profiles[0]).unwrap().unwrap();
     k.fixes.planar_path_sweep_statuses = true;
     let mut a = FaultAccess::new(&mut k, ("project_and_trim", 1));
     let id = a.new_brep(PrimitiveModel::MAIN).unwrap();
