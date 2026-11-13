@@ -29,7 +29,7 @@ const SQRT_2: f64 = std::f64::consts::SQRT_2;
 /// `sqrt(50 + 50 sqrt 2)`: where x = 0 and x = 10 meet the circle about (5, 0) of radius
 /// `5 sqrt 2 + 5` (the arched sheet's arc moved out 5).
 const ARCH_TOP: f64 = 10.986_841_134_678_1;
-/// `5 sqrt 2 + 5`: that circle's radius, its top at (5, ARCH_RADIUS).
+/// `5 sqrt 2 + 5`: that circle's radius, its top at `(5, ARCH_RADIUS)`.
 const ARCH_RADIUS: f64 = 12.071_067_811_865_476;
 const SQRT_5: f64 = 2.236_067_977_499_79;
 const SQRT_10: f64 = 3.162_277_660_168_379_5;
@@ -133,9 +133,9 @@ fn edge_through(body: &Body, order: &Order, p: [f64; 3]) -> usize {
 fn bounds(r: &Brep) -> [[f64; 3]; 2] {
     let mut b = [[f64::INFINITY; 3], [f64::NEG_INFINITY; 3]];
     for v in &r.vertices {
-        for i in 0..3 {
-            b[0][i] = b[0][i].min(v.point[i]);
-            b[1][i] = b[1][i].max(v.point[i]);
+        for (i, &x) in v.point.iter().enumerate() {
+            b[0][i] = b[0][i].min(x);
+            b[1][i] = b[1][i].max(x);
         }
     }
     b
