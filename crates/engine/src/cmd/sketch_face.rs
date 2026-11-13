@@ -2,7 +2,7 @@
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
 use serde_json::Value;
-use solidcore_record::Plane;
+use solidcore_record::{Plane, Vec3};
 use solidcraft_doc::{EmbossFace, PlaneRef, apply_point, apply_vector, mat_inverse, mat_mul};
 use solidcraft_geom::prelude::*;
 
@@ -71,6 +71,47 @@ pub(crate) fn face_pick_form(value: &Value) -> std::result::Result<FacePickForm<
         ),
     };
     Ok(FacePickForm { point, fixed, body, index, path })
+}
+
+fn planar_face_contains(body: &solidcraft_kernel::Body, face_index: usize, plane: &Plane, p: Vec3, tol: f64) -> bool {
+    let rec = body.record();
+    let Some(face) = rec.faces.get(face_index) else { return false };
+    let p2 = plane.to_local(p);
+
+    let mut inside = false;
+    let mut on_edge = false;
+    for lp in &face.loops {
+        let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+        let mut pts = Vec::new();
+        for u in edges {
+            let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+            let Ok(eval) = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()) else { continue };
+            let [t0, t1] = if u.forward { edge.interval } else { [edge.interval[1], edge.interval[0]] };
+            let n = match &eval {
+                solidcraft_geom::brep::eval::CurveEval::Line { .. } => 1,
+                _ => 16,
+            };
+            for k in 0..n {
+                let t = t0 + (t1 - t0) * (k as f64 / n as f64);
+                if let Some(pt) = eval.point(t) {
+                    pts.push(plane.to_local(pt));
+                }
+            }
+        }
+        if pts.len() >= 3 {
+            let ring = solidcraft_geom::Ring::new(pts);
+            for (a, b) in ring.edges() {
+                if p2.extend(0.0).dist_to_segment(a.extend(0.0), b.extend(0.0)) <= tol {
+                    on_edge = true;
+                    break;
+                }
+            }
+            if ring.contains(p2) {
+                inside = !inside;
+            }
+        }
+    }
+    on_edge || inside
 }
 
 fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result<PlaneRef> {
@@ -142,30 +183,28 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 sheet_face = Some((solidcraft_doc::sheet::sheet_face_name(&body.name, &face), plane));
                 continue;
             }
-            let faces = body.body.faces(tolerance)?;
-            let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance))?;
-            // The triangles are grouped by face once, and a face's test reads only its own: the
-            // work is the mesh plus one plane test per face, not the mesh once per face (a
-            // modelled thread leaves thousands of faces, #6720).
-            work = work.saturating_add(mesh.triangles.len()).saturating_add(faces.len());
+            if body.body.is_mesh() {
+                continue;
+            }
+            let face_count = body.body.face_count();
+            work = work.saturating_add(face_count);
             if work > 2_000_000 {
                 return Err(bad(cmd, "face capture work limit exceeded; use an exact body and face index"));
             }
-            let by_face = super::face_triangles(&mesh, faces.iter().map(|face| face.index.saturating_add(1)).max().unwrap_or(0));
-            for face in faces {
-                if requested_index.is_some_and(|index| index != face.index) {
+            for face_idx in 0..face_count {
+                if requested_index.is_some_and(|index| index != face_idx) {
                     continue;
                 }
                 let Some(exact_plane) = (if fixed {
-                    body.body.planar_face(face.index).or_else(|| body.body.face_plane(face.index))
+                    body.body.planar_face(face_idx).or_else(|| body.body.face_plane(face_idx))
                 } else {
-                    body.body.face_plane(face.index).or_else(|| body.body.planar_face(face.index))
+                    body.body.face_plane(face_idx).or_else(|| body.body.planar_face(face_idx))
                 }) else {
                     continue;
                 };
                 let normal = exact_plane.normal();
-                if (local_point - face.centroid).dot(normal).abs() > tolerance * 10.0
-                    || !super::face_contains(&mesh, by_face.get(face.index).map_or(&[][..], Vec::as_slice), local_point, tolerance * 10.0)
+                if (local_point - exact_plane.origin).dot(normal).abs() > tolerance * 10.0
+                    || !planar_face_contains(&body.body, face_idx, &exact_plane, local_point, tolerance * 10.0)
                 {
                     continue;
                 }
@@ -174,9 +213,9 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 }
                 let relative = mat_mul(&author_inverse, &frame);
                 let normal = apply_vector(&relative, normal).normalized().ok_or_else(|| bad(cmd, "invalid planar face normal"))?;
-                let centroid = apply_point(&relative, face.centroid);
+                let centroid = apply_point(&relative, exact_plane.origin);
                 let picked = Plane::from_normal(normal * centroid.dot(normal), normal).ok_or_else(|| bad(cmd, "invalid selected planar face"))?;
-                chosen = Some((body, face.index, path.clone(), picked));
+                chosen = Some((body, face_idx, path.clone(), picked));
             }
         }
     }
