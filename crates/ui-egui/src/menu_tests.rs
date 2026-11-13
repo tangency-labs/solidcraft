@@ -464,6 +464,40 @@ fn sketch_menu_replaces_a_sketch_with_another_sketchs_contents() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Copy Geometry from File lists the file's public geometries; Geometry Copies shows each copy's
+/// state, and a click on it reads the file again.
+#[test]
+fn geometry_copy_menus_take_a_files_public_geometry_and_update_it() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-menu-geometry-copy-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Skeleton.sc").to_string_lossy().to_string();
+    let skeleton = |deck: f64| {
+        let mut s = Session::default();
+        s.execute("component.create_skeleton", &json!({})).unwrap();
+        s.execute("construct.plane.offset", &json!({"base": "XY", "offset": deck, "name": "Deck"})).unwrap();
+        s.execute("construct.plane.offset", &json!({"base": "XZ", "offset": 5, "name": "Wall"})).unwrap();
+        s.execute("geometry.publish", &json!({"name": "Layout", "items": ["Deck"]})).unwrap();
+        s.execute("geometry.publish", &json!({"name": "Sides", "items": ["Wall"]})).unwrap();
+        s.execute("file.save_as", &json!({"path": path})).unwrap();
+    };
+    skeleton(40.0);
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let file = Target::GeometryFile { path: path.clone(), publications: vec!["Layout".into(), "Sides".into()] };
+    assert!(context_menu::check_target(&app, &file).is_ok());
+    act(&mut app, &file, "Layout");
+    assert!(app.session.doc.find_feature("Deck").is_some() && app.session.doc.find_feature("Wall").is_none());
+
+    let copies = context_menu::geometry_copies(&mut app);
+    assert_eq!(find(&context_menu::entries(&app, &copies), "Layout").shortcut, "Up to date");
+    skeleton(60.0);
+    let copies = context_menu::geometry_copies(&mut app);
+    assert_eq!(find(&context_menu::entries(&app, &copies), "Layout").shortcut, "Out of date");
+    act(&mut app, &copies, "Layout");
+    let copies = context_menu::geometry_copies(&mut app);
+    assert_eq!(find(&context_menu::entries(&app, &copies), "Layout").shortcut, "Up to date");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A script or the control channel may replace the sketch being edited: a constraint tool's
 /// first pick named the old contents, so it is dropped, and the next click starts afresh rather
 /// than constraining whichever new curve took that id.
