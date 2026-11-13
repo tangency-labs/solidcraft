@@ -722,3 +722,55 @@ fn a_countersink_stops_at_the_depth_of_its_hole() {
     let v = volume(&mut s);
     assert!((v - expected).abs() < 1e-3 * expected, "{v} vs {expected}");
 }
+
+/// #14424: a countersunk hole's bore starts its circle on the cone's seam, so the circle where
+/// the cone meets the bore has one vertex and stays one edge. A through hole in a box is then
+/// 8/17/11: six planes, the cone and the bore; 12 box edges, three circles and two seams; 8 + 3
+/// vertices, as cutting the same shape by revolving a sketch gives. On the top, bottom and a side
+/// face (each turns the axis' frames another way) and in another box; a counterbore (9/18/12)
+/// and a plain hole (7/15/10) stay as they were.
+#[test]
+fn a_countersink_meets_its_bore_on_one_circle_edge() {
+    use std::f64::consts::PI;
+    // A through countersink of 90° included: the bore, then the frustum above where it meets it.
+    let removed = |r: f64, rc: f64, h: f64| {
+        let d = rc - r;
+        PI * r * r * h + PI * d / 3.0 * (rc * rc + rc * r + r * r) - PI * r * r * d
+    };
+    let cases = [
+        // (box length, width, height), position, direction, diameter, countersink diameter, bore length
+        ((20.0, 20.0, 10.0), [10.0, 10.0, 10.0], [0.0, 0.0, -1.0], 5.0, 12.0, 10.0),
+        ((20.0, 20.0, 10.0), [10.0, 10.0, 0.0], [0.0, 0.0, 1.0], 5.0, 12.0, 10.0),
+        ((20.0, 20.0, 10.0), [20.0, 10.0, 5.0], [-1.0, 0.0, 0.0], 4.0, 8.0, 20.0),
+        ((50.0, 30.0, 8.0), [12.0, 7.0, 8.0], [0.0, 0.0, -1.0], 4.0, 10.0, 8.0),
+    ];
+    for ((l, w, h), position, direction, diameter, cs_diameter, length) in cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": l, "width": w, "height": h, "body_name": "A"}));
+        run(
+            &mut s,
+            "solid.hole",
+            json!({"position": position, "direction": direction, "diameter": diameter, "type": "countersink", "cs_diameter": cs_diameter, "cs_angle": 90, "targets": ["A"]}),
+        );
+        let expected = l * w * h - removed(diameter / 2.0, cs_diameter / 2.0, length);
+        let v = volume(&mut s);
+        assert!((v - expected).abs() < 1e-3 * expected, "{position:?}: {v} vs {expected}");
+        let body = &s.model.state().body("A").unwrap().body;
+        assert_eq!((body.face_count(), body.edge_count(), body.vertex_count()), (8, 17, 11), "{position:?} {direction:?}");
+        assert!(body.validity().is_empty(), "{position:?}: {:?}", body.validity());
+    }
+    for (kind, fev) in [
+        (json!({"type": "counterbore", "cb_diameter": 12, "cb_depth": 3.5}), (9, 18, 12)),
+        (json!({"type": "simple"}), (7, 15, 10)),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "A"}));
+        let mut p = json!({"position": [10, 10, 10], "diameter": 5, "targets": ["A"]});
+        for (k, v) in kind.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        run(&mut s, "solid.hole", p);
+        let body = &s.model.state().body("A").unwrap().body;
+        assert_eq!((body.face_count(), body.edge_count(), body.vertex_count()), fev, "{kind}");
+    }
+}
