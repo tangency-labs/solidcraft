@@ -1581,6 +1581,14 @@ fn a_removed_pair_id_cannot_be_brought_back() {
         let e = s.execute("timeline.edit", &json!({"feature": fid, "set": set})).unwrap_err().to_string();
         assert!(e.contains("next_pair"), "{set}: {e}");
     }
+    // Nor by naming it: neither edit gives the removed `pair1` to another tube.
+    let mut revived = stored_pairs(&s, &fid)[1].clone();
+    revived["id"] = json!("pair1");
+    let e = s.execute("timeline.edit", &json!({"feature": fid, "set": {"pairs": [revived]}})).unwrap_err().to_string();
+    assert!(e.contains("`pair1` was removed"), "{e}");
+    let params = json!({"profile": tube(), "pairs": [{"id": "pair1", "a": upright()["a"], "b": upright()["b"]}]});
+    let e = s.execute("timeline.redefine", &json!({"feature": fid, "command": "frame.member", "params": params})).unwrap_err().to_string();
+    assert!(e.contains("`pair1` was removed"), "{e}");
     assert_eq!(serde_json::to_value(&*s.doc).unwrap(), serde_json::to_value(&*doc).unwrap(), "nothing changed");
 }
 

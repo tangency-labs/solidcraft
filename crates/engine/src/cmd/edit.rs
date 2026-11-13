@@ -1421,6 +1421,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(p) = pairs.iter().find(|p| !solidcraft_doc::frame::parse_pair_id(&p.id).is_some_and(|n| n < *next_pair && seen.insert(n))) {
             return Err(bad(cmd, format!("pair id `{}` must be a pair<N> given once, below `next_pair` ({next_pair})", p.id)));
         }
+        if let Some(p) = pairs.iter().find(|p| removed_pair_id(&f.kind, &p.id)) {
+            return Err(bad(cmd, removed_pair_message(&p.id)));
+        }
     }
     // serde drops fields the definition doesn't have without a word: refuse them, or a typo
     // would report success and change nothing.
@@ -2089,6 +2092,17 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     keys
 }
 
+/// Is `id` a pair id Frame Member `old` gave and has since taken out (below its `next_pair`, and
+/// none of its pairs' now)? Stored references to that tube must not find another one.
+fn removed_pair_id(old: &FeatureKind, id: &str) -> bool {
+    let FeatureKind::FrameMember { next_pair, pairs, .. } = old else { return false };
+    solidcraft_doc::frame::parse_pair_id(id).is_some_and(|n| n < *next_pair) && !pairs.iter().any(|p| p.id == id)
+}
+
+fn removed_pair_message(id: &str) -> String {
+    format!("pair id `{id}` was removed: a removed pair's id is never given again (leave `id` out for a new pair)")
+}
+
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -2170,11 +2184,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // Members keep their names through an edit, unless it gives them another name. A copy names
     // its members by position: they are pinned to their members first, so a member taken out
     // doesn't hand its name to the next. Pair ids are never reused, so `next_pair` never goes
-    // below the feature's own, nor to an id it has, whatever the edit says.
+    // below the feature's own, nor to an id it has, whatever the edit says, and a removed pair's
+    // id is never named again.
     if let FeatureKind::FrameMember { names, body_name, next_pair, pairs, .. } = &old.kind
         && cid == "frame.member"
         && let Some(parameters) = params.as_object_mut()
     {
+        let mut named = parameters.get("pairs").and_then(Value::as_array).into_iter().flatten().filter_map(|p| p.get("id")?.as_str());
+        if let Some(id) = named.find(|id| removed_pair_id(&old.kind, id)) {
+            return Err(bad(cmd, removed_pair_message(id)));
+        }
         let past_ids = pairs.iter().filter_map(|p| solidcraft_doc::frame::parse_pair_id(&p.id)).max().map_or(0, |n| n.saturating_add(1));
         let given = match parameters.get("next_pair") {
             None | Some(Value::Null) => Some(0),
