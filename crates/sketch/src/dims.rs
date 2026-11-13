@@ -946,6 +946,13 @@ mod tests {
             let middle = dim_layout_sized(&f, DimText::At(Vec2::new(0.0, 10.0)), &above, bad, [None, None]);
             assert_eq!(dim_layout_sized(&f, DimText::Across(10.0), &above, bad, [None, None]), middle, "{bad:?}");
         }
+        // A place across the line so far out that one point's extension line overflows: the span is NaN, so the
+        // text doesn't fit, and its place beyond an arrow isn't finite. The text keeps a finite place.
+        let far = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(0.0, f64::MAX), dir: Vec2::X };
+        for sizes in [above, PAPER] {
+            let lay = dim_layout_sized(&far, DimText::Across(-1e308), &sizes, half, [None, None]);
+            assert!(lay.text.x.is_finite() && lay.text.y.is_finite(), "{lay:?}");
+        }
     }
 
     #[test]
