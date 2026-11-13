@@ -75,7 +75,13 @@ fn a_panicking_hook_keeps_the_calls_result() {
         Err(SolidError::invalid_input("test", "refused"))
     });
     set_failure_hook(None);
-    assert_eq!(r, Err(Error::Status(crate::error::INVALID_INPUT)));
+    assert_eq!(
+        r,
+        Err(Error::Refused {
+            operation: "test",
+            reason: "refused"
+        })
+    );
     assert_eq!(b.counts().unwrap(), [6, 12, 8]);
 }
 
@@ -147,7 +153,13 @@ fn a_failed_call_reaches_the_hook_with_its_consistent_inputs() {
             let r: Result<()> = with_body("on purpose: refused", &b, |_, _| {
                 Err(SolidError::invalid_input("test", "refused"))
             });
-            assert_eq!(r, Err(Error::Status(crate::error::INVALID_INPUT)));
+            assert_eq!(
+                r,
+                Err(Error::Refused {
+                    operation: "test",
+                    reason: "refused"
+                })
+            );
             let edited = make_box([0.0; 3], [1.0; 3]).unwrap();
             let r: Result<()> = with_body("on purpose: panics editing", &edited, |_, br| {
                 let v = br.vertex_list()[0];
@@ -161,7 +173,7 @@ fn a_failed_call_reaches_the_hook_with_its_consistent_inputs() {
             assert_eq!(seen.len(), 2);
             let (call, why, inputs) = &seen[0];
             assert_eq!(call, "on purpose: refused");
-            assert!(why.contains("1007") || why.contains("rejected"), "{why}");
+            assert!(why.contains("test: refused"), "{why}");
             assert_eq!(inputs[0].0, "brep");
             let back = Body::from_smb(inputs[0].1.clone().unwrap(), false).unwrap();
             assert_eq!(back.counts().unwrap(), [6, 12, 8]);
@@ -347,7 +359,13 @@ fn a_held_input_is_reported_not_waited_for() {
     let seen = seen.lock().unwrap().clone();
     drop(held);
     set_failure_hook(None);
-    assert_eq!(r, Err(Error::Status(crate::error::INVALID_INPUT)));
+    assert_eq!(
+        r,
+        Err(Error::Refused {
+            operation: "test",
+            reason: "refused"
+        })
+    );
     assert!(
         matches!(&seen[..], [Err(why)] if why.contains("held")),
         "{seen:?}"

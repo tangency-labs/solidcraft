@@ -95,9 +95,9 @@ pub struct BlendEdges {
 ///   or not finite, or an edge past its record's list;
 /// - [`Error::Unsupported`]: the blend does not sew onto an edge of a sheet within the stitch
 ///   tolerance, so that seam cannot be measured;
-/// - the kernel's refusals by their status: the two edges' middles at one point (no chord to
-///   break a tie between two faces by), a station where the two edges meet (no room for a
-///   blend), a surface singular at a station;
+/// - [`Error::Refused`], the kernel's refusal in its words: the two edges' middles at one point
+///   (no chord to break a tie between two faces by), a station where the two edges meet (no room
+///   for a blend), a surface singular at a station;
 /// - [`Error::Empty`]; those of the stitch and the continuity report.
 pub fn blend_edges(
     from: BlendSide<'_>,

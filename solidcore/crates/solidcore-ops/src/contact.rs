@@ -70,7 +70,7 @@ impl Body {
     ///
     /// # Errors
     /// [`Error::ContactUndecided`] when the kernel's bracket does not decide it (`other` 0):
-    /// the bracket, never read as either answer; [`Error::Status`] `SM_ERR_INVALID_INPUT` for a
+    /// the bracket, never read as either answer; [`Error::Refused`], in the kernel's words, for a
     /// tolerance not finite and positive or a body without faces; those of the session.
     pub fn meets(&self, other: &Body, tol: f64) -> Result<bool> {
         poisoned(&[self, other])?;
@@ -117,7 +117,7 @@ impl Body {
     ///
     /// # Errors
     /// [`Error::ContactUndecided`] (`other` 0) with the narrowest bracket reached, when the
-    /// kernel's work runs out before `width`; [`Error::Status`] `SM_ERR_INVALID_INPUT` for a
+    /// kernel's work runs out before `width`; [`Error::Refused`], in the kernel's words, for a
     /// width not finite and positive or a body without faces; those of the session.
     pub fn boundary_distance(&self, other: &Body, width: f64) -> Result<Gap> {
         poisoned(&[self, other])?;

@@ -13,6 +13,15 @@ pub const INVALID_INPUT: i32 = solidcore::error::SM_ERR_INVALID_INPUT;
 pub enum Error {
     /// The kernel's own status (1001 `SM_ERR`, 1007 `SM_ERR_INVALID_INPUT`, …).
     Status(i32),
+    /// Input the kernel refuses, in its words (its `SolidError::InvalidInput`): the routine that
+    /// refused it and what was wrong, as the kernel states them. Displays as
+    /// `"{operation}: {reason}"`.
+    Refused {
+        /// The kernel routine that refused the input.
+        operation: &'static str,
+        /// What was wrong with it.
+        reason: &'static str,
+    },
     /// An argument refused before the kernel saw it: not finite, out of range, or an index
     /// past its list.
     Argument,
@@ -569,6 +578,7 @@ impl std::fmt::Display for Error {
                 write!(f, "solidcore rejected the input (SM_ERR_INVALID_INPUT)")
             }
             Error::Status(s) => write!(f, "solidcore failed (status {s})"),
+            Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
@@ -747,15 +757,16 @@ impl std::error::Error for Error {}
 /// An operation's result.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// A kernel error as the operation's, by its type: a kernel status where it stands for one
-/// (input refused, not converged, the kernel's other failures), a refusal of what the kernel does
+/// A kernel error as the operation's, by its type: input it refuses in its words
+/// ([`Error::Refused`]), a kernel status where it stands for one (not converged, the kernel's
+/// other failures), a refusal of what the kernel does
 /// not support or has not ported, a cancellation, a broken invariant of the kernel's
 /// ([`Error::Invariant`]), or a call made before the preparation it needs.
 #[must_use]
 pub(crate) fn status(e: SolidError) -> Error {
-    use solidcore::error::{SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NOT_CONVERGING};
+    use solidcore::error::{SM_ERR, SM_ERR_NOT_CONVERGING};
     match e {
-        SolidError::InvalidInput { .. } => Error::Status(SM_ERR_INVALID_INPUT),
+        SolidError::InvalidInput { operation, reason } => Error::Refused { operation, reason },
         SolidError::NotConverged { .. } => Error::Status(SM_ERR_NOT_CONVERGING),
         SolidError::NotFound { .. } => Error::Status(SM_ERR),
         SolidError::Degenerate { .. } => Error::Degenerate,
