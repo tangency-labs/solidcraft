@@ -38,28 +38,54 @@ use std::num::IntErrorKind;
 /// passes its own to [`parse_with_max_bytes`] (SolidCraft's Preferences › General › Largest file
 /// to open, #13329).
 pub const MAX_BYTES: usize = 512 << 20;
-/// Most entity instances in one file, a repeated id counted each time.
-pub const MAX_ENTITIES: usize = 20_000_000;
+/// Fewest bytes of text a real file spends on one parameter, its separator counted.
+///
+/// The count limits follow the size limit at this density, so every file of a real density that
+/// is within the size limit is read (#15588: a 350 MB file was refused for its parameter count
+/// although the size limit is 512 MB). The densest corpus file (NIST
+/// `nist_stc_09_asme1_ap242-e3.stp`) spends about 5.4 bytes a parameter; CAD exports run about
+/// 9 to 14.
+const BYTES_PER_PARAM: usize = 4;
+/// Fewest bytes of text a real file spends on one entity instance or record. The densest corpus
+/// files spend about 38 bytes an instance (`#123=VERTEX_POINT('',#122);` is 28).
+const BYTES_PER_RECORD: usize = 16;
+/// The most of any count on a 32-bit target (wasm32), whose address space is 4 GB: the counts
+/// there stay where they held the parsed records and parameters to under 1 GB. A browser can't
+/// hold the parse of a file dense enough to reach them, so it is refused instead of running out
+/// of memory.
+const MAX_COUNT: usize = if cfg!(target_pointer_width = "32") {
+    20_000_000
+} else {
+    usize::MAX
+};
+/// Most entity instances in one file, a repeated id counted each time: one for every
+/// [`BYTES_PER_RECORD`] bytes of [`MAX_BYTES`].
+pub const MAX_ENTITIES: usize = min(MAX_BYTES / BYTES_PER_RECORD, MAX_COUNT);
 /// Deepest parameter list nesting.
 const MAX_DEPTH: usize = 64;
 /// A complex instance is refused when more than this many of its parts have been read and
 /// another follows.
 const MAX_COMPLEX_PARTS: usize = 64;
-/// Most records in one file's DATA sections, each part of a complex instance counted.
+/// Most records in one file's DATA sections, each part of a complex instance counted: one for
+/// every [`BYTES_PER_RECORD`] bytes of [`MAX_BYTES`].
 ///
 /// A record holds no parameter when its list is empty, so [`MAX_PARAMS`] does not bound them:
-/// `A()` is three bytes and its [`Record`] 48 (on a 64-bit target) plus its name, so a text at
-/// the size cap of empty complex-instance parts could ask for about 8 GB of record slots. This
-/// cap holds them to under 1 GB there; the whole corpus holds under a million instances.
-pub const MAX_RECORDS: usize = 20_000_000;
-/// Most parameters in one file, nested ones and the header's included.
+/// `A()` is three bytes and its [`Record`] 48 (on a 64-bit target) plus its name. This cap holds
+/// the record slots to about three times the size of the text.
+pub const MAX_RECORDS: usize = min(MAX_BYTES / BYTES_PER_RECORD, MAX_COUNT);
+/// Most parameters in one file, nested ones and the header's included: one for every
+/// [`BYTES_PER_PARAM`] bytes of [`MAX_BYTES`].
 ///
 /// [`MAX_BYTES`] alone does not bound memory: `$,` is two bytes and its [`Param`] 48 (on a
-/// 64-bit target), so a text at the size cap could ask for about 13 GB. This cap holds the
-/// parameters themselves to under 1 GB there, and less on wasm32, where a `Param` is smaller.
-/// The densest corpus file (NIST `nist_stc_09_asme1_ap242-e3.stp`, about 5.4 bytes a parameter
-/// counting its separators) would reach it at about 110 MB; it holds under a million.
-pub const MAX_PARAMS: usize = 20_000_000;
+/// 64-bit target), so a hostile text could ask for 24 times its size. This cap holds the
+/// parameters to 12 times the size of the text (about 6 GB at the default size limit), the
+/// least that still reads every file of a real density: a real 512 MB file holds 40 to 100
+/// million parameters, about 2 to 5 GB.
+pub const MAX_PARAMS: usize = min(MAX_BYTES / BYTES_PER_PARAM, MAX_COUNT);
+
+const fn min(a: usize, b: usize) -> usize {
+    if a < b { a } else { b }
+}
 
 /// The text size and the counts a parse refuses beyond: [`MAX_BYTES`], [`MAX_ENTITIES`],
 /// [`MAX_RECORDS`] and [`MAX_PARAMS`] by default, all raised together when a caller raises the
@@ -80,20 +106,22 @@ const LIMITS: Limits = Limits {
 };
 
 impl Limits {
-    /// The limits for a text of up to `max_bytes` (never below the defaults). The counts grow in
-    /// proportion to the size, so a larger file of the same density as one the defaults read
-    /// is read too, and the memory they bound stays the same multiple of the text's size.
+    /// The limits for a text of up to `max_bytes` (never below the defaults). The counts follow
+    /// the size at [`BYTES_PER_PARAM`] and [`BYTES_PER_RECORD`] (at most [`MAX_COUNT`]), so a
+    /// file of a real density is read whenever its size is, and the memory they bound stays the
+    /// same multiple of the text's size.
     fn for_bytes(max_bytes: usize) -> Self {
-        let bytes = max_bytes.max(MAX_BYTES);
-        let scale = |count: usize| {
-            let scaled = count as u128 * bytes as u128 / MAX_BYTES as u128;
-            usize::try_from(scaled).unwrap_or(usize::MAX)
-        };
+        Self::at_density(max_bytes.max(MAX_BYTES))
+    }
+
+    /// The limits for a text of up to `bytes`, the counts at [`BYTES_PER_PARAM`] and
+    /// [`BYTES_PER_RECORD`] (at most [`MAX_COUNT`]).
+    fn at_density(bytes: usize) -> Self {
         Self {
             bytes,
-            entities: scale(MAX_ENTITIES),
-            records: scale(MAX_RECORDS),
-            params: scale(MAX_PARAMS),
+            entities: min(bytes / BYTES_PER_RECORD, MAX_COUNT),
+            records: min(bytes / BYTES_PER_RECORD, MAX_COUNT),
+            params: min(bytes / BYTES_PER_PARAM, MAX_COUNT),
         }
     }
 }
@@ -1289,6 +1317,38 @@ FILE_NAME('a');junk').;ENDSEC;DATA;ENDSEC;END-ISO-10303-21;"
                 params: 4 * MAX_PARAMS,
             }
         );
+    }
+
+    /// #15588: a 350 MB file was refused for its parameter count although the size limit is
+    /// 512 MB, because the counts allowed one parameter for every 27 bytes and real files spend
+    /// 9 to 14. The counts now follow the size at a real file's density, so a real file the size
+    /// limit lets through is read.
+    #[test]
+    fn a_real_file_within_the_size_limit_is_not_refused_for_its_counts() {
+        let text = include_str!("../../tests/fixtures/discord-2026-10-30-fillet.step");
+        assert!(parse_limited(text, None, Limits::at_density(text.len())).is_ok());
+        // The old counts, scaled to this text's size, refused it.
+        let old = |count: usize| count * text.len() / (512 << 20);
+        let refused = parse_limited(
+            text,
+            None,
+            Limits {
+                bytes: text.len(),
+                entities: old(20_000_000),
+                records: old(20_000_000),
+                params: old(20_000_000),
+            },
+        );
+        assert!(
+            matches!(refused, Err(Error::TooManyParams { .. })),
+            "{refused:?}"
+        );
+        // The densest corpus file, about 5.4 bytes a parameter, is read at the size limit.
+        // So are the densest corpus files' instances, about 38 bytes each.
+        const {
+            assert!(MAX_PARAMS * 54 >= MAX_BYTES * 10);
+            assert!(MAX_RECORDS * 38 >= MAX_BYTES && MAX_ENTITIES * 38 >= MAX_BYTES);
+        }
     }
 
     #[test]
