@@ -182,6 +182,7 @@ fn mixed_bitwise(line: &str) -> Option<String> {
     groups.iter().find_map(mixed)
 }
 
+/// Unwraps a `Result` in test code, panicking with its `Debug` representation on `Err`.
 fn ok<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) -> T {
     match r {
         Ok(v) => v,
@@ -189,6 +190,7 @@ fn ok<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) -> T {
     }
 }
 
+/// Builds a representative suite of B-rep test solids (booleans, torus, fillets, mirror transform).
 fn bodies() -> Vec<(&'static str, Body)> {
     let bx = ok(solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 4.0)));
     let pin = ok(solidcraft_kernel::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 6.0));
@@ -207,6 +209,7 @@ fn bodies() -> Vec<(&'static str, Body)> {
     ]
 }
 
+/// Verifies that GPU tessellation evaluation matches the CPU reference evaluator across all test bodies.
 #[test]
 fn gpu_evaluation_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
@@ -482,4 +485,1737 @@ fn a_plan_with_pole_nodes_is_refused_by_name() {
     let Some(gpu) = gpu() else { return };
     assert!(matches!(gpu.prepare(&plan), Err(GpuError::PoleNodes { face: 1 })));
     assert!(matches!(gpu.evaluate(&plan), Err(GpuError::PoleNodes { face: 1 })));
+}
+
+/// Verifies numerical parity of `f32` bicubic Bézier tensor-product patch evaluation across CPU, Vulkan, CUDA PTX, and Ampere MMA Tensor Cores.
+#[test]
+fn multi_backend_bicubic_patch_f32_and_tensor_mma_parity() {
+    use crate::cuda::{CudaBackend, PatchUvQueryF32};
+    use crate::dispatch::{VulkanAccel, cpu_eval_bicubic_f32_rayon, cpu_eval_bicubic_f32_scalar, synthetic_bicubic_patch_f32};
+
+    let patch_f32 = synthetic_bicubic_patch_f32();
+
+    // Use 259 queries (non-multiple of 4 and 64) to exercise tail handling in Tensor Core MMA and workgroups.
+    let n = 259usize;
+    let queries_f32: Vec<PatchUvQueryF32> = (0..n)
+        .map(|i| {
+            let t = (i as f32) / (n as f32);
+            PatchUvQueryF32 { u: (t * 0.89 + 0.05).fract(), v: (t * 2.71 + 0.07).fract(), patch_idx: 0, pad: 0 }
+        })
+        .collect();
+
+    let ref_f32 = cpu_eval_bicubic_f32_scalar(&patch_f32, &queries_f32);
+    let ray_f32 = cpu_eval_bicubic_f32_rayon(&patch_f32, &queries_f32);
+    assert_eq!(ref_f32, ray_f32);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_out = vk.eval_bicubic_f32(&patch_f32, &queries_f32).expect("vk eval_bicubic_f32");
+        assert_eq!(vk_out.len(), ref_f32.len());
+        for (i, (a, b)) in ref_f32.iter().zip(&vk_out).enumerate() {
+            for c in 0..3 {
+                assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "vk pos mismatch at {i}[{c}]: {:?} vs {:?}", a.pos, b.pos);
+                assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "vk norm mismatch at {i}[{c}]: {:?} vs {:?}", a.norm, b.norm);
+            }
+        }
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_f32_gen = cuda.eval_bicubic_f32(&patch_f32, &queries_f32, false).expect("cuda generic f32");
+        for (i, (a, b)) in ref_f32.iter().zip(&cu_f32_gen).enumerate() {
+            for c in 0..3 {
+                assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "cuda sm70 f32 pos mismatch at {i}[{c}]");
+                assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "cuda sm70 f32 norm mismatch at {i}[{c}]");
+            }
+        }
+        if cuda.has_ampere_ptx() {
+            let cu_f32_amp = cuda.eval_bicubic_f32(&patch_f32, &queries_f32, true).expect("cuda sm86 cp.async f32");
+            for (i, (a, b)) in ref_f32.iter().zip(&cu_f32_amp).enumerate() {
+                for c in 0..3 {
+                    assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "cuda sm86 f32 pos mismatch at {i}[{c}]");
+                    assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "cuda sm86 f32 norm mismatch at {i}[{c}]");
+                }
+            }
+        }
+
+        let cu_tensor_gen = cuda.eval_bicubic_tensor_f32(&patch_f32, &queries_f32, false).expect("cuda generic tensor f32");
+        for (i, (a, b)) in ref_f32.iter().zip(&cu_tensor_gen).enumerate() {
+            for c in 0..3 {
+                assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "cuda sm70 tensor f32 pos mismatch at {i}[{c}]: {} vs {}", a.pos[c], b.pos[c]);
+                assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "cuda sm70 tensor f32 norm mismatch at {i}[{c}]: {} vs {}", a.norm[c], b.norm[c]);
+            }
+        }
+
+        if cuda.has_f32_tensor_core() {
+            let cu_f32_mma = cuda.eval_bicubic_tensor_f32(&patch_f32, &queries_f32, true).expect("cuda sm86 MMA tensor core f32");
+            for (i, (a, b)) in ref_f32.iter().zip(&cu_f32_mma).enumerate() {
+                for c in 0..3 {
+                    assert!(
+                        (a.pos[c] - b.pos[c]).abs() < 1e-5,
+                        "Ampere MMA f32 pos mismatch at query {i} comp {c}: cpu={} mma={}",
+                        a.pos[c],
+                        b.pos[c]
+                    );
+                    assert!(
+                        (a.norm[c] - b.norm[c]).abs() < 1e-5,
+                        "Ampere MMA f32 norm mismatch at query {i} comp {c}: cpu={} mma={}",
+                        a.norm[c],
+                        b.norm[c]
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Verifies that CUDA device info enables hardware F32 tensor cores (`mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32`)
+/// across all consumer and datacenter Ampere (`sm_80+`) and newer architectures.
+#[test]
+fn cuda_f32_tensor_core_detection_rules() {
+    use crate::cuda::{CudaBackend, CudaDeviceInfo};
+    if let Some(cuda) = CudaBackend::global() {
+        let dev = cuda.device_info();
+        let (major, minor) = dev.compute_capability;
+        let expected_hw_f32 = major >= 8;
+        assert_eq!(
+            dev.supports_f32_tensor_core, expected_hw_f32,
+            "device {} (SM {}.{}) F32 tensor core flag must be {} (hardware F32 MMA is supported on sm_80+)",
+            dev.name, major, minor, expected_hw_f32
+        );
+        assert_eq!(cuda.has_f32_tensor_core(), expected_hw_f32 && cuda.has_ampere_ptx());
+    }
+
+    // Verify `select_best_device` filters out pre-sm_70 devices even when they have more SMs,
+    // and breaks ties among eligible sm_70+ devices by `(sm_count, compute_capability, total_vram_bytes)`.
+    let mk_dev = |ordinal: i32, cc: (i32, i32), sm_count: i32, vram: usize| CudaDeviceInfo {
+        ordinal,
+        name: format!("GPU-{ordinal}"),
+        compute_capability: cc,
+        sm_count,
+        clock_khz: 1_500_000,
+        memory_bus_bits: 256,
+        l2_cache_bytes: 4 * 1024 * 1024,
+        total_vram_bytes: vram,
+        supports_ampere_ptx: cc.0 >= 8,
+        supports_f32_tensor_core: cc.0 >= 8,
+        supports_rt_core: cc >= (7, 5),
+    };
+    let pascal_only = [mk_dev(0, (6, 1), 28, 11 << 30), mk_dev(1, (0, 0), 64, 16 << 30)];
+    assert!(CudaBackend::select_best_device(&pascal_only).is_none());
+
+    let mixed = [mk_dev(0, (6, 1), 28, 11 << 30), mk_dev(1, (8, 6), 20, 8 << 30), mk_dev(2, (7, 5), 20, 16 << 30)];
+    assert_eq!(CudaBackend::select_best_device(&mixed).expect("eligible gpu").ordinal, 1);
+}
+
+/// Verifies 3-ray watertight point-in-solid classification parity across CPU, Vulkan, CUDA PTX, and RT/BVH backends, including empty-BVH fallback.
+#[test]
+fn multi_backend_point_in_solid_and_rt_bvh_parity() {
+    use crate::cuda::CudaBackend;
+    use crate::dispatch::{
+        VulkanAccel, build_gpu_bvh_from_mesh, cpu_classify_points_rayon, cpu_classify_points_scalar, synthetic_closed_sphere_mesh,
+    };
+
+    let mesh = synthetic_closed_sphere_mesh(10.0, 10, 10);
+    let (tris, bvh) = build_gpu_bvh_from_mesh(&mesh);
+
+    let mut pts = Vec::new();
+    for ix in -6..=6 {
+        for iy in -6..=6 {
+            for iz in -4..=4 {
+                let p = [ix as f32 * 2.1 + 0.13, iy as f32 * 2.1 - 0.17, iz as f32 * 2.9 + 0.07, 0.0];
+                pts.push(p);
+            }
+        }
+    }
+
+    let ref_scalar = cpu_classify_points_scalar(&pts, &tris, &[]);
+    let ref_bvh = cpu_classify_points_scalar(&pts, &tris, &bvh);
+    let ref_rayon = cpu_classify_points_rayon(&pts, &tris, &bvh);
+    assert_eq!(ref_scalar, ref_bvh, "CPU brute-force vs CPU BVH point classification");
+    assert_eq!(ref_scalar, ref_rayon, "CPU scalar vs CPU rayon point classification");
+
+    // Verify agreement with SolidCraft's authoritative Mesh::contains
+    for (i, p) in pts.iter().enumerate() {
+        let v = Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64);
+        assert_eq!(ref_scalar[i], mesh.contains(v), "mismatch with Mesh::contains at {i}: {v:?}");
+    }
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_tiled = vk.classify_points(&pts, &tris, &bvh, false).expect("vk classify tiled");
+        let vk_bvh = vk.classify_points(&pts, &tris, &bvh, true).expect("vk classify bvh");
+        assert_eq!(ref_scalar, vk_tiled, "Vulkan tiled classify_points parity");
+        assert_eq!(ref_scalar, vk_bvh, "Vulkan BVH classify_points parity");
+        // Empty-BVH with non-empty tris must return None on BVH path so callers fall back to brute-force
+        assert!(vk.classify_points(&pts, &tris, &[], true).is_none());
+        assert_eq!(vk.classify_points(&pts, &[], &[], true), Some(vec![false; pts.len()]));
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_gen = cuda.classify_points(&pts, &tris, false).expect("cuda sm70 classify_points");
+        assert_eq!(ref_scalar, cu_gen, "CUDA sm_70 classify_points parity");
+        if cuda.has_ampere_ptx() {
+            let cu_amp = cuda.classify_points(&pts, &tris, true).expect("cuda sm86 classify_points");
+            assert_eq!(ref_scalar, cu_amp, "CUDA sm_86 cp.async classify_points parity");
+        }
+        let cu_rt_bvh = cuda.classify_points_rt_bvh(&pts, &tris, &bvh).expect("cuda rt_bvh classify_points");
+        assert_eq!(ref_scalar, cu_rt_bvh, "CUDA RT/BVH classify_points parity");
+        // Empty-BVH with non-empty tris must return None so the dispatcher falls back
+        assert!(cuda.classify_points_rt_bvh(&pts, &tris, &[]).is_none());
+        assert_eq!(cuda.classify_points_rt_bvh(&pts, &[], &[]), Some(vec![false; pts.len()]));
+    }
+}
+
+/// Verifies BVH ray-mesh intersection parity across CPU, Vulkan, and CUDA RT/BVH backends against `Mesh::raycast`, including empty-BVH handling.
+#[test]
+fn multi_backend_raycast_bvh_parity() {
+    use crate::cuda::{CudaBackend, GpuRay};
+    use crate::dispatch::{VulkanAccel, build_gpu_bvh_from_mesh, cpu_raycast_bvh_rayon, cpu_raycast_bvh_scalar, synthetic_closed_sphere_mesh};
+
+    let mesh = synthetic_closed_sphere_mesh(8.0, 10, 10);
+    let (tris, bvh) = build_gpu_bvh_from_mesh(&mesh);
+
+    let mut rays = Vec::new();
+    for ix in -10..=10 {
+        for iy in -10..=10 {
+            let ox = ix as f32 * 1.15 + 0.03;
+            let oy = iy as f32 * 1.15 - 0.04;
+            rays.push(GpuRay { origin: [ox, oy, -20.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] });
+        }
+    }
+
+    let ref_hits = cpu_raycast_bvh_scalar(&rays, &tris, &bvh);
+    let ray_hits = cpu_raycast_bvh_rayon(&rays, &tris, &bvh);
+    assert_eq!(ref_hits, ray_hits);
+
+    // Check against Mesh::raycast
+    for (i, r) in rays.iter().enumerate() {
+        let orig = Vec3::new(r.origin[0] as f64, r.origin[1] as f64, r.origin[2] as f64);
+        let dir = Vec3::new(r.dir[0] as f64, r.dir[1] as f64, r.dir[2] as f64);
+        let mesh_hit = mesh.raycast(orig, dir);
+        let gpu_hit = ref_hits[i];
+        match mesh_hit {
+            Some((t_cpu, _)) => {
+                assert!(gpu_hit.tri_idx != u32::MAX, "ray {i} missed in GPU BVH but hit in Mesh::raycast at t={t_cpu}");
+                assert!((gpu_hit.t as f64 - t_cpu).abs() < 1e-4, "ray {i} t mismatch: {} vs {t_cpu}", gpu_hit.t);
+            }
+            None => {
+                assert_eq!(gpu_hit.tri_idx, u32::MAX, "ray {i} hit in GPU BVH but missed in Mesh::raycast");
+            }
+        }
+    }
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_hits = vk.raycast_bvh(&rays, &tris, &bvh).expect("vk raycast_bvh");
+        for (i, (a, b)) in ref_hits.iter().zip(&vk_hits).enumerate() {
+            assert_eq!(a.tri_idx, b.tri_idx, "Vulkan raycast tri_idx mismatch at {i}");
+            if a.tri_idx != u32::MAX {
+                assert!((a.t - b.t).abs() < 1e-4, "Vulkan raycast t mismatch at {i}");
+            }
+        }
+        assert!(vk.raycast_bvh(&rays, &tris, &[]).is_none());
+        let empty_hits = vk.raycast_bvh(&rays, &[], &[]).expect("vk raycast empty tris");
+        assert!(empty_hits.iter().all(|h| h.tri_idx == u32::MAX));
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_hits = cuda.raycast_rt_bvh(&rays, &tris, &bvh).expect("cuda raycast_rt_bvh");
+        for (i, (a, b)) in ref_hits.iter().zip(&cu_hits).enumerate() {
+            assert_eq!(a.tri_idx, b.tri_idx, "CUDA RT/BVH raycast tri_idx mismatch at {i}");
+            if a.tri_idx != u32::MAX {
+                assert!((a.t - b.t).abs() < 1e-4, "CUDA RT/BVH raycast t mismatch at {i}");
+            }
+        }
+        assert!(cuda.raycast_rt_bvh(&rays, &tris, &[]).is_none());
+        let empty_hits = cuda.raycast_rt_bvh(&rays, &[], &[]).expect("cuda raycast empty tris");
+        assert!(empty_hits.iter().all(|h| h.tri_idx == u32::MAX));
+    }
+}
+
+/// Verifies bipartite AABB overlap, self-overlap, Morton LBVH traversal, and surface-surface intersection (SSI) residual evaluation across CPU, Vulkan, and CUDA backends.
+#[test]
+fn multi_backend_collision_lbvh_morton_and_ssi_residuals_parity() {
+    use crate::collision::{build_simple_lbvh, cpu_bipartite_overlap, cpu_self_overlap, face_aabbs_from_plan, synthetic_aabb_grid};
+    use crate::cuda::CudaBackend;
+    use crate::dispatch::{VulkanAccel, cpu_bipartite_overlap_rayon};
+
+    let boxes_a = synthetic_aabb_grid(150, 2.0, 1.15);
+    let boxes_b = synthetic_aabb_grid(130, 2.0, 1.15);
+    let tol = 1e-4f32;
+
+    let cpu_res = cpu_bipartite_overlap(&boxes_a, &boxes_b, tol);
+    let ray_res = cpu_bipartite_overlap_rayon(&boxes_a, &boxes_b, tol);
+    assert!(!cpu_res.pairs.is_empty());
+    assert_eq!(cpu_res.pairs, ray_res.pairs);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_res = vk.collision().bipartite_overlap(&boxes_a, &boxes_b, tol).expect("vk bipartite");
+        assert_eq!(cpu_res.pairs, vk_res.pairs, "Vulkan bipartite AABB overlap parity");
+
+        // Self-overlap parity
+        let cpu_self = cpu_self_overlap(&boxes_a, tol);
+        let vk_self = vk.collision().self_overlap(&boxes_a, tol).expect("vk self_overlap");
+        assert_eq!(cpu_self.pairs, vk_self.pairs, "Vulkan self_overlap parity");
+
+        // Morton code + LBVH traversal parity
+        let morton = vk.collision().compute_morton(&boxes_b).expect("vk morton");
+        let lbvh = build_simple_lbvh(&boxes_b, &morton);
+        let lbvh_res = vk.collision().lbvh_query(&boxes_a, &lbvh, tol).expect("vk lbvh_query");
+        assert_eq!(cpu_res.pairs, lbvh_res.pairs, "Vulkan LBVH traversal vs all-pairs parity");
+
+        // Real B-rep face AABBs & SSI surface residuals parity
+        let b1 = ok(solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 4.0, 10.0));
+        let b2 = ok(solidcraft_kernel::cylinder(Vec3::new(2.0, -5.0, 5.0), Vec3::Y, 3.0, 10.0));
+        let p1 = ok(b1.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.05)));
+        let p2 = ok(b2.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.05)));
+        let fa = face_aabbs_from_plan(&p1);
+        let fb = face_aabbs_from_plan(&p2);
+        assert_eq!(cpu_bipartite_overlap(&fa, &fb, 1e-3).pairs, vk.collision().bipartite_overlap(&fa, &fb, 1e-3).expect("vk face aabbs").pairs);
+
+        if let (Some(sa), Some(sb)) = (p1.surfaces.first(), p2.surfaces.first()) {
+            let vk_seeds =
+                vk.collision().surface_residuals(sa, (0.0, 1.0), (0.0, 1.0), sb, (0.0, 1.0), (0.0, 1.0), 16, 1.5).expect("vk surface_residuals");
+            for s in &vk_seeds {
+                assert!(s.dist_sq <= 1.5 * 1.5 + 1e-4);
+            }
+        }
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_gen = cuda.bipartite_aabb_overlap(&boxes_a, &boxes_b, tol, false).expect("cuda sm70 bipartite");
+        assert_eq!(cpu_res.pairs, cu_gen.pairs, "CUDA sm_70 bipartite AABB parity");
+        if cuda.has_ampere_ptx() {
+            let cu_amp = cuda.bipartite_aabb_overlap(&boxes_a, &boxes_b, tol, true).expect("cuda sm86 bipartite");
+            assert_eq!(cpu_res.pairs, cu_amp.pairs, "CUDA sm_86 cp.async + redux.sync bipartite AABB parity");
+        }
+    }
+}
+
+/// Verifies batched point-to-mesh squared distance and divergence-theorem mass properties across CPU, Vulkan, and CUDA backends.
+#[test]
+fn multi_backend_point_mesh_distance_and_mass_properties_parity() {
+    use crate::cuda::{CudaBackend, GpuTri};
+    use crate::dispatch::{
+        VulkanAccel, build_gpu_bvh_from_mesh, cpu_mass_properties_rayon, cpu_mass_properties_scalar, cpu_point_mesh_distance_rayon,
+        cpu_point_mesh_distance_scalar,
+    };
+
+    let bx_body = ok(solidcraft_kernel::box_solid(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0)));
+    let bx_mesh = ok(bx_body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)));
+    let (tris, _) = build_gpu_bvh_from_mesh(&bx_mesh);
+
+    // 1. Point-to-Mesh Distance parity
+    let pts: Vec<[f32; 4]> = (0..195)
+        .map(|i| {
+            let f = i as f32 * 0.13;
+            [f - 5.0, (f * 1.7).sin() * 6.0, (f * 0.9).cos() * 8.0, 0.0]
+        })
+        .collect();
+    let ref_dist = cpu_point_mesh_distance_scalar(&pts, &tris);
+    let ray_dist = cpu_point_mesh_distance_rayon(&pts, &tris);
+    assert_eq!(ref_dist, ray_dist);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_dist = vk.point_mesh_distance(&pts, &tris).expect("vk point_mesh_distance");
+        for (i, (a, b)) in ref_dist.iter().zip(&vk_dist).enumerate() {
+            assert!((a - b).abs() < 1e-3, "vk distance mismatch at {i}: {a} vs {b}");
+        }
+    }
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_gen = cuda.point_mesh_distance(&pts, &tris, false).expect("cuda sm70 dist");
+        for (i, (a, b)) in ref_dist.iter().zip(&cu_gen).enumerate() {
+            assert!((a - b).abs() < 1e-3, "cuda sm70 distance mismatch at {i}: {a} vs {b}");
+        }
+        if cuda.has_ampere_ptx() {
+            let cu_amp = cuda.point_mesh_distance(&pts, &tris, true).expect("cuda sm86 cp.async dist");
+            for (i, (a, b)) in ref_dist.iter().zip(&cu_amp).enumerate() {
+                assert!((a - b).abs() < 1e-3, "cuda sm86 distance mismatch at {i}: {a} vs {b}");
+            }
+        }
+    }
+
+    // 2. Mass Properties Integration parity against Mesh::measure()
+    let exact_measure = bx_mesh.measure();
+    let cpu_s = cpu_mass_properties_scalar(&tris);
+    let cpu_r = cpu_mass_properties_rayon(&tris);
+    assert!((cpu_s.volume - exact_measure.volume).abs() < 1e-4, "volume: {} vs {}", cpu_s.volume, exact_measure.volume);
+    assert!((cpu_s.area - exact_measure.area).abs() < 1e-4, "area: {} vs {}", cpu_s.area, exact_measure.area);
+    assert!(cpu_s.centroid.dist(exact_measure.centroid) < 1e-4);
+    assert!((cpu_r.volume - exact_measure.volume).abs() < 1e-4);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_m = vk.mass_properties(&tris).expect("vk mass_properties");
+        assert!((vk_m.volume - exact_measure.volume).abs() < 1e-2);
+        assert!((vk_m.area - exact_measure.area).abs() < 1e-2);
+        assert!(vk_m.centroid.dist(exact_measure.centroid) < 1e-3);
+    }
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_gen = cuda.mass_properties(&tris, false).expect("cuda sm70 mass_properties");
+        assert!((cu_gen.volume - exact_measure.volume).abs() < 1e-4);
+        assert!((cu_gen.area - exact_measure.area).abs() < 1e-4);
+        assert!(cu_gen.centroid.dist(exact_measure.centroid) < 1e-4);
+        if cuda.has_ampere_ptx() {
+            let cu_amp = cuda.mass_properties(&tris, true).expect("cuda sm86 shfl.sync mass_properties");
+            assert!((cu_amp.volume - exact_measure.volume).abs() < 1e-4);
+            assert!((cu_amp.area - exact_measure.area).abs() < 1e-4);
+            assert!(cu_amp.centroid.dist(exact_measure.centroid) < 1e-4);
+        }
+    }
+
+    // 3. Translated and refined mesh cancellation invariance (e.g. translated by (1024, -1024, 256), 768 triangles)
+    let c0 = Vec3::new(1024.0, -1024.0, 256.0);
+    let verts = [
+        c0 + Vec3::new(0.0, 0.0, 0.0),
+        c0 + Vec3::new(2.0, 0.0, 0.0),
+        c0 + Vec3::new(2.0, 3.0, 0.0),
+        c0 + Vec3::new(0.0, 3.0, 0.0),
+        c0 + Vec3::new(0.0, 0.0, 4.0),
+        c0 + Vec3::new(2.0, 0.0, 4.0),
+        c0 + Vec3::new(2.0, 3.0, 4.0),
+        c0 + Vec3::new(0.0, 3.0, 4.0),
+    ];
+    let initial_indices =
+        [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]];
+    let mut current_tris: Vec<[Vec3; 3]> = initial_indices.iter().map(|&[i, j, k]| [verts[i], verts[j], verts[k]]).collect();
+    for _ in 0..3 {
+        let mut next = Vec::with_capacity(current_tris.len() * 4);
+        for &[a, b, c] in &current_tris {
+            let ab = (a + b) * 0.5;
+            let bc = (b + c) * 0.5;
+            let ca = (c + a) * 0.5;
+            next.push([a, ab, ca]);
+            next.push([ab, b, bc]);
+            next.push([ca, bc, c]);
+            next.push([ab, bc, ca]);
+        }
+        current_tris = next;
+    }
+    assert_eq!(current_tris.len(), 768);
+    let trans_tris: Vec<GpuTri> = current_tris
+        .iter()
+        .enumerate()
+        .map(|(idx, &[v0, v1, v2])| GpuTri {
+            v0: [v0.x as f32, v0.y as f32, v0.z as f32, f32::from_bits(idx as u32)],
+            v1: [v1.x as f32, v1.y as f32, v1.z as f32, 0.0],
+            v2: [v2.x as f32, v2.y as f32, v2.z as f32, 0.0],
+        })
+        .collect();
+
+    let expected_centroid = c0 + Vec3::new(1.0, 1.5, 2.0);
+    let trans_cpu = cpu_mass_properties_scalar(&trans_tris);
+    assert!((trans_cpu.volume - 24.0).abs() < 1e-4);
+    assert!((trans_cpu.area - 52.0).abs() < 1e-4);
+    assert!(trans_cpu.centroid.dist(expected_centroid) < 1e-4);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_trans = vk.mass_properties(&trans_tris).expect("vk mass_properties translated 768 tris");
+        assert!((vk_trans.volume - 24.0).abs() < 1e-2, "vk translated volume: {}", vk_trans.volume);
+        assert!((vk_trans.area - 52.0).abs() < 1e-2, "vk translated area: {}", vk_trans.area);
+        assert!(vk_trans.centroid.dist(expected_centroid) < 1e-2, "vk translated centroid: {:?}", vk_trans.centroid);
+    }
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_trans = cuda.mass_properties(&trans_tris, false).expect("cuda translated mass_properties 768 tris");
+        assert!((cu_trans.volume - 24.0).abs() < 1e-4);
+        assert!((cu_trans.area - 52.0).abs() < 1e-4);
+        assert!(cu_trans.centroid.dist(expected_centroid) < 1e-4);
+    }
+
+    // 4. Two separated closed components (Box A at origin and Box B at (1024, -1024, 256), 768 triangles each)
+    let make_subdivided_box = |offset: Vec3| -> Vec<[Vec3; 3]> {
+        let v = [
+            offset + Vec3::new(0.0, 0.0, 0.0),
+            offset + Vec3::new(2.0, 0.0, 0.0),
+            offset + Vec3::new(2.0, 3.0, 0.0),
+            offset + Vec3::new(0.0, 3.0, 0.0),
+            offset + Vec3::new(0.0, 0.0, 4.0),
+            offset + Vec3::new(2.0, 0.0, 4.0),
+            offset + Vec3::new(2.0, 3.0, 4.0),
+            offset + Vec3::new(0.0, 3.0, 4.0),
+        ];
+        let mut cur: Vec<[Vec3; 3]> = initial_indices.iter().map(|&[i, j, k]| [v[i], v[j], v[k]]).collect();
+        for _ in 0..3 {
+            let mut nxt = Vec::with_capacity(cur.len() * 4);
+            for &[a, b, c] in &cur {
+                let ab = (a + b) * 0.5;
+                let bc = (b + c) * 0.5;
+                let ca = (c + a) * 0.5;
+                nxt.push([a, ab, ca]);
+                nxt.push([ab, b, bc]);
+                nxt.push([ca, bc, c]);
+                nxt.push([ab, bc, ca]);
+            }
+            cur = nxt;
+        }
+        cur
+    };
+
+    let box_a = make_subdivided_box(Vec3::ZERO);
+    let box_b = make_subdivided_box(c0);
+    let expected_two_box_centroid = Vec3::new(513.0, -510.5, 130.0);
+
+    for (desc, tris_list) in [("A then B", [&box_a[..], &box_b[..]].concat()), ("B then A", [&box_b[..], &box_a[..]].concat())] {
+        let two_box_gpu: Vec<GpuTri> = tris_list
+            .iter()
+            .enumerate()
+            .map(|(idx, &[v0, v1, v2])| GpuTri {
+                v0: [v0.x as f32, v0.y as f32, v0.z as f32, f32::from_bits(idx as u32)],
+                v1: [v1.x as f32, v1.y as f32, v1.z as f32, 0.0],
+                v2: [v2.x as f32, v2.y as f32, v2.z as f32, 0.0],
+            })
+            .collect();
+        assert_eq!(two_box_gpu.len(), 1536);
+
+        let cpu_m = cpu_mass_properties_scalar(&two_box_gpu);
+        assert!((cpu_m.volume - 48.0).abs() < 1e-4, "{desc} cpu volume: {}", cpu_m.volume);
+        assert!((cpu_m.area - 104.0).abs() < 1e-4, "{desc} cpu area: {}", cpu_m.area);
+        assert!(cpu_m.centroid.dist(expected_two_box_centroid) < 1e-4, "{desc} cpu centroid: {:?}", cpu_m.centroid);
+
+        if let Some(vk) = VulkanAccel::global() {
+            let vk_m = vk.mass_properties(&two_box_gpu).expect("vk mass_properties two-box");
+            assert!((vk_m.volume - 48.0).abs() < 1e-2, "{desc} vk volume: {}", vk_m.volume);
+            assert!((vk_m.area - 104.0).abs() < 1e-2, "{desc} vk area: {}", vk_m.area);
+            assert!(vk_m.centroid.dist(expected_two_box_centroid) < 1e-2, "{desc} vk centroid: {:?}", vk_m.centroid);
+        }
+        if let Some(cuda) = CudaBackend::global() {
+            let cu_m = cuda.mass_properties(&two_box_gpu, false).expect("cuda mass_properties two-box");
+            assert!((cu_m.volume - 48.0).abs() < 1e-4, "{desc} cuda volume: {}", cu_m.volume);
+            assert!((cu_m.area - 104.0).abs() < 1e-4, "{desc} cuda area: {}", cu_m.area);
+            assert!(cu_m.centroid.dist(expected_two_box_centroid) < 1e-4, "{desc} cuda centroid: {:?}", cu_m.centroid);
+        }
+    }
+}
+
+/// All 7 backend execution targets in [`BackendTarget`].
+#[cfg(not(target_arch = "wasm32"))]
+const ALL_BACKEND_TARGETS: [crate::dispatch::BackendTarget; 7] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+    crate::dispatch::BackendTarget::AmpereTensorCore,
+    crate::dispatch::BackendTarget::RtCoreBvh,
+];
+
+/// Backend targets that implement bicubic patch evaluation (`f32` and `f64`).
+#[cfg(not(target_arch = "wasm32"))]
+const PATCH_TARGETS: [crate::dispatch::BackendTarget; 6] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+    crate::dispatch::BackendTarget::AmpereTensorCore,
+];
+
+/// Backend targets that implement BVH queries (point-in-solid, raycast, AABB overlap).
+#[cfg(not(target_arch = "wasm32"))]
+const BVH_TARGETS: [crate::dispatch::BackendTarget; 6] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+    crate::dispatch::BackendTarget::RtCoreBvh,
+];
+
+/// Backend targets that implement general compute kernels (point-mesh distance, mass properties, non-BVH queries).
+#[cfg(not(target_arch = "wasm32"))]
+const COMPUTE_TARGETS: [crate::dispatch::BackendTarget; 5] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+];
+
+/// Verifies [`Dispatcher`] multi-sample rotated calibration, markdown reporting, and forced routing across all backend targets.
+#[test]
+fn dispatcher_auto_tuning_calibration_and_routing() {
+    use crate::cuda::{GpuRay, PatchUvQueryF32};
+    use crate::dispatch::{
+        BENCH_SIZES, BackendTarget, CALIBRATION_SAMPLES, Dispatcher, KernelOp, build_gpu_bvh_from_mesh, synthetic_bicubic_patch_f32,
+        synthetic_closed_sphere_mesh,
+    };
+
+    let disp = Dispatcher::global();
+    let report = disp.report();
+    assert_eq!(report.kernels.len(), KernelOp::ALL.len());
+    for k in &report.kernels {
+        assert_eq!(k.buckets.len(), BENCH_SIZES.len());
+        for b in &k.buckets {
+            assert_eq!(b.sample_orders.len(), CALIBRATION_SAMPLES);
+            assert_eq!(b.sample_timings_ns.len(), CALIBRATION_SAMPLES);
+            if b.sample_orders[0].len() > 1 {
+                assert_ne!(b.sample_orders[0], b.sample_orders[1], "backend execution order must rotate across calibration samples");
+            }
+        }
+    }
+
+    let md = report.to_markdown();
+    println!("\n{md}");
+    assert!(md.contains("SolidCraft Multi-Backend GPU & Auto-Tuning Dispatcher Report"));
+    assert!(md.contains("Bicubic Tensor Patch Eval (f32 MMA)"));
+
+    // Verify forced routing across every backend target produces consistent results
+    let patch_f32 = synthetic_bicubic_patch_f32();
+    let q_f32 = vec![PatchUvQueryF32 { u: 0.25, v: 0.75, patch_idx: 0, pad: 0 }; 32];
+    let sphere = synthetic_closed_sphere_mesh(5.0, 6, 6);
+    let (tris, bvh) = build_gpu_bvh_from_mesh(&sphere);
+    let pts = vec![[0.5f32, 0.5, 0.5, 0.0], [10.0, 10.0, 10.0, 0.0]];
+    let rays = vec![GpuRay { origin: [0.0, 0.0, -10.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] }];
+
+    let (_, ref_f32) = disp.with_forced_backend(Some(BackendTarget::CpuScalar)).eval_bicubic_tensor_f32(&patch_f32, &q_f32);
+    let (_, ref_cls) = disp.with_forced_backend(Some(BackendTarget::CpuScalar)).classify_points(&pts, &tris, &bvh);
+
+    for target in ALL_BACKEND_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, out_f32) = d.eval_bicubic_f32(&patch_f32, &q_f32);
+        assert_eq!(out_f32.len(), 32);
+        let (_, out_tensor_f32) = d.eval_bicubic_tensor_f32(&patch_f32, &q_f32);
+        assert!((out_tensor_f32[0].pos[0] - ref_f32[0].pos[0]).abs() < 1e-4);
+        let (_, out_cls) = d.classify_points(&pts, &tris, &bvh);
+        assert_eq!(out_cls, ref_cls);
+        let (_, out_cls_no_bvh) = d.classify_points(&pts, &tris, &[]);
+        assert_eq!(out_cls_no_bvh, ref_cls);
+        let (_, out_rc) = d.raycast_mesh(&rays, &tris, &bvh);
+        assert!(out_rc[0].tri_idx != u32::MAX);
+        let (_, out_rc_no_bvh) = d.raycast_mesh(&rays, &tris, &[]);
+        assert_eq!(out_rc_no_bvh[0].tri_idx, out_rc[0].tri_idx);
+        let (_, out_dist) = d.point_mesh_distance(&pts, &tris);
+        assert_eq!(out_dist.len(), 2);
+        let (_, out_mass) = d.mass_properties(&tris);
+        assert!(out_mass.volume > 100.0);
+    }
+}
+
+/// Extracts sorted `(key, value)` pairs from a `[section]` header in a TOML manifest.
+fn parse_toml_section_entries(toml_text: &str, section_header: &str) -> Vec<(String, String)> {
+    let mut in_section = false;
+    let mut entries = Vec::new();
+    for raw_line in toml_text.lines() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_section = line == section_header;
+            continue;
+        }
+        if in_section && let Some((k, v)) = line.split_once('=') {
+            entries.push((k.trim().to_string(), v.trim().to_string()));
+        }
+    }
+    entries.sort();
+    entries
+}
+
+/// Ensures `[lints.clippy]` and `[lints.rust]` in `crates/gpu/Cargo.toml` stay synchronized with `[workspace.lints.*]` in the root `Cargo.toml`.
+#[test]
+fn gpu_cargo_toml_lints_match_workspace() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let gpu_toml = ok(std::fs::read_to_string(manifest_dir.join("Cargo.toml")));
+    let root_toml = ok(std::fs::read_to_string(manifest_dir.join("../../Cargo.toml")));
+
+    let ws_clippy = parse_toml_section_entries(&root_toml, "[workspace.lints.clippy]");
+    let gpu_clippy = parse_toml_section_entries(&gpu_toml, "[lints.clippy]");
+    assert!(!ws_clippy.is_empty(), "root Cargo.toml must have [workspace.lints.clippy]");
+    assert_eq!(gpu_clippy, ws_clippy, "crates/gpu/Cargo.toml [lints.clippy] must stay in sync with root Cargo.toml [workspace.lints.clippy]");
+
+    let ws_rust = parse_toml_section_entries(&root_toml, "[workspace.lints.rust]");
+    let gpu_rust = parse_toml_section_entries(&gpu_toml, "[lints.rust]");
+    assert_eq!(ws_rust, vec![("unsafe_code".to_string(), "\"forbid\"".to_string())]);
+    assert_eq!(
+        gpu_rust,
+        vec![("unsafe_code".to_string(), "\"deny\"".to_string())],
+        "crates/gpu/Cargo.toml [lints.rust] must match [workspace.lints.rust] except for unsafe_code = \"deny\""
+    );
+}
+
+#[test]
+fn bicubic_patch_common_and_edge_cases() {
+    use crate::cuda::{CudaBackend, PatchUvQueryF32};
+    use crate::dispatch::{Dispatcher, cpu_eval_bicubic_f32_rayon, cpu_eval_bicubic_f32_scalar, synthetic_bicubic_patch_f32};
+
+    let disp = Dispatcher::global();
+    let cuda = CudaBackend::global();
+
+    // 1. Exact corner interpolation on synthetic rational bicubic patch:
+    // At (u, v) in {(0,0), (1,0), (0,1), (1,1)}, S(u, v) = P_{3u, 3v} / w_{3u, 3v}.
+    let cpts_f32 = synthetic_bicubic_patch_f32();
+    let corners = [(0.0f32, 0.0f32, 0usize, 0usize), (1.0, 0.0, 3, 0), (0.0, 1.0, 0, 3), (1.0, 1.0, 3, 3)];
+    let corner_queries_f32: Vec<PatchUvQueryF32> = corners.iter().map(|&(u, v, _, _)| PatchUvQueryF32 { u, v, patch_idx: 0, pad: 0 }).collect();
+
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, evals_tensor) = d.eval_bicubic_tensor_f32(&cpts_f32, &corner_queries_f32);
+        let (_, evals_f32) = d.eval_bicubic_f32(&cpts_f32, &corner_queries_f32);
+        for (idx, &(_, _, i, j)) in corners.iter().enumerate() {
+            let cpt = cpts_f32[i * 4 + j];
+            let expected = [cpt[0] / cpt[3], cpt[1] / cpt[3], cpt[2] / cpt[3]];
+            for (k, &exp) in expected.iter().enumerate() {
+                assert!(
+                    (evals_tensor[idx].pos[k] - exp).abs() < 1e-5,
+                    "tensor f32 corner {idx} axis {k} mismatch on {target:?}: got {}, expected {exp}",
+                    evals_tensor[idx].pos[k],
+                );
+                assert!(
+                    (evals_f32[idx].pos[k] - exp).abs() < 1e-5,
+                    "f32 corner {idx} axis {k} mismatch on {target:?}: got {}, expected {exp}",
+                    evals_f32[idx].pos[k],
+                );
+            }
+            let n_len = (evals_tensor[idx].norm[0].powi(2) + evals_tensor[idx].norm[1].powi(2) + evals_tensor[idx].norm[2].powi(2)).sqrt();
+            assert!((n_len - 1.0).abs() < 1e-5, "unit normal required at corner {idx} on {target:?}");
+            assert!(evals_tensor[idx].norm[3] > 0.0, "positive |Su x Sv| required at corner {idx} on {target:?}");
+        }
+    }
+
+    // 2. Analytical planar patch S(u, v) = (2u + 1, 3v - 2, 5):
+    // Control points at (i/3, j/3) with weight 1 -> dS/du = (2, 0, 0), dS/dv = (0, 3, 0),
+    // Su x Sv = (0, 0, 6) -> unit normal = (0, 0, 1), |Su x Sv| = 6.0 everywhere.
+    let mut planar_f32 = Vec::with_capacity(16);
+    for i in 0..4 {
+        for j in 0..4 {
+            let u = (i as f32) / 3.0;
+            let v = (j as f32) / 3.0;
+            let x = 2.0 * u + 1.0;
+            let y = 3.0 * v - 2.0;
+            let z = 5.0;
+            planar_f32.push([x, y, z, 1.0]);
+        }
+    }
+    let sample_uvs = [(0.0f32, 0.0f32), (0.5, 0.0), (0.0, 0.5), (0.3, 0.7), (0.5, 0.5), (1.0, 1.0)];
+    let planar_q32: Vec<PatchUvQueryF32> = sample_uvs.iter().map(|&(u, v)| PatchUvQueryF32 { u, v, patch_idx: 0, pad: 0 }).collect();
+
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, out_tc) = d.eval_bicubic_tensor_f32(&planar_f32, &planar_q32);
+        let (_, out32) = d.eval_bicubic_f32(&planar_f32, &planar_q32);
+        for (idx, &(u, v)) in sample_uvs.iter().enumerate() {
+            let exp_x = 2.0 * u + 1.0;
+            let exp_y = 3.0 * v - 2.0;
+            assert!((out_tc[idx].pos[0] - exp_x).abs() < 1e-5);
+            assert!((out_tc[idx].pos[1] - exp_y).abs() < 1e-5);
+            assert!((out_tc[idx].pos[2] - 5.0).abs() < 1e-5);
+            assert!(out_tc[idx].norm[0].abs() < 1e-5);
+            assert!(out_tc[idx].norm[1].abs() < 1e-5);
+            assert!((out_tc[idx].norm[2] - 1.0).abs() < 1e-5);
+            assert!((out_tc[idx].norm[3] - 6.0).abs() < 1e-4);
+
+            assert!((out32[idx].pos[0] - exp_x).abs() < 1e-5);
+            assert!((out32[idx].pos[1] - exp_y).abs() < 1e-5);
+            assert!((out32[idx].pos[2] - 5.0).abs() < 1e-5);
+            assert!((out32[idx].norm[2] - 1.0).abs() < 1e-5);
+            assert!((out32[idx].norm[3] - 6.0).abs() < 1e-4);
+        }
+    }
+
+    // 3. Multi-patch batching (patch_idx = 0, 1, 2) and out-of-bounds patch_idx clamping (patch_idx = 999 -> 2):
+    let mut multi_f32 = Vec::with_capacity(48);
+    for p_idx in 0..3 {
+        let z_offset = (p_idx as f32) * 10.0;
+        for cpt in &cpts_f32 {
+            let w = cpt[3];
+            multi_f32.push([cpt[0], cpt[1], cpt[2] + z_offset * w, w]);
+        }
+    }
+    let multi_q32 = vec![
+        PatchUvQueryF32 { u: 0.4, v: 0.6, patch_idx: 0, pad: 0 },
+        PatchUvQueryF32 { u: 0.4, v: 0.6, patch_idx: 1, pad: 0 },
+        PatchUvQueryF32 { u: 0.4, v: 0.6, patch_idx: 2, pad: 0 },
+        PatchUvQueryF32 { u: 0.4, v: 0.6, patch_idx: 999, pad: 0 },
+    ];
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, mtc) = d.eval_bicubic_tensor_f32(&multi_f32, &multi_q32);
+        let (_, m32) = d.eval_bicubic_f32(&multi_f32, &multi_q32);
+        assert!((mtc[1].pos[2] - (mtc[0].pos[2] + 10.0)).abs() < 1e-4, "tensor patch 1 z shift failed on {target:?}");
+        assert!((mtc[2].pos[2] - (mtc[0].pos[2] + 20.0)).abs() < 1e-4, "tensor patch 2 z shift failed on {target:?}");
+        assert!((mtc[3].pos[2] - mtc[2].pos[2]).abs() < 1e-5, "out-of-bounds patch_idx must clamp to last patch on {target:?}");
+        assert!((m32[1].pos[2] - (m32[0].pos[2] + 10.0)).abs() < 1e-4, "f32 patch 1 z shift failed on {target:?}");
+        assert!((m32[2].pos[2] - (m32[0].pos[2] + 20.0)).abs() < 1e-4, "f32 patch 2 z shift failed on {target:?}");
+        assert!((m32[3].pos[2] - m32[2].pos[2]).abs() < 1e-5, "f32 out-of-bounds patch_idx must clamp on {target:?}");
+    }
+
+    // 4. Degenerate singular patch (all 16 control points collapsed to a single point (3, -4, 7, 1)):
+    // Derivatives Su and Sv are zero, so Su x Sv = 0. Must not produce NaN; fallback normal is [0, 0, 1, 0].
+    let singular_f32 = vec![[3.0f32, -4.0, 7.0, 1.0]; 16];
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, stc) = d.eval_bicubic_tensor_f32(&singular_f32, &[PatchUvQueryF32 { u: 0.5, v: 0.5, patch_idx: 0, pad: 0 }]);
+        let (_, s32) = d.eval_bicubic_f32(&singular_f32, &[PatchUvQueryF32 { u: 0.5, v: 0.5, patch_idx: 0, pad: 0 }]);
+        assert!((stc[0].pos[0] - 3.0).abs() < 1e-5 && (stc[0].pos[1] + 4.0).abs() < 1e-5 && (stc[0].pos[2] - 7.0).abs() < 1e-5);
+        assert_eq!(stc[0].norm, [0.0, 0.0, 1.0, 0.0], "singular patch fallback normal mismatch on {target:?}");
+        assert!((s32[0].pos[0] - 3.0).abs() < 1e-5 && (s32[0].pos[1] + 4.0).abs() < 1e-5 && (s32[0].pos[2] - 7.0).abs() < 1e-5);
+        assert_eq!(s32[0].norm, [0.0, 0.0, 1.0, 0.0], "f32 singular patch fallback normal mismatch on {target:?}");
+    }
+
+    // 4b. Zero homogeneous weight (`w = 0` across all 16 control points):
+    // `h[3] == 0.0` triggers the `inv_w = 1.0` guard (`|h[3]| <= 1e-12` in f32)
+    // and must never divide by zero or emit NaN across CPU, Vulkan, CUDA, or MMA Tensor Core backends.
+    let zero_w_f32: Vec<[f32; 4]> = cpts_f32.iter().map(|&[x, y, z, _]| [x, y, z, 0.0]).collect();
+    let ref_zw32 = cpu_eval_bicubic_f32_scalar(&zero_w_f32, &[PatchUvQueryF32 { u: 0.3, v: 0.7, patch_idx: 0, pad: 0 }]);
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, zwtc) = d.eval_bicubic_tensor_f32(&zero_w_f32, &[PatchUvQueryF32 { u: 0.3, v: 0.7, patch_idx: 0, pad: 0 }]);
+        let (_, zw32) = d.eval_bicubic_f32(&zero_w_f32, &[PatchUvQueryF32 { u: 0.3, v: 0.7, patch_idx: 0, pad: 0 }]);
+        for k in 0..4 {
+            assert!(zwtc[0].pos[k].is_finite() && zwtc[0].norm[k].is_finite(), "tensor f32 zero-weight patch produced NaN/Inf on {target:?}");
+            assert!(zw32[0].pos[k].is_finite() && zw32[0].norm[k].is_finite(), "f32 zero-weight patch produced NaN/Inf on {target:?}");
+        }
+        for k in 0..3 {
+            assert!((zwtc[0].pos[k] - ref_zw32[0].pos[k]).abs() < 1e-4, "tensor f32 zero-weight pos[{k}] mismatch on {target:?}");
+            assert!((zw32[0].pos[k] - ref_zw32[0].pos[k]).abs() < 1e-5, "f32 zero-weight pos[{k}] mismatch on {target:?}");
+        }
+    }
+
+    // 4c. Strongly non-unit rational weights (`w` varying from 0.25 to 8.0) verifying the full
+    // rational quotient rule `(dhu - P * dhw) / w` and `(dhv - P * dhw) / w` across all backends:
+    let rational_curved_f32: Vec<[f32; 4]> = cpts_f32
+        .iter()
+        .enumerate()
+        .map(|(idx, &[x, y, z, _])| {
+            let w = 0.5 + ((idx * 7) % 11) as f32 * 0.35;
+            [x, y, z + (idx as f32) * 0.2, w]
+        })
+        .collect();
+    let rat_q32 = vec![
+        PatchUvQueryF32 { u: 0.2, v: 0.8, patch_idx: 0, pad: 0 },
+        PatchUvQueryF32 { u: 0.65, v: 0.35, patch_idx: 0, pad: 0 },
+        PatchUvQueryF32 { u: 0.9, v: 0.1, patch_idx: 0, pad: 0 },
+    ];
+    let ref_rat32 = cpu_eval_bicubic_f32_scalar(&rational_curved_f32, &rat_q32);
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, gottc) = d.eval_bicubic_tensor_f32(&rational_curved_f32, &rat_q32);
+        let (_, got32) = d.eval_bicubic_f32(&rational_curved_f32, &rat_q32);
+        for i in 0..rat_q32.len() {
+            for k in 0..3 {
+                assert!((gottc[i].pos[k] - ref_rat32[i].pos[k]).abs() < 1e-4, "rational tensor f32 pos mismatch on {target:?}");
+                assert!((gottc[i].norm[k] - ref_rat32[i].norm[k]).abs() < 1e-4, "rational tensor f32 norm mismatch on {target:?}");
+                assert!((got32[i].pos[k] - ref_rat32[i].pos[k]).abs() < 1e-4, "rational f32 pos mismatch on {target:?}");
+                assert!((got32[i].norm[k] - ref_rat32[i].norm[k]).abs() < 1e-4, "rational f32 norm mismatch on {target:?}");
+            }
+        }
+    }
+
+    // 5. Empty and insufficient control points + warp/tile boundary sizes (1, 3, 4, 15, 16, 17, 31, 32, 33, 63, 64, 65, 129):
+    assert!(cpu_eval_bicubic_f32_scalar(&cpts_f32[..15], &corner_queries_f32).is_empty());
+    assert!(cpu_eval_bicubic_f32_rayon(&cpts_f32[..15], &corner_queries_f32).is_empty());
+    assert!(cpu_eval_bicubic_f32_scalar(&cpts_f32, &[]).is_empty());
+
+    for n in [1usize, 3, 4, 15, 16, 17, 31, 32, 33, 63, 64, 65, 129] {
+        let q32: Vec<PatchUvQueryF32> = (0..n)
+            .map(|i| PatchUvQueryF32 { u: (i as f32 + 0.5) / (n as f32 + 1.0), v: ((n - i) as f32 + 0.25) / (n as f32 + 1.0), patch_idx: 0, pad: 0 })
+            .collect();
+        let ref32 = cpu_eval_bicubic_f32_scalar(&cpts_f32, &q32);
+        assert_eq!(ref32.len(), n);
+        if let Some(dev) = cuda {
+            let gen32 = dev.eval_bicubic_tensor_f32(&cpts_f32, &q32, false).expect("cuda gen32");
+            for i in 0..n {
+                for k in 0..3 {
+                    assert!((gen32[i].pos[k] - ref32[i].pos[k]).abs() < 1e-5, "gen32 boundary n={n} i={i} mismatch");
+                }
+            }
+            if dev.has_ampere_ptx() {
+                let sm86_32 = dev.eval_bicubic_f32(&cpts_f32, &q32, true).expect("cuda sm86_32");
+                for i in 0..n {
+                    for k in 0..3 {
+                        assert!((sm86_32[i].pos[k] - ref32[i].pos[k]).abs() < 1e-5, "sm86_32 boundary n={n} i={i} mismatch");
+                    }
+                }
+            }
+            if dev.has_f32_tensor_core() {
+                let mma = dev.eval_bicubic_tensor_f32(&cpts_f32, &q32, true).expect("cuda mma");
+                for i in 0..n {
+                    for k in 0..3 {
+                        assert!((mma[i].pos[k] - ref32[i].pos[k]).abs() < 1e-5, "MMA boundary n={n} i={i} mismatch");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn point_in_solid_common_and_edge_cases() {
+    use crate::cuda::GpuTri;
+    use crate::dispatch::{Dispatcher, build_gpu_bvh_from_mesh, cpu_classify_points_scalar};
+
+    let disp = Dispatcher::global();
+
+    // 1. Non-convex Genus-1 Torus (major_r = 10.0, minor_r = 3.0, centered at origin around Z):
+    // Central hole (r < 7.0) is outside; tube interior ((sqrt(x^2+y^2) - 10)^2 + z^2 < 9) is inside.
+    let torus_solid = ok(solidcraft_kernel::torus(Vec3::ZERO, 10.0, 3.0));
+    let torus_mesh = ok(torus_solid.mesh(&solidcraft_kernel::MeshTolerance::chord(0.15)));
+    let (torus_tris, torus_bvh) = build_gpu_bvh_from_mesh(&torus_mesh);
+
+    let torus_cases: &[([f32; 4], bool, &str)] = &[
+        ([0.0, 0.0, 0.0, 0.0], false, "origin in central torus hole"),
+        ([4.0, 0.0, 0.0, 0.0], false, "off-center in central torus hole"),
+        ([10.0, 0.0, 0.0, 0.0], true, "center of torus tube +X"),
+        ([-10.0, 0.0, 1.0, 0.0], true, "inside torus tube -X/+Z"),
+        ([0.0, 10.0, -1.5, 0.0], true, "inside torus tube +Y/-Z"),
+        ([7.071, 7.071, 0.0, 0.0], true, "inside torus tube 45 deg"),
+        ([10.0, 0.0, 4.5, 0.0], false, "above torus tube"),
+        ([15.0, 0.0, 0.0, 0.0], false, "outside outer torus radius"),
+    ];
+    let torus_pts: Vec<[f32; 4]> = torus_cases.iter().map(|&(p, _, _)| p).collect();
+
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, cls_bvh) = d.classify_points(&torus_pts, &torus_tris, &torus_bvh);
+        let (_, cls_raw) = d.classify_points(&torus_pts, &torus_tris, &[]);
+        for (i, &(_, exp, label)) in torus_cases.iter().enumerate() {
+            assert_eq!(cls_bvh[i], exp, "torus BVH classify mismatch for '{label}' on {target:?}");
+            assert_eq!(cls_raw[i], exp, "torus raw classify mismatch for '{label}' on {target:?}");
+        }
+    }
+
+    // 2. Boolean Cut: 10x10x10 box with a vertical through-hole cylinder of radius 2.5 at (5, 5, z):
+    let outer_box = ok(solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)));
+    let hole_cyl = ok(solidcraft_kernel::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.5, 12.0));
+    let hollow_box = ok(solidcraft_kernel::boolean(&outer_box, &hole_cyl, BoolOp::Cut)).expect("boolean cut");
+    let hollow_mesh = ok(hollow_box.mesh(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+    let (hollow_tris, hollow_bvh) = build_gpu_bvh_from_mesh(&hollow_mesh);
+
+    let hollow_cases: &[([f32; 4], bool, &str)] = &[
+        ([5.0, 5.0, 5.0, 0.0], false, "center of cylindrical through-hole"),
+        ([6.0, 5.0, 2.0, 0.0], false, "inside cylindrical through-hole r=1"),
+        ([1.5, 1.5, 5.0, 0.0], true, "inside solid corner wall"),
+        ([8.5, 5.0, 5.0, 0.0], true, "inside solid wall at r=3.5"),
+        ([-1.0, 5.0, 5.0, 0.0], false, "outside box -X"),
+        ([5.0, 5.0, 11.0, 0.0], false, "above box +Z"),
+    ];
+    let hollow_pts: Vec<[f32; 4]> = hollow_cases.iter().map(|&(p, _, _)| p).collect();
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, cls) = d.classify_points(&hollow_pts, &hollow_tris, &hollow_bvh);
+        for (i, &(_, exp, label)) in hollow_cases.iter().enumerate() {
+            assert_eq!(cls[i], exp, "hollow box classify mismatch for '{label}' on {target:?}");
+        }
+    }
+
+    // 3. Degenerate (zero-area collinear/coincident) triangles mixed into a closed mesh + shared-edge ray alignment:
+    let mut tris_with_degen = hollow_tris.clone();
+    tris_with_degen.push(GpuTri { v0: [5.0, 5.0, 5.0, 0.0], v1: [5.0, 5.0, 5.0, 0.0], v2: [5.0, 5.0, 5.0, 0.0] });
+    tris_with_degen.push(GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [1.0, 1.0, 1.0, 0.0], v2: [2.0, 2.0, 2.0, 0.0] });
+
+    // Also include points aligned with box vertices/edges (0,0,0), (5,0,5) and tile-boundary batch sizes (129 points)
+    let mut edge_pts = hollow_pts.clone();
+    while edge_pts.len() < 129 {
+        let idx = edge_pts.len();
+        let t = idx as f32 / 129.0;
+        edge_pts.push([1.0 + t * 0.5, 1.0 + t * 0.5, 1.0 + t * 8.0, 0.0]);
+    }
+    let ref_edge = cpu_classify_points_scalar(&edge_pts, &tris_with_degen, &[]);
+    for target in COMPUTE_TARGETS {
+        let (_, got) = disp.with_forced_backend(Some(target)).classify_points(&edge_pts, &tris_with_degen, &[]);
+        assert_eq!(got, ref_edge, "degenerate-tri + 129-point classify parity failed on {target:?}");
+    }
+
+    // 4. Empty points / empty triangles edge cases:
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        assert!(d.classify_points(&[], &hollow_tris, &hollow_bvh).1.is_empty());
+        assert_eq!(d.classify_points(&hollow_pts, &[], &[]).1, vec![false; hollow_pts.len()]);
+    }
+}
+
+#[test]
+fn raycast_bvh_common_and_edge_cases() {
+    use crate::cuda::{GpuRay, GpuTri};
+    use crate::dispatch::{BackendTarget, Dispatcher, build_gpu_bvh_from_mesh};
+
+    let disp = Dispatcher::global();
+
+    // 1. Torus multi-surface piercing ray:
+    // A ray from (-20, 0, 0) along +X pierces the torus at x = -13 (entry 1), -7 (exit 1), +7 (entry 2), +13 (exit 2).
+    // Closest hit must be the first entry wall near t = 7.0 (x = -13.0).
+    let torus_solid = ok(solidcraft_kernel::torus(Vec3::ZERO, 10.0, 3.0));
+    let torus_mesh = ok(torus_solid.mesh(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+    let (torus_tris, torus_bvh) = build_gpu_bvh_from_mesh(&torus_mesh);
+
+    // 2. Axis-aligned rays (+X, -X, +Y, -Y, +Z, -Z where two direction components are 0.0 -> inv_d = +/-inf),
+    // diagonal rays, rays starting inside a solid, and rays pointing away from the solid.
+    // Slightly offset the first 3 rays off the exact (y=0, z=0) tessellation vertex seam so each ray hits a unique triangle interior.
+    let rays = vec![
+        // Pierces 4 torus walls along +X; closest is at x ~= -13 -> t ~= 7.0
+        GpuRay { origin: [-20.0, 0.13, 0.07, 0.0], dir: [1.0, 0.0, 0.0, 0.0] },
+        // Pierces 4 torus walls along -X; closest is at x ~= +13 -> t ~= 7.0
+        GpuRay { origin: [20.0, 0.13, 0.07, 0.0], dir: [-1.0, 0.0, 0.0, 0.0] },
+        // Pierces 4 torus walls along +Y; closest is at y ~= -13 -> t ~= 7.0
+        GpuRay { origin: [0.13, -20.0, 0.07, 0.0], dir: [0.0, 1.0, 0.0, 0.0] },
+        // Passes straight through the central hole of the torus along +Z -> MISS
+        GpuRay { origin: [0.0, 0.0, -20.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] },
+        // Hits top of torus tube at (10, 0, +3) from z = +10 along -Z -> t ~= 7.0
+        GpuRay { origin: [10.0, 0.13, 10.0, 0.0], dir: [0.0, 0.0, -1.0, 0.0] },
+        // Origin inside torus tube (10, 0, 0) shooting +Z -> hits top wall at z = +3 -> t ~= 3.0
+        GpuRay { origin: [10.0, 0.13, 0.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] },
+        // Origin outside shooting AWAY from torus -> MISS
+        GpuRay { origin: [20.0, 0.0, 0.0, 0.0], dir: [1.0, 0.0, 0.0, 0.0] },
+    ];
+
+    let (_, ref_hits) = disp.with_forced_backend(Some(BackendTarget::CpuScalar)).raycast_mesh(&rays, &torus_tris, &torus_bvh);
+    assert!((ref_hits[0].t - 7.0).abs() < 0.15 && ref_hits[0].tri_idx != u32::MAX);
+    assert!((ref_hits[1].t - 7.0).abs() < 0.15 && ref_hits[1].tri_idx != u32::MAX);
+    assert!((ref_hits[2].t - 7.0).abs() < 0.15 && ref_hits[2].tri_idx != u32::MAX);
+    assert_eq!(ref_hits[3].tri_idx, u32::MAX, "ray through torus hole must miss");
+    assert!((ref_hits[4].t - 7.0).abs() < 0.15 && ref_hits[4].tri_idx != u32::MAX);
+    assert!((ref_hits[5].t - 3.0).abs() < 0.15 && ref_hits[5].tri_idx != u32::MAX);
+    assert_eq!(ref_hits[6].tri_idx, u32::MAX, "ray pointing away from torus must miss");
+
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, hits_bvh) = d.raycast_mesh(&rays, &torus_tris, &torus_bvh);
+        let (_, hits_raw) = d.raycast_mesh(&rays, &torus_tris, &[]);
+        for (i, r) in ref_hits.iter().enumerate() {
+            assert_eq!(hits_bvh[i].tri_idx, r.tri_idx, "torus BVH ray {i} tri_idx mismatch on {target:?}");
+            assert!((hits_bvh[i].t - r.t).abs() < 1e-4, "torus BVH ray {i} t mismatch on {target:?}");
+            assert_eq!(hits_raw[i].tri_idx, r.tri_idx, "torus no-BVH ray {i} tri_idx mismatch on {target:?}");
+            assert!((hits_raw[i].t - r.t).abs() < 1e-4, "torus no-BVH ray {i} t mismatch on {target:?}");
+        }
+    }
+
+    // 3. Single-triangle leaf BVH + near-origin self-intersection guard (t <= 1e-7 ignored):
+    let single_tri = vec![GpuTri { v0: [-1.0, -1.0, 0.0, f32::from_bits(0)], v1: [2.0, -1.0, 0.0, 0.0], v2: [-1.0, 2.0, 0.0, 0.0] }];
+    let single_bvh = vec![crate::cuda::GpuBvhNode {
+        min_x: -1.0,
+        min_y: -1.0,
+        min_z: 0.0,
+        left_or_prim: 0,
+        max_x: 2.0,
+        max_y: 2.0,
+        max_z: 0.0,
+        right_or_count: 0x8000_0000 | 1,
+    }];
+    let single_rays = vec![
+        // Hits at t = 5.0
+        GpuRay { origin: [0.0, 0.0, -5.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] },
+        // Starts directly on the triangle (t = 0.0 <= 1e-7) -> must be ignored as self-intersection
+        GpuRay { origin: [0.0, 0.0, 0.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] },
+        // Parallel coplanar ray -> must miss
+        GpuRay { origin: [-5.0, 0.0, 0.0, 0.0], dir: [1.0, 0.0, 0.0, 0.0] },
+    ];
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, sh) = d.raycast_mesh(&single_rays, &single_tri, &single_bvh);
+        assert_eq!(sh[0].tri_idx, 0, "single-tri hit failed on {target:?}");
+        assert!((sh[0].t - 5.0).abs() < 1e-5);
+        assert_eq!(sh[1].tri_idx, u32::MAX, "t=0 self-intersection must be ignored on {target:?}");
+        assert_eq!(sh[2].tri_idx, u32::MAX, "parallel coplanar ray must miss on {target:?}");
+        assert!(d.raycast_mesh(&[], &single_tri, &single_bvh).1.is_empty());
+        let (_, empty_mesh_hits) = d.raycast_mesh(&single_rays, &[], &[]);
+        assert!(empty_mesh_hits.iter().all(|h| h.tri_idx == u32::MAX && h.t < 0.0));
+    }
+
+    // 4. Caller-supplied deep BVH exceeding BVH_STACK_CAP (64) must be rejected by bvh_fits_traversal_stack
+    // and routed through the non-BVH fallback across Vulkan, CUDA, and CPU without missing hits or miscounting crossings:
+    assert!(crate::dispatch::bvh_fits_traversal_stack(&torus_bvh, torus_tris.len()));
+    let mut deep_bvh = Vec::with_capacity(141);
+    for d in 0..70u32 {
+        deep_bvh.push(crate::cuda::GpuBvhNode {
+            min_x: -20.0,
+            min_y: -20.0,
+            min_z: -20.0,
+            left_or_prim: d + 1,
+            max_x: 20.0,
+            max_y: 20.0,
+            max_z: 20.0,
+            right_or_count: 71 + d,
+        });
+    }
+    // Node 70 is the deep leaf referencing all torus_tris; nodes 71..141 are empty right-sibling leaves
+    deep_bvh.push(crate::cuda::GpuBvhNode {
+        min_x: -20.0,
+        min_y: -20.0,
+        min_z: -20.0,
+        left_or_prim: 0,
+        max_x: 20.0,
+        max_y: 20.0,
+        max_z: 20.0,
+        right_or_count: 0x8000_0000 | (torus_tris.len() as u32),
+    });
+    for _ in 0..70 {
+        deep_bvh.push(crate::cuda::GpuBvhNode {
+            min_x: -20.0,
+            min_y: -20.0,
+            min_z: -20.0,
+            left_or_prim: 0,
+            max_x: 20.0,
+            max_y: 20.0,
+            max_z: 20.0,
+            right_or_count: 0x8000_0000,
+        });
+    }
+    assert!(!crate::dispatch::bvh_fits_traversal_stack(&deep_bvh, torus_tris.len()), "70-deep BVH must exceed BVH_STACK_CAP");
+    if let Some(vk) = crate::dispatch::VulkanAccel::global() {
+        let vk_deep_rc = vk.raycast_bvh(&rays, &torus_tris, &deep_bvh).expect("vk deep BVH raycast fallback");
+        for (i, r) in ref_hits.iter().enumerate() {
+            assert_eq!(vk_deep_rc[i].tri_idx, r.tri_idx, "vk deep BVH ray {i} fallback mismatch");
+        }
+        let probe_pts = vec![[0.0f32, 0.0, 0.0, 0.0], [10.0, 0.0, 0.0, 0.0]];
+        let vk_deep_cls = vk.classify_points(&probe_pts, &torus_tris, &deep_bvh, true).expect("vk deep BVH classify fallback");
+        assert_eq!(vk_deep_cls, vec![false, true]);
+    }
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, deep_hits) = d.raycast_mesh(&rays, &torus_tris, &deep_bvh);
+        for (i, r) in ref_hits.iter().enumerate() {
+            assert_eq!(deep_hits[i].tri_idx, r.tri_idx, "deep BVH ray {i} mismatch on {target:?}");
+        }
+        let probe_pts = vec![[0.0f32, 0.0, 0.0, 0.0], [10.0, 0.0, 0.0, 0.0]];
+        let (_, deep_cls) = d.classify_points(&probe_pts, &torus_tris, &deep_bvh);
+        assert_eq!(deep_cls, vec![false, true], "deep BVH classify mismatch on {target:?}");
+    }
+}
+
+#[test]
+fn collision_lbvh_morton_and_ssi_edge_cases() {
+    use crate::collision::{GpuAabb, OverlapPair, build_simple_lbvh, cpu_bipartite_overlap, cpu_self_overlap};
+    use crate::cuda::CudaBackend;
+    use crate::dispatch::{Dispatcher, VulkanAccel, cpu_bipartite_overlap_rayon};
+    use solidcraft_geom::Aabb3;
+
+    let disp = Dispatcher::global();
+    let cuda = CudaBackend::global();
+
+    // 1. Outward-rounded GpuAabb::from_aabb3 conservativeness & Aabb3::EMPTY handling:
+    let empty_gpu = GpuAabb::from_aabb3(&Aabb3::EMPTY, 0);
+    let unit_aabb = Aabb3 { min: Vec3::new(0.1, 0.2, 0.3), max: Vec3::new(1.1, 1.2, 1.3) };
+    let unit_gpu = GpuAabb::from_aabb3(&unit_aabb, 1);
+    assert!(f64::from(unit_gpu.min_x) < unit_aabb.min.x && f64::from(unit_gpu.max_x) > unit_aabb.max.x);
+    assert!(f64::from(unit_gpu.min_y) < unit_aabb.min.y && f64::from(unit_gpu.max_y) > unit_aabb.max.y);
+    assert!(f64::from(unit_gpu.min_z) < unit_aabb.min.z && f64::from(unit_gpu.max_z) > unit_aabb.max.z);
+    assert!(cpu_bipartite_overlap(&[empty_gpu], &[unit_gpu], 0.0).pairs.is_empty(), "Aabb3::EMPTY must not overlap finite box");
+
+    // 2. Empty and single-element inputs across bipartite and self-overlap:
+    assert!(cpu_bipartite_overlap(&[], &[unit_gpu], 0.0).pairs.is_empty());
+    assert!(cpu_bipartite_overlap(&[unit_gpu], &[], 0.0).pairs.is_empty());
+    assert!(cpu_bipartite_overlap_rayon(&[], &[unit_gpu], 0.0).pairs.is_empty());
+    assert!(cpu_self_overlap(&[], 0.0).pairs.is_empty());
+    assert!(cpu_self_overlap(&[unit_gpu], 0.0).pairs.is_empty());
+
+    // 3. Exact tolerance boundary conditions:
+    // Box A = [0, 1]^3, Box B = [1.02, 2.02] x [0, 1]^2 (gap along X is 0.02).
+    // Overlap condition is `a.max_x + tol >= b.min_x`, so tol = 0.015 -> no overlap; tol = 0.025 -> overlap.
+    // Touching box C = [1.0, 2.0] x [0, 1]^2 overlaps at tol = 0.0 and negative tol = -5.0 (clamped to 0.0).
+    let box_a = GpuAabb { min_x: 0.0, min_y: 0.0, min_z: 0.0, id: 0, max_x: 1.0, max_y: 1.0, max_z: 1.0, pad: 0 };
+    let box_b = GpuAabb { min_x: 1.02, min_y: 0.0, min_z: 0.0, id: 1, max_x: 2.02, max_y: 1.0, max_z: 1.0, pad: 0 };
+    let box_c = GpuAabb { min_x: 1.0, min_y: 0.0, min_z: 0.0, id: 2, max_x: 2.0, max_y: 1.0, max_z: 1.0, pad: 0 };
+
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        assert!(d.bipartite_aabb_overlap(&[box_a], &[box_b], 0.015).1.pairs.is_empty(), "gap=0.02 with tol=0.015 must not overlap on {target:?}");
+        assert_eq!(
+            d.bipartite_aabb_overlap(&[box_a], &[box_b], 0.025).1.pairs,
+            vec![OverlapPair { a: 0, b: 1 }],
+            "gap=0.02 with tol=0.025 must overlap on {target:?}"
+        );
+        assert_eq!(
+            d.bipartite_aabb_overlap(&[box_a], &[box_c], 0.0).1.pairs,
+            vec![OverlapPair { a: 0, b: 2 }],
+            "touching boxes at tol=0.0 must overlap on {target:?}"
+        );
+        assert_eq!(
+            d.bipartite_aabb_overlap(&[box_a], &[box_c], -5.0).1.pairs,
+            vec![OverlapPair { a: 0, b: 2 }],
+            "negative tol must clamp to 0.0 on {target:?}"
+        );
+    }
+
+    // 4. Workgroup tile boundary sizes (1, 15, 16, 17, 31, 32, 33) for 16x16 bipartite and 256 self-overlap:
+    for (na, nb) in [(1usize, 1usize), (15, 17), (16, 16), (17, 31), (32, 33)] {
+        let set_a: Vec<GpuAabb> = (0..na)
+            .map(|i| {
+                let x = i as f32 * 0.75;
+                GpuAabb { min_x: x, min_y: 0.0, min_z: 0.0, id: i as u32, max_x: x + 1.0, max_y: 1.0, max_z: 1.0, pad: 0 }
+            })
+            .collect();
+        let set_b: Vec<GpuAabb> = (0..nb)
+            .map(|j| {
+                let x = j as f32 * 0.75 + 0.25;
+                GpuAabb { min_x: x, min_y: 0.0, min_z: 0.0, id: j as u32, max_x: x + 1.0, max_y: 1.0, max_z: 1.0, pad: 0 }
+            })
+            .collect();
+        let ref_bi = cpu_bipartite_overlap(&set_a, &set_b, 1e-4);
+        let ref_self = cpu_self_overlap(&set_a, 1e-4);
+        for pair in &ref_self.pairs {
+            assert!(pair.a < pair.b, "self-overlap must strictly emit upper-triangular pairs (a < b)");
+        }
+        for target in COMPUTE_TARGETS {
+            let (_, got_bi) = disp.with_forced_backend(Some(target)).bipartite_aabb_overlap(&set_a, &set_b, 1e-4);
+            assert_eq!(got_bi.pairs, ref_bi.pairs, "bipartite tile boundary ({na}, {nb}) mismatch on {target:?}");
+        }
+        if let Some(vk) = VulkanAccel::global() {
+            let got_self = vk.collision().self_overlap(&set_a, 1e-4).expect("vk self_overlap");
+            assert_eq!(got_self.pairs, ref_self.pairs, "Vulkan self_overlap mismatch for na={na}");
+        }
+    }
+
+    // 5. Coincident / zero-extent scene Morton codes, single-leaf LBVH traversal, & storage buffer limit validation:
+    if let Some(vk) = VulkanAccel::global() {
+        assert!(vk.collision().fits_storage(1024));
+        assert!(!vk.collision().fits_storage(usize::MAX));
+        let coincident_boxes = vec![box_a; 8];
+        let morton = vk.collision().compute_morton(&coincident_boxes).expect("vk morton coincident");
+        assert_eq!(morton.len(), 8);
+        assert!(morton.iter().all(|m| m.code == 0), "zero-extent scene must produce Morton code 0 without NaN");
+        let lbvh_coincident = build_simple_lbvh(&coincident_boxes, &morton);
+        assert_eq!(lbvh_coincident.len(), 15);
+        let res_coincident = vk.collision().lbvh_query(&[box_a], &lbvh_coincident, 0.0).expect("vk lbvh coincident");
+        assert_eq!(res_coincident.pairs.len(), 8);
+
+        let single_morton = vk.collision().compute_morton(&[box_a]).expect("vk morton single");
+        let single_lbvh = build_simple_lbvh(&[box_a], &single_morton);
+        assert_eq!(single_lbvh.len(), 1);
+        let single_res = vk.collision().lbvh_query(&[box_a, box_b, box_c], &single_lbvh, 0.0).expect("vk lbvh single");
+        assert_eq!(single_res.pairs, vec![OverlapPair { a: 0, b: 0 }, OverlapPair { a: 2, b: 0 }]);
+
+        // Caller-supplied 65-leaf left-comb LBVH exceeding LBVH_STACK_CAP (64) must be rejected by lbvh_fits_traversal_stack and lbvh_query:
+        assert!(crate::collision::lbvh_fits_traversal_stack(&lbvh_coincident));
+        let mut left_comb = Vec::with_capacity(129);
+        for d in 0..64u32 {
+            left_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: if d < 63 { d + 1 } else { 64 },
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: 65 + d,
+            });
+        }
+        for leaf_id in 0..65u32 {
+            left_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: leaf_id,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: 0x8000_0000,
+            });
+        }
+        assert!(!crate::collision::lbvh_fits_traversal_stack(&left_comb));
+        assert!(vk.collision().lbvh_query(&[box_a], &left_comb, 0.0).is_none());
+
+        // Whereas a 65-leaf right-comb LBVH (left child is always a leaf, right child is internal)
+        // keeps at most 2 pending nodes on the shader stack and must succeed with all 65 pairs:
+        let mut right_comb = Vec::with_capacity(129);
+        for d in 0..64u32 {
+            right_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: 64 + d,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: if d < 63 { d + 1 } else { 128 },
+            });
+        }
+        for leaf_id in 0..65u32 {
+            right_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: leaf_id,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: 0x8000_0000,
+            });
+        }
+        assert!(crate::collision::lbvh_fits_traversal_stack(&right_comb));
+        let right_res = vk.collision().lbvh_query(&[box_a], &right_comb, 0.0).expect("vk lbvh right_comb");
+        assert_eq!(right_res.pairs.len(), 65);
+
+        // 6. SSI surface residual evaluation: disjoint surfaces vs intersecting surfaces & grid_res clamping:
+        let c1 = ok(solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0));
+        let c2_disjoint = ok(solidcraft_kernel::cylinder(Vec3::new(20.0, 0.0, 0.0), Vec3::Z, 2.0, 5.0));
+        let p1 = ok(c1.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+        let p2_disjoint = ok(c2_disjoint.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+        if let (Some(sa), Some(sb)) = (p1.surfaces.first(), p2_disjoint.surfaces.first()) {
+            let disjoint_seeds = vk
+                .collision()
+                .surface_residuals(sa, (0.0, 1.0), (0.0, 1.0), sb, (0.0, 1.0), (0.0, 1.0), 8, 1.0)
+                .expect("vk disjoint surface_residuals");
+            assert!(disjoint_seeds.is_empty(), "disjoint surfaces separated by >15 units must return 0 seeds at threshold=1.0");
+
+            // Same surface against itself with grid_res = 1 (clamped to 2) must find exact zero-distance seeds on the diagonal:
+            let self_seeds = vk
+                .collision()
+                .surface_residuals(sa, (0.0, 1.0), (0.0, 1.0), sa, (0.0, 1.0), (0.0, 1.0), 1, 0.01)
+                .expect("vk self surface_residuals grid_res=1");
+            assert!(self_seeds.len() >= 4, "2x2 clamped grid self-surface residual must find at least 4 zero-distance seeds");
+            assert!(self_seeds[0].dist_sq < 1e-10);
+        }
+    }
+    let _ = cuda;
+}
+
+#[test]
+fn point_mesh_distance_voronoi_and_edge_cases() {
+    use crate::cuda::GpuTri;
+    use crate::dispatch::{Dispatcher, cpu_point_mesh_distance_scalar};
+
+    let disp = Dispatcher::global();
+
+    // 1. Exact analytical verification of all 7 Voronoi feature regions on a single right triangle:
+    // A = (0, 0, 0), B = (4, 0, 0), C = (0, 3, 0).
+    let tri = GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [4.0, 0.0, 0.0, 0.0], v2: [0.0, 3.0, 0.0, 0.0] };
+    let voronoi_cases: &[([f32; 4], f32, &str)] = &[
+        // Vertex A region: closest is (0, 0, 0), d^2 = (-1)^2 + (-2)^2 + 2^2 = 9.0
+        ([-1.0, -2.0, 2.0, 0.0], 9.0, "Vertex A Voronoi region"),
+        // Vertex B region: closest is (4, 0, 0), d^2 = (6-4)^2 + (-1)^2 + 2^2 = 9.0
+        ([6.0, -1.0, 2.0, 0.0], 9.0, "Vertex B Voronoi region"),
+        // Vertex C region: closest is (0, 3, 0), d^2 = (-2)^2 + (5-3)^2 + 1^2 = 9.0
+        ([-2.0, 5.0, 1.0, 0.0], 9.0, "Vertex C Voronoi region"),
+        // Edge AB region: closest is (2, 0, 0), d^2 = 0^2 + (-3)^2 + 4^2 = 25.0
+        ([2.0, -3.0, 4.0, 0.0], 25.0, "Edge AB Voronoi region"),
+        // Edge AC region: closest is (0, 1.5, 0), d^2 = (-3)^2 + 0^2 + 4^2 = 25.0
+        ([-3.0, 1.5, 4.0, 0.0], 25.0, "Edge AC Voronoi region"),
+        // Edge BC region: (2, 1.5, 0) is midpoint of BC; outward normal in XY is (3, 4)/5.
+        // P = (2, 1.5, 0) + (1.2, 1.6, 2.0) = (3.2, 3.1, 2.0) -> closest is (2, 1.5, 0), d^2 = 1.44 + 2.56 + 4.0 = 8.0
+        ([3.2, 3.1, 2.0, 0.0], 8.0, "Edge BC Voronoi region"),
+        // Face interior region: P = (1, 1, -5) -> closest is (1, 1, 0), d^2 = 25.0
+        ([1.0, 1.0, -5.0, 0.0], 25.0, "Face interior Voronoi region"),
+        // Point directly on triangle interior: P = (1, 1, 0) -> d^2 = 0.0
+        ([1.0, 1.0, 0.0, 0.0], 0.0, "Point on triangle interior"),
+        // Point directly on vertex B: P = (4, 0, 0) -> d^2 = 0.0
+        ([4.0, 0.0, 0.0, 0.0], 0.0, "Point on vertex B"),
+    ];
+    let pts: Vec<[f32; 4]> = voronoi_cases.iter().map(|&(p, _, _)| p).collect();
+
+    for target in COMPUTE_TARGETS {
+        let (_, d2) = disp.with_forced_backend(Some(target)).point_mesh_distance(&pts, &[tri]);
+        for (i, &(_, exp_d2, label)) in voronoi_cases.iter().enumerate() {
+            assert!((d2[i] - exp_d2).abs() < 1e-4, "Voronoi distance mismatch for '{label}' on {target:?}: got {}, expected {exp_d2}", d2[i]);
+        }
+    }
+
+    // 2. Degenerate triangles (coincident vertices A==B==C, A==B!=C, A==C!=B, B==C!=A, and collinear vertices):
+    // Verify no backend ever emits NaN!
+    let degen_tris = vec![
+        GpuTri { v0: [1.0, 2.0, 3.0, 0.0], v1: [1.0, 2.0, 3.0, 0.0], v2: [1.0, 2.0, 3.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [0.0, 0.0, 0.0, 0.0], v2: [2.0, 0.0, 0.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [2.0, 0.0, 0.0, 0.0], v2: [0.0, 0.0, 0.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [2.0, 0.0, 0.0, 0.0], v2: [2.0, 0.0, 0.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [1.0, 0.0, 0.0, 0.0], v2: [2.0, 0.0, 0.0, 0.0] },
+    ];
+    for target in COMPUTE_TARGETS {
+        let (_, d2) = disp.with_forced_backend(Some(target)).point_mesh_distance(&pts, &degen_tris);
+        for (i, &val) in d2.iter().enumerate() {
+            assert!(val.is_finite() && val >= 0.0, "degenerate triangle produced non-finite d2={val} at query {i} on {target:?}");
+        }
+    }
+
+    // 3. Empty inputs and tile-boundary sizes (127, 128, 129 queries x 127, 128, 129 triangles):
+    let mut many_tris = Vec::with_capacity(129);
+    for i in 0..129 {
+        let z = i as f32 * 0.5;
+        many_tris.push(GpuTri { v0: [0.0, 0.0, z, 0.0], v1: [1.0, 0.0, z, 0.0], v2: [0.0, 1.0, z, 0.0] });
+    }
+    let mut many_pts = Vec::with_capacity(129);
+    for i in 0..129 {
+        many_pts.push([0.25, 0.25, i as f32 * 0.5 + 0.1, 0.0]);
+    }
+    let ref_many = cpu_point_mesh_distance_scalar(&many_pts, &many_tris);
+    for target in COMPUTE_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        assert!(d.point_mesh_distance(&[], &many_tris).1.is_empty());
+        let (_, empty_tri_d2) = d.point_mesh_distance(&pts, &[]);
+        assert!(empty_tri_d2.iter().all(|&x| x.is_infinite() && x > 0.0));
+        let (_, got_many) = d.point_mesh_distance(&many_pts, &many_tris);
+        for i in 0..129 {
+            assert!((got_many[i] - ref_many[i]).abs() < 1e-5, "tile-boundary 129x129 mismatch at {i} on {target:?}");
+        }
+    }
+}
+
+#[test]
+fn mass_properties_common_and_edge_cases() {
+    use crate::cuda::GpuTri;
+    use crate::dispatch::{BackendTarget, Dispatcher, build_gpu_bvh_from_mesh};
+
+    let disp = Dispatcher::global();
+
+    // 1. Empty mesh -> all zeros without NaN:
+    for target in COMPUTE_TARGETS {
+        let (_, mp) = disp.with_forced_backend(Some(target)).mass_properties(&[]);
+        assert_eq!(mp.volume, 0.0);
+        assert_eq!(mp.area, 0.0);
+        assert_eq!(mp.centroid, Vec3::ZERO);
+    }
+
+    // 2. Open zero-volume flat 2x3 rectangle in the z = 0 plane:
+    // Volume = 0.0, Surface Area = 6.0, Centroid = Vec3::ZERO (guarded against division by zero v6 == 0).
+    let flat_sheet = vec![
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [2.0, 0.0, 0.0, 0.0], v2: [2.0, 3.0, 0.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [2.0, 3.0, 0.0, 0.0], v2: [0.0, 3.0, 0.0, 0.0] },
+    ];
+    for target in COMPUTE_TARGETS {
+        let (_, mp) = disp.with_forced_backend(Some(target)).mass_properties(&flat_sheet);
+        assert!(mp.volume.abs() < 1e-12, "flat sheet volume must be 0 on {target:?}");
+        assert!((mp.area - 6.0).abs() < 1e-5, "flat sheet area must be 6.0 on {target:?}");
+        assert_eq!(mp.centroid, Vec3::ZERO, "zero-volume flat sheet centroid must be Vec3::ZERO on {target:?}");
+    }
+
+    // 3. Torus shifted away from origin at (5, -3, 2) with R = 8, r = 2 (> 512 triangles across multiple 256-thread workgroups):
+    // Analytical volume = 2 * pi^2 * R * r^2 = 64 * pi^2 ~= 631.65468
+    // Analytical area   = 4 * pi^2 * R * r   = 64 * pi^2 ~= 631.65468
+    let center = Vec3::new(5.0, -3.0, 2.0);
+    let torus_solid = ok(solidcraft_kernel::torus(center, 8.0, 2.0));
+    let torus_mesh = ok(torus_solid.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)));
+    let expected_mp = torus_mesh.measure();
+    let (torus_tris, _) = build_gpu_bvh_from_mesh(&torus_mesh);
+    assert!(torus_tris.len() > 512, "torus mesh must span multiple 256-thread reduction workgroups");
+
+    for target in COMPUTE_TARGETS {
+        let (_, mp) = disp.with_forced_backend(Some(target)).mass_properties(&torus_tris);
+        let rel_vol = (mp.volume - expected_mp.volume).abs() / expected_mp.volume;
+        let rel_area = (mp.area - expected_mp.area).abs() / expected_mp.area;
+        let tol = if target == BackendTarget::VulkanCompute { 1e-4 } else { 1e-6 };
+        assert!(rel_vol < tol, "torus volume mismatch on {target:?}: got {}, expected {}", mp.volume, expected_mp.volume);
+        assert!(rel_area < tol, "torus area mismatch on {target:?}: got {}, expected {}", mp.area, expected_mp.area);
+        assert!(mp.centroid.dist(expected_mp.centroid) < 1e-3, "torus centroid mismatch on {target:?}");
+    }
+
+    // 4. Inverted winding orientation: negates signed volume, preserves area and centroid:
+    let inverted_tris: Vec<GpuTri> = torus_tris.iter().map(|t| GpuTri { v0: t.v0, v1: t.v2, v2: t.v1 }).collect();
+    for target in COMPUTE_TARGETS {
+        let (_, mp_inv) = disp.with_forced_backend(Some(target)).mass_properties(&inverted_tris);
+        let tol = if target == BackendTarget::VulkanCompute { 1e-4 } else { 1e-6 };
+        assert!((mp_inv.volume + expected_mp.volume).abs() / expected_mp.volume < tol, "inverted volume must be -V on {target:?}");
+        assert!((mp_inv.area - expected_mp.area).abs() / expected_mp.area < tol, "inverted area must equal +A on {target:?}");
+        assert!(mp_inv.centroid.dist(expected_mp.centroid) < 1e-3, "inverted centroid must be preserved on {target:?}");
+    }
+
+    // 5. Multi-workgroup reduction boundary triangle counts (1, 12, 255, 256, 257, 511, 512, 513):
+    // Surface area is strictly invariant for any open or closed triangle slice; volume and centroid are
+    // reference-point invariant (`p0 = tris[0].v0` in WGSL vs origin in f64) for any closed manifold mesh.
+    // Test surface area on arbitrary slices and full volume/area/centroid on closed meshes of 12, 252, 256, 260, 512, and 516 triangles:
+    for count in [1usize, 255, 256, 257, 511, 512, 513] {
+        let sub_tris = &torus_tris[..count.min(torus_tris.len())];
+        let (_, ref_sub) = disp.with_forced_backend(Some(BackendTarget::CpuScalar)).mass_properties(sub_tris);
+        for target in COMPUTE_TARGETS {
+            let (_, got_sub) = disp.with_forced_backend(Some(target)).mass_properties(sub_tris);
+            let tol = if target == BackendTarget::VulkanCompute { 1e-2 } else { 1e-5 };
+            assert!((got_sub.area - ref_sub.area).abs() < tol, "mass_properties boundary count={count} area mismatch on {target:?}");
+            if target != BackendTarget::VulkanCompute {
+                assert!((got_sub.volume - ref_sub.volume).abs() < tol, "mass_properties boundary count={count} volume mismatch on {target:?}");
+            }
+        }
+    }
+
+    // Closed meshes constructed to hit exact 256-thread workgroup boundaries (12, 252, 256, 260, 512, 516 triangles)
+    // by combining closed 12-triangle boxes and a closed 4-triangle tetrahedron:
+    let unit_box_body = ok(solidcraft_kernel::box_solid(Vec3::new(1.0, 2.0, 3.0), Vec3::new(3.0, 4.0, 5.0)));
+    let unit_box_mesh = ok(unit_box_body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.5)));
+    let (box12, _) = build_gpu_bvh_from_mesh(&unit_box_mesh);
+    assert_eq!(box12.len(), 12);
+    // Regular closed tetrahedron with 4 triangles:
+    let tet4 = [
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [1.0, 0.0, 0.0, 0.0], v2: [0.0, 1.0, 0.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [0.0, 0.0, 1.0, 0.0], v2: [1.0, 0.0, 0.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [0.0, 1.0, 0.0, 0.0], v2: [0.0, 0.0, 1.0, 0.0] },
+        GpuTri { v0: [1.0, 0.0, 0.0, 0.0], v1: [0.0, 0.0, 1.0, 0.0], v2: [0.0, 1.0, 0.0, 0.0] },
+    ];
+    for (num_boxes, num_tets, expected_tris) in [(1usize, 0usize, 12usize), (21, 0, 252), (21, 1, 256), (21, 2, 260), (42, 2, 512), (43, 0, 516)] {
+        let mut closed_tris = Vec::with_capacity(expected_tris);
+        for _ in 0..num_boxes {
+            closed_tris.extend_from_slice(&box12);
+        }
+        for _ in 0..num_tets {
+            closed_tris.extend_from_slice(&tet4);
+        }
+        assert_eq!(closed_tris.len(), expected_tris);
+        let (_, ref_closed) = disp.with_forced_backend(Some(BackendTarget::CpuScalar)).mass_properties(&closed_tris);
+        for target in COMPUTE_TARGETS {
+            let (_, got_closed) = disp.with_forced_backend(Some(target)).mass_properties(&closed_tris);
+            let tol = if target == BackendTarget::VulkanCompute { 1e-2 } else { 1e-5 };
+            assert!(
+                (got_closed.volume - ref_closed.volume).abs() < tol,
+                "closed boundary tris={expected_tris} volume mismatch on {target:?}: got {}, expected {}",
+                got_closed.volume,
+                ref_closed.volume
+            );
+            assert!((got_closed.area - ref_closed.area).abs() < tol, "closed boundary tris={expected_tris} area mismatch on {target:?}");
+            assert!(got_closed.centroid.dist(ref_closed.centroid) < 1e-3, "closed boundary tris={expected_tris} centroid mismatch on {target:?}");
+        }
+    }
+}
+
+/// Verifies malformed/hostile BVH and LBVH tree rejection (cycles, out-of-bounds child/primitive indices,
+/// `u32::MAX` overflow, exact stack-cap boundary 64 vs 65), `MAX_OVERLAP_PAIRS` saturation, and
+/// equidistance tie-breaking in raycast.
+#[test]
+fn hostile_bvh_lbvh_saturation_and_tie_break_edge_cases() {
+    use crate::collision::{
+        GpuAabb, GpuLbvhNode, GpuPod, MAX_OVERLAP_PAIRS, OverlapPair, aabbs_from_bounds, cpu_bipartite_overlap, cpu_self_overlap, decode_pod_slice,
+        encode_pod_slice, face_aabbs_from_mesh, lbvh_fits_traversal_stack, triangle_aabbs_from_mesh,
+    };
+    use crate::cuda::{CudaBackend, GpuBvhNode, GpuRay, GpuTri};
+    use crate::dispatch::{
+        BVH_STACK_CAP, BackendTarget, Dispatcher, KernelCalibration, KernelOp, SizeBucketCalibration, VulkanAccel, build_gpu_bvh,
+        bvh_fits_traversal_stack, cpu_bipartite_overlap_rayon,
+    };
+
+    let disp = Dispatcher::global();
+
+    // 1. Hostile / Malformed `GpuBvhNode` graphs:
+    // (a) Self-loop at root (left_or_prim = 0, right_or_count = 0)
+    let bvh_self_loop = [GpuBvhNode { left_or_prim: 0, right_or_count: 0, ..Default::default() }];
+    assert!(!bvh_fits_traversal_stack(&bvh_self_loop, 4), "self-loop BVH root must be rejected");
+
+    // (b) 2-node mutual cycle (0 -> 1, 1 -> 0)
+    let bvh_two_cycle = [
+        GpuBvhNode { left_or_prim: 1, right_or_count: 1, ..Default::default() },
+        GpuBvhNode { left_or_prim: 0, right_or_count: 0, ..Default::default() },
+    ];
+    assert!(!bvh_fits_traversal_stack(&bvh_two_cycle, 4), "2-node cycle BVH must be rejected");
+
+    // (c) DAG diamond sharing a child node (0 has children 1 and 1, where 1 is a leaf):
+    // `visited > bvh_nodes.len()` catches cycles; verify diamond with out-of-bounds right child is rejected:
+    let bvh_oob_left = [GpuBvhNode { left_or_prim: 5, right_or_count: 0, ..Default::default() }];
+    let bvh_oob_right = [GpuBvhNode { left_or_prim: 0, right_or_count: 5, ..Default::default() }];
+    assert!(!bvh_fits_traversal_stack(&bvh_oob_left, 4), "OOB left child BVH must be rejected");
+    assert!(!bvh_fits_traversal_stack(&bvh_oob_right, 4), "OOB right child BVH must be rejected");
+
+    // (d) Leaf with primitive span `first + count > num_tris` and `u32::MAX` overflow:
+    let bvh_leaf_oob = [GpuBvhNode { left_or_prim: 3, right_or_count: 0x8000_0000 | 2, ..Default::default() }];
+    assert!(!bvh_fits_traversal_stack(&bvh_leaf_oob, 4), "leaf exceeding num_tris must be rejected");
+    assert!(bvh_fits_traversal_stack(&bvh_leaf_oob, 5), "leaf within num_tris=5 must be accepted");
+
+    let bvh_leaf_u32_max = [GpuBvhNode { left_or_prim: u32::MAX, right_or_count: 0x8000_0000 | 1, ..Default::default() }];
+    assert!(!bvh_fits_traversal_stack(&bvh_leaf_u32_max, 10), "leaf with u32::MAX first prim must be rejected");
+
+    // (e) Exact BVH stack boundary:
+    // Root starts at `needed = 1`, each internal step pushes `(right, needed + 1)` and `(left, needed + 1)`,
+    // and rejects when `needed + 1 > BVH_STACK_CAP` (64).
+    // Thus a chain of 63 internal nodes (max `needed = 64` at depth 63 leaves) is the exact maximum valid depth,
+    // while 64 internal nodes (`needed = 64` trying to push `needed + 1 = 65`) must be rejected.
+    let make_bvh_chain = |internal_count: u32| -> Vec<GpuBvhNode> {
+        let mut nodes = Vec::with_capacity((internal_count * 2 + 1) as usize);
+        for d in 0..internal_count {
+            nodes.push(GpuBvhNode {
+                min_x: -1.0,
+                min_y: -1.0,
+                min_z: -1.0,
+                left_or_prim: d + 1,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_count: internal_count + 1 + d,
+            });
+        }
+        for _ in 0..=internal_count {
+            nodes.push(GpuBvhNode {
+                min_x: -1.0,
+                min_y: -1.0,
+                min_z: -1.0,
+                left_or_prim: 0,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_count: 0x8000_0000 | 1,
+            });
+        }
+        nodes
+    };
+    let chain_63 = make_bvh_chain((BVH_STACK_CAP - 1) as u32);
+    let chain_64 = make_bvh_chain(BVH_STACK_CAP as u32);
+    assert!(bvh_fits_traversal_stack(&chain_63, 1), "63-internal-node BVH chain (needed=64) must be accepted");
+    assert!(!bvh_fits_traversal_stack(&chain_64, 1), "64-internal-node BVH chain (needed=65) must be rejected");
+
+    // (f) Coincident triangles triggering `build_gpu_bvh` zero-centroid-extent leaf fallback (`extent[axis] <= 1e-7`):
+    let coincident_tris: Vec<GpuTri> =
+        (0..16).map(|idx| GpuTri { v0: [0.0, 0.0, 0.0, f32::from_bits(idx)], v1: [1.0, 0.0, 0.0, 0.0], v2: [0.0, 1.0, 0.0, 0.0] }).collect();
+    let (ordered_coincident, coincident_bvh) = build_gpu_bvh(&coincident_tris);
+    assert_eq!(ordered_coincident.len(), 16);
+    assert_eq!(coincident_bvh.len(), 1, "coincident centroid triangles must collapse into a single leaf BVH node");
+    assert!(bvh_fits_traversal_stack(&coincident_bvh, ordered_coincident.len()));
+
+    // 2. Hostile / Malformed `GpuLbvhNode` graphs:
+    let lbvh_self_loop = [GpuLbvhNode { left_or_prim: 0, right_or_flag: 0, ..Default::default() }];
+    assert!(!lbvh_fits_traversal_stack(&lbvh_self_loop), "self-loop LBVH must be rejected");
+
+    let lbvh_diamond_shared = [
+        GpuLbvhNode { left_or_prim: 1, right_or_flag: 1, ..Default::default() },
+        GpuLbvhNode { left_or_prim: 0, right_or_flag: 0x8000_0000, ..Default::default() },
+    ];
+    assert!(!lbvh_fits_traversal_stack(&lbvh_diamond_shared), "DAG shared-node LBVH must be rejected by visited check");
+
+    let lbvh_oob_left = [GpuLbvhNode { left_or_prim: 2, right_or_flag: 0, ..Default::default() }];
+    let lbvh_oob_right = [GpuLbvhNode { left_or_prim: 0, right_or_flag: 2, ..Default::default() }];
+    assert!(!lbvh_fits_traversal_stack(&lbvh_oob_left), "OOB left child LBVH must be rejected");
+    assert!(!lbvh_fits_traversal_stack(&lbvh_oob_right), "OOB right child LBVH must be rejected");
+
+    // Exact LBVH stack boundary: 63 internal left-spine nodes (max stack size = 64) vs 64 internal left-spine nodes (stack size = 65):
+    let make_lbvh_left_spine = |internal_count: u32| -> Vec<GpuLbvhNode> {
+        let mut nodes = Vec::with_capacity((internal_count * 2 + 1) as usize);
+        for d in 0..internal_count {
+            nodes.push(GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: if d + 1 < internal_count { d + 1 } else { internal_count },
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: internal_count + 1 + d,
+            });
+        }
+        for leaf_id in 0..=internal_count {
+            nodes.push(GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: leaf_id,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: 0x8000_0000,
+            });
+        }
+        nodes
+    };
+    assert!(lbvh_fits_traversal_stack(&make_lbvh_left_spine(63)), "63-internal left-spine LBVH (stack=64) must be accepted");
+    assert!(!lbvh_fits_traversal_stack(&make_lbvh_left_spine(64)), "64-internal left-spine LBVH (stack=65) must be rejected");
+
+    // 3. Equidistant Raycast Tie-Breaking:
+    // Two identical triangles at z = 5.0 with original indices 42 and 7 (in reverse order in the slice).
+    // When `th == best_t`, every backend must deterministically pick the smaller `orig_idx` (7).
+    let tie_tris = vec![
+        GpuTri { v0: [-1.0, -1.0, 5.0, f32::from_bits(42)], v1: [2.0, -1.0, 5.0, 0.0], v2: [-1.0, 2.0, 5.0, 0.0] },
+        GpuTri { v0: [-1.0, -1.0, 5.0, f32::from_bits(7)], v1: [2.0, -1.0, 5.0, 0.0], v2: [-1.0, 2.0, 5.0, 0.0] },
+    ];
+    let (tie_ordered, tie_bvh) = build_gpu_bvh(&tie_tris);
+    let tie_ray = [GpuRay { origin: [0.0, 0.0, 0.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] }];
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, hits_bvh) = d.raycast_mesh(&tie_ray, &tie_ordered, &tie_bvh);
+        let (_, hits_raw) = d.raycast_mesh(&tie_ray, &tie_ordered, &[]);
+        assert_eq!(hits_bvh[0].tri_idx, 7, "BVH equidistant tie-break must pick smaller orig_idx=7 on {target:?}");
+        assert_eq!(hits_raw[0].tri_idx, 7, "raw equidistant tie-break must pick smaller orig_idx=7 on {target:?}");
+        assert!((hits_bvh[0].t - 5.0).abs() < 1e-5);
+    }
+
+    // 4. `MAX_OVERLAP_PAIRS` (262,144) saturation and `overflowed = true` flag across CPU, Rayon, Vulkan, and CUDA:
+    // 520 x 520 identical unit boxes produce 270,400 overlapping pairs (> 262,144).
+    let unit_box = GpuAabb { min_x: 0.0, min_y: 0.0, min_z: 0.0, id: 0, max_x: 1.0, max_y: 1.0, max_z: 1.0, pad: 0 };
+    let big_a: Vec<GpuAabb> = (0..520u32).map(|i| GpuAabb { id: i, ..unit_box }).collect();
+    let big_b: Vec<GpuAabb> = (0..520u32).map(|i| GpuAabb { id: i, ..unit_box }).collect();
+
+    let sat_cpu = cpu_bipartite_overlap(&big_a, &big_b, 0.0);
+    assert!(sat_cpu.overflowed, "520x520 overlap must set overflowed=true on CPU scalar");
+    assert_eq!(sat_cpu.pairs.len(), MAX_OVERLAP_PAIRS as usize);
+
+    let sat_rayon = cpu_bipartite_overlap_rayon(&big_a, &big_b, 0.0);
+    assert!(sat_rayon.overflowed, "520x520 overlap must set overflowed=true on CPU rayon");
+    assert_eq!(sat_rayon.pairs.len(), MAX_OVERLAP_PAIRS as usize);
+
+    // Self-overlap saturation: 730 identical boxes -> 730 * 729 / 2 = 266,085 pairs (> 262,144)
+    let big_self: Vec<GpuAabb> = (0..730u32).map(|i| GpuAabb { id: i, ..unit_box }).collect();
+    let sat_self_cpu = cpu_self_overlap(&big_self, 0.0);
+    assert!(sat_self_cpu.overflowed, "730 self-overlap must set overflowed=true on CPU");
+    assert_eq!(sat_self_cpu.pairs.len(), MAX_OVERLAP_PAIRS as usize);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let sat_vk = vk.collision().bipartite_overlap(&big_a, &big_b, 0.0).expect("vk saturated bipartite");
+        assert!(sat_vk.overflowed, "520x520 overlap must set overflowed=true on Vulkan");
+        assert_eq!(sat_vk.pairs.len(), MAX_OVERLAP_PAIRS as usize);
+
+        let sat_self_vk = vk.collision().self_overlap(&big_self, 0.0).expect("vk saturated self_overlap");
+        assert!(sat_self_vk.overflowed, "730 self-overlap must set overflowed=true on Vulkan");
+        assert_eq!(sat_self_vk.pairs.len(), MAX_OVERLAP_PAIRS as usize);
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let sat_cu = cuda.bipartite_aabb_overlap(&big_a, &big_b, 0.0, false).expect("cuda sm70 saturated bipartite");
+        assert!(sat_cu.overflowed, "520x520 overlap must set overflowed=true on CUDA sm_70");
+        assert_eq!(sat_cu.pairs.len(), MAX_OVERLAP_PAIRS as usize);
+        if cuda.has_ampere_ptx() {
+            let sat_cu_amp = cuda.bipartite_aabb_overlap(&big_a, &big_b, 0.0, true).expect("cuda sm86 saturated bipartite");
+            assert!(sat_cu_amp.overflowed, "520x520 overlap must set overflowed=true on CUDA sm_86");
+            assert_eq!(sat_cu_amp.pairs.len(), MAX_OVERLAP_PAIRS as usize);
+        }
+    }
+
+    // 5. `GpuPod` codec edge cases, `face_aabbs_from_mesh`, `triangle_aabbs_from_mesh`, `aabbs_from_bounds`,
+    // `KernelCalibration::select_backend`, and `Dispatcher::evaluate_tess_plan`:
+    assert!(decode_pod_slice::<GpuAabb>(&[1, 2, 3]).is_empty(), "truncated byte slice (< 1 word) must decode to empty");
+    assert!(decode_pod_slice::<GpuAabb>(&[0u8; 28]).is_empty(), "partial 7-word slice for 8-word GpuAabb must decode to empty");
+    let empty_encoded = encode_pod_slice::<OverlapPair>(&[]);
+    assert_eq!(empty_encoded.len(), OverlapPair::WORDS * 4, "encoding empty slice pads to 1 default element");
+    assert_eq!(decode_pod_slice::<OverlapPair>(&empty_encoded), vec![OverlapPair::default()]);
+
+    let bounds = [(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 2.0, 3.0)), (Vec3::new(-1.0, -2.0, -3.0), Vec3::new(0.5, 0.5, 0.5))];
+    let from_bounds = aabbs_from_bounds(&bounds);
+    assert_eq!(from_bounds.len(), 2);
+    assert_eq!(from_bounds[0].id, 0);
+    assert_eq!(from_bounds[1].id, 1);
+
+    let box_body = ok(solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4.0, 5.0, 6.0)));
+    let box_mesh = ok(box_body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+    let face_boxes = face_aabbs_from_mesh(&box_mesh);
+    let tri_boxes = triangle_aabbs_from_mesh(&box_mesh);
+    assert_eq!(face_boxes.len(), 6, "box mesh must have 6 face AABBs");
+    assert_eq!(tri_boxes.len(), box_mesh.triangles.len());
+
+    // Verify `Dispatcher::evaluate_tess_plan` for both small (< 512 vertices) and large (>= 512 vertices) plans:
+    let small_plan = ok(box_body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+    assert!(small_plan.vertex_count() < 512);
+    let small_eval = disp.evaluate_tess_plan(&small_plan);
+    let small_ref = small_plan.evaluate_mesh();
+    assert_eq!(small_eval.positions, small_ref.positions);
+    assert_eq!(small_eval.triangles, small_ref.triangles);
+
+    let fine_torus = ok(solidcraft_kernel::torus(Vec3::ZERO, 10.0, 3.0));
+    let large_plan = ok(fine_torus.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.02)));
+    assert!(large_plan.vertex_count() >= 512, "fine torus plan must have >= 512 vertices to exercise parallel evaluate_tess_plan");
+    let large_eval = disp.evaluate_tess_plan(&large_plan);
+    let large_ref = large_plan.evaluate_mesh();
+    assert_eq!(large_eval.positions, large_ref.positions);
+    assert_eq!(large_eval.normals, large_ref.normals);
+    assert_eq!(large_eval.triangles, large_ref.triangles);
+
+    // Verify `KernelCalibration::select_backend` piecewise bucket lookup (empty buckets, below smallest, between buckets, above largest):
+    let empty_cal = KernelCalibration {
+        op: KernelOp::SurfaceEvalF32,
+        buckets: Vec::new(),
+        rayon_crossover_size: None,
+        gpu_crossover_size: None,
+        preferred_gpu_backend: None,
+    };
+    assert_eq!(empty_cal.select_backend(100), BackendTarget::CpuScalar);
+
+    let mk_bucket = |size: usize, winner: BackendTarget| SizeBucketCalibration {
+        problem_size: size,
+        timings: Vec::new(),
+        sample_orders: Vec::new(),
+        sample_timings_ns: Vec::new(),
+        fastest_backend: winner,
+        fastest_latency_ns: 1,
+        speedup_vs_scalar: 1.0,
+    };
+    let custom_cal = KernelCalibration {
+        op: KernelOp::SurfaceEvalF32,
+        buckets: vec![
+            mk_bucket(64, BackendTarget::CpuScalar),
+            mk_bucket(1024, BackendTarget::CpuRayon),
+            mk_bucket(16384, BackendTarget::VulkanCompute),
+        ],
+        rayon_crossover_size: Some(1024),
+        gpu_crossover_size: Some(16384),
+        preferred_gpu_backend: Some(BackendTarget::VulkanCompute),
+    };
+    assert_eq!(custom_cal.select_backend(0), BackendTarget::CpuScalar);
+    assert_eq!(custom_cal.select_backend(64), BackendTarget::CpuScalar);
+    assert_eq!(custom_cal.select_backend(65), BackendTarget::CpuRayon);
+    assert_eq!(custom_cal.select_backend(1024), BackendTarget::CpuRayon);
+    assert_eq!(custom_cal.select_backend(1025), BackendTarget::VulkanCompute);
+    assert_eq!(custom_cal.select_backend(1_000_000), BackendTarget::VulkanCompute);
 }

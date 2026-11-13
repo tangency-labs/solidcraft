@@ -137,6 +137,8 @@ web-time = "1"
 egui-wgpu = "0.37"
 # the wgpu egui-wgpu uses, for compute (crates/gpu); backends come from the apps' features
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
+# Safe CUDA Driver API and PTX module wrappers with runtime dynamic loading (MIT OR Apache-2.0).
+cudarc = { version = "0.19.10", default-features = false, features = ["cuda-12000", "driver", "dynamic-loading", "nvrtc", "std"] }
 naga = { version = "30", default-features = false }
 pollster = "0.4"
 rfd = "0.17"
