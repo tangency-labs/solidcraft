@@ -7,8 +7,10 @@
 use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
-use solidcore_record::Vec3;
 use solidcore_record::brep::{self as rec, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::Ring;
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 
 use crate::body::Body;
 use crate::{KernelError, Result};
@@ -203,6 +205,116 @@ pub fn draft(b: &Body, faces: &[Vec3], neutral: &solidcore_record::Plane, pull: 
     crate::offset_backend::draft(b, faces, neutral, pull, angle)
 }
 
+fn planar_face_contains(rec: &rec::Brep, face_index: usize, plane: &Plane, p: Vec3, tol: f64) -> bool {
+    let Some(face) = rec.faces.get(face_index) else { return false };
+    let p2 = plane.to_local(p);
+    let mut inside = false;
+    let mut on_edge = false;
+    for lp in &face.loops {
+        let Loop::Edges { edges } = lp else { continue };
+        let mut pts = Vec::new();
+        for u in edges {
+            let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+            let Ok(eval) = CurveEval::new(edge.parameters()) else { continue };
+            let [t0, t1] = if u.forward { edge.interval } else { [edge.interval[1], edge.interval[0]] };
+            let n = match &eval {
+                CurveEval::Line { .. } => 1,
+                _ => 16,
+            };
+            for k in 0..n {
+                let t = t0 + (t1 - t0) * (k as f64 / n as f64);
+                if let Some(pt) = eval.point(t) {
+                    pts.push(plane.to_local(pt));
+                }
+            }
+        }
+        if pts.len() >= 3 {
+            let ring = Ring::new(pts);
+            for (a, b) in ring.edges() {
+                if p2.extend(0.0).dist_to_segment(a.extend(0.0), b.extend(0.0)) <= tol {
+                    on_edge = true;
+                    break;
+                }
+            }
+            if ring.contains(p2) {
+                inside = !inside;
+            }
+        }
+    }
+    on_edge || inside
+}
+
+fn face_nearest_point(body: &Body, p: Vec3) -> Option<(f64, usize)> {
+    let rec = body.record();
+    if body.is_mesh() || rec.faces.is_empty() {
+        return None;
+    }
+    let size = body.size().max(1e-6);
+    let tol = (size * 1e-3).max(1e-4);
+    let mut best: Option<(f64, usize)> = None;
+
+    for (f, face) in rec.faces.iter().enumerate() {
+        let mut d_face = f64::INFINITY;
+        let mut bmin = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut bmax = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+
+        for lp in &face.loops {
+            let Loop::Edges { edges } = lp else { continue };
+            for u in edges {
+                let Some(edge) = rec.edges.get(u.edge as usize) else { continue };
+                let Ok(eval) = CurveEval::new(edge.parameters()) else { continue };
+                let [t0, t1] = edge.interval;
+                let n = match &eval {
+                    CurveEval::Line { .. } => 1,
+                    _ => 8,
+                };
+                for k in 0..=n {
+                    let t = t0 + (t1 - t0) * (k as f64 / n as f64);
+                    if let Some(pt) = eval.point(t) {
+                        d_face = d_face.min(pt.dist(p));
+                        bmin = bmin.min(pt);
+                        bmax = bmax.max(pt);
+                    }
+                }
+            }
+        }
+
+        if let Some(plane) = body.planar_face(f).or_else(|| body.face_plane(f)) {
+            let d_plane = (p - plane.origin).dot(plane.normal()).abs();
+            let q = p - plane.normal() * (p - plane.origin).dot(plane.normal());
+            if planar_face_contains(rec, f, &plane, q, tol) {
+                d_face = d_face.min(d_plane);
+            }
+        } else if let Some(surf) = crate::surface_kind::surface_of(rec, f) {
+            if let Some(q) = surf.nearest(p) {
+                let within_bbox = q.x >= bmin.x - tol
+                    && q.x <= bmax.x + tol
+                    && q.y >= bmin.y - tol
+                    && q.y <= bmax.y + tol
+                    && q.z >= bmin.z - tol
+                    && q.z <= bmax.z + tol;
+                if within_bbox {
+                    d_face = d_face.min(q.dist(p));
+                }
+            }
+        } else if let Ok(eval) = SurfaceEval::new(face.parameters()) {
+            let [[u0, u1], [v0, v1]] = face.domain;
+            if let Some([u, v]) = eval.project(p, Some([(u0 + u1) * 0.5, (v0 + v1) * 0.5]), f64::INFINITY) {
+                let clamped_u = u.clamp(u0.min(u1), u0.max(u1));
+                let clamped_v = v.clamp(v0.min(v1), v0.max(v1));
+                if let Some(pt) = eval.point([clamped_u, clamped_v]) {
+                    d_face = d_face.min(pt.dist(p));
+                }
+            }
+        }
+
+        if best.is_none_or(|(d, _)| d_face < d) {
+            best = Some((d_face, f));
+        }
+    }
+    best
+}
+
 /// Move the faces at the given points along their outward normals by `distance` (negative: into
 /// the body), SMLib's offset of faces: the faces around them are extended or trimmed to meet them.
 pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
@@ -213,15 +325,9 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     }
     let healed = crate::boolean_record::healed(b)?.with_split_lines(b.splits.clone());
     let size = healed.size();
-    let mesh = healed.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
     let mut chosen: Vec<usize> = Vec::new();
     for p in at {
-        let near = mesh
-            .triangles
-            .iter()
-            .zip(&mesh.tri_face)
-            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (solidcraft_geom::compare::closest_on_triangle(*p, x, y, z).dist(*p), *f as usize)))
-            .min_by(|a, c| a.0.total_cmp(&c.0));
+        let near = face_nearest_point(&healed, *p);
         match near {
             Some((d, f)) if d < size * 1e-3 + 1e-6 => {
                 if !chosen.contains(&f) {
