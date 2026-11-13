@@ -9,11 +9,11 @@
 {"case":"analytic_face_cone_x_6_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":[0.00001,0.00001,0.00001,0.00001,0.00001,0.0],"status":[0.0]}}
 {"case":"analytic_face_cone_x_6_14","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":[0.00001,0.00001,0.00001,0.00001,0.00001,0.0],"status":[0.0]}}
 {"case":"analytic_face_cone_x_6_15","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":{"blocks":[[1006.7321008075688,1010.7321008075688,10058.784759690827]],"n":20},"status":[0.0]}}
-{"case":"analytic_face_cone_x_6_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":{"blocks":[[1009.4297375,1013.4297375,10102.015775]],"n":20},"status":[0.0]}}
+{"case":"analytic_face_cone_x_6_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":{"blocks":[[1009.0703625,1013.0703625,10096.984525]],"n":20},"status":[0.0]}}
 {"case":"analytic_face_cone_x_7_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":[0.00001,0.00001,0.00001,0.00001,0.00001,0.0],"status":[0.0]}}
 {"case":"analytic_face_cone_x_7_14","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":[0.00001,0.00001,0.00001,0.00001,0.00001,0.0],"status":[0.0]}}
 {"case":"analytic_face_cone_x_7_15","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":{"blocks":[[5.732100807568877,13.732100807568877,48.784759690826526]],"n":20},"status":[0.0]}}
-{"case":"analytic_face_cone_x_7_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":{"blocks":[[8.4297375,16.4297375,92.01577499999999]],"n":20},"status":[0.0]}}
+{"case":"analytic_face_cone_x_7_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":{"blocks":[[8.0703625,16.0703625,86.984525]],"n":20},"status":[0.0]}}
 {"case":"analytic_face_cone_x_8_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":[0.00001,0.00001,0.00001,0.00001,0.00001,0.0],"status":[0.0]}}
 {"case":"analytic_face_cone_x_8_14","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":[0.00001,0.00001,0.00001,0.00001,0.00001,0.0],"status":[0.0]}}
 {"case":"analytic_face_cone_x_8_14_swap","deferred":null,"error":null,"ints":{},"topology":null,"values":{"static":[0.00001,0.00001,0.00001,0.00001,0.00001,0.0],"status":[0.0]}}

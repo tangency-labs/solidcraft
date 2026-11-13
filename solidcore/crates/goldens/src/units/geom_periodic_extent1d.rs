@@ -12,6 +12,7 @@
 //! (`SM_SUCCESS` = 1000, `SM_ERR` = 1001, `SM_ERR_INVALID_INPUT` = 1007).
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -197,7 +198,7 @@ fn period(rng: &mut Rng) -> f64 {
         3 | 4 => 2.0 * PI,
         5 => 360.0,
         6 => rng.uniform(1e-3, 1e3),
-        7 => 10f64.powi(rng.range_i64(-12, 8) as i32) * rng.uniform(1.0, 9.0),
+        7 => det::powi(10f64, rng.range_i64(-12, 8) as i32) * rng.uniform(1.0, 9.0),
         8 => 0.0,
         _ => f64::from(rng.range_i64(1, 20) as i32),
     }

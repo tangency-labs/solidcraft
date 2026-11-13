@@ -4,6 +4,7 @@
 //! unavailable continuations remain deferred and early exits retain their status.
 #![allow(clippy::indexing_slicing)] // the record layout is checked by `layout_ok` first
 
+use solidcore::math::det;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -684,7 +685,7 @@ impl UnitDiff for Runner {
         }
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let scale = 10f64.powi(rng.range_i64(-6, 6) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-6, 6) as i32);
         let corner = rng.below(3) == 0;
         let mut data = vec![
             f64::from(corner),

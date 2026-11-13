@@ -15,6 +15,7 @@
 //! (`topology_brep_p3::run_tracked`), and its lists and events are recorded as `tracker`,
 //! so each face's and surface's `SwapUV` notifications are.
 
+use solidcore::math::det;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -1215,7 +1216,7 @@ fn gen_op(rng: &mut Rng) -> (OpIn, i64) {
                 tol: match rng.below(4) {
                     0 => 0.0,
                     1 => -1e-4,
-                    2 => 10f64.powf(rng.uniform(-12.0, 3.0)),
+                    2 => det::powf(10f64, rng.uniform(-12.0, 3.0)),
                     _ => 1e-5,
                 },
                 only_larger: rng.chance(0.7),

@@ -2039,6 +2039,7 @@ mod tests {
     use crate::curve::line::Line;
     use crate::geom::extent2d::Extent2d;
     use crate::intersect::point_class::PointClassType;
+    use crate::math::det;
     use crate::math::{Point2, Point3};
     use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use crate::surface::surface::Surface;
@@ -2397,7 +2398,7 @@ mod tests {
         use crate::curve::curve::Curve;
         let point = |i: usize| {
             let t = core::f64::consts::TAU * i as f64 / n as f64;
-            Vec3::new(30.0 * t.cos(), 30.0 * t.sin(), z0)
+            Vec3::new(30.0 * det::cos(t), 30.0 * det::sin(t), z0)
         };
         let curves: Vec<Curve> = (0..n)
             .map(|i| {

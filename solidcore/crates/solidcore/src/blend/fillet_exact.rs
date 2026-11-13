@@ -79,6 +79,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::knots::Side;
@@ -511,7 +512,7 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
             q.kind = QuadricKind::Cone;
             q.point = c.origin + z * (-r0 / tan_b);
             q.dir = if tan_b > 0.0 { z } else { -z };
-            q.angle = tan_b.abs().atan();
+            q.angle = det::atan(tan_b.abs());
         }
         // the nappe the surface point is on
         if q.kind == QuadricKind::Cone && (p - q.point).dot(q.dir) < 0.0 {
@@ -621,7 +622,7 @@ impl BlendQuadric {
             QuadricKind::Cone => {
                 // the normal away from the axis is cos(a) radial - sin(a) d: the apex moves
                 // back along d
-                o.point = self.point - self.dir * (self.side * dist / self.angle.sin());
+                o.point = self.point - self.dir * (self.side * dist / det::sin(self.angle));
             }
             // (solidcore #2403) a torus moved in by its tube radius is its tube's circle
             QuadricKind::Torus => {
@@ -688,7 +689,7 @@ impl BlendQuadric {
                 let r = across(point - self.point, self.dir);
                 let len = r.length();
                 if len > 0.0 {
-                    r * (self.angle.cos() / len) - self.dir * self.angle.sin()
+                    r * (det::cos(self.angle) / len) - self.dir * det::sin(self.angle)
                 } else {
                     Vec3::ZERO
                 }
@@ -717,8 +718,8 @@ impl BlendQuadric {
             QuadricKind::Cylinder | QuadricKind::Line => {
                 (across(w, self.dir).length() - self.radius).abs()
             }
-            QuadricKind::Cone => (across(w, self.dir).length() * self.angle.cos()
-                - w.dot(self.dir) * self.angle.sin())
+            QuadricKind::Cone => (across(w, self.dir).length() * det::cos(self.angle)
+                - w.dot(self.dir) * det::sin(self.angle))
             .abs(),
             QuadricKind::Torus => (self.circle_distance(point) - self.tube).abs(),
             QuadricKind::Circle => self.circle_distance(point),
@@ -755,7 +756,7 @@ impl BlendQuadric {
                 k0 = self.radius * self.radius;
             }
             QuadricKind::Cone => {
-                ki = self.angle.cos() * self.angle.cos();
+                ki = det::cos(self.angle) * det::cos(self.angle);
                 kd = 1.0;
             }
             QuadricKind::None | QuadricKind::Torus | QuadricKind::Circle => {}
@@ -1023,7 +1024,7 @@ fn inscribed_radius(q: &BlendQuadric, c: Point3) -> f64 {
     if q.kind == QuadricKind::Cylinder {
         return q.radius;
     }
-    (c - q.point).dot(q.dir) * q.angle.sin()
+    (c - q.point).dot(q.dir) * det::sin(q.angle)
 }
 
 /// `sm_PairPlane`: two cylinders or cones (offsets) touching a common ball about `c` of
@@ -1068,8 +1069,8 @@ fn pair_plane_form(q: &[BlendQuadric; 2], rho: f64, sign: f64) -> Option<(Vec3, 
         let cone = qi.kind == QuadricKind::Cone;
         if let (Some(ui), Some(ki), Some(si)) = (u.get_mut(i), kk.get_mut(i), s.get_mut(i)) {
             *ui = -qi.dir;
-            *ki = if cone { rho * qi.angle.sin() } else { 0.0 };
-            *si = if cone { 1.0 / qi.angle.cos() } else { 1.0 };
+            *ki = if cone { rho * det::sin(qi.angle) } else { 0.0 };
+            *si = if cone { 1.0 / det::cos(qi.angle) } else { 1.0 };
         }
     }
     let n = u[1] * s[1] - u[0] * (sign * s[0]);
@@ -1120,7 +1121,7 @@ fn points_with_contact(q: &BlendQuadric, contact: f64, e: Vec3) -> Option<(Point
         QuadricKind::Cone => {
             // the normal is side (cos a radial - sin a d): along the generator in the plane
             // of d and n
-            if (n.dot(q.dir) + q.side * q.angle.sin()).abs() > EFF_ZERO_SQRT {
+            if (n.dot(q.dir) + q.side * det::sin(q.angle)).abs() > EFF_ZERO_SQRT {
                 return None;
             }
             let g = across(q.dir, n).unitize().ok()?;
@@ -1160,7 +1161,7 @@ fn touching_point(q: &[BlendQuadric; 2], contact: [f64; 2], tol: f64) -> Option<
         if qi.kind == Q::Cylinder {
             0.0
         } else {
-            -ci * qi.side * qi.angle.sin()
+            -ci * qi.side * det::sin(qi.angle)
         }
     };
     // the candidate contact directions e: from the kinds' normal constraints
@@ -1398,7 +1399,7 @@ fn curve_crosses_quadric(
         if c.kind == QuadricKind::Line {
             (foot - near + e1 * s, e1)
         } else {
-            let (sn, cs) = s.sin_cos();
+            let (sn, cs) = det::sin_cos(s);
             (
                 foot - near + (e1 * cs + e2 * sn) * c.radius,
                 (e1 * (-sn) + e2 * cs) * c.radius,
@@ -1745,7 +1746,7 @@ fn meridian(q: &BlendQuadric, a: Point3, d: Vec3) -> Option<Meridian> {
         // a coaxial cone: the line from its apex at its half-angle into its nappe
         QuadricKind::Cone => Meridian::Line {
             p: Point2::new(rho(q.point), z(q.point)),
-            e: Point2::new(q.angle.sin(), q.angle.cos() * q.dir.dot(d).signum()),
+            e: Point2::new(det::sin(q.angle), det::cos(q.angle) * q.dir.dot(d).signum()),
         },
         _ => return None,
     })
@@ -1847,7 +1848,7 @@ pub fn class_surface(
             let ma = meridian(&blend.offsets[0], a, d)?;
             let mb = meridian(&blend.offsets[1], a, d)?;
             let near = Point2::new(across(centre - a, d).length(), (centre - a).dot(d));
-            let dist = |x: &Point2| (x.x - near.x).hypot(x.y - near.y);
+            let dist = |x: &Point2| det::hypot(x.x - near.x, x.y - near.y);
             let spine = meridians_cross(ma, mb)
                 .into_iter()
                 .filter(|x| x.x >= 0.0)
@@ -2133,7 +2134,7 @@ fn meridian_line(
             let s = if q.dir.dot(axis) < 0.0 { -1.0 } else { 1.0 };
             Some((
                 [0.0, (q.point - axis_point).dot(axis)],
-                [q.angle.sin(), s * q.angle.cos()],
+                [det::sin(q.angle), s * det::cos(q.angle)],
             ))
         }
         _ => None,
@@ -2403,11 +2404,11 @@ fn ball_on_face_along_arc(
     let (Ok(x), Ok(y)) = (e0.unitize(), axis.cross(e0).unitize()) else {
         return Ok(None);
     };
-    let turn = e1.dot(y).atan2(e1.dot(x));
+    let turn = det::atan2(e1.dot(y), e1.dot(x));
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     for i in 1..STEPS {
         let a = turn * f64::from(i) / f64::from(STEPS);
-        let p = centre + (x * a.cos() + y * a.sin()) * radius;
+        let p = centre + (x * det::cos(a) + y * det::sin(a)) * radius;
         let dropped =
             surface.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
         if !dropped.success {

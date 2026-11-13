@@ -8,6 +8,7 @@ use crate::intersect::topology_solver::p1::{
     LocalSolver, LocalSolverKind, TopologyObjects, TopologySolver,
 };
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::Vec3;
 use crate::surface::sphere::{Sphere, SphereOptions};
 use crate::surface::surface::Surface;
@@ -290,7 +291,7 @@ fn check_sphere_projection(tilt: f64, scale: f64) {
     .unwrap();
     sphere.make_nurb(&k).unwrap();
     let angle = tilt.to_radians();
-    let normal = Vec3::new(angle.sin(), 0.0, angle.cos()) * scale;
+    let normal = Vec3::new(det::sin(angle), 0.0, det::cos(angle)) * scale;
     let query = Vec3::new(0.2, 0.3, 2.0);
     let expected = 0.5 * normal.length_squared()
         + normal
@@ -379,7 +380,7 @@ fn projected_sphere_band_maximum_uses_a_trim_away_from_the_silhouette() {
     )
     .unwrap();
     sphere.make_nurb(&k).unwrap();
-    let expected = 0.5 * 15.0_f64.to_radians().cos() + (0.2_f64 * 0.2 + 0.3 * 0.3).sqrt();
+    let expected = 0.5 * det::cos(15.0_f64.to_radians()) + (0.2_f64 * 0.2 + 0.3 * 0.3).sqrt();
     check_face_projection(
         k,
         &Surface::from(sphere),
@@ -639,7 +640,7 @@ fn native_vertex_face_proposals_cover_the_seven_analytic_fixtures() {
         );
     }
     let k = Kernel::default();
-    let tangent = (30.0 * std::f64::consts::PI / 180.0).tan();
+    let tangent = det::tan(30.0 * std::f64::consts::PI / 180.0);
     let placement = Axis2Placement::new(Vec3::new(-0.5, 0.0, 0.0), Vec3::Y, Vec3::Z);
     let cone = Cone::create_canonical(
         &k,

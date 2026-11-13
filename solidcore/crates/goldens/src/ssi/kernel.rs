@@ -10,6 +10,7 @@ use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
@@ -176,7 +177,7 @@ pub(crate) fn rust_surface(
             // apex-based description: radius(h) = h * tan(half_angle), h in [h0, h1]
             // along z, full 360 degree rotation
             let z = unit_cross(v3(*xaxis), v3(*yaxis));
-            let t = (half_angle_deg * std::f64::consts::PI / 180.0).tan();
+            let t = det::tan(half_angle_deg * std::f64::consts::PI / 180.0);
             let o = v3(*apex) + z * height[0];
             let pl = Axis2Placement::new(o, v3(*xaxis), v3(*yaxis));
             match Cone::create_canonical(

@@ -9,6 +9,7 @@
 use super::{el, el_mut, sm_err, smax, smin};
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
+use crate::math::det;
 use core::cell::Cell;
 
 /// Deterministic work done by a constraint-source solve.
@@ -150,7 +151,7 @@ fn dual_run(
         Ok(s)
     };
     let givens = |a: &mut f64, b: &mut f64| -> (f64, f64) {
-        let h = a.hypot(*b);
+        let h = det::hypot(*a, *b);
         if h == 0.0 {
             return (1.0, 0.0);
         }

@@ -36,6 +36,7 @@
 //!   `d[i][j]`, not one flat array.
 //! - **Bounds.** `T2` reads 0 past its orders (the fork's operands always share them).
 
+use crate::math::det;
 use core::cmp::Ordering;
 
 use super::form::{gn_form, gn_form_t, Bern};
@@ -70,7 +71,7 @@ impl T2Scalar for f64 {
         self > 0.0 && self.is_finite()
     }
     fn pow_of(self, p: f64) -> Self {
-        self.powf(p)
+        det::powf(self, p)
     }
 }
 

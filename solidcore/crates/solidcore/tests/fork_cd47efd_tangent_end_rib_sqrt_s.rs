@@ -34,6 +34,7 @@ use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves as curves;
 use solidcore::query::api_queries::get_edges;
@@ -130,7 +131,7 @@ fn front_gn_quadrature_volume(n: usize, w: f64) -> f64 {
     let integrand = |t: f64| -> f64 {
         let h = 1e-7;
         let pt = |u: f64| -> (f64, f64) {
-            let (a, b) = ((1.0 - u).powi(p_exp), u.powi(p_exp));
+            let (a, b) = (det::powi(1.0 - u, p_exp), det::powi(u, p_exp));
             let f = a / (a + b);
             let p1 = u / (1.0 - w + w * u);
             let p2 = u * (1.0 - w) / (1.0 - w * u);
@@ -220,7 +221,7 @@ fn g2_and_g3_front_round_gn_section_end_rib_and_quadrature_volumes() {
         } else {
             let d1 = d[1];
             assert!(d1.length() > 1.0, "n={cont} w={w_arg}: speed at P {d1:?}");
-            let off_t = d1.x.hypot(d1.y) / d1.length();
+            let off_t = det::hypot(d1.x, d1.y) / d1.length();
             assert!(off_t < 1e-2, "n={cont} w={w_arg}: tangent off T: {d1:?}");
         }
 

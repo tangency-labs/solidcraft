@@ -101,6 +101,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -795,7 +796,7 @@ impl FilletBrep {
                     let vec = end_pnt - start_pnt;
                     let angle = vec.angle_between(start_vec)?;
                     if let Some(w) = weights.get_mut(1) {
-                        *w = angle.cos();
+                        *w = det::cos(angle);
                     }
                     BSplineCurve::create_canonical(&CanonicalData {
                         dim: curve_dim,

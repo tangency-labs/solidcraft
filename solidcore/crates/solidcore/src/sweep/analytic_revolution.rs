@@ -31,6 +31,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{line_closest_point, line_point_distance};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::SurfParamType;
@@ -417,7 +418,7 @@ fn candidate(
                         90.0
                     }
                 } else {
-                    a.atan2(r) * to_deg
+                    det::atan2(a, r) * to_deg
                 }
             };
             let (lat0, lat1) = (latitude(a0, r0), latitude(a1, r1));
@@ -459,7 +460,7 @@ fn candidate(
     let origin = base_pt + axis * line_closest_point(base_pt, axis, centre);
     let minor_angle = |p: Point3| {
         let d = p - centre;
-        d.dot(axis).atan2(d.dot(x)) * to_deg
+        det::atan2(d.dot(axis), d.dot(x)) * to_deg
     };
     // #1490: never inside out (fork 9853e54's `CreateCanonical(.., FALSE, FALSE, ..)`
     // over the tube angle range from its low end); an arc falling round its minor
@@ -803,8 +804,8 @@ mod tests {
                     let (f, g) = (f64::from(i) / 6.0, f64::from(j) / 6.0);
                     let p = s.evaluate_point(&k, a.evaluate(f, g)).unwrap();
                     assert!(off_profile(&curve, p) < 1e-9, "{name} {f} {g}: {p:?}");
-                    let azimuth = p.y.atan2(p.x).to_degrees();
-                    if p.x.hypot(p.y) > 1e-3 {
+                    let azimuth = det::atan2(p.y, p.x).to_degrees();
+                    if det::hypot(p.x, p.y) > 1e-3 {
                         assert!(
                             (-1e-9..=120.0 + 1e-9).contains(&azimuth),
                             "{name}: {azimuth}"
@@ -963,7 +964,7 @@ mod tests {
                 let pole = sphere
                     .evaluate_step_point(crate::geom::vector2d::Point2::new(0.0, lat))
                     .unwrap();
-                assert!(pole.x.hypot(pole.y) <= 1e-12, "{off} {lat}: {pole:?}");
+                assert!(det::hypot(pole.x, pole.y) <= 1e-12, "{off} {lat}: {pole:?}");
             }
         }
     }
@@ -992,7 +993,10 @@ mod tests {
                 let n = s.natural_uv_domain_with_nurb(&k).unwrap();
                 for (u, v) in [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)] {
                     let pole = s.evaluate_point(&k, n.evaluate(u, v)).unwrap();
-                    assert!(pole.x.hypot(pole.y) <= 1e-12, "{off} {u} {v}: {pole:?}");
+                    assert!(
+                        det::hypot(pole.x, pole.y) <= 1e-12,
+                        "{off} {u} {v}: {pole:?}"
+                    );
                 }
             }
         }

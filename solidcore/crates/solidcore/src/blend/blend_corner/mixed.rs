@@ -44,6 +44,7 @@
 
 pub mod algebra;
 
+use crate::math::det;
 use algebra::{Crv, Side, TwistTerm, V4};
 
 use crate::blend::blend_corner::swept::SweptSolvers;
@@ -1159,7 +1160,7 @@ pub fn calc_mixed_edge_geom(
             return Err(err());
         }
         let si = sx + dir_x * s;
-        let w = (0.5 * max(-1.0, min(1.0, dir_x.dot(dir_v))).acos()).cos();
+        let w = det::cos(0.5 * det::acos(max(-1.0, min(1.0, dir_x.dot(dir_v)))));
         let xvq = Crv {
             brk: vec![0.0, 1.0],
             seg: vec![vec![

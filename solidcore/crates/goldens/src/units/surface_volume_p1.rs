@@ -19,6 +19,7 @@
 //! default-constructed (twist period `0`, unbend neutral distance `0`:
 //! some of their values are NaN or infinite).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -761,7 +762,7 @@ fn gen_transform(rng: &mut Rng) -> [[f64; 3]; 4] {
         1 => {
             // rotation about z by a random angle, translated
             let a = rng.uniform(-3.2, 3.2);
-            let (s, c) = a.sin_cos();
+            let (s, c) = det::sin_cos(a);
             [coord(rng, 5.0), [c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]]
         }
         2 => {

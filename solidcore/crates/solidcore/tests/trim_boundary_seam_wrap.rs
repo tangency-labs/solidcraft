@@ -22,6 +22,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{
     brep_area, brep_properties, brep_volume, MassPropertyBehavior, PropertyAttributes,
 };
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::create_cone;
 use solidcore::topology::trimming_tools::clear_uv_trim_curves;
@@ -50,8 +51,8 @@ fn frustum(k: &mut Kernel, offset: f64) -> Brep {
         let angle = offset / BASE;
         let turn = |p: Point3| {
             Point3::new(
-                p.x * angle.cos() - p.y * angle.sin(),
-                p.x * angle.sin() + p.y * angle.cos(),
+                p.x * det::cos(angle) - p.y * det::sin(angle),
+                p.x * det::sin(angle) + p.y * det::cos(angle),
                 p.z,
             )
         };

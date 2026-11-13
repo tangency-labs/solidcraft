@@ -13,6 +13,7 @@
 )] // test helpers
 
 use solidcore::geom::object::{ObjectRef, Shape};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::face_closest_point_in_shape;
@@ -72,7 +73,9 @@ fn box_face_centres_are_their_own_closest_points() {
         assert_eq!(on, 1, "centre {c:?}: exactly its own face at distance 0");
         // every other face's answer is no farther than its nearest corner
         for (_, _, d) in answers {
-            assert!(d <= ((5.0f64).powi(2) + 10.0f64.powi(2) + 30.0f64.powi(2)).sqrt());
+            assert!(
+                d <= (det::powi(5.0f64, 2) + det::powi(10.0f64, 2) + det::powi(30.0f64, 2)).sqrt()
+            );
         }
     }
 }

@@ -71,6 +71,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_line_closest_point;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max2, min2, rad_to_deg, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -273,7 +274,7 @@ fn wall_normal(w: &Wall, q: Point3, h: Vec3) -> Result<Vec3> {
 /// (`sm_DraftAngle`).
 fn angle(w: &Wall, q: Point3, near: f64) -> f64 {
     let r = q - w.center;
-    let mut a = r.dot(w.y).atan2(r.dot(w.x));
+    let mut a = det::atan2(r.dot(w.y), r.dot(w.x));
     while a < near - PI {
         a += 2.0 * PI;
     }
@@ -299,7 +300,7 @@ fn param(w: &Wall, q: Point3, f: f64, near: f64) -> Result<f64> {
     let t0 = at(&w.breaks, j)?;
     let t1 = at(&w.breaks, j + 1)?;
     let half = 0.5 * (t1 - t0);
-    let tau = 0.5 * ((0.5 * (a - 0.5 * (t0 + t1))).tan() / (0.5 * half).tan() + 1.0);
+    let tau = 0.5 * (det::tan(0.5 * (a - 0.5 * (t0 + t1))) / det::tan(0.5 * half) + 1.0);
     Ok(t0 + (t1 - t0) * tau)
 }
 
@@ -369,12 +370,12 @@ fn wall_curve(w: &Wall, f: f64, h: Vec3) -> Result<BSplineCurve> {
         let half = 0.5 * (t1 - t0);
         let mid = 0.5 * (t0 + t1);
         if j == 0 {
-            points.push(c + r * (t0.cos() * w.x + t0.sin() * w.y));
+            points.push(c + r * (det::cos(t0) * w.x + det::sin(t0) * w.y));
             weights.push(1.0);
         }
-        points.push(c + (r / half.cos()) * (mid.cos() * w.x + mid.sin() * w.y));
-        weights.push(half.cos());
-        points.push(c + r * (t1.cos() * w.x + t1.sin() * w.y));
+        points.push(c + (r / det::cos(half)) * (det::cos(mid) * w.x + det::sin(mid) * w.y));
+        weights.push(det::cos(half));
+        points.push(c + r * (det::cos(t1) * w.x + det::sin(t1) * w.y));
         weights.push(1.0);
         knots.push(t0);
         mults.push(if j == 0 { 3 } else { 2 });
@@ -538,8 +539,8 @@ fn seam_pcurve(
         let mut roots = Vec::new();
         for b in 1..nb.saturating_sub(1) {
             let db_ang = at(&w.breaks, b)?;
-            let nrm = -db_ang.sin() * w.x + db_ang.cos() * w.y;
-            let dir = db_ang.cos() * w.x + db_ang.sin() * w.y;
+            let nrm = -det::sin(db_ang) * w.x + det::cos(db_ang) * w.y;
+            let dir = det::cos(db_ang) * w.x + det::sin(db_ang) * w.y;
             let mut c = [0.0; 3];
             let mut d = [0.0; 3];
             for ((ck, dk), ((p, f), wk)) in c
@@ -612,8 +613,8 @@ fn seam_pcurve(
         let s0 = at(&w.breaks, j)?;
         let s1 = at(&w.breaks, j + 1)?;
         let mid = 0.5 * (s0 + s1);
-        let tan_q = (0.25 * (s1 - s0)).tan();
-        let xm = mid.cos() * w.x + mid.sin() * w.y;
+        let tan_q = det::tan(0.25 * (s1 - s0));
+        let xm = det::cos(mid) * w.x + det::sin(mid) * w.y;
         let ym = w.axis.cross(xm);
         // tau = (dy + tanq (rho + dx)) / (2 tanq (rho + dx)), each term affine in space
         let mut num = [0.0; 3];
@@ -994,7 +995,7 @@ fn profile_plane(walls: &[Wall], d: Vec3, tol: f64) -> Result<Vec3> {
     let off = |q: Point3| (q - first).dot(d).abs();
     let in_plane = walls.iter().all(|w| {
         if w.arc {
-            off(w.center) + w.radius * w.x.dot(d).hypot(w.y.dot(d)) <= tol
+            off(w.center) + w.radius * det::hypot(w.x.dot(d), w.y.dot(d)) <= tol
         } else {
             off(w.start) <= tol && off(w.end) <= tol
         }

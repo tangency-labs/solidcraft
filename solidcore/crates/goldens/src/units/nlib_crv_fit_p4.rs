@@ -20,6 +20,7 @@
 // The generator indexes the arrays it has just built (as other runners do).
 #![allow(clippy::indexing_slicing)]
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -225,13 +226,13 @@ fn shape(rng: &mut Rng, count: usize, s: f64) -> Vec<[f64; 3]> {
         let p = match kind {
             0 => {
                 let a = 2.5 * t;
-                [a.cos(), a.sin(), 0.0]
+                [det::cos(a), det::sin(a), 0.0]
             }
             1 => {
                 let a = 6.0 * t;
-                [a.cos(), a.sin(), 0.3 * a]
+                [det::cos(a), det::sin(a), 0.3 * a]
             }
-            2 => [4.0 * t, (6.0 * t).sin(), 0.0],
+            2 => [4.0 * t, det::sin(6.0 * t), 0.0],
             3 => [3.0 * t, 1e-3 * rng.uniform(-1.0, 1.0), 1e-3 * rng.uniform(-1.0, 1.0)],
             4 => [t, if i % 2 == 0 { 0.0 } else { 0.4 }, 0.0],
             5 => [t, if i % 2 == 0 { 0.0 } else { 0.4 }, 0.2 * (i % 3) as f64],
@@ -249,8 +250,8 @@ fn shape(rng: &mut Rng, count: usize, s: f64) -> Vec<[f64; 3]> {
 
 fn scale(rng: &mut Rng) -> f64 {
     match rng.below(8) {
-        0 => 10f64.powi(rng.range_i64(-6, -2) as i32),
-        1 => 10f64.powi(rng.range_i64(2, 6) as i32),
+        0 => det::powi(10f64, rng.range_i64(-6, -2) as i32),
+        1 => det::powi(10f64, rng.range_i64(2, 6) as i32),
         _ => rng.uniform(0.5, 4.0),
     }
 }

@@ -804,6 +804,7 @@ impl PointSequence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn square() -> Vec<Point3> {
         vec![
@@ -1086,14 +1087,14 @@ mod tests {
         ws: [f64; 6],
     ) -> Vec<Point3> {
         let theta = 0.08_f64;
-        let (c, s) = (theta.cos(), theta.sin());
+        let (c, s) = (det::cos(theta), det::sin(theta));
         let rot2 = |u: f64, v: f64| (u * c - v * s, u * s + v * c);
         let d = rot2(-10.0, 1.0); // beg0 (min x)
         let b = rot2(10.0, -1.0); // end0 (max x)
         let a = rot2(-10.0, -1.0); // beg1 (min y)
         let top = (5.0, 2.0); // end1 (max y)
         let p4 = rot2(0.0, -1.0); // on long bottom edge A -> B (+0.08 rad from beg1)
-        let p5 = (5.0 + chamfer_ang.cos(), 2.0 - chamfer_ang.sin()); // chamfer from end1
+        let p5 = (5.0 + det::cos(chamfer_ang), 2.0 - det::sin(chamfer_ang)); // chamfer from end1
         let coords_2d = [d, b, a, top, p4, p5];
         coords_2d
             .into_iter()

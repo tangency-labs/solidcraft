@@ -24,6 +24,7 @@
 //! that (grid miss, element box rejection by parameter, skipped element, pseudo box miss) and
 //! checks that with the Rust side, plus free cases that defer.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1278,7 +1279,7 @@ fn gen_polygon(rng: &mut Rng, c: P3, bx: P3, by: P3, r: f64, reversed: bool) -> 
         (0..n)
             .map(|i| {
                 let t = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
-                at(radius(i) * t.cos(), radius(i) * t.sin())
+                at(radius(i) * det::cos(t), radius(i) * det::sin(t))
             })
             .collect()
     };

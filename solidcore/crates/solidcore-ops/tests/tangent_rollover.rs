@@ -12,6 +12,7 @@
 
 mod common;
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use common::edge_at;
@@ -46,17 +47,17 @@ fn added_area(a: f64, r1: f64, r: f64) -> f64 {
     if r <= a {
         return r * r * (1.0 - PI / 4.0);
     }
-    let c = ((r + r1).powi(2) - (r - a).powi(2)).sqrt() - r1;
+    let c = (det::powi(r + r1, 2) - det::powi(r - a, 2)).sqrt() - r1;
     // the contact on the rim's round, at angle t1 about its centre
-    let t1 = (c + r1).atan2(r - a);
+    let t1 = det::atan2(c + r1, r - a);
     // the ball's contact with the round, at angle s0 about the ball's centre
     let s0 = t1 - PI;
     // ∮ (x dy - y dx) / 2: segments wall (0,c)->(0,0) and flat (0,0)->(a,0) give nothing (x = 0,
     // y = 0); the arcs give r^2 dt/2 + (centre x sin-ish terms)
     let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
         // ∫ (x y' - y x') / 2 dt for x = cx + rad cos t, y = cy + rad sin t
-        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
-            - cy * rad * (to.cos() - from.cos()))
+        0.5 * (rad * rad * (to - from) + cx * rad * (det::sin(to) - det::sin(from))
+            - cy * rad * (det::cos(to) - det::cos(from)))
     };
     // the boundary runs clockwise: wall down, flat out, round from pi/2 down to t1, ball from s0 to -pi
     let total = arc(a, -r1, r1, PI / 2.0, t1) + arc(r, c, r, s0, -PI);
@@ -91,17 +92,17 @@ fn the_area_oracle_agrees_with_a_polygon() {
         (1.0, 2.0, 3.0),
         (0.5, 1.0, 2.0),
     ] {
-        let c = ((r + r1).powi(2) - (r - a).powi(2)).sqrt() - r1;
-        let t1 = (c + r1).atan2(r - a);
+        let c = (det::powi(r + r1, 2) - det::powi(r - a, 2)).sqrt() - r1;
+        let t1 = det::atan2(c + r1, r - a);
         let mut pts = vec![(0.0, c), (0.0, 0.0), (a, 0.0)];
         let n = 20000;
         for i in 1..=n {
             let t = PI / 2.0 + (t1 - PI / 2.0) * f64::from(i) / f64::from(n);
-            pts.push((a + r1 * t.cos(), -r1 + r1 * t.sin()));
+            pts.push((a + r1 * det::cos(t), -r1 + r1 * det::sin(t)));
         }
         for i in 1..=n {
             let t = (t1 - PI) + (-PI - (t1 - PI)) * f64::from(i) / f64::from(n);
-            pts.push((r + r * t.cos(), c + r * t.sin()));
+            pts.push((r + r * det::cos(t), c + r * det::sin(t)));
         }
         let mut twice = 0.0;
         for (i, p) in pts.iter().enumerate() {
@@ -171,12 +172,12 @@ fn removed_area(a: f64, r1: f64, r: f64) -> f64 {
     if r <= a {
         return r * r * (1.0 - PI / 4.0);
     }
-    let c = ((r1 - r).powi(2) - (r - a).powi(2)).sqrt() - r1;
+    let c = (det::powi(r1 - r, 2) - det::powi(r - a, 2)).sqrt() - r1;
     // the contact, at angle t about both centres (an inside tangency)
-    let t = (c + r1).atan2(r - a);
+    let t = det::atan2(c + r1, r - a);
     let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
-        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
-            - cy * rad * (to.cos() - from.cos()))
+        0.5 * (rad * rad * (to - from) + cx * rad * (det::sin(to) - det::sin(from))
+            - cy * rad * (det::cos(to) - det::cos(from)))
     };
     // back face and flat give nothing (x = 0, y = 0); the rim's round from pi/2 down to t, then
     // the ball from t up over its top to pi
@@ -197,17 +198,17 @@ const CONVEX_ROLLOVERS: &[(f64, f64, f64)] = &[
 fn the_removed_area_oracle_agrees_with_a_polygon() {
     for &(w, r1, r) in CONVEX_ROLLOVERS {
         let a = w - r1;
-        let c = ((r1 - r).powi(2) - (r - a).powi(2)).sqrt() - r1;
-        let t = (c + r1).atan2(r - a);
+        let c = (det::powi(r1 - r, 2) - det::powi(r - a, 2)).sqrt() - r1;
+        let t = det::atan2(c + r1, r - a);
         let mut pts = vec![(0.0, 0.0), (a, 0.0)];
         let n = 20000;
         for i in 1..n {
             let u = PI / 2.0 + (t - PI / 2.0) * f64::from(i) / f64::from(n);
-            pts.push((a + r1 * u.cos(), -r1 + r1 * u.sin()));
+            pts.push((a + r1 * det::cos(u), -r1 + r1 * det::sin(u)));
         }
         for i in 0..=n {
             let u = t + (PI - t) * f64::from(i) / f64::from(n);
-            pts.push((r + r * u.cos(), c + r * u.sin()));
+            pts.push((r + r * det::cos(u), c + r * det::sin(u)));
         }
         let mut twice = 0.0;
         for (i, p) in pts.iter().enumerate() {
@@ -245,8 +246,8 @@ fn full_length_convex_rollover_builds() {
             .unwrap_or_else(|err| panic!("w {w} r1 {r1} r {r}: {err:?}"));
         let report = b.check(CheckLevel::All).unwrap();
         assert!(report.is_valid(), "w {w} r1 {r1} r {r}: {report}");
-        let c = ((r1 - r).powi(2) - (r - a).powi(2)).sqrt() - r1;
-        let t = (c + r1).atan2(r - a);
+        let c = (det::powi(r1 - r, 2) - det::powi(r - a, 2)).sqrt() - r1;
+        let t = det::atan2(c + r1, r - a);
         let order = b.to_record().unwrap().1;
         let faces: Vec<_> = (0..order.faces.len())
             .map(|i| {
@@ -278,12 +279,12 @@ fn full_length_convex_rollover_builds() {
         close(round.area, r * (PI - t) * LENGTH, "round's area");
         close(
             round.centroid[0],
-            r - r * t.sin() / (PI - t),
+            r - r * det::sin(t) / (PI - t),
             "round's centroid x",
         );
         close(
             round.centroid[1],
-            c + r * (t.cos() + 1.0) / (PI - t),
+            c + r * (det::cos(t) + 1.0) / (PI - t),
             "round's centroid y",
         );
         close(rim.area, r1 * t * LENGTH, "rim round's area");

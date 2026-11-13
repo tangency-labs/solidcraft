@@ -118,6 +118,7 @@ use crate::geom::tol::{are_same, is_zero, ZONE_TOL_3D};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{rad_to_deg, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BoundingBoxRequest as CurveBoxRequest};
 use crate::nurbs::b_spline_surface::{
@@ -1420,8 +1421,8 @@ impl SurfOfRevolution {
         let gen = tmp.as_ref().unwrap_or(gen_own);
 
         // evaluate expensive trigonometric functions
-        let cos_u = (uv.x * PI / 180.0).cos();
-        let sin_u = (uv.x * PI / 180.0).sin();
+        let cos_u = det::cos(uv.x * PI / 180.0);
+        let sin_u = det::sin(uv.x * PI / 180.0);
 
         let pv_eval = gen_evaluate_step(k, gen, uv.y, min_highest)?;
         let pv = |i: usize| pv_eval.get(i).copied().unwrap_or(Vec3::UNDEF);
@@ -1901,15 +1902,15 @@ pub(crate) fn end_angle_conditioning(
     let mut alpha = [0.0_f64; 3];
     for (a, at) in alpha.iter_mut().zip([0.0, 0.45, 0.9]) {
         let d = curve.evaluate_point(interval.evaluate(at)).ok()? - c;
-        *a = y.dot(d).atan2(x.dot(d));
+        *a = det::atan2(y.dot(d), x.dot(d));
     }
     let [a1, a2, a3] = alpha;
     let end = end_ang_deg.to_radians();
     // M⁻¹ by its cofactors: M = [[cos a_i, sin a_i, 1]] (rows i)
     let rows = [
-        [a1.cos(), a1.sin(), 1.0],
-        [a2.cos(), a2.sin(), 1.0],
-        [a3.cos(), a3.sin(), 1.0],
+        [det::cos(a1), det::sin(a1), 1.0],
+        [det::cos(a2), det::sin(a2), 1.0],
+        [det::cos(a3), det::sin(a3), 1.0],
     ];
     let [[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]] = rows;
     let det = m00 * (m11 * m22 - m12 * m21) - m01 * (m10 * m22 - m12 * m20)
@@ -1929,7 +1930,7 @@ pub(crate) fn end_angle_conditioning(
         (m02 * m10 - m00 * m12) / det,
     ];
     // t_1 - t_e, tangents at the first sample and the end
-    let (g0, g1) = (-a1.sin() + end.sin(), a1.cos() - end.cos());
+    let (g0, g1) = (-det::sin(a1) + det::sin(end), det::cos(a1) - det::cos(end));
     let mut w = [0.0; 3];
     for ((wi, a), b) in w.iter_mut().zip(inv0).zip(inv1) {
         *wi = g0 * a + g1 * b;
@@ -2342,8 +2343,8 @@ mod tests {
         let sweep = s.evaluate_step(&k(), Point2::new(0.0, 0.0), 3, 0).unwrap();
         assert_eq!(sweep.len(), 4);
         assert_eq!(sweep[1], du);
-        assert!((sweep[2] - Vec3::new(-2.0 * (PI / 180.0).powi(2), 0.0, 0.0)).length() < 1e-12);
-        assert!((sweep[3] - Vec3::new(0.0, -2.0 * (PI / 180.0).powi(3), 0.0)).length() < 1e-12);
+        assert!((sweep[2] - Vec3::new(-2.0 * det::powi(PI / 180.0, 2), 0.0, 0.0)).length() < 1e-12);
+        assert!((sweep[3] - Vec3::new(0.0, -2.0 * det::powi(PI / 180.0, 3), 0.0)).length() < 1e-12);
     }
 
     #[test]

@@ -140,6 +140,7 @@ use crate::geom::tol::{
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{min2, EFF_ZERO};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
@@ -498,7 +499,7 @@ pub fn approx_circ_arc(
     let rs = match arc.start {
         None => {
             let dd = as_ * (PI / 180.0);
-            translate_sum2_pts(cen, rad * dd.cos(), x, rad * dd.sin(), y)
+            translate_sum2_pts(cen, rad * det::cos(dd), x, rad * det::sin(dd), y)
         }
         Some(p) => p,
     };
@@ -508,7 +509,7 @@ pub fn approx_circ_arc(
                 rs
             } else {
                 let dd = ae * (PI / 180.0);
-                translate_sum2_pts(cen, rad * dd.cos(), x, rad * dd.sin(), y)
+                translate_sum2_pts(cen, rad * det::cos(dd), x, rad * det::sin(dd), y)
             }
         }
         Some(p) => p,

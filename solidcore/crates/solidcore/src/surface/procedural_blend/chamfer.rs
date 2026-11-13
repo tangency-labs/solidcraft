@@ -34,6 +34,7 @@
 //! Not upstream (solidcore's, #2486). Deviations: none. No recursion.
 
 use crate::error::{Result, SolidError};
+use crate::math::det;
 use crate::math::PI;
 
 const OP: &str = "surface::procedural_blend::chamfer";
@@ -108,7 +109,7 @@ impl ChamferDefinition {
     /// not be).
     pub fn of_offsets(offsets: [f64; 2], wedge: f64) -> Result<Self> {
         let [r1, r2] = offsets;
-        let (s, c) = wedge.sin_cos();
+        let (s, c) = det::sin_cos(wedge);
         Self::new(
             ChamferSize::Distances([(r2 + r1 * c) / s, (r1 + r2 * c) / s]),
             wedge,
@@ -122,10 +123,10 @@ impl ChamferDefinition {
             ChamferSize::Distances(d) => d,
             ChamferSize::DistanceAngle { distance, angle } => [
                 distance,
-                distance * angle.sin() / (self.wedge + angle).sin(),
+                distance * det::sin(angle) / det::sin(self.wedge + angle),
             ],
             ChamferSize::Chord(c) => {
-                let d = c / (2.0 * (0.5 * self.wedge).sin());
+                let d = c / (2.0 * det::sin(0.5 * self.wedge));
                 [d, d]
             }
         }
@@ -139,7 +140,7 @@ impl ChamferDefinition {
     /// would leave the wedge; a second distance at most the first's `cos(wedge)`).
     pub fn offsets(&self) -> Result<[f64; 2]> {
         let [d1, d2] = self.setbacks();
-        let (s, c) = self.wedge.sin_cos();
+        let (s, c) = det::sin_cos(self.wedge);
         let r = [(d2 - d1 * c) / s, (d1 - d2 * c) / s];
         if !(positive(r[0]) && positive(r[1])) {
             return Err(SolidError::invalid_input(
@@ -158,7 +159,7 @@ impl ChamferDefinition {
         };
         let [d1, d2] = self.setbacks();
         // the conversion's rounding: a few operations on the setbacks, over sin(wedge)
-        let room = 64.0 * f64::EPSILON * (d1.abs() + d2.abs()) / self.wedge.sin();
+        let room = 64.0 * f64::EPSILON * (d1.abs() + d2.abs()) / det::sin(self.wedge);
         r.iter().zip(offsets).all(|(&a, b)| (a - b).abs() <= room)
     }
 
@@ -233,7 +234,7 @@ mod tests {
             0.5 * PI,
         )
         .unwrap();
-        assert!(close(c.setbacks()[1], 3.0 * (PI / 6.0).tan()));
+        assert!(close(c.setbacks()[1], 3.0 * det::tan(PI / 6.0)));
     }
 
     #[test]

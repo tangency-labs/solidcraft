@@ -9,6 +9,7 @@
 //! to `invalid_input` (`SM_ERR_INVALID_INPUT`) or `status_<code>`.
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -242,9 +243,9 @@ fn coord(rng: &mut Rng) -> f64 {
     } else if r < 0.72 {
         rng.range_i64(-5, 5) as f64
     } else if r < 0.80 {
-        rng.uniform(-1.0, 1.0) * 10f64.powi(-(rng.range_i64(6, 14) as i32))
+        rng.uniform(-1.0, 1.0) * det::powi(10f64, -(rng.range_i64(6, 14) as i32))
     } else if r < 0.87 {
-        rng.uniform(-1.0, 1.0) * 10f64.powi(rng.range_i64(3, 12) as i32)
+        rng.uniform(-1.0, 1.0) * det::powi(10f64, rng.range_i64(3, 12) as i32)
     } else if r < 0.90 {
         UNDEF_DOUBLE
     } else {
@@ -262,12 +263,12 @@ fn vector(rng: &mut Rng) -> [f64; 2] {
         } else {
             rng.uniform(-1.0, 1.0) * 1e-12
         };
-        [t.cos() * (1.0 + e), t.sin()]
+        [det::cos(t) * (1.0 + e), det::sin(t)]
     } else if r < 0.12 {
         // Squared length near EFF_ZERO_SQ (the unitize / angle thresholds).
         let t = rng.uniform(0.0, 2.0 * PI);
         let len = EFF_ZERO * rng.uniform(0.5, 1.5);
-        [t.cos() * len, t.sin() * len]
+        [det::cos(t) * len, det::sin(t) * len]
     } else {
         [coord(rng), coord(rng)]
     }
@@ -282,13 +283,13 @@ fn partner(rng: &mut Rng, a: [f64; 2]) -> [f64; 2] {
         [a[0] * k, a[1] * k]
     } else if r < 0.30 {
         // Nearly (anti)parallel: exercises the asin branch and CCW snapping.
-        let eps = rng.uniform(-1.0, 1.0) * 10f64.powi(-(rng.range_i64(1, 16) as i32));
-        let (c, s) = (eps.cos(), eps.sin());
+        let eps = rng.uniform(-1.0, 1.0) * det::powi(10f64, -(rng.range_i64(1, 16) as i32));
+        let (c, s) = (det::cos(eps), det::sin(eps));
         [k * (c * a[0] - s * a[1]), k * (s * a[0] + c * a[1])]
     } else if r < 0.38 {
         [-a[1] * k, a[0] * k]
     } else if r < 0.52 {
-        let eps = 10f64.powi(-(rng.range_i64(8, 16) as i32));
+        let eps = det::powi(10f64, -(rng.range_i64(8, 16) as i32));
         [
             a[0] + rng.uniform(-1.0, 1.0) * eps,
             a[1] + rng.uniform(-1.0, 1.0) * eps,

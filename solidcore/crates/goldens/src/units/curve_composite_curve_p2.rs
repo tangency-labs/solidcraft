@@ -21,6 +21,7 @@
 //! `WriteToDB` wrote, frozen in `fixtures/curve.composite_curve_p2/written_records.json`
 //! (solidcore has no composite writer, #2857).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1168,7 +1169,7 @@ fn polygon(rng: &mut Rng, o: [f64; 3], k: usize, r: f64) -> Vec<[f64; 3]> {
         .map(|i| {
             let ang = std::f64::consts::TAU * (i as f64 + rng.uniform(-0.25, 0.25)) / k as f64;
             let rr = r * rng.uniform(0.6, 1.0);
-            add(o, [rr * ang.cos(), rr * ang.sin(), 0.0])
+            add(o, [rr * det::cos(ang), rr * det::sin(ang), 0.0])
         })
         .collect()
 }

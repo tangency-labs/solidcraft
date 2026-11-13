@@ -14,6 +14,7 @@
     clippy::panic
 )]
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 use std::fmt::Write as _;
 use std::time::Instant;
@@ -78,8 +79,8 @@ fn main() {
             .map(|k| {
                 let a = 2.0 * PI * f64::from(k) / 400.0;
                 let (u, v) = (
-                    u0 + (u1 - u0) * (cu + 0.1 * a.cos()),
-                    v0 + (v1 - v0) * (cv + 0.1 * a.sin()),
+                    u0 + (u1 - u0) * (cu + 0.1 * det::cos(a)),
+                    v0 + (v1 - v0) * (cv + 0.1 * det::sin(a)),
                 );
                 LoopPoint {
                     u,

@@ -51,7 +51,9 @@ fn fixtures(root: &std::path::Path) -> Vec<String> {
 /// (fixture, digest of its export) as written before the move.
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
-    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "5545d4ee93431803"),
+    // discord-2026-10-30-fillet: 5545d4ee93431803 with glibc's libm. Its export writes numbers
+    // solidcore computes with sines and cosines, now from `solidcore::math::det` (#13866).
+    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "a38b6fb796267551"),
     ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "8432fa140e74c146"),
     ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "c5176ac4d067ab52"),
     ("tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step", "d8c5f6b3ce4ea3cf"),

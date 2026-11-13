@@ -15,6 +15,7 @@
 use crate::blend::fillet_section::interval::Ivl;
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::math::UNIT;
 use crate::query::tangent_edge::{cross_ivl, dot_ivl, face_use_normal, norm_ivl};
@@ -129,9 +130,10 @@ pub fn turn_at(k: &Kernel, b: &Brep, e: EdgeId, f: EdgeId, v: VertexId) -> Resul
         return Ok(None);
     };
     let arrives = arrives * -1.0;
-    Ok(Some(
-        arrives.cross(leaves).length().atan2(arrives.dot(leaves)),
-    ))
+    Ok(Some(det::atan2(
+        arrives.cross(leaves).length(),
+        arrives.dot(leaves),
+    )))
 }
 
 /// Whether edge `e` is convex at its end `v` (its faces meet at less than 180 degrees inside
@@ -208,7 +210,7 @@ pub fn convex_at(
     // a dot product of at most 0 or |na x nc| > tan(smooth) (na . nc) is proved (the tangent
     // within 2 ulps, and the product one rounding: 8 u more)
     let (c, d) = (norm_ivl(cross_ivl(na, nc)), dot_ivl(na, nc));
-    let parted = d.hi <= 0.0 || c.lo > smooth.tan() * (1.0 + 8.0 * UNIT) * d.hi;
+    let parted = d.hi <= 0.0 || c.lo > det::tan(smooth) * (1.0 + 8.0 * UNIT) * d.hi;
     if !parted {
         return Ok(None);
     }

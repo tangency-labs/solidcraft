@@ -122,7 +122,7 @@ fn orient(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
 /// The angle at `o` between the directions to `a` and `b` (radians; 0 where one is empty).
 fn angle(o: Vec3, a: Vec3, b: Vec3) -> f64 {
     let (x, y) = (a - o, b - o);
-    x.cross(y).len().atan2(x.dot(y))
+    solidcore::math::det::atan2(x.cross(y).len(), x.dot(y))
 }
 
 impl Mesh<'_> {
@@ -251,13 +251,13 @@ impl Mesh<'_> {
             let size = (0..3)
                 .map(|k| {
                     let [p0, p1, _] = super::rot3(ps, k);
-                    (p1[0] - p0[0]).hypot(p1[1] - p0[1])
+                    solidcore::math::det::hypot(p1[0] - p0[0], p1[1] - p0[1])
                 })
                 .fold(0.0, f64::max);
             for k in 0..3 {
                 let [a, b, _] = super::rot3(tri, k);
                 let [pa, pb, _] = super::rot3(ps, k);
-                let len = (pb[0] - pa[0]).hypot(pb[1] - pa[1]);
+                let len = solidcore::math::det::hypot(pb[0] - pa[0], pb[1] - pa[1]);
                 if !(len > 0.0) {
                     continue;
                 }
@@ -372,7 +372,7 @@ pub(crate) fn shape(
     all.sort_unstable();
     m.flip(all, per);
     let h_at = |p: Vec3| local(rules.h, rules.size_at, p);
-    let floor = if rules.tol.is_finite() && rules.tol > 0.0 { (1e-3 * rules.tol).powi(2) } else { 0.0 };
+    let floor = if rules.tol.is_finite() && rules.tol > 0.0 { solidcore::math::det::powi(1e-3 * rules.tol, 2) } else { 0.0 };
     let mut limits: Vec<ShapeLimit> = Vec::new();
     // The sides points would encroach on, by their nodes in index order.
     let mut encroached: std::collections::BTreeMap<(u32, u32), (u32, u32)> = std::collections::BTreeMap::new();
@@ -609,7 +609,7 @@ fn off_centre(m: &Mesh<'_>, e: (u32, u32), rules: &Rules) -> Option<(u32, [f64; 
     if !(length > 0.0 && reach > 0.0) {
         return None;
     }
-    let height = 0.5 * length * (rules.min_angle * (1.0 + 1e-3)).tan();
+    let height = 0.5 * length * solidcore::math::det::tan(rules.min_angle * (1.0 + 1e-3));
     let target = mid + across * (height / reach);
     let qm = [0.5 * (qx[0] + qy[0]), 0.5 * (qx[1] + qy[1])];
     let f = height / reach;

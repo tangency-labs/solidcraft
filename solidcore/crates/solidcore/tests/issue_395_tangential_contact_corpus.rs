@@ -24,6 +24,7 @@
 use solidcore::geom::tol::approx_tol3d;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
@@ -155,7 +156,7 @@ fn bernstein_power(k: usize, n: usize, lo: f64, hi: f64) -> Vec<f64> {
             if j > k {
                 0.0
             } else {
-                choose(k, j) * lo.powi((k - j) as i32) * d.powi(j as i32)
+                choose(k, j) * det::powi(lo, (k - j) as i32) * det::powi(d, j as i32)
             }
         })
         .collect();
@@ -212,7 +213,7 @@ fn circle(center: Vec3, e1: Vec3, e2: Vec3, r: f64) -> Vec<Vec3> {
     (0..=720)
         .map(|i| {
             let t = std::f64::consts::TAU * f64::from(i) / 720.0;
-            center + e1 * (r * t.cos()) + e2 * (r * t.sin())
+            center + e1 * (r * det::cos(t)) + e2 * (r * det::sin(t))
         })
         .collect()
 }
@@ -235,7 +236,7 @@ fn corpus() -> Vec<Pair> {
         (0..=720)
             .map(|i| {
                 let t = std::f64::consts::TAU * f64::from(i) / 720.0;
-                v(s * t.sin(), t.cos(), t.sin())
+                v(s * det::sin(t), det::cos(t), det::sin(t))
             })
             .collect()
     };

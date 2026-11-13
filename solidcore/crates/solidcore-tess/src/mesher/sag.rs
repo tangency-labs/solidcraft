@@ -7,6 +7,7 @@
 //! conforming. Sides on the face's boundary are never split: they are the edges' own nodes,
 //! which the neighbouring face shares.
 
+use solidcore::math::det;
 use crate::vec::VecExt as _;
 use crate::hash::BitsMap;
 
@@ -202,7 +203,7 @@ fn flat_long_side(t: &[u32; 3], pos: &[Vec3], sides: &BitsMap<(u32, u32), Vec<u3
     let [ta, tb, _] = rot3(*t, k);
     let side = key(ta, tb);
     let inside = sides.get(&side).is_some_and(|ts| ts.len() == 2) && l > shortest;
-    let flat = a > 0.0 && b > 0.0 && (a * a + b * b - l * l) / (2.0 * a * b) < degrees.to_radians().cos();
+    let flat = a > 0.0 && b > 0.0 && (a * a + b * b - l * l) / (2.0 * a * b) < det::cos(degrees.to_radians());
     (inside && flat).then_some(side)
 }
 
@@ -277,7 +278,7 @@ pub(crate) fn flip(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[Vec
     let min_angle = |t: [u32; 3]| -> f64 {
         let (Some(a), Some(b), Some(c)) = (p(t[0]), p(t[1]), p(t[2])) else { return 0.0 };
         let angle = |o: Vec3, x: Vec3, y: Vec3| match ((x - o).normalized(), (y - o).normalized()) {
-            (Some(u), Some(v)) => u.dot(v).clamp(-1.0, 1.0).acos(),
+            (Some(u), Some(v)) => det::acos(u.dot(v).clamp(-1.0, 1.0)),
             _ => 0.0,
         };
         angle(a, b, c).min(angle(b, c, a)).min(angle(c, a, b))
@@ -288,7 +289,7 @@ pub(crate) fn flip(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[Vec
         let m = mean(&[qa, qb, qc]);
         let facet = (b - a).cross(c - a).normalized();
         match (facet, s.derivs(m[0], m[1]).and_then(|(_, su, sv)| su.cross(sv).normalized())) {
-            (Some(f), Some(n)) => f.dot(n).abs().clamp(0.0, 1.0).acos(),
+            (Some(f), Some(n)) => det::acos(f.dot(n).abs().clamp(0.0, 1.0)),
             _ => 0.0,
         }
     };

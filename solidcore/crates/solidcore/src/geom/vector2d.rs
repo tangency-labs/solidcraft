@@ -52,6 +52,7 @@
 //!   `SM_IS_ZERO_SQUARED` = `SmTol::InTol(a, SmTol::GetScaledZeroSq())` calls
 //!   [`crate::geom::tol`].
 
+use crate::math::det;
 use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub, SubAssign};
 
 use crate::error::{Result, SolidError};
@@ -200,8 +201,8 @@ impl Vec2 {
     /// The vector rotated counter-clockwise by `ang_rad` about the Z axis (`Rotate`).
     #[must_use]
     pub fn rotate(self, ang_rad: f64) -> Self {
-        let cos = ang_rad.cos();
-        let sin = ang_rad.sin();
+        let cos = det::cos(ang_rad);
+        let sin = det::sin(ang_rad);
         Self::new(cos * self.x - sin * self.y, sin * self.x + cos * self.y)
     }
 

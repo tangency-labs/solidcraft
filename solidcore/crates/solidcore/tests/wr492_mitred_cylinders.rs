@@ -16,6 +16,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_analytic_circle, create_line_segment};
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -83,8 +84,8 @@ fn mitred_union(turn: f64) -> (solidcore::Result<Brep>, Kernel, f64) {
     let at = Vec3::new(23.5802, -12.5892, 51.2134);
     let a = turn.to_radians() * 0.5;
     let (ta, tb) = (
-        Vec3::new(a.cos(), a.sin(), 0.0),
-        Vec3::new(a.cos(), -a.sin(), 0.0),
+        Vec3::new(det::cos(a), det::sin(a), 0.0),
+        Vec3::new(det::cos(a), -det::sin(a), 0.0),
     );
     let m = unit(ta + tb);
     let ca = cylinder(&mut k, at, ta, 10.0, 12.0);

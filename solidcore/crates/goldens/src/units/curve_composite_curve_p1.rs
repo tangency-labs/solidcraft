@@ -23,6 +23,7 @@
 //! corner chamfers and classifications whose intersections or point solves reach the
 //! unported curve/curve or analytic solvers.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1248,8 +1249,8 @@ fn gen_polygon(rng: &mut Rng, k: usize, closed: bool) -> (Vec<[f64; 3]>, [f64; 3
             add(
                 o,
                 add(
-                    scale3(ex, r * ang.cos()),
-                    scale3(ey, squash * r * ang.sin()),
+                    scale3(ex, r * det::cos(ang)),
+                    scale3(ey, squash * r * det::sin(ang)),
                 ),
             )
         })
@@ -1535,8 +1536,8 @@ fn gen_corner(rng: &mut Rng) -> OpIn {
     let vertex = rp(rng, 5.0);
     let ang1 = rng.uniform(0.0, std::f64::consts::TAU);
     let ang2 = ang1 + rng.uniform(0.2, 2.9) * if rng.chance(0.5) { 1.0 } else { -1.0 };
-    let dir1 = [ang1.cos(), ang1.sin(), 0.0];
-    let dir2 = [ang2.cos(), ang2.sin(), 0.0];
+    let dir1 = [det::cos(ang1), det::sin(ang1), 0.0];
+    let dir2 = [det::cos(ang2), det::sin(ang2), 0.0];
     let dist = rng.uniform(0.1, 2.0);
     // offsets of the two original lines (incoming along dir1, outgoing along dir2)
     let side = if rng.chance(0.5) { 1.0 } else { -1.0 };

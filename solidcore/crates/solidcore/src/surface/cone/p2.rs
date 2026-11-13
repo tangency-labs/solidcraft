@@ -98,6 +98,7 @@ use crate::geom::tol::{approx_tol3d, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{
@@ -228,9 +229,9 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
             return Ok(None);
         };
         // the half sweep, from the leg and the chord
-        let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
+        let half = det::atan2(tangent.cross(chord).length(), tangent.dot(chord));
         let weight = b.w / (a.w * c.w).sqrt();
-        if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
+        if (weight - det::cos(half)).abs() > EFF_ZERO_SQRT {
             return Ok(None);
         }
         segments.push(Segment {
@@ -268,7 +269,7 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
     for s in &segments {
         let on = |p: Point3| ((p - centre).length() - radius).abs() <= scaled_zero;
         // the middle point is where the end tangents meet, r / cos α from the centre
-        let corner = ((s.q1 - centre).length() * s.half.cos() - radius).abs() <= scaled_zero;
+        let corner = ((s.q1 - centre).length() * det::cos(s.half) - radius).abs() <= scaled_zero;
         let flat = s
             .normal
             .is_none_or(|n| n.dot(normal) >= 1.0 - EFF_ZERO_SQRT);
@@ -539,7 +540,7 @@ impl Cone {
         let tol = approx_tol3d(k, tol);
         let sign =
             if self.rev.swap_uv { -1.0 } else { 1.0 } * if self.inside_out { -1.0 } else { 1.0 };
-        let d = (self.semi_angle_deg * PI / 180.0).cos() * sign * signed_offset_distance;
+        let d = det::cos(self.semi_angle_deg * PI / 180.0) * sign * signed_offset_distance;
         self.bot_radius() + d < tol && self.top_radius() + d < tol
     }
 
@@ -589,8 +590,8 @@ impl Cone {
         let nurb_domain = self.rev.base.natural_uv_domain();
 
         // offset vector and displacements
-        let mut sin = (self.semi_angle_deg * PI / 180.0).sin();
-        let mut cos = (self.semi_angle_deg * PI / 180.0).cos();
+        let mut sin = det::sin(self.semi_angle_deg * PI / 180.0);
+        let mut cos = det::cos(self.semi_angle_deg * PI / 180.0);
         let norm = (cos * x_axis - sin * z_axis).unitize_or_z();
         let off_vec = offset_sign * signed_offset_distance * norm;
         let off_z_dist = -sin * offset_sign * signed_offset_distance;
@@ -1327,7 +1328,7 @@ impl Cone {
             top.radius - bot.radius
         };
         if radius_diff.abs() > EFF_ZERO {
-            self.semi_angle_deg = radius_diff.atan2(height) * 180.0 / PI;
+            self.semi_angle_deg = det::atan2(radius_diff, height) * 180.0 / PI;
         }
         // Not upstream (WR-385, #713): an SmCylinder's angle is always 0, so with the
         // opt-in clear any angle left by a previous rebuild under the pinned rule
@@ -1992,7 +1993,7 @@ mod tests {
             let mut fixed = c.clone();
             c.rebuild_step_from_nurb_parameters(&k).unwrap();
             fixed.rebuild_step_from_nurb_parameters(&fixed_k).unwrap();
-            let expected = (top - radius).atan2(3.0) * 180.0 / PI;
+            let expected = det::atan2(top - radius, 3.0) * 180.0 / PI;
             assert!((c.semi_angle_deg() - expected).abs() < 1e-12);
             assert_ne!(c.semi_angle_deg(), 0.0);
             assert_eq!(fixed.semi_angle_deg(), c.semi_angle_deg());
@@ -2100,7 +2101,7 @@ mod tests {
         let cone = canonical(&k, 2.0, 1.0, 3.0, false, false);
         let off = cone.create_offset_surface(&k, 0.5, 1e-6).unwrap().unwrap();
         let semi = cone.semi_angle_deg() * PI / 180.0;
-        assert!((off.base_radius() - (2.0 + semi.cos() * 0.5)).abs() < 1e-12);
+        assert!((off.base_radius() - (2.0 + det::cos(semi) * 0.5)).abs() < 1e-12);
         // both radii below the tolerance: no surface
         assert!(cone
             .create_offset_surface(&k, -10.0, 1e-6)
@@ -2133,7 +2134,7 @@ mod tests {
                 // inside out); the kept cone runs from where that radius reaches zero
                 // to the surviving end, at the slope (top - bot) / 3
                 let semi = cone.semi_angle_deg() * PI / 180.0;
-                let moved = (if inside { -1.0 } else { 1.0 }) * d * semi.cos();
+                let moved = (if inside { -1.0 } else { 1.0 }) * d * det::cos(semi);
                 let (new_bot, new_top) = (bot + moved, top + moved);
                 let collapsed_bot = new_bot < new_top;
                 let (want_bot, want_top, want_height) = if collapsed_bot {
@@ -2295,7 +2296,7 @@ mod tests {
     /// The part of the ellipse of [`ellipse_on_a_trimmed_cylinder`] inside the trimmed
     /// domain: `z = 50 - 30 cos t >= 30`, so `cos t <= 2/3`.
     fn ellipse_part_above_v30() -> f64 {
-        360.0 - 2.0 * (2.0_f64 / 3.0).acos().to_degrees()
+        360.0 - 2.0 * det::acos(2.0_f64 / 3.0).to_degrees()
     }
 
     #[test]
@@ -2427,7 +2428,7 @@ mod tests {
             cylinder.rev().base().natural_uv_domain()
         );
         assert!((cone.canonical().radius - (5.0 - 0.4)).abs() < 1e-9);
-        assert!((cone.canonical().semi_angle_deg - slope.atan().to_degrees()).abs() < 1e-9);
+        assert!((cone.canonical().semi_angle_deg - det::atan(slope).to_degrees()).abs() < 1e-9);
         let nurb = cylinder.rev().base().natural_uv_domain();
         for i in 0..=6 {
             for j in 0..=3 {

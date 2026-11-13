@@ -19,6 +19,7 @@ use crate::blend::blend_refusal::{chains_among, BlendRefusal};
 use crate::blend::chamfer_side::widest_wedge_bound;
 use crate::blend::fillet_executive::p2::FilletParametersAccess;
 use crate::blend::fillet_solver::p5::is_knife_edge;
+use crate::math::det;
 use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
 use crate::surface::surface::SurfaceKind;
 use crate::topology::edgeuse::p1 as eu1;
@@ -118,7 +119,7 @@ fn chain_wedge(
         }
         if planes {
             // the rounding of an angle measured from two unit vectors
-            let room = 64.0 * f64::EPSILON / w.sin();
+            let room = 64.0 * f64::EPSILON / det::sin(w);
             match anchor {
                 Some(a) if (a - w).abs() > room => return Ok(own),
                 Some(_) => {}
@@ -138,7 +139,7 @@ fn chain_wedge(
 /// setbacks. The bound stops at `widest`, where the setbacks are as asked.
 fn unfolded_wedge(narrowest: f64, setbacks: [f64; 2], widest: f64, margin: f64) -> f64 {
     let [d1, d2] = setbacks;
-    let (sin_w, cos_w) = widest.sin_cos();
+    let (sin_w, cos_w) = det::sin_cos(widest);
     let mut most = 1.0_f64;
     for (a, b) in [(d1, d2), (d2, d1)] {
         let across = b + a * cos_w;
@@ -147,7 +148,7 @@ fn unfolded_wedge(narrowest: f64, setbacks: [f64; 2], widest: f64, margin: f64) 
         }
     }
     // clamp: constant bounds, the lower below the upper (cannot panic)
-    let least = most.clamp(-1.0, 1.0).acos();
+    let least = det::acos(most.clamp(-1.0, 1.0));
     narrowest.max(least.min(widest))
 }
 
@@ -161,7 +162,7 @@ fn wedge_at(k: &Kernel, b: &mut crate::Brep, u0: EdgeuseId, u1: EdgeuseId, t: f6
         .binormal
         .unitize()?;
     // clamp: constant bounds, the lower below the upper (cannot panic)
-    Ok(b0.dot(b1).clamp(-1.0, 1.0).acos())
+    Ok(det::acos(b0.dot(b1).clamp(-1.0, 1.0)))
 }
 
 impl FilletSession<'_> {
@@ -569,21 +570,21 @@ mod tests {
     fn setback(a: f64, [d1, d2]: [f64; 2], w: f64) -> f64 {
         let chamfer = ChamferDefinition::new(ChamferSize::Distances([d1, d2]), a).unwrap();
         let [r1, r2] = chamfer.offsets().unwrap();
-        (r2 + r1 * w.cos()) / w.sin()
+        (r2 + r1 * det::cos(w)) / det::sin(w)
     }
 
     #[test]
     fn equal_sizes_take_the_narrowest_and_unequal_ones_stop_short_of_the_fold() {
-        let tilt = 0.5_f64.atan();
+        let tilt = det::atan(0.5_f64);
         let widest = 0.5 * crate::math::PI + tilt;
         // equal sizes do not fold: the narrowest, whatever the wedges
         assert_eq!(unfolded_wedge(1.0, [1.528; 2], widest, 0.01), 1.0);
         // the rim's 1 and 2 opening to 116.57 degrees: cos a = (1 + 2 cos w - m sin w)
         // / (2 + cos w), and the setback at the widest station is above the margin, not far
-        let (s, c) = widest.sin_cos();
+        let (s, c) = det::sin_cos(widest);
         let m = 0.01;
         let a = unfolded_wedge(1.37, [1.0, 2.0], widest, m);
-        assert!((a.cos() - (1.0 + 2.0 * c - m * s) / (2.0 + c)).abs() < 1e-15);
+        assert!((det::cos(a) - (1.0 + 2.0 * c - m * s) / (2.0 + c)).abs() < 1e-15);
         let least = setback(a, [1.0, 2.0], widest);
         assert!(least >= m && least < 1.01 * m, "{least}");
         // measured at the narrowest the same chamfer folds

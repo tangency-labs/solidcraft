@@ -21,6 +21,7 @@ use crate::intersect::point_class::{
     PointClassification,
 };
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::query::face::p2 as face_p2;
 use crate::topology::brep::p2 as brep_p2;
@@ -875,7 +876,7 @@ pub struct VertexDefinition<O> {
 /// runs along the edge (within the angular tolerance) or the angle is unknown.
 fn crossing_error(gap: f64, crossing_sine: f64) -> f64 {
     // (upstream's `!(sine >= min)`: a NaN sine is unknown too)
-    if crossing_sine.partial_cmp(&crate::geom::tol::ang_tol_rad().sin())
+    if crossing_sine.partial_cmp(&det::sin(crate::geom::tol::ang_tol_rad()))
         == Some(core::cmp::Ordering::Less)
         || crossing_sine.is_nan()
     {

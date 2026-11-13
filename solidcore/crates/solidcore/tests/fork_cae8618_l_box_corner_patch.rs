@@ -22,6 +22,7 @@
 
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
@@ -92,7 +93,7 @@ fn corner_patch_seams(k: &Kernel, b: &Brep, corner: Point3, reach: f64) -> (usiz
                 // the normals' angle either way round, from the cross product, which
                 // resolves it below acos's 2.1e-8 rad floor
                 let (n, n2) = (normal(s, p), normal(s2, p));
-                let angle = n.cross(n2).length().atan2(n.dot(n2).abs());
+                let angle = det::atan2(n.cross(n2).length(), n.dot(n2).abs());
                 worst = worst.max(angle.to_degrees());
             }
         }

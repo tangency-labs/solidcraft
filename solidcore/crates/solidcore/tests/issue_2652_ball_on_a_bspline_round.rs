@@ -38,6 +38,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::tol;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::nurbs::b_spline_surface::{
@@ -332,8 +333,8 @@ fn a_ball_narrower_than_the_bspline_round_rolls_as_on_the_cylinder() {
     let r = reference(&mut kr);
     let (want, _) = round_top_at(&mut kr, r, 1.5).unwrap();
     let torus = |p: Point3| {
-        let rho = ((p.x - 8.0).powi(2) + (p.y - 8.0).powi(2)).sqrt();
-        (((rho - 0.5).powi(2) + (p.z + 1.5).powi(2)).sqrt() - 1.5).abs()
+        let rho = (det::powi(p.x - 8.0, 2) + det::powi(p.y - 8.0, 2)).sqrt();
+        ((det::powi(rho - 0.5, 2) + det::powi(p.z + 1.5, 2)).sqrt() - 1.5).abs()
     };
     let mut slack = 0.0_f64;
     let ids: Vec<FaceId> = b.faces().ids().collect();
@@ -704,7 +705,7 @@ const HEIGHT: f64 = 15.0;
 const TWIST: f64 = 30.0;
 
 fn rotate(p: Point3, a: f64) -> Point3 {
-    let (s, c) = a.sin_cos();
+    let (s, c) = det::sin_cos(a);
     Point3::new(c * p.x - s * p.y, s * p.x + c * p.y, p.z)
 }
 
@@ -735,8 +736,8 @@ fn profile(n: usize) -> Vec<Piece> {
         pieces.push(line(c, d));
         // the outer arc from this slot's right wall to the next slot's left wall (clockwise)
         let next = slots[(k + n - 1) % n][0];
-        let ad = d.y.atan2(d.x);
-        let an = next.y.atan2(next.x);
+        let ad = det::atan2(d.y, d.x);
+        let an = det::atan2(next.y, next.x);
         let mut an = an;
         while an > ad {
             an -= std::f64::consts::TAU;
@@ -896,8 +897,8 @@ fn arc(c: Point3, r: f64, a0: f64, a1: f64, start: Point3, end: Point3) -> Piece
         .ceil()
         .max(1.0) as usize;
     let d = (a1 - a0) / n as f64;
-    let w = (0.5 * d).cos();
-    let at = |a: f64, rr: f64| Point3::new(c.x + rr * a.cos(), c.y + rr * a.sin(), 0.0);
+    let w = det::cos(0.5 * d);
+    let at = |a: f64, rr: f64| Point3::new(c.x + rr * det::cos(a), c.y + rr * det::sin(a), 0.0);
     let mut points = vec![start];
     let mut weights = vec![1.0];
     let mut knots = vec![0.0];

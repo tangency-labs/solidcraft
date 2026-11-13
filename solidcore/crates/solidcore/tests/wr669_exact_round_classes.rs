@@ -21,6 +21,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_sphere};
 use solidcore::primitive::api_surface_ops::create_offset_surface;
@@ -107,11 +108,11 @@ fn ball_and_peg_round_volume() -> f64 {
     // int rho (zc - sqrt(1 - (rho - 3)^2)) drho, u = rho - 3
     let arc = |u: f64| {
         let w = 1.0 - u * u;
-        -(w * w.sqrt()) / 3.0 + 3.0 * (u * w.sqrt() + u.asin()) / 2.0
+        -(w * w.sqrt()) / 3.0 + 3.0 * (u * w.sqrt() + det::asin(u)) / 2.0
     };
     let ball_part = zc * (2.5f64 * 2.5 - 2.0 * 2.0) / 2.0 - (arc(-0.5) - arc(-1.0));
     // int rho sqrt(25 - rho^2) drho
-    let sphere = |rho: f64| -(25.0 - rho * rho).powf(1.5) / 3.0;
+    let sphere = |rho: f64| -det::powf(25.0 - rho * rho, 1.5) / 3.0;
     let sphere_part = sphere(2.5) - sphere(2.0);
     2.0 * PI * (ball_part - sphere_part)
 }
@@ -141,7 +142,7 @@ fn revolved_off_spine(k: &Kernel, b: &Brep) -> f64 {
                     .evaluate_point(k, solidcore::geom::vector2d::Point2::new(u, v))
                     .unwrap();
                 let rho = (p.x * p.x + p.y * p.y).sqrt();
-                let off = ((rho - 3.0).powi(2) + (p.z - zc).powi(2)).sqrt() - 1.0;
+                let off = (det::powi(rho - 3.0, 2) + det::powi(p.z - zc, 2)).sqrt() - 1.0;
                 worst = worst.max(off.abs());
             }
         }

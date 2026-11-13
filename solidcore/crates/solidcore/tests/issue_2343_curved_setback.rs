@@ -37,6 +37,7 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::global_solver::{SolutionRequested, SolverOperation};
 use solidcore::kernel::UpstreamFixes;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3, BIG_DOUBLE};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::knots::Side;
@@ -124,7 +125,7 @@ fn arc(k: &Kernel, c: Point3, r: f64, a0: f64, a1: f64) -> Curve {
     let axis = Vec3::Z;
     let reference = Vec3::X;
     let y = axis.cross(reference);
-    let x0 = reference * a0.cos() + y * a0.sin();
+    let x0 = reference * det::cos(a0) + y * det::sin(a0);
     let y0 = axis.cross(x0);
     let frame = Axis2Placement::new(c, x0, y0);
     let interval = Extent1d::from_min_max(0.0, (a1 - a0) * 180.0 / PI);
@@ -133,7 +134,7 @@ fn arc(k: &Kernel, c: Point3, r: f64, a0: f64, a1: f64) -> Curve {
 
 /// The disc of radius `rr` about (`cx`, `cy`) less x > cx + a, from z0 up `height`.
 fn d_prism(k: &mut Kernel, cx: f64, cy: f64, rr: f64, a: f64, z0: f64, height: f64) -> Brep {
-    let al = (a / rr).acos();
+    let al = det::acos(a / rr);
     let h = (rr * rr - a * a).sqrt();
     let l = line(
         Point3::new(cx + a, cy - h, z0),
@@ -371,7 +372,7 @@ struct Case {
 }
 
 fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b))
+    det::atan2(a.cross(b).length(), a.dot(b))
 }
 
 /// The parameters of `s` nearest `x`, and how far `x` is from it there.
@@ -783,7 +784,7 @@ fn d_prism_corner_room_is_measured_along_its_edges() {
     let mut want = [
         2.0 * (rr * rr - a * a).sqrt(),
         10.0,
-        rr * (2.0 * PI - 2.0 * (a / rr).acos()),
+        rr * (2.0 * PI - 2.0 * det::acos(a / rr)),
     ];
     want.sort_by(f64::total_cmp);
     let mut room = r.room.clone();
@@ -972,8 +973,8 @@ fn knife_edge_corner_is_a_setback_no_more_concave_than_its_wall() {
                 2.0,
             ),
             mid(
-                Point3::new(tip + 23.5 * q.cos(), -21.0 + 23.5 * q.sin(), 7.5),
-                Point3::new(tip + 21.0 * q.cos(), -21.0 + 21.0 * q.sin(), 10.0),
+                Point3::new(tip + 23.5 * det::cos(q), -21.0 + 23.5 * det::sin(q), 7.5),
+                Point3::new(tip + 21.0 * det::cos(q), -21.0 + 21.0 * det::sin(q), 10.0),
                 2.5,
             ),
             mid(
@@ -1084,8 +1085,8 @@ fn middle(c: [f64; 3], n1: [f64; 3], n2: [f64; 3], r: f64) -> Point3 {
 #[test]
 fn cone_frustum_corner_is_a_setback_beside_the_cone() {
     let mut k = all_fixes();
-    let tb = (PI / 6.0).tan();
-    let (cb, sb) = ((PI / 6.0).cos(), (PI / 6.0).sin());
+    let tb = det::tan(PI / 6.0);
+    let (cb, sb) = (det::cos(PI / 6.0), det::sin(PI / 6.0));
     let rt = 10.0 - 6.0 * tb;
     let rm = 10.0 - 3.0 * tb;
     let cone = solidcore::primitive::api_primitives::create_cone(
@@ -1101,7 +1102,7 @@ fn cone_frustum_corner_is_a_setback_beside_the_cone() {
     let mut edges = vec![pick(&k, &b, [0.0, 0.0, 6.0]), pick(&k, &b, [0.0, rm, 3.0])];
     let mut radii = vec![1.25, 1.5];
     for e in edges_on(&k, &b, |p| {
-        (p.z - 6.0).abs() <= 1e-7 && (p.x.hypot(p.y) - rt).abs() <= 1e-7
+        (p.z - 6.0).abs() <= 1e-7 && (det::hypot(p.x, p.y) - rt).abs() <= 1e-7
     }) {
         edges.push(e);
         radii.push(2.0);
@@ -1165,7 +1166,7 @@ fn countersink_case(k: &mut Kernel) -> (Brep, Vec<EdgeId>, Vec<f64>, Case) {
     ];
     let mut radii = vec![1.25, 1.0];
     for e in edges_on(k, &b, |p| {
-        (p.z - 20.0).abs() <= 1e-7 && ((p.x - 4.0).hypot(p.y) - 8.0).abs() <= 1e-7
+        (p.z - 20.0).abs() <= 1e-7 && (det::hypot(p.x - 4.0, p.y) - 8.0).abs() <= 1e-7
     }) {
         edges.push(e);
         radii.push(1.5);
@@ -1194,9 +1195,9 @@ fn countersink_case(k: &mut Kernel) -> (Brep, Vec<EdgeId>, Vec<f64>, Case) {
                 1.25,
             ),
             middle(
-                [4.0 + rr * a3.cos(), rr * a3.sin(), zr],
+                [4.0 + rr * det::cos(a3), rr * det::sin(a3), zr],
                 [0.0, 0.0, 1.0],
-                [-c45 * a3.cos(), -c45 * a3.sin(), c45],
+                [-c45 * det::cos(a3), -c45 * det::sin(a3), c45],
                 1.5,
             ),
             middle(
@@ -1480,15 +1481,15 @@ fn d_prism_asked_past_the_rails_names_the_setback_that_fits() {
 /// parameter (each a few millionths long).
 fn top_spring_least_rho(s: f64) -> f64 {
     let p = (7.0, 6.0 - s);
-    let psi = 6.0f64.atan2(8.0) + s / 10.0;
-    let q = (8.0 * psi.cos(), 8.0 * psi.sin());
-    let along = (7.0 - q.0) / psi.sin();
-    let x = (7.0, q.1 - along * psi.cos());
+    let psi = det::atan2(6.0f64, 8.0) + s / 10.0;
+    let q = (8.0 * det::cos(psi), 8.0 * det::sin(psi));
+    let along = (7.0 - q.0) / det::sin(psi);
+    let x = (7.0, q.1 - along * det::cos(psi));
     (0..=20000)
         .map(|i| {
             let t = f64::from(i) / 20000.0;
             let (a, b, c) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t);
-            (a * p.0 + b * x.0 + c * q.0).hypot(a * p.1 + b * x.1 + c * q.1)
+            det::hypot(a * p.0 + b * x.0 + c * q.0, a * p.1 + b * x.1 + c * q.1)
         })
         .fold(f64::INFINITY, f64::min)
 }

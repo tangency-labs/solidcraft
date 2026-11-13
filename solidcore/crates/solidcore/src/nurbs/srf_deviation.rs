@@ -241,6 +241,7 @@ fn patches(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::math::Vec3;
     use crate::nurbs::geom::Rectangle;
     use crate::nurbs::knots::{clamped_uniform, Side};
@@ -295,7 +296,8 @@ mod tests {
                 let (u, v) = (f64::from(i) / 40.0, f64::from(j) / 40.0);
                 let p = s.eval(u, v, Side::Left, Side::Left).unwrap();
                 let q = m.eval(u, v, Side::Left, Side::Left).unwrap();
-                let gap2 = (p.x - q.x).powi(2) + (p.y - q.y).powi(2) + (p.z - q.z).powi(2);
+                let gap2 =
+                    det::powi(p.x - q.x, 2) + det::powi(p.y - q.y, 2) + det::powi(p.z - q.z, 2);
                 assert!(gap2 <= d * d, "at ({u}, {v}): {gap2} past {d}²");
             }
         }

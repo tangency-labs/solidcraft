@@ -3,6 +3,7 @@
 //! Deviations: validate counts, check arithmetic and available numeric tokens
 //! before constructing the net, and grow storage only as points/knots are read.
 
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 use crate::HarnessError;
@@ -31,7 +32,7 @@ pub(super) fn parse_sms(text: &str, path: &str) -> Result<ParsedSrf, HarnessErro
     let int = |value: f64, name: &str| -> Result<usize, HarnessError> {
         // usize::MAX rounds up to 2^BITS as f64 on 64-bit hosts. Use the
         // exclusive bound so that rounded, unrepresentable value is rejected too.
-        let upper = 2.0_f64.powi(usize::BITS as i32);
+        let upper = det::powi(2.0_f64, usize::BITS as i32);
         if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value >= upper {
             return Err(error(&format!("bad {name} count {value}")));
         }

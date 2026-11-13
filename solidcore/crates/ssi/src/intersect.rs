@@ -32,6 +32,7 @@
 //! Ported from Form Studio's `src/kernel/intersect.js` (same author) as of its
 //! 2026-10-22 fixes, and grown past it since.
 
+use solidcore::math::det;
 use std::collections::HashMap;
 
 use crate::surface3::Surf;
@@ -809,7 +810,7 @@ fn curve_surface(curve: &[H], surface: &Piece, ctx: &mut Ctx) -> Result<Vec<[f64
         let small = hull.size < ctx.resolution && piece.size() < ctx.resolution;
         let mut transversal = false;
         if let (Some(hc), Some(pc)) = (hull.cone, piece.cone()) {
-            let theta = dot(hc.axis, pc.axis).clamp(-1.0, 1.0).acos();
+            let theta = det::acos(dot(hc.axis, pc.axis).clamp(-1.0, 1.0));
             let spread = hc.angle + pc.angle;
             transversal = theta + spread < std::f64::consts::FRAC_PI_2 - 1e-9
                 || theta - spread > std::f64::consts::FRAC_PI_2 + 1e-9;
@@ -1350,9 +1351,7 @@ fn march(
         let mut accepted = false;
         if next.ok {
             let after = both(a, b, next.q);
-            let turn = dot(unit(after.tangent), unit(state.tangent))
-                .clamp(-1.0, 1.0)
-                .acos();
+            let turn = det::acos(dot(unit(after.tangent), unit(state.tangent)).clamp(-1.0, 1.0));
             let travelled = norm(sub(after.a.point, state.a.point));
             let measured = travelled < 2.0 * h && travelled > 0.25 * h;
             // A step that leaves the pair across a collapsed edge (a pole) is not
@@ -1847,7 +1846,7 @@ mod tests {
         let circle: Vec<V3> = (0..=40)
             .map(|k| {
                 let a = std::f64::consts::TAU * f64::from(k) / 40.0;
-                [a.cos(), a.sin(), 0.0]
+                [det::cos(a), det::sin(a), 0.0]
             })
             .collect();
         assert_eq!(unfolded(arc(&circle), 1e-9).len(), circle.len());

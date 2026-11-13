@@ -20,6 +20,7 @@
 // would fail the case (runner panics are caught).
 #![allow(clippy::indexing_slicing)]
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -231,7 +232,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 // ---- generator --------------------------------------------------------------------
 
 fn log_uniform(rng: &mut Rng, lo: f64, hi: f64) -> f64 {
-    (lo.ln() + (hi.ln() - lo.ln()) * rng.unit()).exp()
+    det::exp(det::ln(lo) + (det::ln(hi) - det::ln(lo)) * rng.unit())
 }
 
 fn gen_radius(rng: &mut Rng) -> f64 {

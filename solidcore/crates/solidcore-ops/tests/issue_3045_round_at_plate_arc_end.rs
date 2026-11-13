@@ -15,6 +15,7 @@
 
 mod common;
 
+use solidcore::math::det;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use common::{edge_at, kernel_copy};
@@ -46,7 +47,7 @@ impl Plate {
 
     fn body(&self) -> Body {
         let s = self.s;
-        let half = (self.cy() / self.rc()).asin();
+        let half = det::asin(self.cy() / self.rc());
         let line = |start: [f64; 3], end: [f64; 3]| Curve::Line { start, end };
         let profile = vec![
             line([0.0, 0.0, 0.0], [100.0 * s, 0.0, 0.0]),
@@ -74,15 +75,15 @@ impl Plate {
 
     /// The plate's volume: the 100 x 30 rectangle and the arc's segment past x = 100.
     fn volume(&self) -> f64 {
-        let turn = 2.0 * (self.cy() / self.rc()).asin();
+        let turn = 2.0 * det::asin(self.cy() / self.rc());
         let (rc, s) = (self.rc(), self.s);
-        self.thickness() * (3000.0 * s * s + rc * rc / 2.0 * (turn - turn.sin()))
+        self.thickness() * (3000.0 * s * s + rc * rc / 2.0 * (turn - det::sin(turn)))
     }
 
     /// The round's centre abscissa, `cx + dx`: the circle of radius `r` tangent to the side
     /// (y = 0) and inside the arc's circle, `|centre - (cx, cy)| = rc - r`.
     fn round_x(&self, r: f64) -> f64 {
-        self.cx() + ((self.rc() - r).powi(2) - (self.cy() - r).powi(2)).sqrt()
+        self.cx() + (det::powi(self.rc() - r, 2) - det::powi(self.cy() - r, 2)).sqrt()
     }
 
     /// The area the round of radius `r` removes: between the corner (100, 0), the side and the
@@ -91,12 +92,12 @@ impl Plate {
     /// sin a) + cy r (cos a - cos b))`, the side nothing.
     fn removed_area(&self, r: f64) -> f64 {
         let fx = self.round_x(r);
-        let contact = (r - self.cy()).atan2(fx - self.cx());
-        let corner = (-self.cy()).atan2(100.0 * self.s - self.cx());
+        let contact = det::atan2(r - self.cy(), fx - self.cx());
+        let corner = det::atan2(-self.cy(), 100.0 * self.s - self.cx());
         let arc = |(cx, cy): (f64, f64), rad: f64, a: f64, b: f64| {
             0.5 * (rad * rad * (b - a)
-                + cx * rad * (b.sin() - a.sin())
-                + cy * rad * (a.cos() - b.cos()))
+                + cx * rad * (det::sin(b) - det::sin(a))
+                + cy * rad * (det::cos(a) - det::cos(b)))
         };
         (arc((fx, r), r, -FRAC_PI_2, contact)
             + arc((self.cx(), self.cy()), self.rc(), contact, corner))
@@ -145,7 +146,7 @@ fn check_round(b: &Body, r: f64, axis_x: f64, expected: f64, what: &str) {
     assert_eq!(rounds.len(), 1, "{what}: one cylinder of radius {r}");
     let p = rounds.first().copied().unwrap();
     assert!(
-        ((p.x - axis_x).hypot(p.y - r) - r).abs() < 1e-9,
+        (det::hypot(p.x - axis_x, p.y - r) - r).abs() < 1e-9,
         "{what}: the round's cylinder is about ({axis_x}, {r})"
     );
 }

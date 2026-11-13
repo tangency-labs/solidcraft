@@ -37,6 +37,7 @@
 //! - Cancellation: `offset_pt_sampling_cancellable` (crate-private) polls a cancel token (#2136, #2372) per sample point and per knot removal step; `offset_pt_sampling` passes none.
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
+use crate::math::det;
 use crate::math::{max2, Vec3};
 use crate::nurbs::bezier::check_short_degree;
 use crate::nurbs::crv_adv::p2::ConstrainedEnds;
@@ -247,7 +248,7 @@ impl Curve {
         }
 
         let mut f1 = 1.0 / tol;
-        f1 = f1.powf(exp);
+        f1 = det::powf(f1, exp);
         let f2 = 2.0 * deg as f64;
 
         let (b, _) = normalize(b)?;
@@ -591,7 +592,7 @@ mod tests {
         let pw = (0..n + 3)
             .map(|i| {
                 let x = i as f64 * 0.5;
-                CPoint::new(x, (x * 0.7).sin() * 2.0, 0.0, crate::nurbs::math::NOW)
+                CPoint::new(x, det::sin(x * 0.7) * 2.0, 0.0, crate::nurbs::math::NOW)
             })
             .collect();
         let mut u = vec![0.0; 4];

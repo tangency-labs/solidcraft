@@ -3,6 +3,7 @@
 //! (two curves running closer together than their chords sag).
 
 
+use solidcore::math::det;
 use super::comp;
 use super::seam;
 use super::uv;
@@ -157,7 +158,7 @@ fn along(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
 /// Whether the segments `ab` and `cd` cross: each one's ends strictly either side of the other.
 fn cross(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
     let orient = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
-    let len = |p: [f64; 2], q: [f64; 2]| (q[0] - p[0]).hypot(q[1] - p[1]);
+    let len = |p: [f64; 2], q: [f64; 2]| det::hypot(q[0] - p[0], q[1] - p[1]);
     let eps = STRADDLE * len(a, b) * len(c, d);
     let side = |o: f64| {
         if o > eps {

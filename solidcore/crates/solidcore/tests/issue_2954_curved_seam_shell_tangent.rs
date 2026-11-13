@@ -27,6 +27,7 @@ mod offset_fixture;
 use offset_fixture::{planar_faces_at, volume};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::curve::curve::CurveKind;
+use solidcore::math::det;
 use solidcore::math::Point2;
 use solidcore::offset::offset_executive::p2::{shell_brep_simple, OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::{create_box, create_partial_cylinder};
@@ -133,7 +134,7 @@ fn check_quarter_torus_seam_case(mut k: Kernel) -> solidcore::Result<()> {
             let Ok(p) = s.evaluate_point(&k, mid) else {
                 return false;
             };
-            (p.x.hypot(p.y) - 10.0).abs() < 0.2 && p.z > 2.0 && p.z < 15.0
+            (det::hypot(p.x, p.y) - 10.0).abs() < 0.2 && p.z > 2.0 && p.z < 15.0
         })
         .map(|(id, _)| id)
         .collect();
@@ -191,7 +192,7 @@ fn check_quarter_torus_seam_case(mut k: Kernel) -> solidcore::Result<()> {
         if (p_mid.z - 17.0).abs() >= 1e-2 || p_mid.x < 2.0 || p_mid.y < 2.0 {
             continue;
         }
-        let r_mid = p_mid.x.hypot(p_mid.y);
+        let r_mid = det::hypot(p_mid.x, p_mid.y);
         let expected_r = if (r_mid - 10.0).abs() < 0.2 {
             found_outer_rail = true;
             10.0_f64
@@ -217,7 +218,7 @@ fn check_quarter_torus_seam_case(mut k: Kernel) -> solidcore::Result<()> {
         );
         for frac in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
             let p = curve.evaluate_point(&k, ivl.evaluate(frac))?;
-            let r = p.x.hypot(p.y);
+            let r = det::hypot(p.x, p.y);
             assert!(
                 (r - expected_r).abs() <= edge.tolerance,
                 "sample {frac} radius {r} deviates from {expected_r} by {:.3e} > edge tol {:.3e}",

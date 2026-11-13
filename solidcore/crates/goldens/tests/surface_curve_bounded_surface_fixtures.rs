@@ -1,6 +1,7 @@
 //! Non-C++ regression coverage for both curve-bounded-surface fixture parsers.
 
 pub use goldens::HarnessError;
+use solidcore::math::det;
 
 #[path = "../src/units/fixtures/surface_curve_bounded_surface_fixtures.rs"]
 mod fixtures;
@@ -53,7 +54,7 @@ fn concrete_curve_capacity_overflow_input_returns_error() {
 
 #[test]
 fn invalid_counts_are_rejected_in_every_header_position() {
-    let upper = 2.0_f64.powi(usize::BITS as i32);
+    let upper = det::powi(2.0_f64, usize::BITS as i32);
     for value in [
         "-1",
         "0.5",
@@ -83,7 +84,7 @@ fn invalid_counts_are_rejected_in_every_header_position() {
 
 #[test]
 fn surface_knot_arithmetic_overflow_is_rejected() {
-    let large = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let large = det::powi(2.0_f64, usize::BITS as i32 - 1);
     assert_rejected(
         &format!("{large:.0} 0 {large:.0} 0 0"),
         true,
@@ -98,7 +99,7 @@ fn surface_knot_arithmetic_overflow_is_rejected() {
 
 #[test]
 fn curve_knot_arithmetic_overflow_is_rejected() {
-    let large = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let large = det::powi(2.0_f64, usize::BITS as i32 - 1);
     assert_rejected(
         &format!("{large:.0} {large:.0} 0 3"),
         false,
@@ -108,7 +109,7 @@ fn curve_knot_arithmetic_overflow_is_rejected() {
 
 #[test]
 fn surface_point_product_overflow_is_rejected() {
-    let large = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let large = det::powi(2.0_f64, usize::BITS as i32 - 1);
     assert_rejected(
         &format!("{large:.0} {large:.0} 0 0 0"),
         true,
@@ -118,7 +119,7 @@ fn surface_point_product_overflow_is_rejected() {
 
 #[test]
 fn coordinate_product_overflow_is_rejected_for_both_formats() {
-    let large = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let large = det::powi(2.0_f64, usize::BITS as i32 - 1);
     for rat in [0, 1] {
         assert_rejected(
             &format!("{large:.0} 0 0 0 {rat}"),
@@ -137,7 +138,7 @@ fn coordinate_product_overflow_is_rejected_for_both_formats() {
 
 #[test]
 fn total_token_sum_overflow_is_rejected() {
-    let quarter = 2.0_f64.powi(usize::BITS as i32 - 2);
+    let quarter = det::powi(2.0_f64, usize::BITS as i32 - 2);
     // Coordinate products fit; adding the knot vectors does not.
     assert_rejected(
         &format!("{quarter:.0} 0 0 0 0"),

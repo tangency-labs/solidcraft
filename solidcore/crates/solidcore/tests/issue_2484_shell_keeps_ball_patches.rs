@@ -18,6 +18,7 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p2::{shell_brep_simple, OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::create_box;
@@ -121,7 +122,7 @@ fn rounded_box_volume(r: f64) -> f64 {
     x * y * z
         + 2.0 * r * (x * y + y * z + z * x)
         + PI * r * r * (x + y + z)
-        + 4.0 / 3.0 * PI * r.powi(3)
+        + 4.0 / 3.0 * PI * det::powi(r, 3)
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {

@@ -376,6 +376,7 @@ pub fn ruled(a: &Curve, b: &Curve, reversed: bool) -> Result<Record> {
 mod tests {
     use super::*;
     use solidcore::eval::SurfaceEval;
+    use solidcore::math::det;
     use solidcore_record::brep::{Face, Frame};
 
     fn line(start: [f64; 3], end: [f64; 3]) -> Curve {
@@ -659,7 +660,7 @@ mod tests {
         (0..5)
             .map(|i| {
                 let a = std::f64::consts::TAU * f64::from(i) / 5.0;
-                let (x, y) = (10.0 * a.cos(), 10.0 * a.sin());
+                let (x, y) = (10.0 * det::cos(a), 10.0 * det::sin(a));
                 [x, y, z(x, y)]
             })
             .collect()
@@ -717,11 +718,11 @@ mod tests {
         // five arcs of the circle z = 6 on the sphere of radius 10 (radius 8), as rational
         // quadratics
         let half = std::f64::consts::PI / 5.0;
-        let w = half.cos();
+        let w = det::cos(half);
         let arcs: Vec<Curve> = (0..5)
             .map(|i| {
                 let a = 2.0 * half * f64::from(i);
-                let on = |t: f64, r: f64| [r * t.cos(), r * t.sin(), 6.0];
+                let on = |t: f64, r: f64| [r * det::cos(t), r * det::sin(t), 6.0];
                 let (s, m, e) = (on(a, 8.0), on(a + half, 8.0 / w), on(a + 2.0 * half, 8.0));
                 Curve::RationalSpline {
                     knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],

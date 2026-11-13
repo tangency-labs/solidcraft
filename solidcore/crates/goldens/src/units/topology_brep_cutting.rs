@@ -9,6 +9,7 @@
 //! `topology.brep_local_operation`'s) and the whole B-rep graph after the call (topology,
 //! vertex points, tolerances, intervals, UV domains).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::kernel::Kernel;
@@ -140,7 +141,7 @@ impl UnitDiff for Runner {
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         let mut i = Inputs::default();
-        let scale = 10f64.powi(rng.range_i64(-2, 2) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-2, 2) as i32);
         if rng.below(3) == 0 {
             let file = FILES.get(rng.below(FILES.len() as u64) as usize)?;
             i.body = Body::File {

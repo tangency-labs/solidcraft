@@ -42,6 +42,7 @@
 //! classification after the call. The out-params start from the same values on both
 //! sides, so an early return compares what it leaves.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1177,7 +1178,7 @@ pub(super) fn gen_seam_face(rng: &mut Rng) -> BrepIn {
                 scale,
                 a,
                 b: semi,
-                c: rng.uniform(0.1, 0.45) * a / semi.to_radians().tan(),
+                c: rng.uniform(0.1, 0.45) * a / det::tan(semi.to_radians()),
                 swap,
             }
         }

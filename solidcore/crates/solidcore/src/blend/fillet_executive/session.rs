@@ -7220,6 +7220,7 @@ mod tests {
     use crate::curve::curve::Curve;
     use crate::curve::line::Line;
     use crate::geom::tol::USE_DEFAULT;
+    use crate::math::det;
     use crate::math::Point3;
     use crate::topology::brep::p2::ArenaNotifyState;
     use crate::topology::brep::p8::{create_planar_face_with_3d_curves, FaceBuildEnv};
@@ -7276,7 +7277,7 @@ mod tests {
         let base: Vec<Point3> = (0..5)
             .map(|ii| {
                 let angle = std::f64::consts::TAU * f64::from(ii) / 5.0;
-                Point3::new(10.0 * angle.cos(), 10.0 * angle.sin(), 0.0)
+                Point3::new(10.0 * det::cos(angle), 10.0 * det::sin(angle), 0.0)
             })
             .collect();
         let apex = Point3::new(0.0, 0.0, 15.0);

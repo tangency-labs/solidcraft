@@ -17,6 +17,7 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::curve::curve::Curve;
 use solidcore::error::SolidError;
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::query::api_queries::edge_closest_point;
@@ -54,7 +55,7 @@ fn pick(k: &Kernel, b: &Brep, p: Point3) -> EdgeId {
 
 fn at(r: f64, deg: f64, z: f64) -> Point3 {
     let a = deg.to_radians();
-    Point3::new(r * a.cos(), r * a.sin(), z)
+    Point3::new(r * det::cos(a), r * det::sin(a), z)
 }
 
 fn sector(k: &mut Kernel) -> Brep {

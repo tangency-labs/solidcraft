@@ -31,6 +31,7 @@ use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel, Point3};
@@ -170,7 +171,7 @@ fn pocket_chamfer_without_operand_trims() {
 /// faces, `int_x0^5 (5 - r + sqrt(r^2 - (x - r)^2)) dx` from `x0 = r - sqrt(r^2 - (r - 5)^2)`.
 fn rounded_bar_volume(r: f64) -> f64 {
     let a = 5.0;
-    let f = |u: f64| (u * (r * r - u * u).sqrt() + r * r * (u / r).asin()) / 2.0;
+    let f = |u: f64| (u * (r * r - u * u).sqrt() + r * r * det::asin(u / r)) / 2.0;
     let x0 = r - (r * r - (r - a) * (r - a)).sqrt();
     30.0 * ((a - r) * (a - x0) + f(a - r) - f(x0 - r))
 }

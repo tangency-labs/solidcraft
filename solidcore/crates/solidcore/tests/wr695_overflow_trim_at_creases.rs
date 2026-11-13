@@ -20,6 +20,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -54,7 +55,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// (perpendicular), in closed form.
 fn removed_area(r: f64, w: f64, h: f64) -> f64 {
     let a = w.min(r);
-    let f = |s: f64| s / 2.0 * (r * r - s * s).max(0.0).sqrt() + r * r / 2.0 * (s / r).asin();
+    let f = |s: f64| s / 2.0 * (r * r - s * s).max(0.0).sqrt() + r * r / 2.0 * det::asin(s / r);
     let u_h = if h >= r {
         0.0
     } else {

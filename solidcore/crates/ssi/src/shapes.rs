@@ -10,6 +10,7 @@ use crate::intersect::Options;
 use crate::piece::{add, cross, norm, scale, sub, unit, V3};
 use crate::surface3::Surf;
 use crate::Patch;
+use solidcore::math::det;
 
 /// A rational quadratic arc of the unit circle from a0 to a1 degrees, in
 /// segments of at most 90 degrees (A7.1): Cartesian control points [cos, sin],
@@ -24,8 +25,8 @@ fn arc(a0: f64, a1: f64) -> Arc {
     let sweep = a1 - a0;
     let n = ((sweep.abs() / 90.0 - 1e-9).ceil() as usize).max(1);
     let step = sweep / n as f64;
-    let corner = (step / 2.0).to_radians().cos();
-    let at = |deg: f64| [deg.to_radians().cos(), deg.to_radians().sin()];
+    let corner = det::cos((step / 2.0).to_radians());
+    let at = |deg: f64| [det::cos(deg.to_radians()), det::sin(deg.to_radians())];
     let mut points = vec![at(a0)];
     let mut weights = vec![1.0];
     let mut knots = vec![a0, a0, a0];
@@ -191,7 +192,7 @@ pub fn cylinder(
 pub fn cone(apex: V3, xaxis: V3, yaxis: V3, half_angle_deg: f64, height: [f64; 2]) -> Patch {
     let (x, y, z) = axes(xaxis, yaxis);
     let half = half_angle_deg.to_radians();
-    let t = half.tan();
+    let t = det::tan(half);
     let mut patch = swept(&arc(0.0, 360.0), height, |c, h| {
         add(
             apex,

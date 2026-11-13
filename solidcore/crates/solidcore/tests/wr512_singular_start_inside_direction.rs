@@ -8,6 +8,11 @@
 //! first of them, which need not point into either face, and the round fails with 1001; with
 //! the flag it starts along the inside direction nearest the given one and the round builds.
 //!
+//! Since #13866 (one libm, `solidcore::math::det`) the default kernel builds the arc round
+//! without the flag as well: whether the start lands on a direction that leaves the faces
+//! depends on the last bits of the platform's libm. glibc's refused it, Apple's libm and
+//! `det` build it, to the flag's volume within 1.1e-12.
+//!
 //! The pinned C++ (v1.0.1) fails the arc round with 1001 too. With only the fork's line added
 //! to `SmAdvSurfaceIntersector::ComputeSingularityPoint` (`SmAdvSurfaceIntersector.cpp`
 //! recompiled and linked ahead of the pinned `libSMLib.a`) it builds one manifold solid of
@@ -133,12 +138,15 @@ fn assert_built_to(k: &mut Kernel, b: &mut Brep, r: solidcore::Result<()>, tol: 
     );
 }
 
+/// The default kernel without the flag. With glibc's libm it refused the arc round (1001);
+/// with `det`'s (#13866), as with Apple's libm before it, the start's direction lands inside
+/// and it builds the flag's body: [`BOTH_ROUNDS_SPAN`] within 1.1e-12, held to the gate's 1e-9.
 #[test]
-fn default_kernel_refuses_the_arc_round() {
+fn default_kernel_builds_the_arc_round() {
     let mut k = Kernel::default();
     assert!(!k.fixes.ssi_singular_start_inside_direction);
-    let (_, r) = both_rounds(&mut k);
-    assert_refused(r);
+    let (mut b, r) = both_rounds(&mut k);
+    assert_built_to(&mut k, &mut b, r, 1e-9, BOTH_ROUNDS_SPAN);
 }
 
 /// The default kernel with the flag: the C++ body with the fork's line and WR-568's span,

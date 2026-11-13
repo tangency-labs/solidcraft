@@ -21,6 +21,7 @@
 //! of the face ([`Builder::drop_inner_slits`]).
 
 use crate::vec::Vec3Geom as _;
+use solidcore::math::det;
 use std::f64::consts::{PI, TAU};
 
 use crate::kernel::{CurveEval, SurfaceEval};
@@ -119,7 +120,7 @@ fn axis(s: &BSurface) -> Option<Axis> {
         }
         BSurface::Cone { frame: f, radius_at_origin, half_angle } => {
             let (origin, z) = frame(f);
-            let apex = origin + z * (-radius_at_origin / half_angle.tan());
+            let apex = origin + z * (-radius_at_origin / det::tan(*half_angle));
             let poles = if *half_angle > 0.0 { [Some(apex), None] } else { [None, Some(apex)] };
             Some(Axis { origin, z, kind: Kind::Ruled, poles, period: TAU })
         }
@@ -196,7 +197,7 @@ const IDENTITY: [[f64; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.
 
 /// `p` turned by `angle` about the axis through `o` along unit `k` (right-handed).
 fn turned(p: Vec3, o: Vec3, k: Vec3, angle: f64) -> Vec3 {
-    let (s, c) = angle.sin_cos();
+    let (s, c) = det::sin_cos(angle);
     let x = p - o;
     o + x * c + k.cross(x) * s + k * (k.dot(x) * (1.0 - c))
 }
@@ -543,7 +544,7 @@ impl Builder<'_, '_> {
                 let (da, db) = (pa - ax.origin, pb - ax.origin);
                 let (ra, rb) = (da - ax.z * da.dot(ax.z), db - ax.z * db.dot(ax.z));
                 let x = if ra.len() >= rb.len() { ra } else { rb }.normalized().ok_or("a seam along the sphere's axis")?;
-                let latitude = |d: Vec3| d.dot(ax.z).atan2(d.dot(x));
+                let latitude = |d: Vec3| det::atan2(d.dot(ax.z), d.dot(x));
                 let (ta, tb) = (latitude(da), latitude(db));
                 if !(ta.abs() <= 0.5 * PI + 1e-9 && tb.abs() <= 0.5 * PI + 1e-9) {
                     return Err(unsupported("a seam between loops at opposite angles"));
@@ -565,7 +566,7 @@ impl Builder<'_, '_> {
                 let centre = ax.origin + x * *major;
                 let tube = |p: Vec3| {
                     let d = p - centre;
-                    d.dot(ax.z).atan2(d.dot(x))
+                    det::atan2(d.dot(ax.z), d.dot(x))
                 };
                 let (ta, tb) = (tube(pa), tube(pb));
                 let up = (tb - ta).rem_euclid(TAU);
@@ -586,7 +587,7 @@ impl Builder<'_, '_> {
                 let x = radial.normalized().ok_or("a torus seam on its axis")?;
                 let y = ax.z.cross(x);
                 let db = pb - ax.origin;
-                let back = (-(db.dot(y).atan2(db.dot(x)))).rem_euclid(TAU);
+                let back = (-(det::atan2(db.dot(y), db.dot(x)))).rem_euclid(TAU);
                 if !(back > 1e-9) {
                     return Err("a seam of no length".into());
                 }
@@ -912,7 +913,7 @@ impl Builder<'_, '_> {
             let y = n.cross(x);
             let y = if (pb - before).dot(y) >= 0.0 { y } else { -y };
             let d = pa - c;
-            let theta = d.dot(y).atan2(d.dot(x)).rem_euclid(TAU);
+            let theta = det::atan2(d.dot(y), d.dot(x)).rem_euclid(TAU);
             let radius = (pb - c).len();
             if !(theta * radius > self.tol) {
                 return Ok(None);
@@ -1371,7 +1372,7 @@ impl Perpendicular {
     /// `p`'s angle about the axis, right-handed.
     fn angle(&self, p: Vec3) -> f64 {
         let d = p - self.origin;
-        d.dot(self.y).atan2(d.dot(self.x))
+        det::atan2(d.dot(self.y), d.dot(self.x))
     }
 
     /// The Bézier pieces of a curve's NURBS form on `interval` (a line, circle or ellipse on its
@@ -1438,7 +1439,7 @@ impl Perpendicular {
                 return None;
             }
             let d = *p - self.origin;
-            let r = d.dot(self.x).hypot(d.dot(self.y));
+            let r = det::hypot(d.dot(self.x), d.dot(self.y));
             if !(r > 0.0) {
                 return None;
             }
@@ -1451,7 +1452,7 @@ impl Perpendicular {
         if !(hi - lo < PI) {
             return None;
         }
-        let r = least * (0.5 * (hi - lo)).cos();
+        let r = least * det::cos(0.5 * (hi - lo));
         let pad = gamma(16) * (PI + far) + if tol > 0.0 { tol / r } else { 0.0 };
         (pad.is_finite() && r > 0.0).then_some(([a0 + lo, a0 + hi], pad))
     }

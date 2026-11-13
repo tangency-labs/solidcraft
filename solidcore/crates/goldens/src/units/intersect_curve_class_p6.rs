@@ -17,6 +17,7 @@
 //! editing enabled, so the vertex, face-split, coincident-edge and wire-edge branches
 //! run to completion.
 
+use solidcore::math::det;
 use crate::{Case, CaseContext, CaseSource, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -816,8 +817,8 @@ impl UnitDiff for Runner {
         i.op = rng.below(4) as i32;
         i.kind = rng.below(5) as i32;
         i.flags = rng.below(4) as i32;
-        i.scale = 10.0_f64.powf(rng.uniform(-6.0, 6.0));
-        i.tol = 10.0_f64.powf(rng.uniform(-10.0, -3.0));
+        i.scale = det::powf(10.0_f64, rng.uniform(-6.0, 6.0));
+        i.tol = det::powf(10.0_f64, rng.uniform(-10.0, -3.0));
         let a = rng.unit();
         let b = rng.unit();
         i.input = record([a.min(b), a.max(b)], [0, 0, 0], rng.chance(0.5));

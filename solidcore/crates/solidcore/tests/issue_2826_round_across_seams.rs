@@ -30,6 +30,7 @@ use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::topology::brep::mirror::transform_matrix;
@@ -49,7 +50,7 @@ const R: f64 = 2.0;
 
 /// The turn of `deg` degrees about z, as a row-vector matrix (`transform_matrix`'s).
 fn about_z(deg: f64) -> [[f64; 4]; 4] {
-    let (s, c) = deg.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(deg.to_radians());
     [
         [c, s, 0.0, 0.0],
         [-s, c, 0.0, 0.0],
@@ -60,7 +61,7 @@ fn about_z(deg: f64) -> [[f64; 4]; 4] {
 
 /// The turn of `deg` degrees about y, then the move to `at`.
 fn about_y_then_to(deg: f64, at: [f64; 3]) -> [[f64; 4]; 4] {
-    let (s, c) = deg.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(deg.to_radians());
     [
         [c, 0.0, -s, 0.0],
         [0.0, 1.0, 0.0, 0.0],
@@ -71,7 +72,7 @@ fn about_y_then_to(deg: f64, at: [f64; 3]) -> [[f64; 4]; 4] {
 
 /// B's axis: its base centre and unit direction.
 fn b_axis() -> (Point3, Vec3) {
-    let (s, c) = B_TURN.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(B_TURN.to_radians());
     (Point3::new(B_AT[0], B_AT[1], B_AT[2]), Vec3::new(s, 0.0, c))
 }
 
@@ -98,7 +99,7 @@ fn join(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
         let p = curve
             .evaluate_point(k, edge.interval.evaluate(0.5))
             .unwrap();
-        let to_a = p.x.hypot(p.y);
+        let to_a = det::hypot(p.x, p.y);
         let w = p - base;
         let to_b = (w - dir * w.dot(dir)).length();
         if (to_a - RA).abs() < 1e-4 && (to_b - RB).abs() < 1e-4 {

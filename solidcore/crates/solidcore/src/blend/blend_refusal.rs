@@ -9,6 +9,7 @@
 //! ([`edge::blend_edgeuse_or_why`]). No recursion.
 
 use crate::blend::blend_corner::end::continuing_edges;
+use crate::math::det;
 use crate::math::{rad_to_deg, PI};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
@@ -394,7 +395,7 @@ pub fn round_too_small(
     }
     // the blend's tangency angle: faces within it are tangent ([`edge::blend_edgeuse`])
     let tangent = PI / 180.0 * (90.0 - edge::crease_angle(k));
-    let reach = 1.0 / (0.5 * turn).cos() - 1.0;
+    let reach = 1.0 / det::cos(0.5 * turn) - 1.0;
     if turn <= tangent || !(reach.is_finite() && reach > 0.0) {
         return Ok(None);
     }

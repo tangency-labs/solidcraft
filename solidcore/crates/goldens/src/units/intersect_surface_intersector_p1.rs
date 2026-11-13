@@ -22,6 +22,7 @@
 //! bounded with an exact start point (`smsurf_EvaluateNormalSection`,
 //! `surface.surface_p1`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -893,7 +894,7 @@ fn gen_bspline(rng: &mut Rng, s: f64, tube: bool) -> SurfaceIn {
         for j in 0..nv {
             let (x, y, z) = if tube {
                 let a = core::f64::consts::TAU * (i % (nu - 1)) as f64 / (nu - 1) as f64;
-                (s * a.cos(), s * a.sin(), s * j as f64 / (nv - 1) as f64)
+                (s * det::cos(a), s * det::sin(a), s * j as f64 / (nv - 1) as f64)
             } else {
                 (
                     s * i as f64 / (nu - 1) as f64,
@@ -1322,8 +1323,8 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
             _ => 0.3,
         };
         *d = [
-            mag * (n[2] - n[0]) * ang.cos(),
-            mag * (n[3] - n[1]) * ang.sin(),
+            mag * (n[2] - n[0]) * det::cos(ang),
+            mag * (n[3] - n[1]) * det::sin(ang),
         ];
     }
     if b.is_none() || rng.chance(0.3) {
@@ -1550,7 +1551,7 @@ fn edge_cases() -> Vec<(String, Value)> {
         for i in 0..5 {
             let a = core::f64::consts::TAU * f64::from(i % 4) / 4.0;
             let row: Vec<Value> = (0..2)
-                .map(|j| json!([a.cos(), a.sin(), f64::from(j), null]))
+                .map(|j| json!([det::cos(a), det::sin(a), f64::from(j), null]))
                 .collect();
             net.push(Value::Array(row));
         }

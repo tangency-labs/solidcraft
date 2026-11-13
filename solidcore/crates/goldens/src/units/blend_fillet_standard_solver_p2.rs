@@ -28,6 +28,7 @@
 //! meeting at an edge (rolling-ball corner, randomly placed, with the guesses near or far
 //! from the answer) and on random surfaces.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1943,7 +1944,7 @@ fn gen_corner(rng: &mut Rng) -> (SrfIn, SrfIn, Vec3, Vec3) {
     let y = perp(x, rng);
     let z = x.cross(y);
     let phi = rng.uniform(40.0, 140.0) * DEG;
-    let w = y * phi.cos() + z * phi.sin();
+    let w = y * det::cos(phi) + z * det::sin(phi);
     let o = Vec3::new(
         rng.uniform(-2.0, 2.0),
         rng.uniform(-2.0, 2.0),

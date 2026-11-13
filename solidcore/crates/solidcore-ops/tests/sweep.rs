@@ -19,6 +19,7 @@
     dead_code
 )]
 
+use solidcore::math::det;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::sweep::{
@@ -213,7 +214,7 @@ fn case(name: &str) -> Case {
         // Leaning in by θ, the walls' offsets overlap at the corners and are trimmed where they
         // cross, under every rule: the frustum from side 20 to 20 - 2 h tanθ.
         "extrude_square_drafted_round" => {
-            let top = 20.0 - 2.0 * 10.0 * theta.tan();
+            let top = 20.0 - 2.0 * 10.0 * det::tan(theta);
             c(
                 Op::Extrude(
                     square(0.0, 0.0, 20.0, 0.0),
@@ -227,7 +228,7 @@ fn case(name: &str) -> Case {
             )
         }
         "extrude_square_drafted_curvature" => {
-            let top = 20.0 - 2.0 * 10.0 * theta.tan();
+            let top = 20.0 - 2.0 * 10.0 * det::tan(theta);
             c(
                 Op::Extrude(
                     square(0.0, 0.0, 20.0, 0.0),
@@ -242,7 +243,7 @@ fn case(name: &str) -> Case {
         }
         // No corner: the cone frustum from radius 5 to 5 - h tanθ.
         "extrude_circle_drafted" => {
-            let r2 = 5.0 - 10.0 * theta.tan();
+            let r2 = 5.0 - 10.0 * det::tan(theta);
             c(
                 Op::Extrude(disc(), Z, 10.0, theta, DraftCorner::default(), true),
                 Expect::Volume(frustum(PI * 25.0, PI * r2 * r2, 10.0)),

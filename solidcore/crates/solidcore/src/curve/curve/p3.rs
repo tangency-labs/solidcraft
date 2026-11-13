@@ -2329,6 +2329,7 @@ mod tests {
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::curve::line::{BoundedLineOptions, Line};
     use crate::error::SM_ERR;
+    use crate::math::det;
 
     fn hermite(p1: [f64; 3], d1: [f64; 3], p2: [f64; 3], d2: [f64; 3]) -> Curve {
         Curve::from(HermiteCurve::new(
@@ -2681,7 +2682,7 @@ mod tests {
         let ivl = c.natural_interval();
         let angle = 30f64.to_radians();
         for rho in [1e-2, 1e-4, 1e-6] {
-            let p = Vec3::new(rho * angle.cos(), rho * angle.sin(), 0.0);
+            let p = Vec3::new(rho * det::cos(angle), rho * det::sin(angle), 0.0);
             {
                 let k = Kernel::default();
                 let (found, sol): (bool, Solution<()>) = c
@@ -2696,7 +2697,7 @@ mod tests {
                     .unwrap();
                 assert!(found, "rho {rho}");
                 let q = c.evaluate_point(&k, sol.start.parameters[0]).unwrap();
-                let at = q.y.atan2(q.x);
+                let at = det::atan2(q.y, q.x);
                 // the solve stops where the gap is square to the tangent within EFF_ZERO,
                 // an angle of (rho / R) (at - angle) there: the point is as ill-conditioned
                 // as R / rho, its distance not

@@ -112,7 +112,7 @@
 {"case":"edge_sphere_p2","deferred":null,"error":null,"ints":{"index":[0],"status":[0]},"topology":null,"values":{"param":[6.624116470087319]}}
 {"case":"edge_sphere_p3","deferred":null,"error":null,"ints":{"index":[0],"status":[0]},"topology":null,"values":{"param":[7.653668647301796]}}
 {"case":"edge_torus_p0","deferred":null,"error":null,"ints":{"index":[0],"status":[0]},"topology":null,"values":{"param":[24.14213562373095]}}
-{"case":"edge_torus_p1","deferred":null,"error":null,"ints":{"index":[0],"status":[0]},"topology":null,"values":{"param":[23.21785632082473]}}
+{"case":"edge_torus_p1","deferred":null,"error":null,"ints":{"index":[0],"status":[0]},"topology":null,"values":{"param":[23.217856320824733]}}
 {"case":"edge_torus_p2","deferred":null,"error":null,"ints":{"index":[0],"status":[0]},"topology":null,"values":{"param":[12.07106781186547]}}
 {"case":"edge_torus_p3","deferred":null,"error":null,"ints":{"index":[0],"status":[0]},"topology":null,"values":{"param":[24.14213562373095]}}
 {"case":"face_Mouse_p0","deferred":null,"error":null,"ints":{"face":[2],"status":[0]},"topology":null,"values":{}}

@@ -133,6 +133,7 @@ use crate::geom::tol::{
 };
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{
     max2, min2, rad_to_deg, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI,
     TWO_PI,
@@ -545,9 +546,9 @@ impl PolarConversion {
         let angle_rad = (angle_deg - start_angle_deg) * PI / 180.0;
 
         // get coefficients of quadratic equation
-        let cos_angle = angle_rad.cos();
-        let cos_theta = theta.cos();
-        let a = 2.0 * cos_angle * (1.0 - cos_theta) - 1.0 + 2.0 * cos_theta - (2.0 * theta).cos();
+        let cos_angle = det::cos(angle_rad);
+        let cos_theta = det::cos(theta);
+        let a = 2.0 * cos_angle * (1.0 - cos_theta) - 1.0 + 2.0 * cos_theta - det::cos(2.0 * theta);
         let b = 2.0 * cos_angle * (-1.0 + cos_theta) + 2.0 - 2.0 * cos_theta;
         let c = cos_angle - 1.0;
 
@@ -1263,8 +1264,8 @@ impl Ellipse {
 
         // get input in radians
         let angle_rad = t * PI / 180.0;
-        let cos_u = angle_rad.cos();
-        let sin_u = angle_rad.sin();
+        let cos_u = det::cos(angle_rad);
+        let sin_u = det::sin(angle_rad);
         let o = self.position.origin();
         let x = self.position.x_axis();
         let y = self.position.y_axis();
@@ -1321,7 +1322,7 @@ impl Ellipse {
         // get dAngleParam in radians [-Pi, +Pi]
         let mut angle_param = 0.0;
         if self.radius_y != 0.0 {
-            angle_param = (self.radius_x / self.radius_y * dy).atan2(dx);
+            angle_param = det::atan2(self.radius_x / self.radius_y * dy, dx);
         }
 
         // convert to degrees, in [ 0, 360 ) strictly positive result [B630]
@@ -1350,8 +1351,8 @@ impl Ellipse {
 
         // Calculate end point on Ellipse
         let angle_rad = self.anal_domain.max() * PI / 180.0;
-        let cos_u = angle_rad.cos();
-        let sin_u = angle_rad.sin();
+        let cos_u = det::cos(angle_rad);
+        let sin_u = det::sin(angle_rad);
         let end = self.position.origin()
             + self.radius_x * cos_u * self.position.x_axis()
             + self.radius_y * sin_u * self.position.y_axis();
@@ -2208,8 +2209,10 @@ pub(crate) fn set_up_polar_conversion(
         } else {
             let own_angle = |pnt: Point3| {
                 let vec = pnt - e.position.origin();
-                let mut angle = (e.radius_x / e.radius_y * vec.dot(e.position.y_axis()))
-                    .atan2(vec.dot(e.position.x_axis()));
+                let mut angle = det::atan2(
+                    e.radius_x / e.radius_y * vec.dot(e.position.y_axis()),
+                    vec.dot(e.position.x_axis()),
+                );
                 if angle < 0.0 {
                     angle += TWO_PI;
                 }
@@ -2360,7 +2363,7 @@ pub(crate) fn set_up_polar_conversion(
         let weight_a = table(&weights, ii * 2 - 2, OP_SET_UP)?;
         let weight_b = table(&weights, ii * 2 - 1, OP_SET_UP)?;
         let weight_c = table(&weights, ii * 2, OP_SET_UP)?;
-        let cos_half_ang = ((span_end_angle - span_start_angle) / 2.0 * PI / 180.0).cos();
+        let cos_half_ang = det::cos((span_end_angle - span_start_angle) / 2.0 * PI / 180.0);
         pc.exact_conversion
             .push(are_same(weight_a, weight_c) && are_same(weight_b / weight_c, cos_half_ang));
     }

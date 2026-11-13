@@ -28,6 +28,7 @@ use offset_fixture::Notifications;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::mass::integrator::properties::{brep_volume_default, face_area, face_centroid};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::knots::Side;
 use solidcore::surface::plane::Plane;
@@ -250,7 +251,7 @@ fn a_pyramid_base_moved_up_leaves_the_similar_pyramid_above_it() {
     assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
     let d = planes[0].0.z;
     assert!(d > 1.3 && d < 1.31, "{d}");
-    let want = before * ((h - d) / h).powi(3);
+    let want = before * det::powi((h - d) / h, 3);
     let v = volume(&mut k, &mut b).unwrap();
     assert!((v - want).abs() <= AGREE * want, "{v} vs {want}");
 }

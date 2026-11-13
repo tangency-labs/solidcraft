@@ -17,6 +17,7 @@
 //! [`MIN_GENERATED`] generated inputs (more with `--seeds`); the generated inputs
 //! also walk every entry of every label table.
 
+use solidcore::math::det;
 use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
@@ -324,7 +325,7 @@ fn number(rng: &mut Rng) -> f64 {
         1 => USE_DEFAULT,
         2 => 0.0,
         3 => -0.0,
-        4 => rng.uniform(-1.0, 1.0) * 10f64.powi(-(rng.range_i64(3, 15) as i32)),
+        4 => rng.uniform(-1.0, 1.0) * det::powi(10f64, -(rng.range_i64(3, 15) as i32)),
         5 => f64::from(rng.range_i64(-5, 5) as i32),
         _ => rng.uniform(-100.0, 100.0),
     }

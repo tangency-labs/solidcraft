@@ -15,6 +15,7 @@
 //! produce), `res`, `res_i`, `state`, `dom`, `nodes` and `node_geom`. Every run has at least
 //! [`MIN_GENERATED`] generated cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -990,8 +991,8 @@ fn gen_srf(rng: &mut Rng, max_deg: usize, scale: f64) -> InlineSrf {
                         1 => z = 0.0,
                         2 => {
                             let t = i as f64 / n as f64 * 2.5;
-                            x = t.cos() * 3.0;
-                            z = t.sin() * 3.0;
+                            x = det::cos(t) * 3.0;
+                            z = det::sin(t) * 3.0;
                             y = j as f64;
                         }
                         3 if i == 0 => {
@@ -1166,7 +1167,7 @@ fn gen_poly(rng: &mut Rng, dom: [f64; 4]) -> PolyIn {
             .map(|j| {
                 let a = (j as f64 + phase) / k as f64 * std::f64::consts::TAU;
                 let r = if star && j % 2 == 1 { 0.5 } else { 1.0 } * scale;
-                [c[0] + r * a.cos() * lu, c[1] + r * a.sin() * lv, 0.0, tol]
+                [c[0] + r * det::cos(a) * lu, c[1] + r * det::sin(a) * lv, 0.0, tol]
             })
             .collect();
         if rev {

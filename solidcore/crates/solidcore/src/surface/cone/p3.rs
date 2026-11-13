@@ -55,6 +55,7 @@ use crate::geom::tol::{approx_tol3d, are_same_to_tol, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BoundingBoxRequest, LocationType};
@@ -965,8 +966,8 @@ fn add_ellipse_intervals_trimmed_to_two_cones(
             for intersection in interval.intersect_periodic(other_interval, 360.0, false)? {
                 if intersection.length() < zero_ang {
                     let angle = intersection.min();
-                    let cos = (angle * PI / 180.0).cos();
-                    let sin = (angle * PI / 180.0).sin();
+                    let cos = det::cos(angle * PI / 180.0);
+                    let sin = det::sin(angle * PI / 180.0);
                     let point = center + rx * cos * x + y * sin * ry;
                     let mut unique = true;
                     for existing in degenerate.iter() {
@@ -1261,7 +1262,7 @@ mod tests {
             for p in [start, end] {
                 for c in on {
                     let origin = c.rev().position().origin();
-                    let r = (p.x - origin.x).hypot(p.y - origin.y);
+                    let r = det::hypot(p.x - origin.x, p.y - origin.y);
                     assert!((r - c.bot_radius()).abs() < 1e-9, "{p:?}");
                 }
             }
@@ -1407,7 +1408,7 @@ mod tests {
             let n = curve.natural_interval();
             for t in [n.min(), 0.5 * (n.min() + n.max()), n.max()] {
                 let p = curve.evaluate_point(&k, t).unwrap();
-                assert!((p.x.hypot(p.y) - 5.0).abs() < 1e-7, "{p:?}");
+                assert!((det::hypot(p.x, p.y) - 5.0).abs() < 1e-7, "{p:?}");
             }
         }
     }

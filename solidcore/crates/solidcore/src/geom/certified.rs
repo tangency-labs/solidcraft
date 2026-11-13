@@ -6,9 +6,9 @@
 //!
 //! The bounds use Higham's `gamma_k = k u / (1 - k u)` (`u` the unit roundoff, half
 //! `f64::EPSILON`): `k` floating-point operations, each correctly rounded, move a
-//! result by at most `gamma_k` relative to the size of its terms. `cos`, `sin` and
-//! `atan2` are taken as within one ulp of the true value (the platform's libm; IEEE
-//! does not round them correctly), counted as two roundings each.
+//! result by at most `gamma_k` relative to the size of its terms. `cos` and `sin` are
+//! within one ulp of the true value and `atan2` within two ([`crate::math::det`]'s table;
+//! IEEE does not round them correctly), counted as two and four roundings.
 //!
 //! Not upstream. Deviations: none (no upstream counterpart). No recursion.
 

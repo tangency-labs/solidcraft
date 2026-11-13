@@ -17,6 +17,7 @@
 //! surfaces can have several; their closest point is a certified branch and
 //! bound over Bezier patches.
 
+use solidcore::math::det;
 use std::sync::Arc;
 
 use crate::geom3::{clamp, insert_knot, Frame, V3};
@@ -77,8 +78,8 @@ struct Axial {
 fn axial(f: &Frame, p: V3) -> Axial {
     let l = f.local(p);
     let rho = (l.x * l.x + l.y * l.y).sqrt();
-    let theta = if rho > 0.0 { l.y.atan2(l.x) } else { 0.0 };
-    let (s, c) = theta.sin_cos();
+    let theta = if rho > 0.0 { det::atan2(l.y, l.x) } else { 0.0 };
+    let (s, c) = det::sin_cos(theta);
     Axial {
         rho,
         h: l.z,
@@ -114,7 +115,7 @@ impl Surf {
     /// Apex of a cone (height -r / tan a on its axis).
     pub fn apex(&self) -> Option<V3> {
         match self {
-            Surf::Cone { f, r, a } => Some(f.world(V3::new(0.0, 0.0, -r / a.tan()))),
+            Surf::Cone { f, r, a } => Some(f.world(V3::new(0.0, 0.0, -r / det::tan(*a)))),
             _ => None,
         }
     }
@@ -131,8 +132,8 @@ impl Surf {
             }
             Surf::Cone { f, r, a } => {
                 let ax = axial(f, p);
-                let (sa, ca) = a.sin_cos();
-                let ha = -r / a.tan();
+                let (sa, ca) = det::sin_cos(*a);
+                let ha = -r / det::tan(*a);
                 let s = ax.rho * sa + (ax.h - ha) * ca;
                 if s <= 0.0 {
                     f.o + f.z * ha
@@ -171,7 +172,7 @@ impl Surf {
             Surf::Cylinder { f, .. } => axial(f, x).er,
             Surf::Cone { f, a, .. } => {
                 let ax = axial(f, x);
-                let (sa, ca) = a.sin_cos();
+                let (sa, ca) = det::sin_cos(*a);
                 ax.er * ca - f.z * sa
             }
             Surf::Sphere { f, .. } => (x - f.o).unit(),
@@ -1000,9 +1001,9 @@ mod tests {
             for k in 0..200 {
                 let x = f64::from(k);
                 let p = V3::new(
-                    1.0 + 7.0 * (x * 0.37).sin(),
-                    2.0 + 6.0 * (x * 0.73).cos(),
-                    3.0 + 5.0 * (x * 1.31).sin(),
+                    1.0 + 7.0 * det::sin(x * 0.37),
+                    2.0 + 6.0 * det::cos(x * 0.73),
+                    3.0 + 5.0 * det::sin(x * 1.31),
                 );
                 let q = s.foot(p);
                 let n = s.normal(q);
@@ -1031,7 +1032,7 @@ mod tests {
             let mut row = Vec::new();
             for j in 0..4 {
                 let (x, y) = (f64::from(i) * 2.0, f64::from(j) * 2.0);
-                row.push(V3::new(x, y, (x * 0.7).sin() * 2.0 + (y * 0.9).cos()));
+                row.push(V3::new(x, y, det::sin(x * 0.7) * 2.0 + det::cos(y * 0.9)));
             }
             ctrl.push(row);
         }
@@ -1042,9 +1043,9 @@ mod tests {
         for k in 0..40 {
             let x = f64::from(k);
             let p = V3::new(
-                4.0 + 5.0 * (x * 0.37).sin(),
-                3.0 + 4.0 * (x * 0.71).cos(),
-                1.0 + 3.0 * (x * 1.3).sin(),
+                4.0 + 5.0 * det::sin(x * 0.37),
+                3.0 + 4.0 * det::cos(x * 0.71),
+                1.0 + 3.0 * det::sin(x * 1.3),
             );
             let h = s.closest(p, f64::INFINITY).unwrap();
             let mut dense = f64::INFINITY;

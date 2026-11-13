@@ -35,6 +35,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3, BIG_DOUBLE};
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -178,7 +179,11 @@ fn off_front_axis(p: Point3) -> (f64, f64) {
 /// The point at angle `phi` about the arc wall's axis (from -x towards +y), `rho` from it,
 /// at height `z`.
 fn about_axis(phi: f64, rho: f64, z: f64) -> Point3 {
-    Point3::new(AXIS[0] - rho * phi.cos(), AXIS[1] + rho * phi.sin(), z)
+    Point3::new(
+        AXIS[0] - rho * det::cos(phi),
+        AXIS[1] + rho * det::sin(phi),
+        z,
+    )
 }
 
 /// The closed forms of the middle edge rounded `r`, at its top End.
@@ -199,8 +204,8 @@ struct TopEnd {
 
 impl TopEnd {
     fn new(r: f64) -> Self {
-        let phi_v = (2.0 / WALL).asin();
-        let phi_q = (2.0 / (WALL + r)).asin();
+        let phi_v = det::asin(2.0 / WALL);
+        let phi_q = det::asin(2.0 / (WALL + r));
         Self {
             phi_v,
             q: about_axis(phi_q, WALL + r, 10.0),
@@ -214,7 +219,7 @@ impl TopEnd {
 
     /// The signed distance of `p` from P (positive past it, away from the bottom).
     fn past_p(&self, p: Point3) -> f64 {
-        let n = Vec3::new(self.phi_v.sin(), self.phi_v.cos(), 0.0);
+        let n = Vec3::new(det::sin(self.phi_v), det::cos(self.phi_v), 0.0);
         (p - self.v).dot(n)
     }
 }
@@ -276,7 +281,7 @@ fn crease(k: &Kernel, b: &Brep, e: EdgeId) -> f64 {
     for p in samples(k, b, e, 16) {
         let n0 = normal_at(k, b, fs[0], p);
         let n1 = normal_at(k, b, fs[1], p);
-        worst = worst.max(n0.dot(n1).abs().min(1.0).acos());
+        worst = worst.max(det::acos(n0.dot(n1).abs().min(1.0)));
     }
     worst
 }
@@ -414,7 +419,7 @@ fn check_top_end(k: &Kernel, b: &Brep, r: f64, rail_tol: f64) {
     );
     assert!(worst.0 <= EXACT_TOL, "the sections at Q: {:e}", worst.0);
     assert!(worst.1 <= EXACT_TOL, "the seam is not G1: {:e}", worst.1);
-    let np = Vec3::new(t.phi_v.sin(), t.phi_v.cos(), 0.0);
+    let np = Vec3::new(det::sin(t.phi_v), det::cos(t.phi_v), 0.0);
     let s_p = section_in(k, rolled, t.centre_p, np);
     let mut off_p = 0.0f64;
     for i in 0..=8 {
@@ -488,7 +493,7 @@ fn check_top_end(k: &Kernel, b: &Brep, r: f64, rail_tol: f64) {
 
 /// The angle between two lines along `a` and `b` (radians), to rounding near 0.
 fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b).abs())
+    det::atan2(a.cross(b).length(), a.dot(b).abs())
 }
 
 /// The face of edge `e` other than the one whose surface's type `is` takes.

@@ -43,6 +43,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::query::api_queries::{get_edges, get_faces};
@@ -59,7 +60,7 @@ use solidcore::{Brep, Kernel};
 const PI: f64 = core::f64::consts::PI;
 
 fn tan5() -> f64 {
-    5.0_f64.to_radians().tan()
+    det::tan(5.0_f64.to_radians())
 }
 
 fn line(a: Point3, b: Point3) -> Curve {
@@ -167,7 +168,7 @@ fn cone_faces(k: &Kernel, b: &Brep) -> Vec<(f64, f64)> {
                 let u = dom.u_min() + (dom.u_max() - dom.u_min()) * f64::from(i) / 10.0;
                 let v = dom.v_min() + (dom.v_max() - dom.v_min()) * f64::from(j) / 10.0;
                 let q = s.evaluate_point(k, Point2::new(u, v)).unwrap();
-                let rho = (q.x - 40.0).hypot(q.y - 8.0);
+                let rho = det::hypot(q.x - 40.0, q.y - 8.0);
                 worst = worst.max((rho - (8.0 - q.z * tan5())).abs());
             }
         }
@@ -335,7 +336,7 @@ fn grid(k: &Kernel, s: &Surface) -> Vec<Point3> {
 #[test]
 fn an_oblique_drafted_wall_is_ruled_on_its_oblique_cone() {
     let a = 5.0_f64.to_radians();
-    let e2 = Vec3::new(0.0, a.cos(), a.sin());
+    let e2 = Vec3::new(0.0, det::cos(a), det::sin(a));
     let m = Vec3::X.cross(e2);
     let o = Point3::new(0.0, 0.0, 0.0);
     let mut k = Kernel::default();
@@ -349,7 +350,7 @@ fn an_oblique_drafted_wall_is_ruled_on_its_oblique_cone() {
     assert_eq!(counts(&b), (4, 6, 4));
     assert!(cone_faces(&k, &b).is_empty());
     let h = Vec3::new(0.0, 0.0, 10.0);
-    let e = 10.0 * tan5() * a.cos();
+    let e = 10.0 * tan5() * det::cos(a);
     let apex = o + (8.0 / e) * h;
     // each face's surface: a cap, the chord's wall or the arc's wall
     let (mut caps, mut chord, mut cone) = (0, 0, 0);
@@ -395,7 +396,7 @@ fn an_oblique_drafted_wall_is_ruled_on_its_oblique_cone() {
     check(&mut k, &mut b);
     let segment = |f: f64| {
         let (rho, c) = (8.0 - f * e, f * e);
-        rho * rho * (c / rho).acos() - c * (rho * rho - c * c).sqrt()
+        rho * rho * det::acos(c / rho) - c * (rho * rho - c * c).sqrt()
     };
     let want = h.dot(m) * simpson(segment);
     let v = volume(&k, &mut b, 1e-10);
@@ -437,7 +438,7 @@ fn segment_240(deg: f64) -> (Kernel, Brep) {
     let x = Vec3::new(0.0, -1.0, 0.0);
     let at = |deg: f64| {
         let t = deg.to_radians();
-        Point3::new(8.0 * t.cos(), 8.0 * t.sin(), 0.0)
+        Point3::new(8.0 * det::cos(t), 8.0 * det::sin(t), 0.0)
     };
     let cs = [arc(&k, o, 8.0, x, 240.0), line(at(150.0), at(-90.0))];
     let TaperExtrude::Solid(b) = draft(&mut k, &cs, deg) else {
@@ -469,7 +470,7 @@ fn a_seam_cut_at_a_span_end_keeps_its_exact_pcurve() {
         let (mut k, mut b) = segment_240(deg);
         assert_eq!(counts(&b), (4, 6, 4), "{deg}");
         check(&mut k, &mut b);
-        let tan = deg.to_radians().tan();
+        let tan = det::tan(deg.to_radians());
         let cone = get_faces(&b)
             .unwrap()
             .into_iter()
@@ -496,7 +497,7 @@ fn a_seam_cut_at_a_span_end_keeps_its_exact_pcurve() {
         );
         let off = grid(&k, s)
             .into_iter()
-            .map(|q| (q.x.hypot(q.y) - (8.0 - q.z * tan)).abs())
+            .map(|q| (det::hypot(q.x, q.y) - (8.0 - q.z * tan)).abs())
             .fold(0.0, f64::max);
         assert!(off < 1e-12, "{deg}: off the cone by {off:e}");
         let gap = cone_pcurve_gap(&k, &b);
@@ -538,7 +539,7 @@ fn a_seam_cut_at_a_span_end_keeps_its_exact_pcurve() {
             let want = 10.0
                 * simpson(|f| {
                     let (rho, c) = (8.0 - f * e, 4.0 - f * e);
-                    rho * rho * (-c / rho).acos() + c * (rho * rho - c * c).sqrt()
+                    rho * rho * det::acos(-c / rho) + c * (rho * rho - c * c).sqrt()
                 });
             let v = volume(&k, &mut b, 1e-10);
             assert!((v - want).abs() <= 1e-11 * want, "volume {v} want {want}");

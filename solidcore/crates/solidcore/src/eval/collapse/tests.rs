@@ -1,5 +1,6 @@
 use super::*;
 use crate::eval::uv::{degenerate, degenerate_within};
+use crate::math::det;
 
 const MID: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
@@ -539,7 +540,7 @@ fn a_swapped_mapped_revolution_and_a_producer_tolerance_row() {
             [10.0, 0.0, 10.0, 1.0],
         ],
     );
-    let (s, c) = 0.6f64.sin_cos();
+    let (s, c) = det::sin_cos(0.6f64);
     let s = EvalSurface::Revolved {
         profile,
         origin: Vec3::ZERO,

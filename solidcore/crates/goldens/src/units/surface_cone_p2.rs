@@ -20,6 +20,7 @@
 //! points; the rotation of a move is computed here once and given to both sides.
 //! Trim domains are fractions of the cone's natural domain (`Evaluate` on each side).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -217,7 +218,7 @@ fn rotation(axis: [f64; 3], angle: f64) -> [f64; 9] {
     }
     let (x, y, z) = (ax / l, ay / l, az / l);
     let a = angle * PI / 180.0;
-    let (s, c) = a.sin_cos();
+    let (s, c) = det::sin_cos(a);
     let t = 1.0 - c;
     [
         t * x * x + c,
@@ -572,8 +573,8 @@ fn offset_defined(k: &Kernel, s: &Cone, dist: f64, tol: f64) -> solidcore::Resul
     let (origin, x_axis, y_axis, z_axis) = (pos.origin(), pos.x_axis(), pos.y_axis(), pos.z_axis());
     let height = s.height(k)?;
     let semi = s.semi_angle_deg();
-    let sin = (semi * PI / 180.0).sin();
-    let cos = (semi * PI / 180.0).cos();
+    let sin = det::sin(semi * PI / 180.0);
+    let cos = det::cos(semi * PI / 180.0);
     let off_z = -sin * sign * dist;
     let off_r = cos * sign * dist;
     let old_bot = s.bot_radius();
@@ -1061,17 +1062,17 @@ fn gen_trim(rng: &mut Rng, c: &ConeIn, scale: f64) -> OpIn {
         0.0
     } else {
         let t = rng.uniform(-max_tan, max_tan).clamp(-5.0, 5.0);
-        t.atan()
+        det::atan(t)
     };
-    let t = slope * phi.tan();
+    let t = slope * det::tan(phi);
     let one_t2 = 1.0 - t * t;
     let xc = -rr * t / one_t2;
     let ax = rr / one_t2;
     let b = rr / one_t2.sqrt();
-    let (sp, cp) = phi.sin_cos();
+    let (sp, cp) = det::sin_cos(phi);
     let a = ax / cp;
     // local center (xc, 0, h0 - xc tan(phi)), major axis (cos phi, 0, -sin phi)
-    let lc = [xc, 0.0, h0 - xc * phi.tan()];
+    let lc = [xc, 0.0, h0 - xc * det::tan(phi)];
     let lu = [cp, 0.0, -sp];
     let to_world = |p: [f64; 3]| {
         let [px, py, pz] = p;

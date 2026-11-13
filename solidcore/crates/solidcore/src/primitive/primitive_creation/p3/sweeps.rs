@@ -685,6 +685,7 @@ impl PrimitiveCreation {
 mod tests {
     use crate::curve::curve::Curve;
     use crate::kernel::Kernel;
+    use crate::math::det;
     use crate::math::{Point3, Vec3};
     use crate::primitive::api_curves;
     use crate::sweep::api_brep::create_rotational_sweep;
@@ -789,7 +790,8 @@ mod tests {
         };
         let volume = brep_volume(&k, &mut ball, 1e-6, &attributes).unwrap();
         // 4/3 pi (40^3 - 18.5^3)
-        let want = 4.0 / 3.0 * std::f64::consts::PI * (40.0_f64.powi(3) - 18.5_f64.powi(3));
+        let want =
+            4.0 / 3.0 * std::f64::consts::PI * (det::powi(40.0_f64, 3) - det::powi(18.5_f64, 3));
         assert!(
             (volume - want).abs() < 1e-3 * want,
             "volume {volume}, want {want}"

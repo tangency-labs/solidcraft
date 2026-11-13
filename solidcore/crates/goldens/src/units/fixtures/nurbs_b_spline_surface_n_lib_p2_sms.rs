@@ -5,6 +5,7 @@
 //! geometric validity remains the downstream surface constructor's responsibility.
 
 use crate::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 #[derive(Debug)]
@@ -30,7 +31,11 @@ pub(super) fn decode(text: &str, path: &str) -> Result<Decoded, HarnessError> {
     let overflow = || HarnessError::new(format!("{path}: count overflow"));
     let count = |v: f64| {
         // usize::MAX as f64 rounds up on 64-bit: the boundary must be exclusive.
-        if !v.is_finite() || v.fract() != 0.0 || v < 0.0 || v >= 2.0_f64.powi(usize::BITS as i32) {
+        if !v.is_finite()
+            || v.fract() != 0.0
+            || v < 0.0
+            || v >= det::powi(2.0_f64, usize::BITS as i32)
+        {
             Err(HarnessError::new(format!("{path}: bad count {v}")))
         } else {
             Ok(v as usize)

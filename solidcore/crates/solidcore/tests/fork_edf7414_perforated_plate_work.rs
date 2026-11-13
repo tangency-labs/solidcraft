@@ -24,6 +24,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 use std::time::Instant;
 
@@ -229,7 +230,7 @@ fn a_plate_classifies_its_points_the_same_with_its_holes_left_out() {
             let (x, y) = (PITCH * f64::from(i), PITCH * f64::from(j));
             points.push(Point3::new(x, y, 0.0));
             for a in 0..12 {
-                let (s, c) = (f64::from(a) * PI / 6.0 + 0.1).sin_cos();
+                let (s, c) = det::sin_cos(f64::from(a) * PI / 6.0 + 0.1);
                 for d in [0.0, 0.1, -0.1, 1.0, -1.0, 10.0, -10.0] {
                     let r = RADIUS + d * tol;
                     points.push(Point3::new(x + r * c, y + r * s, 0.0));

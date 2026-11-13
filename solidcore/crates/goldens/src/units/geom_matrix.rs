@@ -12,6 +12,7 @@
 //! 1007, `SM_ERR` = 1001). Every run uses at least [`MIN_GENERATED`] generated
 //! inputs (more with `--seeds`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -263,9 +264,9 @@ fn entry(rng: &mut Rng) -> f64 {
     } else if r < 0.82 {
         rng.range_i64(-3, 3) as f64
     } else if r < 0.90 {
-        rng.uniform(-1.0, 1.0) * 10f64.powi(-(rng.range_i64(6, 14) as i32))
+        rng.uniform(-1.0, 1.0) * det::powi(10f64, -(rng.range_i64(6, 14) as i32))
     } else if r < 0.97 {
-        rng.uniform(-1.0, 1.0) * 10f64.powi(rng.range_i64(3, 12) as i32)
+        rng.uniform(-1.0, 1.0) * det::powi(10f64, rng.range_i64(3, 12) as i32)
     } else {
         rng.uniform(-1.0, 1.0)
     }
@@ -359,7 +360,7 @@ fn square(rng: &mut Rng, n: usize, symmetric: bool) -> Vec<f64> {
             // near-zero pivot during elimination: row b = row a + tiny noise
             if n > 1 {
                 let (a, b) = (0usize, 1 + rng.below(n as u64 - 1) as usize);
-                let eps = 10f64.powi(-(rng.range_i64(10, 16) as i32));
+                let eps = det::powi(10f64, -(rng.range_i64(10, 16) as i32));
                 for c in 0..n {
                     let x = get(&m, a, c) + eps * rng.uniform(-1.0, 1.0);
                     set(&mut m, b, c, x);
@@ -368,7 +369,7 @@ fn square(rng: &mut Rng, n: usize, symmetric: bool) -> Vec<f64> {
         }
         6 => {
             // huge / tiny scales, possibly overflowing
-            let k = 10f64.powi(rng.range_i64(-300, 300) as i32);
+            let k = det::powi(10f64, rng.range_i64(-300, 300) as i32);
             for x in &mut m {
                 *x *= k;
             }
@@ -517,7 +518,7 @@ fn gen_svd(rng: &mut Rng) -> Inputs {
         (rows, cols, m)
     };
     if rng.chance(0.1) {
-        let k = 10f64.powi(rng.range_i64(-60, 60) as i32);
+        let k = det::powi(10f64, rng.range_i64(-60, 60) as i32);
         for x in &mut m {
             *x *= k;
         }
@@ -554,7 +555,7 @@ fn svd_element_ok(x: f64) -> bool {
 /// A 3x3 block of the kinds `SmBrep::Transform(double[4][4])` decomposes.
 fn transform_block(rng: &mut Rng) -> Vec<f64> {
     let (a, b) = (rng.uniform(-3.2, 3.2), rng.uniform(-3.2, 3.2));
-    let (ca, sa, cb, sb) = (a.cos(), a.sin(), b.cos(), b.sin());
+    let (ca, sa, cb, sb) = (det::cos(a), det::sin(a), det::cos(b), det::sin(b));
     // a rotation about Z then X
     let rot = [ca, sa, 0.0, -sa * cb, ca * cb, sb, sa * sb, -ca * sb, cb];
     let mut d = [1.0, 1.0, 1.0];
@@ -563,7 +564,7 @@ fn transform_block(rng: &mut Rng) -> Vec<f64> {
         1 => d = [2.0, 2.0, 2.0],
         2 => d = [rng.uniform(0.1, 5.0), rng.uniform(0.1, 5.0), rng.uniform(0.1, 5.0)],
         3 => d = [-1.0, 1.0, 1.0],
-        4 => d = [1.0, 1.0, 10f64.powi(-(rng.range_i64(3, 15) as i32))],
+        4 => d = [1.0, 1.0, det::powi(10f64, -(rng.range_i64(3, 15) as i32))],
         _ => d = [1.0, 1.0, 0.0],
     }
     let mut m: Vec<f64> = rot

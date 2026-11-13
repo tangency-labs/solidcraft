@@ -38,6 +38,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::primitive::primitive_creation::SweepOptions;
@@ -60,8 +61,8 @@ fn line(a: (f64, f64), b: (f64, f64), z: f64) -> Line {
 /// starting at `a0`, as the capi builds it.
 fn arc(k: &Kernel, c: (f64, f64), z: f64, nz: f64, r: f64, a0: f64, a1: f64) -> Ellipse {
     // the capi's x0 = ref cos a0 + (axis x ref) sin a0 and y0 = axis x x0, with ref +x
-    let x0 = Vec3::new(a0.cos(), nz * a0.sin(), 0.0);
-    let y0 = Vec3::new(-a0.sin(), nz * a0.cos(), 0.0);
+    let x0 = Vec3::new(det::cos(a0), nz * det::sin(a0), 0.0);
+    let y0 = Vec3::new(-det::sin(a0), nz * det::cos(a0), 0.0);
     let frame = Axis2Placement::new(Point3::new(c.0, c.1, z), x0, y0);
     let degrees = Extent1d::from_min_max(0.0, (a1 - a0).to_degrees());
     Ellipse::create_canonical_circle(k, &frame, r, Some(&degrees), None).unwrap()

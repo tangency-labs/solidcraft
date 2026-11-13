@@ -45,6 +45,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::ANG_TOL_DEG;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Vec3, PI};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::BSplineSurface;
@@ -326,7 +327,7 @@ fn taper(
     };
 
     // This is the offset distance in the plane of the input curves
-    let mut offset = height * (draft_angle_deg.abs() * PI / 180.0).tan();
+    let mut offset = height * det::tan(draft_angle_deg.abs() * PI / 180.0);
     if offset < 0.0 {
         offset = -offset;
     }

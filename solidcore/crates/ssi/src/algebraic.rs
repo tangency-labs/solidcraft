@@ -19,6 +19,7 @@
 use crate::field::Bern;
 use crate::patch::Patch;
 use crate::piece::{norm, sub, Piece, V3};
+use solidcore::math::det;
 
 /// An implicit polynomial of total degree `degree` in coordinates centered on
 /// `center` and scaled by `length`: Σ coef[k] x^a y^b z^c over `monomials`.
@@ -86,7 +87,7 @@ impl Algebraic {
         let m = (0..4)
             .map(|d| coordinate(piece, self.center, self.length, d).max_abs())
             .fold(0.0_f64, f64::max);
-        (Bern::sum(&weighted), m.powi(self.degree as i32))
+        (Bern::sum(&weighted), det::powi(m, self.degree as i32))
     }
 
     /// A form of degree 2 as x^T M x + 2 w · x + c in its scaled coordinates
@@ -130,7 +131,7 @@ impl Algebraic {
             (p[1] - self.center[1]) / self.length,
             (p[2] - self.center[2]) / self.length,
         ];
-        let power = |v: f64, e: usize| if e == 0 { 1.0 } else { v.powi(e as i32) };
+        let power = |v: f64, e: usize| if e == 0 { 1.0 } else { det::powi(v, e as i32) };
         let mut f = 0.0;
         let mut size = 0.0;
         let mut g = [0.0; 3];
@@ -256,11 +257,10 @@ impl Fitter {
             let mut residual = 0.0_f64;
             for (piece, p) in self.pieces.iter().zip(&self.powers) {
                 let n = (degree * piece.du + 1) * (degree * piece.dv + 1);
-                let scale = p
-                    .base
-                    .iter()
-                    .fold(0.0_f64, |m, b| m.max(b.max_abs()))
-                    .powi(degree as i32);
+                let scale = det::powi(
+                    p.base.iter().fold(0.0_f64, |m, b| m.max(b.max_abs())),
+                    degree as i32,
+                );
                 let mut largest = 0.0_f64;
                 for r in start..start + n {
                     let Some(row) = full
@@ -488,7 +488,7 @@ fn null_vector(columns: &[Vec<f64>]) -> Option<(Vec<f64>, f64)> {
         }
         x
     };
-    let mut x = unit((0..n).map(|i| 1.0 + 0.1 * (i as f64).sin()).collect());
+    let mut x = unit((0..n).map(|i| 1.0 + 0.1 * det::sin(i as f64)).collect());
     for _ in 0..6 {
         // R^T y = x, then R z = y.
         let mut y: Vec<f64> = Vec::with_capacity(n);
@@ -544,9 +544,9 @@ mod tests {
             .map(|k| {
                 let (a, b) = (f64::from(k) * 0.37, f64::from(k) * 0.91);
                 [
-                    0.8 * a.cos() * b.sin(),
-                    0.8 * a.sin() * b.sin(),
-                    0.8 * b.cos(),
+                    0.8 * det::cos(a) * det::sin(b),
+                    0.8 * det::sin(a) * det::sin(b),
+                    0.8 * det::cos(b),
                 ]
             })
             .collect();
@@ -556,7 +556,9 @@ mod tests {
                 points
                     .iter()
                     .map(|x| {
-                        x[0].powi(m[0] as i32) * x[1].powi(m[1] as i32) * x[2].powi(m[2] as i32)
+                        det::powi(x[0], m[0] as i32)
+                            * det::powi(x[1], m[1] as i32)
+                            * det::powi(x[2], m[2] as i32)
                     })
                     .collect()
             })

@@ -32,6 +32,7 @@
 // The generator indexes the nets and knot vectors it has just built (as other runners do).
 #![allow(clippy::indexing_slicing)]
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -381,8 +382,8 @@ fn level(rng: &mut Rng) -> f64 {
 
 fn scale(rng: &mut Rng) -> f64 {
     match rng.below(8) {
-        0 => 10f64.powi(rng.range_i64(-6, -2) as i32),
-        1 => 10f64.powi(rng.range_i64(2, 6) as i32),
+        0 => det::powi(10f64, rng.range_i64(-6, -2) as i32),
+        1 => det::powi(10f64, rng.range_i64(2, 6) as i32),
         _ => rng.uniform(0.5, 4.0),
     }
 }
@@ -395,11 +396,11 @@ fn frame(rng: &mut Rng, b: &mut Vec<f64>, s: f64) {
         0 => ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
         1 => {
             let a = rng.uniform(0.0, 6.0);
-            ([a.cos(), a.sin(), 0.0], [-a.sin(), a.cos(), 0.0])
+            ([det::cos(a), det::sin(a), 0.0], [-det::sin(a), det::cos(a), 0.0])
         }
         2 => {
             let a = rng.uniform(0.0, 6.0);
-            ([a.cos(), 0.0, a.sin()], [0.0, 1.0, 0.0])
+            ([det::cos(a), 0.0, det::sin(a)], [0.0, 1.0, 0.0])
         }
         _ => ([1.0, 0.0, 0.0], [rng.uniform(-0.3, 0.3), 1.0, rng.uniform(-0.2, 0.2)]),
     };
@@ -616,9 +617,9 @@ fn extrusion_generator(rng: &mut Rng, shape: u64, s: f64) -> (usize, Vec<[f64; 4
             let a = t * 2.5;
             let c = match shape {
                 0 => [t, 0.5 * t, -0.25 * t],
-                1 => [a.cos(), a.sin(), 0.0],
-                2 => [0.0, a.cos(), a.sin()],
-                3 => [a.cos(), a.sin(), 0.4 * t * t],
+                1 => [det::cos(a), det::sin(a), 0.0],
+                2 => [0.0, det::cos(a), det::sin(a)],
+                3 => [det::cos(a), det::sin(a), 0.4 * t * t],
                 4 => [t, t * t, if i == 0 || i + 1 == n { 0.0 } else { 0.5 }],
                 _ => [t, 1e-9 * (i % 2) as f64, 0.0],
             };

@@ -367,6 +367,7 @@ impl CorrectionStation {
 mod tests {
     use super::*;
     use crate::blend::fillet_section::smooth_interior::correction_kernels;
+    use crate::math::det;
 
     fn station() -> CorrectionStation {
         let j = JumpJet {
@@ -419,10 +420,10 @@ mod tests {
                         contains(enclosure.second[i], p[2]);
                         let l = jet(lo, i);
                         let rr = jet(hi, i);
-                        let herm = (2.0 * u.powi(3) - 3.0 * u * u + 1.0) * l[0]
-                            + (u.powi(3) - 2.0 * u * u + u) * h * l[1]
-                            + (-2.0 * u.powi(3) + 3.0 * u * u) * rr[0]
-                            + (u.powi(3) - u * u) * h * rr[1];
+                        let herm = (2.0 * det::powi(u, 3) - 3.0 * u * u + 1.0) * l[0]
+                            + (det::powi(u, 3) - 2.0 * u * u + u) * h * l[1]
+                            + (-2.0 * det::powi(u, 3) + 3.0 * u * u) * rr[0]
+                            + (det::powi(u, 3) - u * u) * h * rr[1];
                         contains(enclosure.hermite_error[i], herm - p[0]);
                     }
                 }

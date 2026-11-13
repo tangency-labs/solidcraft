@@ -38,6 +38,7 @@ use solidcore::boolean::api_brep::boolean_intersection;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
@@ -122,8 +123,8 @@ fn removed_closed_form() -> f64 {
     let mut removed = 0.0;
     for i in 0..=n {
         let t = f64::from(i) * h;
-        let y = -3.0 - 2.0 * t.sin();
-        let f = 4.0 * (1.0 - t.cos()) * t.cos() * (400.0 - y * y).sqrt();
+        let y = -3.0 - 2.0 * det::sin(t);
+        let f = 4.0 * (1.0 - det::cos(t)) * det::cos(t) * (400.0 - y * y).sqrt();
         let w = if i == 0 || i == n {
             1.0
         } else if i % 2 == 1 {

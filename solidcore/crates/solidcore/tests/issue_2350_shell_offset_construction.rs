@@ -24,6 +24,7 @@ use solidcore::error::offset::OffsetFailure;
 use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::object::ObjectRef;
 use solidcore::geom::tol::USE_DEFAULT;
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_surface::p1::BSplineSurface;
 use solidcore::nurbs::math::CPoint;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
@@ -107,7 +108,7 @@ fn thicken(k: &mut Kernel, mut sheet: Brep, distance: f64) -> solidcore::Result<
 /// The arc length of the parabola y = (100 - x^2) / 20, x in [-10, 10].
 fn arc_length() -> f64 {
     // integral of sqrt(1 + x^2 / 100): [x/2 sqrt(1 + x^2/100) + 5 asinh(x / 10)]
-    let half = 5.0 * 2f64.sqrt() + 5.0 * 1f64.asinh();
+    let half = 5.0 * 2f64.sqrt() + 5.0 * det::asinh(1f64);
     2.0 * half
 }
 
@@ -121,7 +122,7 @@ fn tube(t: f64, towards: bool) -> f64 {
 fn distance_to_arc(x: f64, y: f64) -> f64 {
     let f = |s: f64| {
         let (px, py) = (-10.0 + 20.0 * s, 20.0 * s * (1.0 - s));
-        ((px - x).powi(2) + (py - y).powi(2)).sqrt()
+        (det::powi(px - x, 2) + det::powi(py - y, 2)).sqrt()
     };
     let n = 2000;
     let mut best = (f64::INFINITY, 0.0);

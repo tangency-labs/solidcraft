@@ -18,6 +18,7 @@
 )] // test helpers
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::surface::cone::Cone;
 use solidcore::Kernel;
@@ -120,7 +121,7 @@ fn each_cone(
 /// (1e-3 inside it), at the base, the issue's height 1 (or -1 past a negative cone's apex
 /// side), and far from the apex (1e4).
 fn unbounded_heights(bot: f64, semi: f64) -> Vec<f64> {
-    let apex = -bot / semi.to_radians().tan();
+    let apex = -bot / det::tan(semi.to_radians());
     let inward = if semi > 0.0 { 1.0 } else { -1.0 };
     vec![
         apex + inward * 1e-3,
@@ -218,7 +219,7 @@ fn unbounded_cone_domain_and_nurb_points_agree() {
     let pl = &placements()[0];
     let cone =
         Cone::create_canonical_with_semi_angle(&k, pl, 2.0, -15.0, None, false, false).unwrap();
-    let apex = 2.0 / 15f64.to_radians().tan();
+    let apex = 2.0 / det::tan(15f64.to_radians());
     assert!(
         close(cone.top_height(), apex, 1.0),
         "top {}",

@@ -20,6 +20,7 @@
 //! `blend.fillet_geom_p5`) on every path a native fixture can build without the
 //! executive's pseudo B-rep; their comparable early exits are covered by kernel tests.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -472,7 +473,7 @@ fn gen_step(rng: &mut Rng) -> StepIn {
     let scale = *rng.choose(&[1e-3, 1.0, 1.0, 1.0, 1.0, 1e3]).unwrap_or(&1.0);
     let l = 2.0 * scale;
     let phi = rng.uniform(20.0, 160.0).to_radians();
-    let (sp, cp) = (phi.sin(), phi.cos());
+    let (sp, cp) = (det::sin(phi), det::cos(phi));
     let r = l * rng.uniform(0.03, 0.15);
     let curved = rng.chance(0.4);
     let bump = if curved {
@@ -574,7 +575,7 @@ fn gen_step(rng: &mut Rng) -> StepIn {
         [1.0, 1.0]
     };
     // the rail chord of the exact fillet, perturbed for the clipped radius solve
-    let chord = ((xc - rail1[0]).powi(2) + rail1[2].powi(2)).sqrt();
+    let chord = (det::powi(xc - rail1[0], 2) + det::powi(rail1[2], 2)).sqrt();
     let distance = chord * rng.uniform(0.9, 1.1);
     StepIn {
         ty,

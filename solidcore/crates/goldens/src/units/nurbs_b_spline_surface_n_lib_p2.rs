@@ -19,6 +19,7 @@
 //! on analytic neighbour surfaces (`SmCone`, `SmCylinder`, `SmSphere`, `SmTorus`,
 //! evaluated through their virtual `SmSurface` methods).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1133,7 +1134,7 @@ fn plane_loop(rng: &mut Rng, k: usize) -> (Vec<InlineCrv>, Vec<InlineCrv>, Inlin
     let uvs: Vec<[f64; 2]> = (0..k)
         .map(|i| {
             let a = std::f64::consts::TAU * i as f64 / k as f64 + std::f64::consts::PI;
-            [0.5 + 0.3 * a.cos(), 0.5 + 0.3 * a.sin()]
+            [0.5 + 0.3 * det::cos(a), 0.5 + 0.3 * det::sin(a)]
         })
         .collect();
     let to3 = |uv: [f64; 2]| [4.0 * uv[0], 4.0 * uv[1], z0 + 4.0 * uv[1] * tilt];
@@ -1323,8 +1324,8 @@ fn gen_analytic_corner(rng: &mut Rng) -> Inputs {
             let t = turn + std::f64::consts::TAU * i as f64 / sides as f64;
             let t = if reverse { -t } else { t };
             [
-                0.5 * (lo.x + hi.x) + frac * (hi.x - lo.x) * t.cos(),
-                0.5 * (lo.y + hi.y) + frac * (hi.y - lo.y) * t.sin(),
+                0.5 * (lo.x + hi.x) + frac * (hi.x - lo.x) * det::cos(t),
+                0.5 * (lo.y + hi.y) + frac * (hi.y - lo.y) * det::sin(t),
             ]
         };
         let mut c3 = Vec::with_capacity(sides);

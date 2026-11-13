@@ -24,6 +24,7 @@ use offset_fixture::{offset_full, planar_faces_at, report, shell, Notifications}
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::integrator::properties::face_area;
+use solidcore::math::det;
 use solidcore::nurbs::knots::Side;
 use solidcore::offset::offset_executive::p2::{
     api_offset_brep_full, local_operation_simple, OffsetOptions,
@@ -468,9 +469,9 @@ fn off_the_translated_disk_boundary(p: Point3, height: f64) -> f64 {
         ((x * x + y * y).sqrt() - 5.0).abs()
     } else {
         // below the diameter: the nearest end of the semicircle
-        ((x - 5.0).powi(2) + y * y)
+        (det::powi(x - 5.0, 2) + y * y)
             .sqrt()
-            .min(((x + 5.0).powi(2) + y * y).sqrt())
+            .min((det::powi(x + 5.0, 2) + y * y).sqrt())
     };
     let dx = (x.abs() - 5.0).max(0.0);
     arc.min((dx * dx + y * y).sqrt())

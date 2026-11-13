@@ -20,6 +20,7 @@
 
 mod common;
 
+use solidcore::math::det;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
 use common::{edge_at, kernel_copy, rel, volume};
@@ -41,7 +42,7 @@ use solidcore_ops::{blend, Blend, Body, CheckLevel, Corners, PointClass};
 /// x = 15 from y = -15 to 15. Simpson's rule on 2000 panels: 537.671338762226, within 1e-12 of
 /// it on 200 (the loft's volume below checks it against the kernel's to 1e-9).
 fn mixed() -> f64 {
-    let c = FRAC_PI_4.cos();
+    let c = det::cos(FRAC_PI_4);
     let p = [[10.0 * c, -10.0 * c], [10.0 / c, 0.0], [10.0 * c, 10.0 * c]];
     let w = [1.0, c, 1.0];
     let integrand = |t: f64| {
@@ -83,10 +84,10 @@ fn loft_volume() -> f64 {
 /// a round of radius s or a chamfer of distance s takes nothing outside it.
 fn band(s: f64) -> f64 {
     let s0 = 1.0 - s / 30.0;
-    let square = 900.0 * (1.0 - s0).powi(3) / 3.0;
-    let mixed = 2.0 * mixed() * (1.0 / 6.0 - s0 * s0 / 2.0 + s0.powi(3) / 3.0);
-    let circle = 100.0 * PI * (1.0 - s0.powi(3)) / 3.0;
-    30.0 * (square + mixed + circle) - s * PI * (10.0 - s).powi(2)
+    let square = 900.0 * det::powi(1.0 - s0, 3) / 3.0;
+    let mixed = 2.0 * mixed() * (1.0 / 6.0 - s0 * s0 / 2.0 + det::powi(s0, 3) / 3.0);
+    let circle = 100.0 * PI * (1.0 - det::powi(s0, 3)) / 3.0;
+    30.0 * (square + mixed + circle) - s * PI * det::powi(10.0 - s, 2)
 }
 
 /// The loft: the sides paired with the arcs centred on their directions.
@@ -119,7 +120,7 @@ fn loft_body() -> Body {
 
 /// `p` turned `q` quarters about the z axis.
 fn turned(p: [f64; 3], q: i32) -> [f64; 3] {
-    let (s, c) = (f64::from(q) * FRAC_PI_2).sin_cos();
+    let (s, c) = det::sin_cos(f64::from(q) * FRAC_PI_2);
     [c * p[0] - s * p[1], s * p[0] + c * p[1], p[2]]
 }
 
@@ -181,9 +182,9 @@ fn creases(k: &Kernel, brep: &Brep) -> Vec<Crease> {
         for quarter in 0..4 {
             let a = FRAC_PI_4 + f64::from(quarter) * FRAC_PI_2;
             // the joint's plane, on the joint's side of the axis
-            let off = |p: Point3| (-a.sin() * p.x + a.cos() * p.y).abs();
+            let off = |p: Point3| (-det::sin(a) * p.x + det::cos(a) * p.y).abs();
             let mid = at(0.5);
-            if a.cos() * mid.x + a.sin() * mid.y <= 0.0 {
+            if det::cos(a) * mid.x + det::sin(a) * mid.y <= 0.0 {
                 continue;
             }
             let off_plane = (0..=32)
@@ -224,7 +225,7 @@ fn blended(kind: Blend, size: f64) -> (Body, f64) {
 /// What every rounding of the rim leaves at the old joints, the arcs' meeting points: their
 /// corner taken, the side edges below the round untouched.
 fn joints(b: &Body) {
-    let (s, c) = FRAC_PI_4.sin_cos();
+    let (s, c) = det::sin_cos(FRAC_PI_4);
     // 0.01 inside the rim and below the disc, in the plane of a side edge: material before
     at_each(
         b,
@@ -245,7 +246,7 @@ fn joints(b: &Body) {
 /// The distance from `p` to the joint's side edge from (15, 15, 0) to (10 cos 45, 10 sin 45,
 /// 30), turned by `quarter`.
 fn off_side_edge(p: Point3, quarter: i32) -> f64 {
-    let c = FRAC_PI_4.cos();
+    let c = det::cos(FRAC_PI_4);
     let a = turned([15.0, 15.0, 0.0], quarter);
     let b = turned([10.0 * c, 10.0 * c, 30.0], quarter);
     let u = Vec3::new(b[0] - a[0], b[1] - a[1], b[2] - a[2]);

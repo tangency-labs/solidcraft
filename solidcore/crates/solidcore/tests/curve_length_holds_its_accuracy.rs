@@ -20,6 +20,7 @@
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::math::{CPoint, NOW};
@@ -48,12 +49,17 @@ fn arcs_nurb(arcs_deg: &[f64], first: f64, step: f64) -> BSplineCurve {
         let half = deg.to_radians() / 2.0;
         let mid = start + half;
         let end = start + 2.0 * half;
-        let w = half.cos();
+        let w = det::cos(half);
         // the middle point at RADIUS / w, weighted by w
-        cpw.push(CPoint::new(RADIUS * mid.cos(), RADIUS * mid.sin(), 0.0, w));
         cpw.push(CPoint::new(
-            RADIUS * end.cos(),
-            RADIUS * end.sin(),
+            RADIUS * det::cos(mid),
+            RADIUS * det::sin(mid),
+            0.0,
+            w,
+        ));
+        cpw.push(CPoint::new(
+            RADIUS * det::cos(end),
+            RADIUS * det::sin(end),
             0.0,
             1.0,
         ));
@@ -75,7 +81,7 @@ fn holds_down_to(curve: &Curve, exact: f64, tightest: i32) {
     let k = Kernel::default();
     let interval = curve.natural_interval();
     for e in 3..=tightest {
-        let accuracy = 10f64.powi(-e);
+        let accuracy = det::powi(10f64, -e);
         let length = curve
             .length(&k, &interval, accuracy)
             .unwrap_or_else(|err| panic!("at accuracy {accuracy:e}: {err:?}"));
@@ -105,7 +111,7 @@ fn a_parabola_holds_every_requested_accuracy() {
     ];
     let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
     let curve = Curve::from(BSplineCurve::from_data(3, 2, 5, 2, &cpw, &knots).unwrap());
-    let exact = a * (1.0 + 4.0 * a * a).sqrt() / 2.0 + (2.0 * a).asinh() / 4.0;
+    let exact = a * (1.0 + 4.0 * a * a).sqrt() / 2.0 + det::asinh(2.0 * a) / 4.0;
     holds(&curve, exact);
 }
 
@@ -170,11 +176,11 @@ fn quintic_length() -> f64 {
     ];
     let speed = |t: f64| {
         let b = [
-            (1.0 - t).powi(4),
-            4.0 * t * (1.0 - t).powi(3),
-            6.0 * t * t * (1.0 - t).powi(2),
-            4.0 * t.powi(3) * (1.0 - t),
-            t.powi(4),
+            det::powi(1.0 - t, 4),
+            4.0 * t * det::powi(1.0 - t, 3),
+            6.0 * t * t * det::powi(1.0 - t, 2),
+            4.0 * det::powi(t, 3) * (1.0 - t),
+            det::powi(t, 4),
         ];
         let mut d = [0.0; 3];
         for (i, bi) in b.iter().enumerate() {
@@ -207,7 +213,7 @@ fn quintic_length() -> f64 {
 #[test]
 fn a_small_curve_far_from_the_origin_holds_every_requested_accuracy() {
     let exact = quintic_length();
-    for scale in [2f64.powi(-10), 2f64.powi(-7)] {
+    for scale in [det::powi(2f64, -10), det::powi(2f64, -7)] {
         for offset in [0.0, 1e6] {
             let cpw: Vec<CPoint> = QUINTIC
                 .iter()
@@ -250,7 +256,7 @@ fn lengths(curve: &Curve) -> Vec<(f64, f64)> {
     let k = Kernel::default();
     let mut out = Vec::new();
     for e in 3..=12 {
-        let accuracy = 10f64.powi(-e);
+        let accuracy = det::powi(10f64, -e);
         let length = curve
             .length(&k, &curve.natural_interval(), accuracy)
             .unwrap_or_else(|err| panic!("at {accuracy:e}: {err:?}"));
@@ -359,7 +365,7 @@ fn rational_parabola(a: f64, w: f64) -> Curve {
 #[test]
 fn a_rationally_parametrised_parabola_holds_every_requested_accuracy() {
     for a in [1.0_f64, 4.0, 10.0, 16.0] {
-        let exact = a * (1.0 + 4.0 * a * a).sqrt() / 2.0 + (2.0 * a).asinh() / 4.0;
+        let exact = a * (1.0 + 4.0 * a * a).sqrt() / 2.0 + det::asinh(2.0 * a) / 4.0;
         for w in [1.0, 2.0, 4.0, 0.5, 0.25] {
             holds_down_to(&rational_parabola(a, w), exact, 12);
         }
@@ -383,7 +389,7 @@ fn is_radius_times_angle(curve: &Curve, interval: &Extent1d, exact: f64, size: f
     let k = Kernel::default();
     let bound = ARC_ULPS * f64::EPSILON * (size + exact);
     for e in 3..=10 {
-        let accuracy = 10f64.powi(-e);
+        let accuracy = det::powi(10f64, -e);
         let length = curve
             .length(&k, interval, accuracy)
             .unwrap_or_else(|err| panic!("{what} at accuracy {accuracy:e}: {err:?}"));
@@ -482,7 +488,7 @@ fn a_piece_of_a_circle_is_its_radius_times_its_angle() {
 /// product by the weight, is exact: the circle moved is the same B-spline, moved.
 fn grid_circle(radius: f64, center: [f64; 3]) -> (Curve, Vec<f64>) {
     let k = Kernel::default();
-    let grid = |v: f64| (v * 2f64.powi(40)).round() / 2f64.powi(40);
+    let grid = |v: f64| (v * det::powi(2f64, 40)).round() / det::powi(2f64, 40);
     let mut cpw = Vec::new();
     for i in 0..7 {
         let angle = (60.0 * f64::from(i)).to_radians();
@@ -493,8 +499,8 @@ fn grid_circle(radius: f64, center: [f64; 3]) -> (Curve, Vec<f64>) {
             (radius, 1.0)
         };
         let p = [
-            center[0] + grid(r * angle.cos()),
-            center[1] + grid(r * angle.sin()),
+            center[0] + grid(r * det::cos(angle)),
+            center[1] + grid(r * det::sin(angle)),
             center[2],
         ];
         cpw.push(CPoint::new(p[0] * w, p[1] * w, p[2] * w, w));
@@ -532,7 +538,7 @@ fn grid_circle(radius: f64, center: [f64; 3]) -> (Curve, Vec<f64>) {
 /// from the origin (here `2^20` times the radius).
 #[test]
 fn a_small_circle_far_from_the_origin_has_the_length_it_has_at_the_origin() {
-    let radius = 2f64.powi(-10);
+    let radius = det::powi(2f64, -10);
     let (near, breaks) = grid_circle(radius, [0.0, 0.0, 0.0]);
     let (far, _) = grid_circle(radius, [1000.0, -1000.0, 1000.0]);
     let k = Kernel::default();
@@ -573,7 +579,7 @@ fn an_ellipse_holds_every_requested_accuracy() {
     let exact: f64 = (0..n)
         .map(|i| {
             let s = f64::from(i) * h;
-            (a * a * s.sin().powi(2) + b * b * s.cos().powi(2)).sqrt()
+            (a * a * det::powi(det::sin(s), 2) + b * b * det::powi(det::cos(s), 2)).sqrt()
         })
         .sum::<f64>()
         * h;

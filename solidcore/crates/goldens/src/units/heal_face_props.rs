@@ -42,6 +42,7 @@
 //! classifies its ends as seams) and the bad closed-loop counts (every built loop has a
 //! closed vertex chain).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1609,7 +1610,7 @@ fn gen_polygon(rng: &mut Rng, c: [f64; 3], radius: f64, ccw: bool) -> Vec<[f64; 
         .map(|i| {
             let a = std::f64::consts::TAU * (i as f64 + rng.uniform(0.0, 0.4)) / n as f64;
             let r = radius * rng.uniform(0.8, 1.0);
-            [c[0] + r * a.cos(), c[1] + r * a.sin(), c[2]]
+            [c[0] + r * det::cos(a), c[1] + r * det::sin(a), c[2]]
         })
         .collect();
     if !ccw {
@@ -1802,7 +1803,7 @@ fn gen_plane_loops(rng: &mut Rng, z0: f64) -> LoopsIn {
     let mut specs: Vec<([f64; 3], f64, bool)> = Vec::new();
     for i in 0..n {
         let (centre, radius) = if nested {
-            (c, 3.0 * 0.6_f64.powi(i as i32) * rng.uniform(0.9, 1.0))
+            (c, 3.0 * det::powi(0.6_f64, i as i32) * rng.uniform(0.9, 1.0))
         } else {
             ([c[0] - 2.25 + 1.5 * i as f64, c[1], z0], 0.6)
         };
@@ -1876,7 +1877,7 @@ fn gen_revolution_circles(rng: &mut Rng) -> (SurfIn, LoopsIn) {
                 .iter()
                 .map(|t| {
                     let phi = (-80.0 + 160.0 * t).to_radians();
-                    ([0.0, 0.0, r * phi.sin()], r * phi.cos())
+                    ([0.0, 0.0, r * det::sin(phi)], r * det::cos(phi))
                 })
                 .collect();
             let d = *rng

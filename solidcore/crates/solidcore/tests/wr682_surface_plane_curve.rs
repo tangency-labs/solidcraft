@@ -19,6 +19,7 @@ use solidcore::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfCurves, SrfS
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_cylinder_surface;
 use solidcore::surface::cone::Cone;
@@ -31,7 +32,11 @@ const ANG_TOL: f64 = 0.2;
 
 fn ellipse(deg: f64) -> Point3 {
     let t = deg.to_radians();
-    Point3::new(10.0 * t.cos(), 10.0 * t.sin(), 20.0 + 5.0 * t.cos())
+    Point3::new(
+        10.0 * det::cos(t),
+        10.0 * det::sin(t),
+        20.0 + 5.0 * det::cos(t),
+    )
 }
 
 /// The cylinder as a B-spline surface, as a round's surface is: no analytic intersector takes
@@ -60,7 +65,7 @@ fn off_plane(x: Point3) -> f64 {
 }
 
 fn off_cylinder(x: Point3) -> f64 {
-    (x.x.hypot(x.y) - 10.0).abs()
+    (det::hypot(x.x, x.y) - 10.0).abs()
 }
 
 /// The length of the ellipse from `from` to `to` degrees.
@@ -209,7 +214,7 @@ fn the_start_direction_chooses_the_way_round() {
     let (cyl, plane) = (cylinder(&k), patch());
     let t = 45f64.to_radians();
     // the way the angle grows at 45 degrees, and the other way
-    let up = Vec3::new(-t.sin(), t.cos(), -0.5 * t.sin());
+    let up = Vec3::new(-det::sin(t), det::cos(t), -0.5 * det::sin(t));
     let short = intersect(&k, &cyl, &plane, 45.0, 135.0, Some(up)).unwrap();
     let length = check_curves(
         &k,

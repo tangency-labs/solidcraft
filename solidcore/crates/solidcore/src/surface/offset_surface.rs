@@ -108,6 +108,7 @@
 //!   too: `SmOffsetSurface::GetSingularities()` (no arguments, returning the stored
 //!   flags) hides the virtual rather than overriding it.
 
+use crate::math::det;
 use core::f64::consts::PI;
 use core::ptr;
 use core::sync::atomic::{AtomicU64, Ordering};
@@ -2303,7 +2304,7 @@ struct WeightedPoint {
 /// `sm_TurnAbout`).
 fn turn_about(x: Point3, o: Point3, a: Vec3, t: f64) -> Point3 {
     let v = x - o;
-    o + v * t.cos() + a.cross(v) * t.sin() + a * (a.dot(v) * (1.0 - t.cos()))
+    o + v * det::cos(t) + a.cross(v) * det::sin(t) + a * (a.dot(v) * (1.0 - det::cos(t)))
 }
 
 /// The control points of `n` spans of `angle` (a quarter turn at most) carrying on, about
@@ -2311,7 +2312,7 @@ fn turn_about(x: Point3, o: Point3, a: Vec3, t: f64) -> Point3 {
 /// end, ... (the fork's `sm_ArcSpans`; the rational quadratic arc, its middle point where
 /// the end tangents meet at weight `cos(angle / 2)` times the end's).
 fn arc_spans(e: WeightedPoint, o: Point3, a: Vec3, n: usize, angle: f64) -> Vec<WeightedPoint> {
-    let c = (0.5 * angle).cos();
+    let c = det::cos(0.5 * angle);
     let foot = o + a * a.dot(e.p - o);
     let mut out = Vec::new();
     for k in 1..=n {
@@ -2566,13 +2567,13 @@ fn generator_is_circle(rev: &SurfOfRevolution) -> Option<(Point3, f64)> {
         let d = ta.dot(tb);
         let d = if 1.0 < d { 1.0 } else { d };
         let d = if -1.0 > d { -1.0 } else { d };
-        let half = 0.5 * d.acos();
-        if (half.cos() - cos).abs() > 1.0e-9 {
+        let half = 0.5 * det::acos(d);
+        if (det::cos(half) - cos).abs() > 1.0e-9 {
             return None;
         }
         // the centre: from P0 square to its tangent, toward P2, a radius |P0 P1| / tan(half) away
         let inward = ((b.p - a.p) - ta * ta.dot(b.p - a.p)).unitize().ok()?;
-        let r = la / half.tan();
+        let r = la / det::tan(half);
         let c = a.p + inward * r;
         if sp == 0 {
             centre = c;
@@ -2913,7 +2914,7 @@ fn extend_as_itself(
                 let at = net_at(&g, r, i_ref)?;
                 let rho = radial(at.p, o, z);
                 let scale = rho.length() / d_ref;
-                let angle = rho0.cross(rho).dot(z).atan2(rho0.dot(rho));
+                let angle = det::atan2(rho0.cross(rho).dot(z), rho0.dot(rho));
                 let dw = at.w / ref0.w;
                 let column = new
                     .first()
@@ -3911,10 +3912,10 @@ mod tests {
         let luv = 6.0 + 36.0 * u * v;
         let luuv = 36.0 * v;
         let luvv = 36.0 * u;
-        let w = l.powf(-0.5);
-        let a = -0.5 * l.powf(-1.5);
-        let b = 0.75 * l.powf(-2.5);
-        let c = -1.875 * l.powf(-3.5);
+        let w = det::powf(l, -0.5);
+        let a = -0.5 * det::powf(l, -1.5);
+        let b = 0.75 * det::powf(l, -2.5);
+        let c = -1.875 * det::powf(l, -3.5);
         let w_u = a * lu;
         let w_v = a * lv;
         let w_uu = b * lu * lu + a * luu;
@@ -4531,7 +4532,7 @@ mod tests {
 
     /// The angle of `p` about the z axis, in degrees.
     fn wr650_deg(p: Point3) -> f64 {
-        p.y.atan2(p.x).to_degrees()
+        det::atan2(p.y, p.x).to_degrees()
     }
 
     /// The half cylinder r 5 offset 4 of the fork's tangency-labs/smlib@93db777 (WR-650):

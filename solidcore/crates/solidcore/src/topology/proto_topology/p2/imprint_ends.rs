@@ -42,6 +42,7 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::are_same;
 use crate::intersect::point_class::{ClassObject, ClassObjectKind, PointClassType};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -568,9 +569,10 @@ fn analytic_of_continued_nurb(
             // angle's way.
             let at_max = at_end != inside_out;
             let d = (if at_end { end } else { start }) - pos.origin();
-            let ang = crate::math::rad_to_deg(
-                (d.dot(pos.y_axis()) / e.y_radius()).atan2(d.dot(pos.x_axis()) / e.x_radius()),
-            );
+            let ang = crate::math::rad_to_deg(det::atan2(
+                d.dot(pos.y_axis()) / e.y_radius(),
+                d.dot(pos.x_axis()) / e.x_radius(),
+            ));
             let old = if at_max { dom.max() } else { dom.min() };
             let delta = ieee_remainder(ang - old, 360.0);
             if if at_max {

@@ -3,6 +3,7 @@
 #[path = "../src/units/fixtures/surface_surface_p7_sms.rs"]
 mod sms;
 
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 const PATH: &str = "fixture/input.sms";
@@ -13,7 +14,7 @@ fn parse(text: &str) -> Result<sms::Parsed, String> {
 }
 
 fn exclusive() -> f64 {
-    2.0_f64.powi(usize::BITS as i32)
+    det::powi(2.0_f64, usize::BITS as i32)
 }
 
 fn largest_float_count() -> f64 {

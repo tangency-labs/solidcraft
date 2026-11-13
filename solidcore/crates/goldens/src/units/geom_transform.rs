@@ -13,6 +13,7 @@
 //! base data through `surface.volume_p2`) and compares the matrix.
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -507,7 +508,7 @@ fn unit(rng: &mut Rng) -> [f64; 3] {
     let z = rng.uniform(-1.0, 1.0);
     let t = rng.uniform(0.0, 2.0 * PI);
     let r = (1.0 - z * z).sqrt();
-    [r * t.cos(), r * t.sin(), z]
+    [r * det::cos(t), r * det::sin(t), z]
 }
 
 fn scale(v: [f64; 3], k: f64) -> [f64; 3] {
@@ -535,9 +536,9 @@ fn coord(rng: &mut Rng) -> f64 {
     } else if r < 0.8 {
         rng.range_i64(-5, 5) as f64
     } else if r < 0.9 {
-        rng.uniform(-1.0, 1.0) * 10f64.powi(rng.range_i64(2, 7) as i32)
+        rng.uniform(-1.0, 1.0) * det::powi(10f64, rng.range_i64(2, 7) as i32)
     } else {
-        rng.uniform(-1.0, 1.0) * 10f64.powi(-(rng.range_i64(3, 12) as i32))
+        rng.uniform(-1.0, 1.0) * det::powi(10f64, -(rng.range_i64(3, 12) as i32))
     }
 }
 
@@ -577,7 +578,7 @@ fn partner(rng: &mut Rng, x: [f64; 3]) -> [f64; 3] {
     if r < 0.4 && plen > 0.0 {
         scale(p, rng.uniform(0.1, 5.0) / plen)
     } else if r < 0.5 {
-        let eps = 10f64.powi(-(rng.range_i64(6, 15) as i32)) * rng.uniform(-3.0, 3.0);
+        let eps = det::powi(10f64, -(rng.range_i64(6, 15) as i32)) * rng.uniform(-3.0, 3.0);
         add(x, scale(unit(rng), eps))
     } else if r < 0.58 {
         scale(x, rng.uniform(-3.0, 3.0))
@@ -622,7 +623,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         let eps = if rng.chance(0.3) {
             0.0
         } else {
-            10f64.powi(-(rng.range_i64(8, 15) as i32))
+            det::powi(10f64, -(rng.range_i64(8, 15) as i32))
         };
         let (vi, ci) = (rng.below(8) as usize, rng.below(3) as usize);
         if let Some(c) = b.v.get_mut(vi).and_then(|v| v.get_mut(ci)) {

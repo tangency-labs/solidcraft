@@ -58,6 +58,7 @@ use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::EFF_ZERO_PARAM;
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -224,7 +225,7 @@ impl Segment {
             [q1[0] - q0[0], q1[1] - q0[1]],
             [q2[0] - q0[0], q2[1] - q0[1]],
         );
-        if area.abs() <= f64::EPSILON * (q0[0].abs() + q0[1].abs() + 1.0).powi(2) {
+        if area.abs() <= f64::EPSILON * det::powi(q0[0].abs() + q0[1].abs() + 1.0, 2) {
             return None;
         }
         // b_i = cross(q_{i+1} - X, q_{i+2} - X) / area
@@ -387,15 +388,15 @@ impl Section {
             }
         }
         let first = *joints.first()?;
-        let radius = first[0].hypot(first[1]);
+        let radius = det::hypot(first[0], first[1]);
         if segments.is_empty() || radius <= 0.0 {
             return None;
         }
         // the circle's two ends are one joint (the seam) when it is whole
-        joints.dedup_by(|a, b| (a[0] - b[0]).hypot(a[1] - b[1]) <= 1e-12 * radius);
+        joints.dedup_by(|a, b| det::hypot(a[0] - b[0], a[1] - b[1]) <= 1e-12 * radius);
         if joints.len() > 1 {
             if let (Some(a), Some(b)) = (joints.first(), joints.last()) {
-                if (a[0] - b[0]).hypot(a[1] - b[1]) <= 1e-12 * radius {
+                if det::hypot(a[0] - b[0], a[1] - b[1]) <= 1e-12 * radius {
                     joints.pop();
                 }
             }
@@ -908,11 +909,11 @@ mod tests {
     /// segment joints lie over 0, 90 degrees, ..., so each knot is `R turn` from a
     /// joint crossing.
     fn section(k: &Kernel, turn: f64, tilt: f64) -> Curve {
-        let x = Vec3::new(turn.cos(), turn.sin(), 0.0);
+        let x = Vec3::new(det::cos(turn), det::sin(turn), 0.0);
         let y = Vec3::new(
-            -turn.sin() * tilt.cos(),
-            turn.cos() * tilt.cos(),
-            tilt.sin(),
+            -det::sin(turn) * det::cos(tilt),
+            det::cos(turn) * det::cos(tilt),
+            det::sin(tilt),
         );
         let e = Ellipse::new(
             k,
@@ -921,7 +922,7 @@ mod tests {
             y,
             Extent1d::from_min_max(0.0, 360.0),
             R,
-            R / tilt.cos(),
+            R / det::cos(tilt),
             &EllipseOptions::default(),
         )
         .unwrap();

@@ -21,6 +21,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use solidcore::boolean::api_brep::boolean_difference;
@@ -40,7 +41,7 @@ fn threaded_shaft(k: &mut Kernel, p: f64, r: f64, len: f64, depth: f64, flat: f6
     let root = r - depth;
     let outer = r + 0.05;
     let half_root = flat / 2.0;
-    let half_outer = half_root + (outer - root) * 30.0_f64.to_radians().tan();
+    let half_outer = half_root + (outer - root) * det::tan(30.0_f64.to_radians());
     let section = [
         (root, -half_root),
         (outer, -half_outer),
@@ -66,7 +67,7 @@ fn screw_groove(
     let mut curves = Vec::new();
     for i in 0..=n {
         let turn = i as f64 / per_turn as f64;
-        let (s, c) = (2.0 * PI * turn).sin_cos();
+        let (s, c) = det::sin_cos(2.0 * PI * turn);
         let pts: Vec<Point3> = section
             .iter()
             .map(|&(r, z)| Point3::new(r * c, r * s, z0 + z + p * turn))

@@ -14,6 +14,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
@@ -34,7 +35,7 @@ fn line(a: (f64, f64), b: (f64, f64)) -> Curve {
 
 /// The rise of the crease above y = 20 for a turn of `turn` degrees.
 fn rise(turn: f64) -> f64 {
-    20.0 * (0.5 * turn * PI / 180.0).tan()
+    20.0 * det::tan(0.5 * turn * PI / 180.0)
 }
 
 /// The creased block, extruded 20 along z.
@@ -95,7 +96,7 @@ fn round(half_degree: bool, turn: f64, r: f64) -> solidcore::Result<f64> {
 
 fn removed(turn: f64, r: f64) -> f64 {
     let d = turn * PI / 180.0;
-    20.0 * r * r * ((0.5 * d).tan() - 0.5 * d)
+    20.0 * r * r * (det::tan(0.5 * d) - 0.5 * d)
 }
 
 #[test]

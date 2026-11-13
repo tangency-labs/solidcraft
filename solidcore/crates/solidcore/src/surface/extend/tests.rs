@@ -2,6 +2,7 @@ use super::*;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::Vec3;
+use crate::math::det;
 use crate::math::EFF_ZERO_PARAM;
 use crate::nurbs::knots::Side;
 use crate::nurbs::srf_tool::p1::extract_iso_crv;
@@ -85,7 +86,7 @@ fn past(e: &Extended, side: BoxSide) -> Vec<Vec3> {
 
 /// The parabola's arc length from `x = 0` to `x`.
 fn arc(x: f64) -> f64 {
-    0.5 * x * (1.0 + 4.0 * x * x).sqrt() + 0.25 * (2.0 * x).asinh()
+    0.5 * x * (1.0 + 4.0 * x * x).sqrt() + 0.25 * det::asinh(2.0 * x)
 }
 
 /// The enclosure holds `d` within the stop: `max(1e-9 d, its truncation and rounding parts)`,
@@ -209,12 +210,12 @@ fn a_circle_continues_on_itself_and_mirrors_tangent_and_curvature_continuous() {
     assert!(is_spline(&e.surface));
     meets(&e, 1.0);
     for p in past(&e, BoxSide::UMax) {
-        assert!((p.x.hypot(p.y) - r).abs() < 1e-12, "{p:?}");
+        assert!((det::hypot(p.x, p.y) - r).abs() < 1e-12, "{p:?}");
     }
     let end = *past(&e, BoxSide::UMax).last().unwrap();
     // from angle 90 by an arc of 1 on radius 2
     let want = FRAC_PI_2 + 0.5;
-    assert!((end.y.atan2(end.x) - want).abs() < 1e-7, "{end:?}");
+    assert!((det::atan2(end.y, end.x) - want).abs() < 1e-7, "{end:?}");
     // curvature within the boundary span: the homogeneous quadratic matched to second order is
     // the circle's own
     let e = s
@@ -223,7 +224,7 @@ fn a_circle_continues_on_itself_and_mirrors_tangent_and_curvature_continuous() {
         .expect("extended");
     meets(&e, 1.0);
     for p in past(&e, BoxSide::UMax) {
-        assert!((p.x.hypot(p.y) - r).abs() < 1e-11, "{p:?}");
+        assert!((det::hypot(p.x, p.y) - r).abs() < 1e-11, "{p:?}");
     }
     // tangent: a different conic, tangent continuous at the joint
     let e = s
@@ -549,7 +550,7 @@ fn natural_carries_a_bound_that_holds_the_closed_form() {
         meets(&e, d);
         let mut off = 0.0_f64;
         for q in past(&e, BoxSide::UMax) {
-            off = off.max((q.y - q.x.powi(3)).abs());
+            off = off.max((q.y - det::powi(q.x, 3)).abs());
         }
         assert!(e.extension > 0.0, "{d}");
         assert!(
@@ -716,7 +717,10 @@ fn mirrors_on_a_rational_row_past_every_side() {
                         Vec2::new(0.5, a + (b - a) * t)
                     };
                     let p = e.surface.evaluate_point(&k(), uv).unwrap();
-                    assert!((p.x.hypot(p.y) - 2.0).abs() < 1e-11, "{side:?}: {p:?}");
+                    assert!(
+                        (det::hypot(p.x, p.y) - 2.0).abs() < 1e-11,
+                        "{side:?}: {p:?}"
+                    );
                 }
             }
         }
@@ -735,7 +739,7 @@ fn an_offset_surface_is_the_offset_of_its_base_extended() {
     let h = 0.5;
     let s = offset_quarter(h);
     // the offset's radius, off the source's box
-    let radius = |p: Vec3| p.x.hypot(p.y);
+    let radius = |p: Vec3| det::hypot(p.x, p.y);
     let r = radius(s.evaluate_point(&kk, Vec2::new(0.5, 0.5)).unwrap());
     assert!((r - 2.0).abs() > 0.4, "{r}");
     for (how, side) in [
@@ -990,7 +994,7 @@ fn a_cone_extends_its_own_net_along_up_to_its_apex_and_round_its_axis_a_quarter_
             let p = s.evaluate_point(Point2::new(u, vm)).unwrap() - origin;
             p - axis * axis.dot(p)
         };
-        let deg = |a: Vec3, b: Vec3| a.cross(b).length().atan2(a.dot(b)).to_degrees();
+        let deg = |a: Vec3, b: Vec3| det::atan2(a.cross(b).length(), a.dot(b)).to_degrees();
         assert!((deg(flat(grown, u0), flat(&src, s0)) - 67.5).abs() <= 1e-6);
         assert!((deg(flat(grown, u1), flat(&src, s1)) - 67.5).abs() <= 1e-6);
         // along: one side runs the whole 5, the other stops at the apex
@@ -1424,7 +1428,7 @@ fn a_round_continues_on_its_ball_past_a_foot_with_its_bound_grown_in_closed_form
     // the growth, in closed form: T_4(2 te - 1) times the net's weight ratio (W is at least
     // 1 past the foot, at most 1 on the source)
     let x = 2.0 * te - 1.0;
-    let t4 = 8.0 * x.powi(4) - 8.0 * x * x + 1.0;
+    let t4 = 8.0 * det::powi(x, 4) - 8.0 * x * x + 1.0;
     let ws = |n: &crate::nurbs::srf_basic::Surface| {
         let w: Vec<f64> = n.cpts().iter().flatten().map(|c| c.w).collect();
         (
@@ -1450,12 +1454,12 @@ fn a_round_continues_on_its_ball_past_a_foot_with_its_bound_grown_in_closed_form
             let st = out.definition_parameters(Point2::new(u, v));
             let def = out.evaluate_definition(&kk, st.x, st.y, 0, 0).unwrap()[0][0];
             assert!(p.distance(def) <= out.bound(), "{u} {v}: {p:?} {def:?}");
-            let rad = (p.y - 2.0).hypot(p.z - 2.0);
+            let rad = det::hypot(p.y - 2.0, p.z - 2.0);
             assert!((rad - 2.0).abs() <= out.bound() + 1e-12, "{p:?}");
         }
     }
     let end = e.surface.evaluate_point(&kk, Vec2::new(0.5, te)).unwrap();
-    let phi = (end.z - 2.0).atan2(end.y - 2.0);
+    let phi = det::atan2(end.z - 2.0, end.y - 2.0);
     assert!((phi - (-FRAC_PI_2 + 0.5)).abs() < 1e-8, "{end:?} {phi}");
     // the source part is the source's net, bit for bit
     let src = pb.net.gw_nurb().unwrap();
@@ -1493,7 +1497,7 @@ fn a_round_continues_along_its_spine_by_a_span_of_its_definition() {
             let st = out.definition_parameters(Point2::new(u, v));
             let def = out.evaluate_definition(&kk, st.x, st.y, 0, 0).unwrap()[0][0];
             assert!(p.distance(def) <= out.bound(), "{u} {v}: {p:?} {def:?}");
-            let rad = (p.y - 2.0).hypot(p.z - 2.0);
+            let rad = det::hypot(p.y - 2.0, p.z - 2.0);
             assert!((rad - 2.0).abs() <= out.bound() + 1e-12, "{p:?}");
             assert!((p.x - 10.0 * u).abs() <= out.bound() + 1e-9, "{p:?}");
         }
@@ -1538,7 +1542,7 @@ fn a_side_inside_the_spine_runs_the_definitions_spans_then_past_its_end() {
                 let st = out.definition_parameters(Point2::new(u, v));
                 let def = out.evaluate_definition(&kk, st.x, st.y, 0, 0).unwrap()[0][0];
                 assert!(p.distance(def) <= out.bound(), "{u} {v}: {p:?} {def:?}");
-                let rad = (p.y - 2.0).hypot(p.z - 2.0);
+                let rad = det::hypot(p.y - 2.0, p.z - 2.0);
                 assert!((rad - 2.0).abs() <= out.bound() + 1e-12, "{p:?}");
             }
         }
@@ -2020,7 +2024,7 @@ fn a_small_torus_patch_far_from_the_origin_extends_on_its_torus() {
         let d = x - centre;
         let h = axis.dot(d);
         let r = (d - axis * h).length() - major;
-        r.hypot(h) - minor
+        det::hypot(r, h) - minor
     };
     on_its_analytic(grown, &on, tube, 1e-11);
     for s in e.sides {
@@ -2477,7 +2481,7 @@ fn reference_length(e: &Extended, side: BoxSide) -> f64 {
                 let w2 = c[2] * c[2];
                 let sx = (dc[0] * c[2] - c[0] * dc[2]) / w2;
                 let sy = (dc[1] * c[2] - c[1] * dc[2]) / w2;
-                total += 0.5 * (u1 - u0) * wt * sx.hypot(sy);
+                total += 0.5 * (u1 - u0) * wt * det::hypot(sx, sy);
             }
         }
     }
@@ -3197,7 +3201,7 @@ fn a_distance_the_stored_net_cannot_resolve_is_refused_naming_the_reachable_leng
         false,
     );
     // the strip runs along v, the side extended is VMax
-    let step = 2f64.powi(-36);
+    let step = det::powi(2f64, -36);
     let d = ((1e-3 / step).round() + 0.5) * step;
     let ask = |d: f64| s.extended_by_distance(&kk, &dom(&s), BoxSide::VMax, Continuity::Tangent, d);
     let Err(SolidError::ExtendRefused {

@@ -5,6 +5,7 @@
 )] // test arithmetic and its tables
 use super::super::{form, CurveEval, Frame, SurfaceEval};
 use super::*;
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 fn frame(origin: [f64; 3], x_axis: [f64; 3], y_axis: [f64; 3]) -> Frame {
@@ -248,7 +249,7 @@ fn circles_about_the_axis_are_u_lines() {
     let at = |h: f64| [1., -2., 3. + h];
     let tilt = 0.3f64;
     let rotated = |origin: [f64; 3], down: bool| {
-        let (s, c) = tilt.sin_cos();
+        let (s, c) = det::sin_cos(tilt);
         frame(
             origin,
             [c, s, 0.],
@@ -273,7 +274,7 @@ fn circles_about_the_axis_are_u_lines() {
                 half_angle: half,
             },
             4.,
-            2. + 4. * half.tan(),
+            2. + 4. * det::tan(half),
             4.,
         ),
         (
@@ -283,7 +284,7 @@ fn circles_about_the_axis_are_u_lines() {
             },
             3.,
             4.,
-            3f64.atan2(4.),
+            det::atan2(3f64, 4.),
         ),
         (
             Surface::Sphere {
@@ -292,7 +293,7 @@ fn circles_about_the_axis_are_u_lines() {
             },
             -3.,
             4.,
-            (-3f64).atan2(4.),
+            det::atan2(-3f64, 4.),
         ),
         (
             Surface::Torus {
@@ -347,7 +348,7 @@ fn rulings_are_v_lines() {
         radius_at_origin: 3.,
         half_angle: half,
     };
-    let (s, c) = 2f64.sin_cos();
+    let (s, c) = det::sin_cos(2f64);
     let up = Curve::Line {
         start: [4. * c, 4. * s, -1.],
         end: [4. * c, 4. * s, 6.],
@@ -356,7 +357,7 @@ fn rulings_are_v_lines() {
         start: [4. * c, 4. * s, 6.],
         end: [4. * c, 4. * s, -1.],
     };
-    let r = |z: f64| 3. + (z - 1.) * half.tan();
+    let r = |z: f64| 3. + (z - 1.) * det::tan(half);
     let slant = Curve::Line {
         start: [r(2.) * c, r(2.) * s, 2.],
         end: [r(5.) * c, r(5.) * s, 5.],
@@ -386,7 +387,7 @@ fn rulings_are_v_lines() {
 /// sphere, a plane's ellipse on a cylinder, a circle off the axis on a plane.
 #[test]
 fn curves_without_a_closed_form_are_refused() {
-    let (s, c) = 0.5f64.sin_cos();
+    let (s, c) = det::sin_cos(0.5f64);
     let sphere = Surface::Sphere {
         frame: about_z([0.; 3], false),
         radius: 6.,
@@ -593,7 +594,7 @@ fn meridians_at_a_pole_span_the_face_box() {
         radius: 6.,
     };
     let at = |a: f64| Curve::Circle {
-        frame: frame([0.; 3], [a.cos(), a.sin(), 0.], [0., 0., 1.]),
+        frame: frame([0.; 3], [det::cos(a), det::sin(a), 0.], [0., 0., 1.]),
         radius: 6.,
     };
     let (first, last) = (at(0.), at(1.5 * PI));
@@ -656,7 +657,7 @@ fn a_seam_from_pole_to_pole_encloses_the_whole_sphere() {
         };
         let ax = Axes::new(&sf);
         for turn in [0f64, 2.1, -0.7] {
-            let x = ax.x * turn.cos() + ax.y * turn.sin();
+            let x = ax.x * det::cos(turn) + ax.y * det::sin(turn);
             let p = |v: Vec3| [v.x, v.y, v.z];
             let (o, r, z) = (ax.o, x * 6., ax.z * 6.);
             let circle = Curve::Circle {
@@ -1110,7 +1111,7 @@ fn intersection_curves_lie_on_both_surfaces() {
         frame: about_z([0.; 3], false),
         radius: 5.,
     };
-    let k = 0.4f64.tan();
+    let k = det::tan(0.4f64);
     let plane = Surface::Plane {
         origin: [0., 0., 20.],
         u_axis: [1., 0., k],
@@ -1120,7 +1121,11 @@ fn intersection_curves_lie_on_both_surfaces() {
     let leader: Vec<[f64; 3]> = (0..=12)
         .map(|i| {
             let a = 0.2 + 2.5 * i as f64 / 12.;
-            [5. * a.cos(), 5. * a.sin(), 20. + 5. * a.cos() * k]
+            [
+                5. * det::cos(a),
+                5. * det::sin(a),
+                20. + 5. * det::cos(a) * k,
+            ]
         })
         .collect();
     let curve = Curve::SurfaceIntersection {
@@ -1132,7 +1137,7 @@ fn intersection_curves_lie_on_both_surfaces() {
     for i in 0..=48 {
         let p = eval.point(12. * i as f64 / 48.).unwrap();
         assert!(
-            (p.x.hypot(p.y) - 5.).abs() < 1e-11 && (p.z - 20. - p.x * k).abs() < 1e-11,
+            (det::hypot(p.x, p.y) - 5.).abs() < 1e-11 && (p.z - 20. - p.x * k).abs() < 1e-11,
             "{i}: {p:?}"
         );
     }
@@ -1164,7 +1169,7 @@ fn helical_strip(r: [f64; 2], rise: f64, at: f64) -> (Surface, Curve) {
         (0..n)
             .map(|i| {
                 let a = TAU * i as f64 / PER_TURN;
-                [r * a.cos(), r * a.sin(), a / TAU + rise]
+                [r * det::cos(a), r * det::sin(a), a / TAU + rise]
             })
             .collect()
     };
@@ -1232,7 +1237,7 @@ fn a_curve_weaving_across_a_thread_flank_is_refused() {
     // Along the flank as it winds, a third of a turn (u = t), weaving a little across it.
     let [a, b] = [0.40625, 0.4234375];
     let ts: Vec<f64> = (0..=12).map(|i| a + (b - a) * i as f64 / 12.).collect();
-    let v = |t: f64| 0.5 + 0.02 * (3. * TAU * (t - a) / (b - a)).sin();
+    let v = |t: f64| 0.5 + 0.02 * det::sin(3. * TAU * (t - a) / (b - a));
     let on: Vec<[f64; 3]> = ts
         .iter()
         .map(|&t| s.point([t, v(t)]).unwrap())
@@ -1405,8 +1410,8 @@ fn hostile_records_give_errors() {
         points: (0..n)
             .map(|i| {
                 [
-                    (i as f64 * 0.01).cos(),
-                    (i as f64 * 0.01).sin(),
+                    det::cos(i as f64 * 0.01),
+                    det::sin(i as f64 * 0.01),
                     (i % 2) as f64,
                 ]
             })

@@ -17,6 +17,7 @@
 //! `SmCurve::CalculateTightBoundingBox` (non-line curves) or
 //! `SmCurve::IsOnPositiveSideOfPlanes` (unit `curve.curve_p9`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -351,7 +352,7 @@ fn gen_transform(rng: &mut Rng) -> Tf {
         0 => [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         1 => {
             let a = rng.uniform(-3.2, 3.2);
-            let (s, c) = a.sin_cos();
+            let (s, c) = det::sin_cos(a);
             [coord(rng, 5.0), [c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]]
         }
         2 => {
@@ -524,8 +525,8 @@ fn gen_point(rng: &mut Rng, v: &VolIn) -> [f64; 3] {
 fn unit_axes(rng: &mut Rng) -> ([f64; 3], [f64; 3]) {
     let a = rng.uniform(-3.2, 3.2);
     let bb = rng.uniform(-1.5, 1.5);
-    let (sa, ca) = a.sin_cos();
-    let (sb, cb) = bb.sin_cos();
+    let (sa, ca) = det::sin_cos(a);
+    let (sb, cb) = det::sin_cos(bb);
     let x = [ca * cb, sa * cb, sb];
     let y = [-sa, ca, 0.0];
     (x, y)

@@ -17,6 +17,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
@@ -92,7 +93,7 @@ fn knife_edge(k: &Kernel, b: &Brep, s: f64) -> EdgeId {
 
 /// The volume the round of radius `r` takes off.
 fn removed(r: f64) -> f64 {
-    let beta = ((R - r) / (R + r)).acos();
+    let beta = det::acos((R - r) / (R + r));
     let ox = TIP - (4.0 * R * r).sqrt();
     let quad = 0.5 * (TIP - ox) * (R + r);
     (quad - 0.5 * R * R * beta - 0.5 * r * r * (PI - beta)) * H

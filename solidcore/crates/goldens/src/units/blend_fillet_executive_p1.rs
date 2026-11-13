@@ -9,6 +9,7 @@
 //! calls on an `SmFilletErrorInfo`, or of those and the setters on a new
 //! `SmFilletExecutive`, and dumps the resulting members. A `remove_topo_edges` case
 //! ([`topo`]) runs `RemoveTopoEdges` on a fixture B-rep and compares the B-reps after it.
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -197,9 +198,9 @@ fn gen_law_curve(rng: &mut Rng, scale: f64, a: f64, b: f64) -> InlineCrv {
 
 fn gen_scale(rng: &mut Rng) -> f64 {
     match rng.below(5) {
-        0 => 10f64.powf(rng.uniform(-6.0, -2.0)),
-        1 => 10f64.powf(rng.uniform(2.0, 6.0)),
-        _ => 10f64.powf(rng.uniform(-1.0, 1.0)),
+        0 => det::powf(10f64, rng.uniform(-6.0, -2.0)),
+        1 => det::powf(10f64, rng.uniform(2.0, 6.0)),
+        _ => det::powf(10f64, rng.uniform(-1.0, 1.0)),
     }
 }
 
@@ -268,8 +269,8 @@ impl UnitDiff for Runner {
             return serde_json::to_value(gen_object(rng)).ok();
         }
         let scale = gen_scale(rng);
-        let a = rng.uniform(-5.0, 5.0) * 10f64.powf(rng.uniform(-2.0, 2.0));
-        let b = a + rng.uniform(0.1, 10.0) * 10f64.powf(rng.uniform(-2.0, 2.0));
+        let a = rng.uniform(-5.0, 5.0) * det::powf(10f64, rng.uniform(-2.0, 2.0));
+        let b = a + rng.uniform(0.1, 10.0) * det::powf(10f64, rng.uniform(-2.0, 2.0));
         let (law, domain) = match rng.below(10) {
             0 => (LawIn::Base, [0.0, 1.0]),
             1..=4 => (
@@ -296,7 +297,7 @@ impl UnitDiff for Runner {
                 let len = if rng.chance(0.5) {
                     0.0
                 } else {
-                    10f64.powf(rng.uniform(-13.0, -11.0))
+                    det::powf(10f64, rng.uniform(-13.0, -11.0))
                 };
                 Some([v, v + len])
             }
@@ -913,7 +914,7 @@ fn gen_step(rng: &mut Rng, exec: bool) -> Step {
             surfaces: gen_list(rng),
             curves: gen_list(rng),
             edges: gen_list(rng),
-            at: [0; 3].map(|_| rng.uniform(-1e3, 1e3) * 10f64.powf(rng.uniform(-6.0, 6.0))),
+            at: [0; 3].map(|_| rng.uniform(-1e3, 1e3) * det::powf(10f64, rng.uniform(-6.0, 6.0))),
             comment: gen_text(rng),
         },
         6 => Step::GlobalMerge { on: rng.chance(0.5) },

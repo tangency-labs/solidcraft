@@ -17,6 +17,7 @@
 //! is the upstream `SmStatus` (`InvalidInput` is `SM_ERR_INVALID_INPUT`, the zero-vector
 //! status of `Unitize`). `Unported` on the Rust side defers the case.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1341,7 +1342,7 @@ fn gen_bss(rng: &mut Rng, shape: Shape, scale: f64) -> BssIn {
                     let h = if flat {
                         0.0
                     } else {
-                        amp * (f1 * s + ph).sin() * (f2 * t).cos()
+                        amp * det::sin(f1 * s + ph) * det::cos(f2 * t)
                     };
                     at(c, &f, 2.0 * scale * s, 1.5 * scale * t, h)
                 }
@@ -1349,19 +1350,19 @@ fn gen_bss(rng: &mut Rng, shape: Shape, scale: f64) -> BssIn {
                     // a dome: radius growing from 0 at i = 0
                     let r = scale * s;
                     let th = std::f64::consts::PI * t;
-                    at(c, &f, r * th.cos(), r * th.sin(), scale * (1.0 - s * s))
+                    at(c, &f, r * det::cos(th), r * det::sin(th), scale * (1.0 - s * s))
                 }
                 Shape::PoleV => {
                     let r = scale * (1.0 - t);
                     let th = 1.5 * s;
-                    at(c, &f, r * th.cos(), r * th.sin(), 0.8 * scale * t)
+                    at(c, &f, r * det::cos(th), r * det::sin(th), 0.8 * scale * t)
                 }
                 Shape::ClosedU => {
                     // a polygon around a circle, the last row equal to the first, so
                     // the end tangents match
                     let k = if i == n { 0 } else { i };
                     let th = 2.0 * std::f64::consts::PI * k as f64 / n as f64;
-                    at(c, &f, scale * th.cos(), scale * th.sin(), 1.5 * scale * t)
+                    at(c, &f, scale * det::cos(th), scale * det::sin(th), 1.5 * scale * t)
                 }
                 Shape::Collinear => at(c, &f, scale * (s + 0.5 * t), 0.0, 0.0),
             };

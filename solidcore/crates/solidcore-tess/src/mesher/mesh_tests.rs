@@ -13,6 +13,7 @@ use solidcore_record::brep;
 use crate::{Mesh, MeshSpec, PlanStats, TessError, TessPlan, WeldedMesh};
 
 use solidcore::Vec3;
+use solidcore::math::det;
 
 use crate::vec::VecExt as _;
 
@@ -29,7 +30,7 @@ fn sunk_ball() -> (brep::Brep, f64) {
     let plate = make_box([-30.0, -30.0, -10.0], [60.0, 60.0, 10.0]).expect("plate");
     let ball = make_sphere([0.0, 0.0, 19.9], 20.0).expect("ball");
     let joined = boolean(plate, ball, BooleanOp::Union).expect("join").expect("a body");
-    (record(&joined), (2.0 * 60f64.powi(2) + 49.9f64.powi(2)).sqrt())
+    (record(&joined), (2.0 * det::powi(60.0, 2) + det::powi(49.9, 2)).sqrt())
 }
 
 fn sub(a: P, b: P) -> [f64; 3] {
@@ -49,7 +50,7 @@ fn length(a: [f64; 3]) -> f64 {
 fn smallest_angle([a, b, c]: [P; 3]) -> f64 {
     let at = |o: P, x: P, y: P| {
         let (u, v) = (sub(x, o), sub(y, o));
-        length(cross(u, v)).atan2(dot(u, v)).to_degrees()
+        det::atan2(length(cross(u, v)), dot(u, v)).to_degrees()
     };
     at(a, b, c).min(at(b, c, a)).min(at(c, a, b))
 }
@@ -108,7 +109,7 @@ fn a_sphere_on_the_mesh_path_keeps_its_angle_at_its_poles() {
 #[test]
 fn a_torus_on_the_mesh_path_keeps_its_angle() {
     let b = record(&make_torus([0.0; 3], 20.0, 5.0).expect("torus"));
-    let _ = shaped_in_3d(&b, (50f64.powi(2) * 2.0 + 10f64.powi(2)).sqrt(), "torus");
+    let _ = shaped_in_3d(&b, (det::powi(50.0, 2) * 2.0 + det::powi(10.0, 2)).sqrt(), "torus");
 }
 
 /// A box with its top edges rounded: the fillets are strips a few sides wide, curved across
@@ -224,7 +225,7 @@ fn a_plate_a_ball_sinks_into_has_no_needles_on_the_mesh_path() {
 #[test]
 fn a_box_on_the_mesh_path_keeps_its_angle_and_its_side() {
     let b = record(&make_box([0.0; 3], [20.0, 10.0, 5.0]).expect("box"));
-    let size = (20f64.powi(2) + 10f64.powi(2) + 5f64.powi(2)).sqrt();
+    let size = (det::powi(20.0, 2) + det::powi(10.0, 2) + det::powi(5.0, 2)).sqrt();
     let spec = MeshSpec { chord: 0.01, size: Some(2.0), min_angle: 25.0 };
     let (plan, stats) = meshed(&b, &spec, size, None);
     assert!(stats.over_tolerance.is_empty(), "{:?}", stats.over_tolerance);
@@ -251,7 +252,7 @@ fn a_box_on_the_mesh_path_keeps_its_angle_and_its_side() {
 #[test]
 fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
     let b = record(&make_cylinder([0.0; 3], 10.0, 20.0).expect("cylinder"));
-    let size = (20f64.powi(2) * 2.0 + 20f64.powi(2)).sqrt();
+    let size = (det::powi(20.0, 2) * 2.0 + det::powi(20.0, 2)).sqrt();
     let spec = MeshSpec { chord: 0.01, size: Some(2.0), min_angle: 25.0 };
     let (plan, stats) = meshed(&b, &spec, size, None);
     let (m, refused) = plan.evaluate();
@@ -272,7 +273,7 @@ fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
 #[test]
 fn a_size_function_gives_shorter_sides_where_it_asks() {
     let b = record(&make_box([0.0; 3], [20.0, 10.0, 5.0]).expect("box"));
-    let size = (20f64.powi(2) + 10f64.powi(2) + 5f64.powi(2)).sqrt();
+    let size = (det::powi(20.0, 2) + det::powi(10.0, 2) + det::powi(5.0, 2)).sqrt();
     let spec = MeshSpec { chord: 0.01, size: Some(2.0), min_angle: 25.0 };
     let centre = P::new(10.0, 5.0, 5.0);
     let near = |p: P, r: f64| length(sub(p, centre)) < r;
@@ -317,7 +318,7 @@ fn the_mesh_path_gives_one_plan_on_any_number_of_threads() {
         plate = boolean(plate, hole, BooleanOp::Subtract).expect("cut").expect("a body");
     }
     let b = record(&plate);
-    let size = (2.0 * 40f64.powi(2) + 10f64.powi(2)).sqrt();
+    let size = (2.0 * det::powi(40.0, 2) + det::powi(10.0, 2)).sqrt();
     let spec = MeshSpec { chord: 0.02, size: Some(3.0), min_angle: 25.0 };
     let on = |threads: usize| {
         let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).stack_size(8 << 20).build().expect("a pool");

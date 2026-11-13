@@ -748,6 +748,7 @@ pub fn point_off_plane_of(
 
 #[cfg(test)]
 mod tests {
+    use crate::math::det;
     use std::f64::consts::PI;
 
     use super::*;
@@ -826,7 +827,7 @@ mod tests {
         let mut curves = Vec::new();
         for i in 0..10 {
             let a = if i % 2 == 0 { 0.0 } else { 1.3e-6_f64 };
-            let q = p + Vec3::new(a.cos(), a.sin(), 0.0) * 10.0;
+            let q = p + Vec3::new(det::cos(a), det::sin(a), 0.0) * 10.0;
             curves.push(line(p, q));
             p = q;
         }

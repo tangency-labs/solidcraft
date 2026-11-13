@@ -27,6 +27,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use super::profile::{cross2, derivative, halves, point_of, product, Seg2, H2};
@@ -303,7 +304,8 @@ fn circle_span(
         let (yy, ey) = product(&y, &y)?;
         let (ww, ew) = product(&w, &w)?;
         let max = |v: &[f64]| v.iter().map(|x| x.abs()).fold(0.0, f64::max);
-        let scale = max(&x).powi(2) + max(&y).powi(2) + radius * radius * max(&w).powi(2);
+        let scale =
+            det::powi(max(&x), 2) + det::powi(max(&y), 2) + radius * radius * det::powi(max(&w), 2);
         #[allow(clippy::cast_precision_loss)]
         let (n, n2) = (c.len() as f64, (c.len() * c.len()) as f64);
         let coordinate_error = source_error
@@ -334,7 +336,7 @@ fn circle_span(
             && c.iter()
                 .all(|p| (point_of(*p) - center).dot(mid) > coordinate_error * mid.length());
         if (positive || negative) && half_plane {
-            let sweep = cross2(a, b).atan2(a.dot(b));
+            let sweep = det::atan2(cross2(a, b), a.dot(b));
             if !((positive && sweep > 0.0) || (negative && sweep < 0.0))
                 || (total != 0.0 && total.signum() != sweep.signum())
             {
@@ -485,8 +487,8 @@ fn arc(
         sweep += ds;
     }
     let ac = a - center;
-    let start = ac.y.atan2(ac.x);
-    let end = center + Vec2::new((start + sweep).cos(), (start + sweep).sin()) * radius;
+    let start = det::atan2(ac.y, ac.x);
+    let end = center + Vec2::new(det::cos(start + sweep), det::sin(start + sweep)) * radius;
     // the arc ends where the curve does, as closely as a profile loop must close
     if end.distance(b) + error > tol.min(ARC_END_TOL) {
         return None;

@@ -26,6 +26,7 @@ use solidcore::geom::vector2d::Point2;
 use solidcore::intersect::point_class::{PointClassType, PointClassification};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::query::face::p1 as fq;
 use solidcore::topology::brep::p1;
@@ -141,7 +142,7 @@ fn base(k: &mut Kernel) -> Brep {
     let refs: Vec<Option<&Curve>> = lines.iter().map(Some).collect();
     let bar = create_linear_sweep(k, &refs, v(0.0, 0.0, 1.0), 10.0, true).unwrap();
     let a = 0.6131f64;
-    let x0 = v(a.cos(), a.sin(), 0.0);
+    let x0 = v(det::cos(a), det::sin(a), 0.0);
     let y0 = v(0.0, 0.0, 1.0).cross(x0);
     let frame = Axis2Placement::new(v(0.0, 0.0, 0.0), x0, y0);
     let degrees = Extent1d::from_min_max(0.0, 360.0);
@@ -191,7 +192,7 @@ fn lumps(b: &Brep) -> usize {
 /// rho = 20 has its centre on the circle rho = 22, z = 12.
 fn torus_distance(p: Point3) -> f64 {
     let rho = (p.x * p.x + p.y * p.y).sqrt();
-    ((rho - 22.0).powi(2) + (p.z - 12.0).powi(2)).sqrt()
+    (det::powi(rho - 22.0, 2) + det::powi(p.z - 12.0, 2)).sqrt()
 }
 
 /// Whether `p` lies on a face the second round does not make: the bar's planes, the boss's
@@ -221,11 +222,11 @@ fn on_given_face(p: Point3) -> bool {
 /// at `r`.
 fn off_envelope(p: Point3) -> f64 {
     let r = 2.0_f64;
-    let line = ((p.y - (-13.0_f64)).powi(2) + (p.z - (8.0_f64)).powi(2)).sqrt();
+    let line = (det::powi(p.y - (-13.0_f64), 2) + det::powi(p.z - (8.0_f64), 2)).sqrt();
     // the centre at angle t round the offset torus's section in the plane y = -13.0
     let centre = |t: f64| {
-        let rho = 22.0_f64 + (2.0_f64 + r) * t.cos();
-        let z = 12.0_f64 + (2.0_f64 + r) * t.sin();
+        let rho = 22.0_f64 + (2.0_f64 + r) * det::cos(t);
+        let z = 12.0_f64 + (2.0_f64 + r) * det::sin(t);
         let x2 = rho * rho - (-13.0_f64) * (-13.0_f64);
         (x2 >= 0.0).then(|| Point3::new(x2.sqrt(), -13.0_f64, z))
     };

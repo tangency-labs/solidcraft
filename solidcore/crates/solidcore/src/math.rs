@@ -18,6 +18,7 @@
 //! | [`is_infinite_param`]        | `SM_IS_INFINITE`                               |
 //! | [`max2`], [`min2`], [`max3`], [`min3`], [`max4`], [`min4`] | `smos_Max`, `smos_Min`, `smos_3Max`, `smos_3Min`, `smos_4Max`, `smos_4Min` |
 //! | [`rad_to_deg`]               | `SM_RAD2DEG`                                   |
+//! | [`det`]                      | the C library's `sin`, `cos`, `atan2`, `pow`, ... (one pure-Rust libm on every platform) |
 //!
 //! ## Why not `glam`/`nalgebra`
 //!
@@ -27,6 +28,8 @@
 //! (e.g. `Unitize` of a zero vector). These hand-written types spell every expression
 //! in upstream order, so results are bit-identical to the C++ (built with
 //! `-ffp-contract=off`).
+
+pub mod det;
 
 pub use crate::geom::vector2d::{Point2, Vec2};
 pub use crate::geom::vector3d::{Point3, Vec3};
@@ -339,12 +342,12 @@ impl Transform {
         // One power of two for the whole linear part (exact; two steps for a subnormal
         // largest entry, whose inverse power alone would overflow).
         let pre = if big < f64::MIN_POSITIVE {
-            2.0_f64.powi(600)
+            det::powi(2.0_f64, 600)
         } else {
             1.0
         };
         #[allow(clippy::cast_possible_truncation)] // an exponent of a finite double
-        let scale = 2.0_f64.powi(-((big * pre).log2().floor() as i32));
+        let scale = det::powi(2.0_f64, -(det::log2(big * pre).floor() as i32));
         let mut m = [[0.0_f64; 3]; 3];
         let mut tiny_entry = false;
         for (row, src) in m.iter_mut().zip(&self.m) {
@@ -450,7 +453,7 @@ impl Transform {
         let k = axis
             .unitize()
             .map_err(|_| SolidError::invalid_input(OP_MAPS, "a turn's axis of no length"))?;
-        let (s, c) = angle.sin_cos();
+        let (s, c) = det::sin_cos(angle);
         let v = 1.0 - c;
         let (x, y, z) = (k.x, k.y, k.z);
         Ok(Self::about(

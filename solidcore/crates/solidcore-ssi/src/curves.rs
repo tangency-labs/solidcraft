@@ -26,6 +26,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
@@ -837,7 +838,7 @@ fn dedup(run: Vec<Node>, link: f64) -> Vec<Node> {
 
 /// The run split at its corners: nodes where the curve turns by more than [`CORNER`].
 fn at_corners(run: &[Node]) -> Vec<Vec<Node>> {
-    let cos = CORNER.cos();
+    let cos = det::cos(CORNER);
     let mut out = Vec::new();
     let mut piece: Vec<Node> = Vec::new();
     for (i, &node) in run.iter().enumerate() {

@@ -15,6 +15,7 @@
 //! parameter); pcurves and domains come from the records, never from STEP's parameters.
 
 use crate::vec::Vec3Geom as _;
+use solidcore::math::det;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use solidcore_record::Vec3;
@@ -49,17 +50,17 @@ fn p3(v: Vec3) -> P3 {
 pub(super) fn hyperbola_spline(p: &Placement, a: f64, b: f64, t0: f64, t1: f64) -> BCurve {
     let n = (((t1 - t0) / HYPERBOLA_STEP).ceil() as usize).clamp(1, MAX_PIECES);
     let dt = (t1 - t0) / n as f64;
-    let w = (0.5 * dt).cosh();
+    let w = det::cosh(0.5 * dt);
     let at = |c: f64, s: f64| p.at(a * c, b * s, 0.0);
     let mut knots = vec![t0; 3];
-    let first = at(t0.cosh(), t0.sinh());
+    let first = at(det::cosh(t0), det::sinh(t0));
     let mut homogeneous = vec![[first[0], first[1], first[2], 1.0]];
     for i in 0..n {
         let ta = t0 + dt * i as f64;
         let (tm, tb) = (ta + 0.5 * dt, ta + dt);
-        let m = at(tm.cosh() / w, tm.sinh() / w);
+        let m = at(det::cosh(tm) / w, det::sinh(tm) / w);
         homogeneous.push([m[0] * w, m[1] * w, m[2] * w, w]);
-        let e = at(tb.cosh(), tb.sinh());
+        let e = at(det::cosh(tb), det::sinh(tb));
         homogeneous.push([e[0], e[1], e[2], 1.0]);
         let k = if i + 1 == n { t1 } else { tb };
         knots.extend([k, k]);
@@ -114,7 +115,7 @@ fn basis(c: &Curve) -> R<&Curve> {
 /// The conic angle of a point in the conic's plane.
 fn conic_angle(p: &Placement, radii: [f64; 2], q: Vec3) -> f64 {
     let d = q - v3(p.origin);
-    (d.dot(v3(p.y())) / radii[1]).atan2(d.dot(v3(p.ref_direction)) / radii[0])
+    det::atan2(d.dot(v3(p.y())) / radii[1], d.dot(v3(p.ref_direction)) / radii[0])
 }
 
 /// The STEP parameter of `q` (a point on, or projected into the plane of, a planar curve):
@@ -128,7 +129,7 @@ fn planar_param(c: &Curve, q: Vec3) -> Option<f64> {
         Curve::Line { origin, direction, magnitude } => (q - v3(*origin)).dot(v3(*direction)) / magnitude,
         Curve::Circle { position, radius } => conic_angle(position, [*radius; 2], q),
         Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => conic_angle(position, [*semi_axis_1, *semi_axis_2], q),
-        Curve::Hyperbola { position, semi_imag_axis, .. } => (local(position).1 / semi_imag_axis).asinh(),
+        Curve::Hyperbola { position, semi_imag_axis, .. } => det::asinh(local(position).1 / semi_imag_axis),
         Curve::Parabola { position, focal_dist } => local(position).1 / (2.0 * focal_dist),
         _ => return None,
     };
@@ -395,13 +396,13 @@ fn conic_side_arc(c: &Curve, o: Vec3, e: Vec3, near: f64) -> Option<(f64, f64)> 
     };
     let s0 = (v3(position.origin) - o).dot(e);
     let (ca, cb) = (a * v3(position.ref_direction).dot(e), b * v3(position.y()).dot(e));
-    let m = ca.hypot(cb);
+    let m = det::hypot(ca, cb);
     let ratio = -s0 / m;
     if !(m > 0.0 && (-1.0..=1.0).contains(&ratio)) {
         return None;
     }
-    let half = ratio.acos();
-    let phi = cb.atan2(ca);
+    let half = det::acos(ratio);
+    let phi = det::atan2(cb, ca);
     let centre = phi + ((near - phi) / TAU).round() * TAU;
     (centre.is_finite() && half > 0.0).then_some((centre - half, centre + half))
 }
@@ -547,7 +548,7 @@ fn offset(s: BSurface, d: f64) -> R<BSurface> {
         BSurface::Cone { frame, radius_at_origin, half_angle } => {
             // The normal is (cos a, −sin a) in (radial, axial): the reference radius grows by
             // d / cos a, the angle stays.
-            let r = radius_at_origin + d / half_angle.cos();
+            let r = radius_at_origin + d / det::cos(half_angle);
             if !(r >= 0.0 && r.is_finite()) {
                 return bad("cone whose reference radius turns negative");
             }
@@ -676,7 +677,7 @@ fn map_surface_in(s: &Surface, ext: &Extent, tol: f64, depth: usize, reversed: &
 /// `rho tan a > 0`.
 fn flat_cone(position: &Placement, radius: f64, semi_angle: f64, ext: &Extent, tol: f64, reversed: &mut bool) -> Option<BSurface> {
     let (o, k) = (v3(position.origin), v3(position.axis).normalized()?);
-    let cot = semi_angle.cos() / semi_angle.sin();
+    let cot = det::cos(semi_angle) / det::sin(semi_angle);
     let mut deviation = (radius * cot).abs();
     let mut widest: Option<(f64, f64)> = None;
     for p in &ext.points {
@@ -693,7 +694,7 @@ fn flat_cone(position: &Placement, radius: f64, semi_angle: f64, ext: &Extent, t
         return None;
     }
     // The parameter radius at the widest boundary point (it keeps one sign off the apex).
-    *reversed ^= (radius + h * semi_angle.tan()) * semi_angle.tan() > 0.0;
+    *reversed ^= (radius + h * det::tan(semi_angle)) * det::tan(semi_angle) > 0.0;
     Some(BSurface::Plane { origin: position.origin, u_axis: position.ref_direction, v_axis: position.y() })
 }
 

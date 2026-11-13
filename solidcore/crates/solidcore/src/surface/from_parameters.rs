@@ -29,6 +29,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
 use crate::nurbs::math::gamma;
@@ -157,7 +158,7 @@ pub fn from_parameters(
                 return Err(bad("the half angle is not in (0, pi/2)"));
             }
             turn(u, "the sweep is over a turn")?;
-            let t = half_angle.tan();
+            let t = det::tan(*half_angle);
             // the apex where the radius is 0, heights from it along z. The record's cone runs
             // through it (its radius goes negative past it, the other nappe); the kernel's is
             // one nappe, so a box reaching past the apex (beyond the rounding of finding it)
@@ -629,7 +630,7 @@ mod tests {
         let cone = Record::Cone {
             frame: frame([0.0, 0.0, 0.0]),
             radius_at_origin: 1.0,
-            half_angle: (1.0f64 / 3.0).atan(),
+            half_angle: det::atan(1.0f64 / 3.0),
         };
         same_set(
             &corners(&make(&cone, [0.0, TAU], [0.0, 3.0]).unwrap()),
@@ -680,7 +681,7 @@ mod tests {
         let cone = Record::Cone {
             frame: frame([0.0, 0.0, 0.0]),
             radius_at_origin: 1.0,
-            half_angle: (1.0f64 / 3.0).atan(),
+            half_angle: det::atan(1.0f64 / 3.0),
         };
         let cyl = Record::Cylinder {
             frame: frame([0.0, 0.0, 0.0]),
@@ -709,7 +710,7 @@ mod tests {
         let cone = Record::Cone {
             frame: frame([1.0, -2.0, 0.5]),
             radius_at_origin: 1.0,
-            half_angle: (1.0f64 / 3.0).atan(),
+            half_angle: det::atan(1.0f64 / 3.0),
         };
         let (u, v) = ([0.3, 2.0], [-1.0, 2.5]);
         let (s, _) = from_parameters(&k(), &cone, [u, v]).unwrap();
@@ -771,7 +772,7 @@ mod tests {
         };
         let s = make(&r, [0.0, 1.0], [0.0, 1.0]).unwrap();
         let mid = s.evaluate_point(&k(), Point2::new(0.5, 0.5)).unwrap();
-        assert!((mid.x.hypot(mid.y) - 2.0).abs() < 1e-14 && (mid.z - 0.5).abs() < 1e-14);
+        assert!((det::hypot(mid.x, mid.y) - 2.0).abs() < 1e-14 && (mid.z - 0.5).abs() < 1e-14);
         let bad = Record::RationalSpline {
             u_knots: vec![0.0, 0.0, 1.0, 1.0],
             v_knots: vec![0.0, 0.0, 1.0, 1.0],

@@ -106,6 +106,7 @@ use crate::geom::transform::Transform;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max4, EFF_ZERO_DEG, INFINITE_PARAMETER, PI, UNDEF_DOUBLE};
 use crate::surface::surface::p2::Surface;
 use crate::surface::volume::p1::{
@@ -347,8 +348,8 @@ impl TwistVolume {
         let per = self.per();
         let a = dw * per;
 
-        let cos = a.cos();
-        let sin = a.sin();
+        let cos = det::cos(a);
+        let sin = det::sin(a);
 
         let mid = volume.twist_mid_dir();
         let bin = volume.twist_binormal();
@@ -458,8 +459,8 @@ impl TwistVolume {
         let per = self.per(); // negative for left hand twists
         let a = dw * per;
 
-        let cos = a.cos();
-        let sin = a.sin();
+        let cos = det::cos(a);
+        let sin = det::sin(a);
 
         // init output array
         let mut d = vec![Vec3::ZERO; eval_size(n)];
@@ -576,10 +577,10 @@ impl TwistVolume {
         let rad2 = (u_min * u_min + v_max * v_max).sqrt();
         let rad3 = (u_max * u_max + v_max * v_max).sqrt();
         let rad4 = (u_max * u_max + v_min * v_min).sqrt();
-        let ang_rad1 = v_min.atan2(u_min);
-        let ang_rad2 = v_max.atan2(u_min);
-        let ang_rad3 = v_max.atan2(u_max);
-        let ang_rad4 = v_min.atan2(u_max);
+        let ang_rad1 = det::atan2(v_min, u_min);
+        let ang_rad2 = det::atan2(v_max, u_min);
+        let ang_rad3 = det::atan2(v_max, u_max);
+        let ang_rad4 = det::atan2(v_min, u_max);
 
         // The BBox UV square on the W=0 plane is swept in a helix from WMin to WMax
         // sweeping through associated angles AngMin and AngMax. Each corner sweeps
@@ -619,11 +620,11 @@ impl TwistVolume {
                 }
 
                 // arc end points
-                proj_pt1.x = rad * theta_rad1.cos();
-                proj_pt1.y = rad * theta_rad1.sin();
+                proj_pt1.x = rad * det::cos(theta_rad1);
+                proj_pt1.y = rad * det::sin(theta_rad1);
 
-                proj_pt2.x = rad * theta_rad2.cos();
-                proj_pt2.y = rad * theta_rad2.sin();
+                proj_pt2.x = rad * det::cos(theta_rad2);
+                proj_pt2.y = rad * det::sin(theta_rad2);
 
                 s_proj_box.add_point(proj_pt1);
                 s_proj_box.add_point(proj_pt2);
@@ -683,8 +684,8 @@ impl TwistVolume {
         // (neg sign = rotate from ProjSpace to ParamSpace)
         let theta_rad = -2.0 * PI * proj_point.z / self.twist_period_dist;
 
-        let cos = theta_rad.cos();
-        let sin = theta_rad.sin();
+        let cos = det::cos(theta_rad);
+        let sin = det::sin(theta_rad);
 
         // same as positive twist mapping but with the angle negated
         vec![Vec3::new(

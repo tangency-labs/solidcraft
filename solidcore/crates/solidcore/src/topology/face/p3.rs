@@ -2846,6 +2846,7 @@ mod tests {
     use crate::geom::context::{Context, NotifyCallback};
     use crate::geom::object::{NotifyOperation, ObjectRef};
     use crate::kernel::Kernel;
+    use crate::math::det;
     use crate::primitive::api_curves::create_line_segment;
     use crate::primitive::api_trim_ops::create_planar_faces;
     use crate::topology::edge::NotifyEnv;
@@ -2886,7 +2887,7 @@ mod tests {
         let n = 24;
         let point = |i: usize| {
             let t = core::f64::consts::TAU * i as f64 / n as f64;
-            crate::math::Vec3::new(30.0 * t.cos(), 30.0 * t.sin(), 0.0)
+            crate::math::Vec3::new(30.0 * det::cos(t), 30.0 * det::sin(t), 0.0)
         };
         let curves: Vec<Curve> = (0..n)
             .map(|i| Curve::from(create_line_segment(point(i), point(i + 1)).unwrap()))

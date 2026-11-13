@@ -495,6 +495,7 @@ pub fn eval3(a: &Bernstein3, u: f64, v: f64) -> crate::math::Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn poly(du: usize, dv: usize, f: impl Fn(usize, usize) -> f64) -> Bernstein2 {
         let mut c = Vec::new();
@@ -512,7 +513,7 @@ mod tests {
     fn product_derivative_split_and_elevation_agree_with_values() {
         let b = Binomials::new();
         let p = poly(2, 1, |i, j| (i as f64) * 1.5 - (j as f64) + 0.25);
-        let q = poly(1, 3, |i, j| ((i + 2 * j) as f64).sin());
+        let q = poly(1, 3, |i, j| det::sin((i + 2 * j) as f64));
         let pq = p.mul(&q, &b).unwrap();
         let e = p.elevate(4, 3, &b).unwrap();
         let du = pq.deriv_u();

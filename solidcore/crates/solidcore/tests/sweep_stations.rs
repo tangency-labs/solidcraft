@@ -27,6 +27,7 @@
 )] // test helpers
 
 use solidcore::curve::curve::Curve;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::math::CPoint;
@@ -67,7 +68,7 @@ fn defect(s: &Station) -> f64 {
 
 /// The signed angle about the unit `axis` from `a` to `b` (both square to it).
 fn angle_about(axis: Vec3, a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).dot(axis).atan2(a.dot(b))
+    det::atan2(a.cross(b).dot(axis), a.dot(b))
 }
 
 #[test]
@@ -83,7 +84,7 @@ fn a_helix_frame_turns_by_its_torsion_against_the_screw() {
             rise: b,
         }],
     };
-    let t0 = Vec3::new(0.0, a, b) * (1.0 / a.hypot(b));
+    let t0 = Vec3::new(0.0, a, b) * (1.0 / det::hypot(a, b));
     let st = stations(&k, &path, t0, &Laws::default(), &stops(&[0.0, 0.25, 1.0])).unwrap();
     for s in &st {
         assert!(defect(s) < 1e-13, "{}", defect(s));
@@ -92,7 +93,7 @@ fn a_helix_frame_turns_by_its_torsion_against_the_screw() {
     // after a whole turn the tangent is the start's; the frame has turned about it
     assert!(near(apply(&end, t0), t0, 1e-12), "{:?}", apply(&end, t0));
     let normal = Vec3::new(-1.0, 0.0, 0.0);
-    let want = -TAU * b / a.hypot(b);
+    let want = -TAU * b / det::hypot(a, b);
     let got = angle_about(t0, normal, apply(&end, normal));
     // the angle modulo a turn
     let diff = (got - want).rem_euclid(TAU);
@@ -123,11 +124,11 @@ fn a_planar_quarter_arc_turns_the_frame_a_quarter_turn() {
             let phi = FRAC_PI_2 * u;
             assert!(near(
                 s.at,
-                Point3::new(r * phi.cos(), r * phi.sin(), 0.0),
+                Point3::new(r * det::cos(phi), r * det::sin(phi), 0.0),
                 1e-12
             ));
             assert!(near(apply(s, Vec3::Z), Vec3::Z, 1e-12), "{orientation:?}");
-            let want = Vec3::new(phi.cos(), phi.sin(), 0.0);
+            let want = Vec3::new(det::cos(phi), det::sin(phi), 0.0);
             assert!(near(apply(s, Vec3::X), want, 1e-12), "{orientation:?} {u}");
             assert!(defect(s) < 1e-13);
         }
@@ -155,7 +156,7 @@ fn a_straight_path_twists_and_scales_linearly() {
     for (s, u) in st.iter().zip(at) {
         let k_u = 1.0 + (scale - 1.0) * u;
         let turn = twist * u;
-        let want = Vec3::new(turn.cos(), turn.sin(), 0.0) * k_u;
+        let want = Vec3::new(det::cos(turn), det::sin(turn), 0.0) * k_u;
         assert!(near(apply(s, Vec3::X), want, 1e-12), "{u}");
         assert!(near(apply(s, Vec3::Z), Vec3::Z, 1e-12), "{u}");
         assert!(near(s.at, Point3::new(0.0, 0.0, len * u), 1e-12));
@@ -187,7 +188,7 @@ fn a_right_angle_corner_turns_the_frame_and_mitres_its_station() {
     assert!(near(apply(&end, Vec3::Z), Vec3::X, 1e-12));
     assert!(near(apply(&end, Vec3::X), Vec3::Z * -1.0, 1e-12));
     // at the corner: the eighth turn about y, and x (along t_1 - t_0 there) stretched by sqrt 2
-    let half = Vec3::new(FRAC_PI_4.sin(), 0.0, FRAC_PI_4.cos());
+    let half = Vec3::new(det::sin(FRAC_PI_4), 0.0, det::cos(FRAC_PI_4));
     assert!(
         near(apply(&mitre, Vec3::Z), half, 1e-12),
         "{:?}",
@@ -268,7 +269,7 @@ fn a_diverging_straight_rail_scales_the_profile() {
 fn an_arc_rail_scales_by_its_distance_across() {
     let k = Kernel::default();
     let (len, r): (f64, f64) = (6.0, 10.0);
-    let start = (len / r).acos().to_degrees();
+    let start = det::acos(len / r).to_degrees();
     let rail = Curve::from(create_arc(Point3::new(0.0, 0.0, 0.0), r, start, 90.0).unwrap());
     let laws = Laws {
         rails: vec![&rail],
@@ -490,8 +491,8 @@ fn helix(axis: Vec3, e: Vec3, a: f64, b: f64, angle: f64) -> Piece {
 
 /// A helix's tangent and principal normal at `phi` (axis `z`, starting on `x`).
 fn helix_frame(a: f64, b: f64, phi: f64) -> (Vec3, Vec3) {
-    let c = a.hypot(b);
-    let (s, co) = phi.sin_cos();
+    let c = det::hypot(a, b);
+    let (s, co) = det::sin_cos(phi);
     (
         Vec3::new(-a * s, a * co, b) * (1.0 / c),
         Vec3::new(-co, -s, 0.0),
@@ -514,15 +515,15 @@ fn a_helix_at_a_quarter_turn_turns_its_normal_by_minus_the_torsion() {
         for (s, u) in st.iter().zip([0.25, 0.5]) {
             let phi = TAU * u;
             let (t, n) = helix_frame(a, b, phi);
-            let psi = -b * phi / a.hypot(b);
-            let want = n * psi.cos() + t.cross(n) * psi.sin();
+            let psi = -b * phi / det::hypot(a, b);
+            let want = n * det::cos(psi) + t.cross(n) * det::sin(psi);
             assert!(near(apply(s, t0), t, 1e-12), "{b} {u}");
             assert!(
                 near(apply(s, n0), want, 1e-12),
                 "{b} {u}: {:?}",
                 apply(s, n0)
             );
-            let (x, y) = (a * phi.cos(), a * phi.sin());
+            let (x, y) = (a * det::cos(phi), a * det::sin(phi));
             assert!(near(s.at, Point3::new(x, y, b * phi), 1e-12), "{b} {u}");
         }
     }
@@ -536,7 +537,7 @@ fn a_helix_at_a_quarter_turn_turns_its_normal_by_minus_the_torsion() {
 fn a_corner_then_a_helix_compose() {
     let k = Kernel::default();
     let (a, b) = (2.0_f64, 0.5);
-    let c = a.hypot(b);
+    let c = det::hypot(a, b);
     let path = Path {
         pieces: vec![
             Piece::Line {
@@ -549,7 +550,7 @@ fn a_corner_then_a_helix_compose() {
     let st = stations(&k, &path, Vec3::Z, &Laws::default(), &[Stop::At(1.0)]).unwrap();
     let th = Vec3::new(0.0, a, b) * (1.0 / c);
     let psi = -TAU * b / c;
-    let want = Vec3::X * psi.cos() + th.cross(Vec3::X) * psi.sin();
+    let want = Vec3::X * det::cos(psi) + th.cross(Vec3::X) * det::sin(psi);
     assert!(near(apply(&st[0], Vec3::Z), th, 1e-12));
     assert!(
         near(apply(&st[0], Vec3::X), want, 1e-12),
@@ -617,7 +618,7 @@ fn the_frames_turn_about_no_axis_along_the_path() {
         ..Laws::default()
     };
     let w = worst(helix(tilt, across, 2.0, 0.5, TAU), &turning);
-    assert!((w - 0.5 / 2.0_f64.hypot(0.5)).abs() < 1e-3, "{w}");
+    assert!((w - 0.5 / det::hypot(2.0_f64, 0.5)).abs() < 1e-3, "{w}");
 }
 
 /// The parallel orientation keeps the profile as it is, and refuses a station the path crosses
@@ -645,7 +646,7 @@ fn the_parallel_orientation_keeps_the_profile() {
             assert!(near(apply(s, e), e, 1e-15));
         }
     }
-    let p = 5.0 * FRAC_PI_4.cos();
+    let p = 5.0 * det::cos(FRAC_PI_4);
     assert!(near(st[1].at, Point3::new(p, p, 0.0), 1e-12));
     let err = stations(&k, &path, Vec3::Y, &laws, &stops(&[1.0])).unwrap_err();
     assert!(format!("{err:?}").contains("least angle asked"), "{err:?}");
@@ -774,7 +775,7 @@ fn a_joint_is_a_corner_past_the_procedural_sweep_s_g1_rule() {
             },
             Piece::Line {
                 a: Point3::new(5.0, 0.0, 0.0),
-                b: Point3::new(5.0 + 5.0 * a.cos(), 5.0 * a.sin(), 0.0),
+                b: Point3::new(5.0 + 5.0 * det::cos(a), 5.0 * det::sin(a), 0.0),
             },
         ],
     };

@@ -63,6 +63,7 @@ pub mod exact;
 pub mod offset;
 pub mod record;
 
+use crate::math::det;
 use std::cell::Cell;
 use std::sync::Arc;
 
@@ -1758,7 +1759,7 @@ fn set_entry(d: &mut [Vec<Vec3>], i: usize, j: usize, v: Vec3) {
 fn pow_index(x: f64, n: usize) -> f64 {
     #[allow(clippy::cast_precision_loss)]
     let e = n as f64;
-    x.powf(e)
+    det::powf(x, e)
 }
 
 #[cfg(test)]

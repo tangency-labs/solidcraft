@@ -29,6 +29,7 @@
 //! Observation decoding rejects truncated records without unchecked indexing.
 //! Legacy records and generated inputs remain unchanged.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -940,8 +941,8 @@ fn rust_observation(k: &Kernel, body: &mut Brep, fine: bool) -> solidcore::Resul
 /// A length scale: mostly moderate, sometimes tiny or huge.
 fn gen_scale(rng: &mut Rng) -> f64 {
     match rng.below(10) {
-        0 => 10f64.powi(-(rng.range_i64(3, 6) as i32)),
-        1 => 10f64.powi(rng.range_i64(3, 6) as i32),
+        0 => det::powi(10f64, -(rng.range_i64(3, 6) as i32)),
+        1 => det::powi(10f64, rng.range_i64(3, 6) as i32),
         _ => rng.uniform(0.2, 20.0),
     }
 }
@@ -1031,7 +1032,7 @@ fn gen_path(rng: &mut Rng, s: f64) -> CrvIn {
     let points = (0..4)
         .map(|i| {
             let t = f64::from(i) / 3.0;
-            [bend * (t * 3.0).sin(), 0.0, len * t]
+            [bend * det::sin(t * 3.0), 0.0, len * t]
         })
         .collect();
     CrvIn::Curve { points }

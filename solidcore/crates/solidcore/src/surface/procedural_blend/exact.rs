@@ -37,6 +37,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::are_same;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::implicit::{
@@ -411,7 +412,7 @@ impl ExactRound {
         // every point of the net's torus moves to the class's torus by at most: the turn of
         // its axis (an angle, over the torus's reach from its centre), the move of its
         // centre, and the change of its radii
-        let turn = d.cross(axis).length().atan2(d.dot(axis).abs());
+        let turn = det::atan2(d.cross(axis).length(), d.dot(axis).abs());
         let distance =
             turn * (big_r + r) + (c - centre).length() + (big_r - major).abs() + (r - minor).abs();
         let within = matches!(

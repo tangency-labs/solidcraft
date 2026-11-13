@@ -13,6 +13,7 @@
 use super::*;
 use crate::make_box;
 use crate::test_corpus::{area, entry, kernel_order, operand, rel, rig, rig_fixes, valid};
+use solidcore::math::det;
 use solidcore_record::brep::Frame;
 
 const X: [f64; 3] = [1.0, 0.0, 0.0];
@@ -76,7 +77,10 @@ fn corpus_tool(t: &serde_json::Value) -> Tool {
     if let Some(p) = t.get("plane") {
         let (x, y) = (v3(&p["xaxis"]), v3(&p["yaxis"]));
         for a in [x, y] {
-            assert!((a[0].hypot(a[1]).hypot(a[2]) - 1.0).abs() < 1e-15, "{a:?}");
+            assert!(
+                (det::hypot(det::hypot(a[0], a[1]), a[2]) - 1.0).abs() < 1e-15,
+                "{a:?}"
+            );
         }
         return plane(v3(&p["origin"]), x, y, v2(&p["u"]), v2(&p["v"]));
     }

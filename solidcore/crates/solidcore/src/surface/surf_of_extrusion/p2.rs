@@ -84,6 +84,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::curve_class::CurveClassification;
 use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind, PointClassType};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest as CurveBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -680,7 +681,7 @@ impl SurfOfExtrusion {
                 .curve_vec
                 .angle_between(self.extrusion_vec)
                 .unwrap_or(0.0);
-            let dist_along_extrusion = dist_center_base_to_plane * angle_rad.cos();
+            let dist_along_extrusion = dist_center_base_to_plane * det::cos(angle_rad);
             let param_along_extrusion = dist_along_extrusion / self.extrusion_vec.length();
 
             // get extrusionSurface's sweep interval

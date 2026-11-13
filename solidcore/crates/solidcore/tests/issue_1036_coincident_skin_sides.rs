@@ -17,6 +17,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, face_area, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_fit::p1::ParamMethod;
@@ -31,7 +32,7 @@ fn section(i: usize) -> solidcore::Result<Curve> {
     let mut pts: Vec<Point3> = (0..12)
         .map(|j| {
             let t = 2.0 * std::f64::consts::PI * f64::from(j) / 12.0;
-            Point3::new(a * t.cos(), b * t.sin(), z)
+            Point3::new(a * det::cos(t), b * det::sin(t), z)
         })
         .collect();
     pts.extend(pts.first().copied());

@@ -12,6 +12,7 @@
 mod common;
 
 use common::*;
+use solidcore::math::det;
 
 use std::f64::consts::PI;
 use std::io::Read as _;
@@ -173,7 +174,7 @@ fn blends_turn_round_a_shallow_sharp_corner() {
     all_fixes();
     let plate = |kink: f64, convex: bool| {
         let t = if convex { -kink } else { kink }.to_radians();
-        let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+        let (u, n) = ([det::cos(t), det::sin(t)], [det::sin(t), -det::cos(t)]);
         let p = [
             [0.0, 0.0],
             [50.0, 0.0],
@@ -215,7 +216,7 @@ fn blends_turn_round_a_shallow_sharp_corner() {
                 blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap_or_else(|e| {
                     panic!("{kind:?} at a {kink} degree corner (convex {convex}): {e:?}")
                 });
-                let corner = 2.0 * m * (kink.to_radians() / 2.0).tan();
+                let corner = 2.0 * m * det::tan(kink.to_radians() / 2.0);
                 let want = 90.0 * a + if convex { -corner } else { corner };
                 let off = before - volume(&b);
                 assert!(
@@ -977,7 +978,7 @@ fn a_tangent_chain_is_one_chamfer_measured_where_no_station_folds() {
     let ellipse = |cos_w: f64| {
         let sin_w = (1.0 - cos_w * cos_w).sqrt();
         let c = (1.0 + 2.0 * cos_w - 1000.0 * tolerance * sin_w) / (2.0 + cos_w);
-        let s = c.acos().sin();
+        let s = det::sin(det::acos(c));
         let (r_top, r_wall) = ((2.0 - c) / s, (1.0 - 2.0 * c) / s);
         let radius = 5.0 - r_wall;
         let half_x = radius * SQRT_5 / 2.0;

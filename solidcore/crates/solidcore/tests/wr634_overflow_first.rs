@@ -19,6 +19,7 @@ use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p2::is_manifold_solid;
@@ -117,7 +118,7 @@ const STOP: i32 = FilletErrorType::OverflowFirst as i32;
 fn r21_closed_form() -> f64 {
     let (r, w, h) = (21.0_f64, 20.0_f64, 20.0_f64);
     let a = w.min(r);
-    let f = |s: f64| s / 2.0 * (r * r - s * s).max(0.0).sqrt() + r * r / 2.0 * (s / r).asin();
+    let f = |s: f64| s / 2.0 * (r * r - s * s).max(0.0).sqrt() + r * r / 2.0 * det::asin(s / r);
     let u_h = r - (r * r - (r - h) * (r - h)).sqrt();
     let area = h * u_h.min(a) + r * (a - u_h) - (f(r - u_h) - f(r - a));
     8000.0 - 20.0 * area

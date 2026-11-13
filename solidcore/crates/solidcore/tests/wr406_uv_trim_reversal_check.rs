@@ -23,6 +23,7 @@
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives as api;
@@ -60,7 +61,7 @@ fn bored_plate_turn(k: &mut Kernel, turn: f64) -> Brep {
     let mut bore = api::create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 1.0, 12.0).unwrap();
     // the bore's z axis onto +y (through the 4 thickness), its x axis turned `turn`
     // degrees from the plate's u axis about that z axis
-    let (c, s) = (turn.cos(), turn.sin());
+    let (c, s) = (det::cos(turn), det::sin(turn));
     let frame = Axis2Placement::new(
         Point3::new(30.0, -1.0, 2.0),
         Vec3::new(c, 0.0, -s),

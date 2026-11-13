@@ -14,6 +14,7 @@
 //! triangle count, with its error measured: how far its vertices and the centres of its triangles
 //! lie from the original surface, at most.
 
+use solidcore::math::det;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
@@ -217,7 +218,7 @@ impl Quadric {
     fn best(&self) -> Option<[f64; 3]> {
         let [aa, ab, ac, ad, bb, bc, bd, cc, cd, _] = self.0;
         let det = aa * (bb * cc - bc * bc) - ab * (ab * cc - bc * ac) + ac * (ab * bc - bb * ac);
-        let scale = (aa.abs() + bb.abs() + cc.abs()).powi(3);
+        let scale = det::powi(aa.abs() + bb.abs() + cc.abs(), 3);
         if det.abs().partial_cmp(&(1e-12 * scale)) != Some(Ordering::Greater) {
             return None;
         }

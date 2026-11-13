@@ -376,7 +376,7 @@ pub fn measurable(k: &Kernel, surf: &Surface) -> Result<bool> {
 ///   coefficient (`decompose_to_bez`, The NURBS Book A5.6);
 /// - an analytic surface's form against its definition (the face evaluates on the analytic
 ///   surface): its constants are the definition's data through at most eight roundings per
-///   coordinate (the circle weights' `cos`/`sin` an ulp each, two roundings, as
+///   coordinate (the circle weights' `cos`/`sin` an ulp each, [`crate::math::det`]'s, two roundings, as
 ///   [`crate::geom::certified`] counts them; the products and sums with the frame), on sizes
 ///   at most the net's plus the distance of the definition's origin, and a generator's own
 ///   circle within twice the net's size: `gamma_32 (2 M + |O|)`;
@@ -641,6 +641,7 @@ pub(crate) fn pieces_about(
 mod tests {
     use super::*;
     use crate::geom::vector2d::{Point2, Vec2};
+    use crate::math::det;
     use crate::math::Vec3;
     use crate::primitive::api_primitives::{create_box, create_cylinder, create_sphere};
     use crate::query::api_queries::face_bounding_box;
@@ -693,7 +694,7 @@ mod tests {
         // eight points per scale cover face interiors, edges and corners.
         // Coordinate scale 2^29 is covered by the nonanalytic bilinear sheet in
         // extracted_and_restricted_bounds_stay_below_the_exact_plane below.
-        for scale in [0.0, 2.0_f64.powi(20)] {
+        for scale in [0.0, det::powi(2.0_f64, 20)] {
             // Dyadic origins with short mantissas ensure adding 16 is exact. A
             // full-mantissa origin alone would not guarantee this across a binade.
             let c = Point3::new(1.5 * scale, -scale, scale * 0.5);
@@ -759,7 +760,7 @@ mod tests {
         let mut k = Kernel::default();
         // Coordinate scale 2^29 is covered by the nonanalytic bilinear sheet below;
         // these analytic sphere fixtures exercise scales through 2^20.
-        for scale in [0.0, 2.0_f64.powi(20)] {
+        for scale in [0.0, det::powi(2.0_f64, 20)] {
             let c = Point3::new(scale * rng.mantissa(), -scale, scale * 0.5);
             let radius = rng.mantissa();
             let b = create_sphere(&mut k, c, radius).unwrap();
@@ -844,7 +845,7 @@ mod tests {
                                 } else {
                                     // 2^-40 is above ulps but keeps the support nearly
                                     // attained, rather than testing a loose hull only.
-                                    base[axis] * w + rng.mantissa() * 2.0_f64.powi(-40)
+                                    base[axis] * w + rng.mantissa() * det::powi(2.0_f64, -40)
                                 }
                             })
                             .collect(),
@@ -893,14 +894,14 @@ mod tests {
         // full-mantissa heights. The extraction charge carried through translation
         // would leave weights unproved at the largest scale, so the bilinear case
         // isolates translation/restriction there without an extraction charge.
-        for scale in [1.0, 2.0_f64.powi(20), 2.0_f64.powi(29)] {
+        for scale in [1.0, det::powi(2.0_f64, 20), det::powi(2.0_f64, 29)] {
             for _ in 0..16 {
                 let height = rng.mantissa() * scale;
                 let points: Vec<_> = [0.0, 1.0, 3.0, 4.0]
                     .into_iter()
                     .flat_map(|x| [Point3::new(x, 0.0, height), Point3::new(x, 2.0, height)])
                     .collect();
-                let net = if scale == 2.0_f64.powi(29) {
+                let net = if scale == det::powi(2.0_f64, 29) {
                     BSplineSurface::create_bilinear_surface(
                         Point3::new(0.0, 0.0, height),
                         Point3::new(4.0, 0.0, height),
@@ -1069,18 +1070,18 @@ mod tests {
             ]);
             let x = unit(cross(n, [rng.mantissa(), -rng.mantissa(), rng.mantissa()]));
             let y = cross(n, x);
-            let far = 2.0_f64.powi(10 + i % 21);
+            let far = det::powi(2.0_f64, 10 + i % 21);
             let (s0, t0) = (
                 sign(2) * rng.mantissa() * far,
                 sign(3) * rng.mantissa() * far,
             );
-            let c = rng.mantissa() * 2.0_f64.powi((i / 3) % 9 - 4);
+            let c = rng.mantissa() * det::powi(2.0_f64, (i / 3) % 9 - 4);
             let o = Point3::new(
                 -s0 * x[0] - t0 * y[0] + c * n[0],
                 -s0 * x[1] - t0 * y[1] + c * n[1],
                 -s0 * x[2] - t0 * y[2] + c * n[2],
             );
-            let half = rng.mantissa() * 2.0_f64.powi((i / 5) % 7 - 3);
+            let half = rng.mantissa() * det::powi(2.0_f64, (i / 5) % 7 - 3);
             let dom = Extent2d::from_bounds(s0 - half, t0 - half, s0 + half, t0 + half);
             let plane = Plane::new(
                 o,
@@ -1091,7 +1092,7 @@ mod tests {
             );
             let pos = *plane.position();
             let s = Surface::from(plane);
-            let d = c + rng.mantissa() * 2.0_f64.powi((i / 7) % 14 - 10);
+            let d = c + rng.mantissa() * det::powi(2.0_f64, (i / 7) % 14 - 10);
             let p = Point3::new(d * n[0], d * n[1], d * n[2]);
             let (o, xs, ys) = (pos.origin(), pos.x_axis(), pos.y_axis());
             let (xs, ys) = ([xs.x, xs.y, xs.z], [ys.x, ys.y, ys.z]);
@@ -1123,18 +1124,19 @@ mod tests {
         let k = Kernel::default();
         let mut rng = Samples::new();
         // a 23-bit mantissa (hz, x0, y0) and 25-bit weights in [1/2, 1): products exact
-        let short =
-            |m: f64, bits: i32| (m * 2.0_f64.powi(bits - 1)).floor() * 2.0_f64.powi(1 - bits);
+        let short = |m: f64, bits: i32| {
+            (m * det::powi(2.0_f64, bits - 1)).floor() * det::powi(2.0_f64, 1 - bits)
+        };
         // 64 sheets 2^4 to 2^28 out, 2^-2 to 2^4 wide, 2^-12 to 2^3 below or above the point
         for i in 0..64_i32 {
             let sign = |bit: i32| if (i >> bit) & 1 == 0 { 1.0 } else { -1.0 };
-            let far = 2.0_f64.powi(4 + (i * 7) % 25);
+            let far = det::powi(2.0_f64, 4 + (i * 7) % 25);
             let hz = sign(0) * short(rng.mantissa(), 23) * far;
             let (x0, y0) = (
                 sign(1) * short(rng.mantissa(), 23) * far,
                 sign(2) * short(rng.mantissa(), 23) * far,
             );
-            let half = 2.0_f64.powi(i % 7 - 2);
+            let half = det::powi(2.0_f64, i % 7 - 2);
             let weights: Vec<f64> = (0..4).map(|_| 0.5 * short(rng.mantissa(), 25)).collect();
             let corners: Vec<Point3> = [-half, half]
                 .into_iter()
@@ -1164,7 +1166,7 @@ mod tests {
                     Ordering::Equal
                 );
             }
-            let gap = sign(3) * rng.mantissa() * 2.0_f64.powi((i * 5) % 16 - 12);
+            let gap = sign(3) * rng.mantissa() * det::powi(2.0_f64, (i * 5) % 16 - 12);
             let p = Point3::new(
                 x0 + half * (rng.mantissa() - 1.5),
                 y0 + half * (rng.mantissa() - 1.5),
@@ -1341,8 +1343,8 @@ mod tests {
             let p = 2 + (i % 5) as usize;
             let t = 0.1 + 0.8 * (rng.mantissa() - 1.0);
             let up = if i % 2 == 0 { 1.0 } else { -1.0 };
-            let height = up * rng.mantissa() * 2.0_f64.powi((i * 7) % 21);
-            let bend = rng.mantissa() * 2.0_f64.powi(-(i % 20)) * height.abs().max(1.0);
+            let height = up * rng.mantissa() * det::powi(2.0_f64, (i * 7) % 21);
+            let bend = rng.mantissa() * det::powi(2.0_f64, -(i % 20)) * height.abs().max(1.0);
             let knots: Vec<f64> = std::iter::repeat_n(0.0, p + 1)
                 .chain([t])
                 .chain(std::iter::repeat_n(1.0, p + 1))
@@ -1353,7 +1355,12 @@ mod tests {
                     height - up * bend * (g - t) * (g - t)
                 })
                 .collect();
-            bounded += check(p, t, up * rng.mantissa() * 2.0_f64.powi(-(i % 15)), &z);
+            bounded += check(
+                p,
+                t,
+                up * rng.mantissa() * det::powi(2.0_f64, -(i % 15)),
+                &z,
+            );
         }
         // every ridge up to 2^20 out is bounded, at both targets
         assert_eq!(bounded, 64);
@@ -1399,9 +1406,9 @@ mod tests {
         for i in 0..24 {
             let t = f64::from(i) * 0.37;
             let dir = Point3::new(
-                t.cos() * (0.3 * t).cos(),
-                t.sin() * (0.3 * t).cos(),
-                (0.3 * t).sin(),
+                det::cos(t) * det::cos(0.3 * t),
+                det::sin(t) * det::cos(0.3 * t),
+                det::sin(0.3 * t),
             );
             let p = dir * 7.0;
             // the sphere's distance from p is 2, over all its faces
@@ -1431,9 +1438,9 @@ mod tests {
         for i in 0..24 {
             let t = f64::from(i) * 0.37;
             let dir = Point3::new(
-                t.cos() * (0.3 * t).cos(),
-                t.sin() * (0.3 * t).cos(),
-                (0.3 * t).sin(),
+                det::cos(t) * det::cos(0.3 * t),
+                det::sin(t) * det::cos(0.3 * t),
+                det::sin(0.3 * t),
             );
             let p = c + dir * 3.0;
             let exact = (p - c).length() - 1.0;

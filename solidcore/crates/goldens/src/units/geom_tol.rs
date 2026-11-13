@@ -37,6 +37,7 @@
 //!
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -385,7 +386,7 @@ fn brep_case(rng: &mut Rng) -> Inputs {
         if rng.chance(0.7) {
             *rng.choose(&E).unwrap_or(&50.0)
         } else {
-            10f64.powf(rng.uniform(-6.0, 8.0))
+            det::powf(10f64, rng.uniform(-6.0, 8.0))
         }
     };
     let ratio = |rng: &mut Rng| -> f64 {
@@ -396,7 +397,7 @@ fn brep_case(rng: &mut Rng) -> Inputs {
         if rng.chance(0.2) {
             0.0
         } else {
-            10f64.powf(rng.uniform(-8.0, 0.0))
+            det::powf(10f64, rng.uniform(-8.0, 0.0))
         }
     };
     let model = if rng.chance(0.5) { tol::USE_DEFAULT } else { est(rng) };
@@ -702,7 +703,7 @@ fn model_size(rng: &mut Rng) -> f64 {
             e * (1.0 + rng.uniform(-1e-12, 1e-12))
         }
     } else {
-        let v = 10f64.powf(rng.uniform(-9.0, 12.0));
+        let v = det::powf(10f64, rng.uniform(-9.0, 12.0));
         if rng.chance(0.1) {
             -v
         } else {
@@ -720,7 +721,7 @@ fn ratio(rng: &mut Rng) -> f64 {
     } else if r < 0.65 {
         0.0
     } else {
-        10f64.powf(rng.uniform(-3.0, 6.0))
+        det::powf(10f64, rng.uniform(-3.0, 6.0))
     }
 }
 
@@ -736,11 +737,11 @@ fn scalar(rng: &mut Rng) -> f64 {
     } else if r < 0.18 {
         tol::UNINIT_TOL
     } else if r < 0.50 {
-        sign * 10f64.powf(rng.uniform(-14.0, -2.0))
+        sign * det::powf(10f64, rng.uniform(-14.0, -2.0))
     } else if r < 0.85 {
         sign * rng.uniform(0.0, 100.0)
     } else {
-        sign * 10f64.powf(rng.uniform(2.0, 15.0))
+        sign * det::powf(10f64, rng.uniform(2.0, 15.0))
     }
 }
 
@@ -749,9 +750,9 @@ fn vector(rng: &mut Rng, len_scale: f64) -> [f64; 3] {
     let p = rng.uniform(-PI / 2.0, PI / 2.0);
     let len = len_scale * rng.uniform(0.5, 1.5);
     [
-        len * p.cos() * t.cos(),
-        len * p.cos() * t.sin(),
-        len * p.sin(),
+        len * det::cos(p) * det::cos(t),
+        len * det::cos(p) * det::sin(t),
+        len * det::sin(p),
     ]
 }
 
@@ -763,7 +764,7 @@ fn obj(rng: &mut Rng) -> Obj {
         2 => 3,
         _ => 6,
     };
-    let scale = 10f64.powf(rng.uniform(-3.0, 8.0));
+    let scale = det::powf(10f64, rng.uniform(-3.0, 8.0));
     let mut d: Vec<f64> = (0..n).map(|_| rng.uniform(-1.0, 1.0) * scale).collect();
     if kind == 3 {
         for c in 0..3 {
@@ -972,14 +973,14 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         Op::CalcEdgeZone | Op::CalcVertexZone => {
             for x in a.iter_mut().take(3) {
                 if rng.chance(0.7) {
-                    *x = zone * 10f64.powf(rng.uniform(-2.0, 2.0));
+                    *x = zone * det::powf(10f64, rng.uniform(-2.0, 2.0));
                 }
             }
         }
         Op::AreParallel | Op::ArePerpendicular => {
-            let sv = 10f64.powf(rng.uniform(-6.0, 3.0));
+            let sv = det::powf(10f64, rng.uniform(-6.0, 3.0));
             let v = vector(rng, sv);
-            let sw = 10f64.powf(rng.uniform(-6.0, 3.0));
+            let sw = det::powf(10f64, rng.uniform(-6.0, 3.0));
             let w = vector(rng, sw);
             for (j, x) in v.iter().chain(w.iter()).enumerate() {
                 if let Some(dst) = a.get_mut(j) {
@@ -997,7 +998,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             }
         }
         Op::IsDegenerateVec3 => {
-            let sv = 2.0 * zone * 10f64.powf(rng.uniform(-1.0, 1.0));
+            let sv = 2.0 * zone * det::powf(10f64, rng.uniform(-1.0, 1.0));
             let v = vector(rng, sv);
             for (j, x) in v.iter().enumerate() {
                 if let Some(dst) = a.get_mut(j) {
@@ -1010,7 +1011,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             let sv = if rng.chance(0.5) {
                 EFF_ZERO * rng.uniform(0.3, 3.0)
             } else {
-                10f64.powf(rng.uniform(-4.0, 3.0))
+                det::powf(10f64, rng.uniform(-4.0, 3.0))
             };
             let v = vector(rng, sv);
             for (j, x) in v.iter().enumerate() {

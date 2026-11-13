@@ -23,6 +23,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -160,8 +161,8 @@ fn taper_extrude_past_the_centre_still_builds_its_pyramid() {
             (b.faces().len(), b.edges().len(), b.vertices().len()),
             (n, 2 * n, n + 1)
         );
-        let inradius = RADIUS * (std::f64::consts::PI / sides as f64).cos();
-        let apex_z = HEIGHT * inradius / (HEIGHT * 72.0_f64.to_radians().tan());
+        let inradius = RADIUS * det::cos(std::f64::consts::PI / sides as f64);
+        let apex_z = HEIGHT * inradius / (HEIGHT * det::tan(72.0_f64.to_radians()));
         let points: Vec<Point3> = b
             .vertices()
             .ids()
@@ -177,7 +178,7 @@ fn taper_extrude_past_the_centre_still_builds_its_pyramid() {
         );
         // the other vertices are the polygon's corners
         for p in points.iter().filter(|p| **p != apex) {
-            let r = p.x.hypot(p.y);
+            let r = det::hypot(p.x, p.y);
             assert!(
                 p.z.abs() < 1e-12 && (r - RADIUS).abs() < 1e-9 * RADIUS,
                 "{p:?}"

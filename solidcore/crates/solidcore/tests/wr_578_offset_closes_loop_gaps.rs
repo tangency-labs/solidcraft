@@ -29,6 +29,7 @@ use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -43,7 +44,7 @@ const SHELL_1494: f64 = 8864.598272772;
 fn box_and_cylinder(k: &mut Kernel, seam_deg: f64) -> Brep {
     let body = create_box(k, Point3::new(0.0, 0.0, 0.0), 47.5, 45.0, 30.0).unwrap();
     let mut cylinder = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 7.5, 30.0).unwrap();
-    let (s, c) = seam_deg.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(seam_deg.to_radians());
     // local z (the axis) along +x: x = (0, c, s), y = (0, -s, c), z = x cross y = +x
     let placement = Axis2Placement::new(
         Point3::new(47.5, 0.0, 10.0),

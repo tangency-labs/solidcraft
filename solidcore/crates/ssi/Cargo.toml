@@ -7,6 +7,8 @@ version.workspace = true
 publish = false
 
 [dependencies]
+# The transcendental functions (`solidcore::math::det`): the same bits on every platform.
+solidcore = { path = "../solidcore" }
 
 [lints]
 workspace = true

@@ -28,6 +28,7 @@
 //! are compared on their *defined region* (the entries upstream writes for the
 //! result type). Every run has at least [`MIN_GENERATED`] generated cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -864,7 +865,7 @@ fn special(rng: &mut Rng) -> f64 {
     } else if r < 0.7 {
         let e = rng.range_i64(-320, 307) as i32;
         let s = if rng.chance(0.5) { 1.0 } else { -1.0 };
-        s * rng.uniform(1.0, 10.0) * 10f64.powi(e)
+        s * rng.uniform(1.0, 10.0) * det::powi(10f64, e)
     } else {
         coord(rng)
     }

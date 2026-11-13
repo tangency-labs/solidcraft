@@ -48,6 +48,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::srf_basic::Direction;
@@ -69,7 +70,7 @@ const MEET: f64 = 1e-12;
 
 /// The angle between `a` and `b`, in radians.
 fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b))
+    det::atan2(a.cross(b).length(), a.dot(b))
 }
 
 fn refused(refusal: ExtendRefusal, distance: Option<f64>) -> SolidError {
@@ -321,7 +322,7 @@ fn extend_side(
         let x1 = s.evaluate_point(at(s, 1.0))? - c;
         let cc = n * n.dot(x0);
         let (u0, u1) = (x0 - cc, x1 - cc);
-        let mut phi = u0.cross(u1).dot(n).atan2(u0.dot(u1));
+        let mut phi = det::atan2(u0.cross(u1).dot(n), u0.dot(u1));
         if phi < 0.0 {
             phi += 2.0 * PI;
         }

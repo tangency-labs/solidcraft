@@ -57,6 +57,7 @@
 // The range tests are NaN-safe negations (`!(x > y)`), as `sweep::screw`'s.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::blend::fillet_section::interval::{round_up, Ivl};
@@ -275,7 +276,7 @@ impl ScrewMotion {
     /// Rodrigues: `v` turned right-handed about the axis by `a`.
     fn turn(&self, v: Vec3, a: f64) -> Vec3 {
         let k = self.axis;
-        v * a.cos() + k.cross(v) * a.sin() + k * (k.dot(v) * (1.0 - a.cos()))
+        v * det::cos(a) + k.cross(v) * det::sin(a) + k * (k.dot(v) * (1.0 - det::cos(a)))
     }
 
     /// The lift at angle `a`.
@@ -346,7 +347,7 @@ fn alternating(p0: Ivl, r: Ivl, c: impl Fn(u32) -> Ivl) -> Ivl {
         sum = if n % 2 == 0 { sum + term } else { sum - term };
         power = power * r;
         n += 1;
-        if (c(n) * power).mag() <= sum.mig() * f64::powi(2.0, -64) {
+        if (c(n) * power).mag() <= sum.mig() * det::powi(2.0, -64) {
             break;
         }
     }
@@ -498,7 +499,7 @@ impl ProceduralSweep {
             motion: Motion::Screw(motion),
             stations: stations.to_vec(),
             half,
-            tau: (0.5 * half).tan(),
+            tau: det::tan(0.5 * half),
             bound: 0.0,
             map: SweepMap::default(),
         };
@@ -605,7 +606,7 @@ impl ProceduralSweep {
         let width = t1 - t0;
         let s = 2.0 * (t - t0) / width - 1.0;
         let x = self.tau * s;
-        let theta = 0.5 * (t0 + t1) + 2.0 * x.atan();
+        let theta = 0.5 * (t0 + t1) + 2.0 * det::atan(x);
         let rate = 2.0 * self.tau / (1.0 + x * x) * (2.0 / width);
         (theta, rate)
     }
@@ -815,7 +816,7 @@ impl ProceduralSweep {
     ///   largest from the axis, plus the law's largest offset) and lifts it by `lambda`
     ///   times that; `R` again for the arcs' weight `cos h` and `tau`, each a rounding;
     /// - `K = 2 (p + 3) + 24` operations: the turn (Rodrigues, ten with its sine and
-    ///   cosine, each within an ulp), the mid point's scale and weight (two), the sums
+    ///   cosine, each within an ulp, [`crate::math::det`]'s), the mid point's scale and weight (two), the sums
     ///   with the origin and the lift (three), the lift and the stations' angles (six),
     ///   `cos h`, `tan(h / 2)` and `atan` (three), and evaluating the two rational
     ///   factors of degrees p and 2 in homogeneous coordinates (`2 (p + 3)`);
@@ -839,7 +840,7 @@ impl ProceduralSweep {
                     (lo.min(w), hi.max(w))
                 })
         };
-        let cos_h = self.half.cos();
+        let cos_h = det::cos(self.half);
         let mut dist = 0.0_f64;
         let mut reach = 0.0_f64;
         for &p in &c.control_points {
@@ -1196,7 +1197,7 @@ mod tests {
     fn atan_is_enclosed() {
         for x in [0.0, 1e-9, 0.05, 0.0985, 0.19891, 0.5] {
             let e = atan_point(x);
-            let y = f64::atan(x);
+            let y = det::atan(x);
             assert!(e.lo <= y && y <= e.hi, "{x}: {e:?} misses {y}");
             assert!(e.hi - e.lo <= 1e-13 * y + 1e-290, "{x}: {e:?} is loose");
         }
@@ -1209,9 +1210,9 @@ mod tests {
     #[test]
     fn the_lift_error_bound_is_its_maximum() {
         for half in [MAX_HALF_ANGLE, 0.1, 1e-3] {
-            let tau = (0.5 * half).tan();
-            let k = 2.0 * (1.0 + tau * tau) * tau.atan() / tau;
-            let e = |x: f64| k * x / (1.0 + x * x) - 2.0 * x.atan();
+            let tau = det::tan(0.5 * half);
+            let k = 2.0 * (1.0 + tau * tau) * det::atan(tau) / tau;
+            let e = |x: f64| k * x / (1.0 + x * x) - 2.0 * det::atan(x);
             let bound = lift_error_bound(tau);
             let mut most = 0.0_f64;
             for i in 0..=20_000 {
@@ -1230,7 +1231,7 @@ mod tests {
     #[test]
     fn the_offset_error_bound_holds_and_is_tight() {
         for half in [MAX_HALF_ANGLE, 0.05] {
-            let tau = (0.5 * half).tan();
+            let tau = det::tan(0.5 * half);
             let bound = offset_error_bound(tau);
             let mut most = 0.0_f64;
             for i in 0..=20_000 {

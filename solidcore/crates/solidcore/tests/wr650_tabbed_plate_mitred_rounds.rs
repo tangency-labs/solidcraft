@@ -20,6 +20,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use solidcore::blend::fillet_executive::session::FilletSession;
@@ -40,7 +41,7 @@ const H: f64 = 2.0;
 const R: f64 = 0.5;
 
 fn theta() -> f64 {
-    (4.0_f64 / 25.0).acos()
+    det::acos(4.0_f64 / 25.0)
 }
 
 fn y0() -> f64 {
@@ -90,7 +91,7 @@ fn area(da: f64, dt: f64) -> f64 {
     let rho = 2.0 - dt;
     let tab = rho * rho * PI + 2.0 * rho * (2.0 + cy) + 4.0 * (cy + rho);
     let yc = (big * big - (4.0 - dt) * (4.0 - dt)).sqrt();
-    let at = yc.atan2(4.0 - dt);
+    let at = det::atan2(yc, 4.0 - dt);
     0.5 * (big * big * (PI + 2.0 * at) + tab) + (4.0 - dt) * (cy - yc)
 }
 
@@ -101,8 +102,8 @@ fn want_removed() -> f64 {
     (0..n)
         .map(|i| {
             let phi = (f64::from(i) + 0.5) * dphi;
-            let d = R * (1.0 - phi.cos());
-            (area(0.0, 0.0) - area(d, d)) * R * phi.cos() * dphi
+            let d = R * (1.0 - det::cos(phi));
+            (area(0.0, 0.0) - area(d, d)) * R * det::cos(phi) * dphi
         })
         .sum()
 }

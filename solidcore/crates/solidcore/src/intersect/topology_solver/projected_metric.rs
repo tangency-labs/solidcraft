@@ -15,6 +15,7 @@
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::V3;
 use crate::geom::extent3d::Extent3d;
+use crate::math::det;
 use crate::math::Vec3;
 
 /// The interval cross product `a x b`.
@@ -98,7 +99,7 @@ pub(super) fn directed_box_range(
     let q_sq = norm_squared(q);
     // Within the angle means |Q x dir|^2 <= sin^2(angle) |Q|^2 |dir|^2. The
     // sine is rounded up so the limit can only admit more.
-    let sin = ang_tol_deg.to_radians().sin() * (1.0 + 1e-12);
+    let sin = det::sin(ang_tol_deg.to_radians()) * (1.0 + 1e-12);
     let limit = Ivl::from(sin * sin) * q_sq * norm_squared(dir);
     let admissible = norm_squared(cross(q, dir)).lo <= limit.hi;
     Some(DirectedRange {

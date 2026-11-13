@@ -16,6 +16,7 @@
 //! upstream `.smc` file (`{"smc": {"$upstream_file": "curve0.smc"}}`). Every run has
 //! at least [`MIN_GENERATED`] generated cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -169,7 +170,7 @@ fn to_curve(c: &InlineCrv) -> Result<Curve, HarnessError> {
 /// axes as given, as the runner's default end points; identical on both sides).
 fn circle_pt(cen: [f64; 3], x: [f64; 3], y: [f64; 3], rad: f64, ang: f64) -> [f64; 3] {
     let t = ang.to_radians();
-    let (s, c) = t.sin_cos();
+    let (s, c) = det::sin_cos(t);
     let nx = (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt();
     let ny = (y[0] * y[0] + y[1] * y[1] + y[2] * y[2]).sqrt();
     let (nx, ny) = (if nx > 0.0 { nx } else { 1.0 }, if ny > 0.0 { ny } else { 1.0 });
@@ -336,7 +337,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 // ---- generator --------------------------------------------------------------------
 
 fn log_uniform(rng: &mut Rng, lo: f64, hi: f64) -> f64 {
-    (rng.uniform(lo.ln(), hi.ln())).exp()
+    det::exp(rng.uniform(det::ln(lo), det::ln(hi)))
 }
 
 /// A random clamped curve: degree `1..=4`, interior knots possibly repeated (up to

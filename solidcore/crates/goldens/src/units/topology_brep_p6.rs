@@ -14,6 +14,7 @@
 //! post-operation graph (the `topology.brep_p10` traversal, with edge marks).
 
 
+use solidcore::math::det;
 use super::topology_brep_p10::{orient_code, Graph};
 use super::topology_vertexuse::{self as shared, BrepIn, CrvIn, SrfIn};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -1054,7 +1055,7 @@ fn plain_face(surface: SrfIn, cycles: &[&[usize]]) -> FaceIn {
 /// loop vertex), shared edges, open boxes, flat and saddle B-spline patches, at
 /// random scales and offsets, with random flags and orientations.
 fn gen_faces(rng: &mut Rng) -> Inputs {
-    let s = 10f64.powf(rng.uniform(-4.0, 3.0));
+    let s = det::powf(10f64, rng.uniform(-4.0, 3.0));
     let (x, y, z) = (
         rng.uniform(-2.0, 2.0) * s,
         rng.uniform(-2.0, 2.0) * s,

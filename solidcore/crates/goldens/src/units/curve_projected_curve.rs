@@ -31,6 +31,7 @@
 //! the operation's defined domain and is rejected by the native side, so the case is
 //! never compared; a borrowed Hermite base is valid.
 
+use solidcore::math::det;
 use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
@@ -1104,7 +1105,7 @@ fn gen_transform(rng: &mut Rng) -> OpIn {
         };
     }
     let ang = rng.uniform(0.0, 6.0);
-    let (s, c) = ang.sin_cos();
+    let (s, c) = det::sin_cos(ang);
     let scale = if rng.chance(0.4) {
         if rng.chance(0.5) {
             let f = rng.uniform(0.5, 2.0);

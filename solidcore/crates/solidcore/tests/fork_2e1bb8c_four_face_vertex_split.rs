@@ -33,6 +33,7 @@ use offset_fixture::{api_shell, planar_faces_at, volume};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
 use solidcore::kernel::UpstreamFixes;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::query::api_queries::brep_is_manifold_solid;
@@ -49,7 +50,7 @@ const T: f64 = 2.0;
 
 /// The drain's depth below the bottom edges: the long sides' facets fall 1 degree.
 fn drain_depth() -> f64 {
-    (LY / 2.0) * 1.0_f64.to_radians().tan()
+    (LY / 2.0) * det::tan(1.0_f64.to_radians())
 }
 
 /// A solid from planar polygons (each a closed loop of corner points), stitched and

@@ -20,6 +20,7 @@
 //! (the edge owning it is skipped). The runner reads the file's B-rep with the Rust
 //! reader (`file_brep`, `crate::own_reader`), as for `edge` / `face`.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -244,7 +245,7 @@ fn tolerance(rng: &mut Rng) -> f64 {
         4 => 0.1,
         5 => 1.0,
         6 => 1.0e3,
-        _ => 10f64.powi(rng.range_i64(-10, 2) as i32) * rng.uniform(0.5, 2.0),
+        _ => det::powi(10f64, rng.range_i64(-10, 2) as i32) * rng.uniform(0.5, 2.0),
     }
 }
 

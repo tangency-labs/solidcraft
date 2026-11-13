@@ -26,6 +26,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
+use crate::math::det;
 use std::borrow::Cow;
 
 use crate::curve::curve::Curve;
@@ -656,7 +657,7 @@ fn form_angles(
     ry: f64,
 ) -> Result<Option<Extent1d>> {
     let d = nurbs.evaluate_point(nurbs.natural_interval().min())? - o;
-    let a0 = (d.dot(y) / ry).atan2(d.dot(x) / rx).to_degrees();
+    let a0 = det::atan2(d.dot(y) / ry, d.dot(x) / rx).to_degrees();
     let Some(mut sweep) = conic_turn(nurbs, o, x, y, rx, ry)? else {
         return Ok(None);
     };

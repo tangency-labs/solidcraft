@@ -103,6 +103,7 @@ use crate::geom::tol::{are_same_to_tol, is_zero};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos as sm_acos, sqrt as sm_sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
@@ -315,7 +316,7 @@ pub fn parallelogram_cross_vectors(
     let base = base.unitize()?;
     let side = side.unitize()?;
     let angle = base.angle_between(side)?;
-    let sine_angle = angle.sin();
+    let sine_angle = det::sin(angle);
     let leng_side = distance_top_to_bottom / sine_angle;
     let leng_bot = distance_between_sides / sine_angle;
     let low_left_to_up_right = base * leng_bot + side * leng_side;
@@ -2518,7 +2519,7 @@ mod tests {
         let best = squared_residual(&rect, line.line_vec);
         for i in 0..360 {
             let a = f64::from(i).to_radians();
-            let dir = v(a.cos(), a.sin(), 0.0);
+            let dir = v(det::cos(a), det::sin(a), 0.0);
             assert!(best <= squared_residual(&rect, dir) + 1e-9);
         }
         assert!(best < squared_residual(&rect, Vec3::Y));

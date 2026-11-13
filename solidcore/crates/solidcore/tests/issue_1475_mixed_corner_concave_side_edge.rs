@@ -23,6 +23,7 @@ use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::topology::brep::p1 as bp1;
@@ -153,7 +154,7 @@ fn round(fix: bool, radius: f64) -> (Kernel, Brep, Result<(), (solidcore::SolidE
 /// (|y| <= 15, x >= 0) through the bar's height.
 fn body_volume() -> f64 {
     let pi = core::f64::consts::PI;
-    let overlap = 10.0 * (15.0 * 175f64.sqrt() + 400.0 * 0.75f64.asin());
+    let overlap = 10.0 * (15.0 * 175f64.sqrt() + 400.0 * det::asin(0.75f64));
     100.0 * 30.0 * 10.0 + pi * 20.0 * 20.0 * 20.0 - overlap
 }
 
@@ -195,7 +196,7 @@ fn corner_builds_with_the_fix() {
             let v = volume(&k, &mut b);
             let estimate = body_volume() + 28.9190 - 74.0736;
             assert!(
-                (v - estimate).abs() < (2.0 * radius).powi(3),
+                (v - estimate).abs() < det::powi(2.0 * radius, 3),
                 "{v} vs {estimate}"
             );
         }

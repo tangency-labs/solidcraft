@@ -10,6 +10,7 @@ use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_THUMBWEIGHT_EQU
 use solidcore::blend::fillet_section::smooth_interior::correction_kernels;
 use solidcore::blend::fillet_section::smooth_interior_plan::SmoothInteriorPlan;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, KnotType};
 use solidcore::nurbs::b_spline_surface::{
@@ -137,7 +138,7 @@ fn normal(d: &[Vec<Vec3>]) -> Vec3 {
 fn normal_jump(a: &[Vec<Vec3>], b: &[Vec<Vec3>]) -> f64 {
     // atan2 retains accuracy near zero; acos(dot) loses the 1e-9 gate.
     let (a, b) = (normal(a), normal(b));
-    a.cross(b).length().atan2(a.dot(b))
+    det::atan2(a.cross(b).length(), a.dot(b))
 }
 
 fn s_curvature(d: &[Vec<Vec3>]) -> f64 {

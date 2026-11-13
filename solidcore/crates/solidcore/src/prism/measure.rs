@@ -25,6 +25,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
+use crate::math::det;
 use std::collections::BTreeSet;
 use std::f64::consts::{PI, TAU};
 
@@ -236,8 +237,8 @@ fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Opti
         // rank-one weights keep the normalized convex coefficients; their error is bounded by the
         // positive least weight
         let error = 2.0 * variation
-            + 8.0 * magnitude * rank_error / min_w.powi(2)
-            + 2048.0 * f64::EPSILON * magnitude / min_w.powi(2);
+            + 8.0 * magnitude * rank_error / det::powi(min_w, 2)
+            + 2048.0 * f64::EPSILON * magnitude / det::powi(min_w, 2);
         best = best.min(error);
     }
     best.is_finite().then_some(best)
@@ -263,7 +264,7 @@ fn segment_same(a: &Seg2, b: &Seg2, tolerance: f64) -> bool {
                 sweep: s,
             },
         ) => {
-            let at = |angle: f64, radius: f64| Vec2::new(angle.cos(), angle.sin()) * radius;
+            let at = |angle: f64, radius: f64| Vec2::new(det::cos(angle), det::sin(angle)) * radius;
             center.distance(c) <= tolerance
                 && (radius - r).abs() <= tolerance
                 && (sweep.abs() - s.abs()).abs() * radius <= tolerance
@@ -810,7 +811,7 @@ fn separated_material(loops: &[CapLoop], clearance: f64, work: &mut usize) -> Op
             let Seg2::Line { a, b } = *s else { return None };
             let x = b - a;
             let y = nx.end() - nx.start();
-            turn += cross2(x, y).atan2(x.dot(y));
+            turn += det::atan2(cross2(x, y), x.dot(y));
             angular_error += clearance * 8.0 / x.length() + 256.0 * f64::EPSILON;
             for (j, t) in outer.segments.iter().enumerate() {
                 if i != j && a.distance(t.start()) <= clearance {

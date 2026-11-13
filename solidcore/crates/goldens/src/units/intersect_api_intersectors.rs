@@ -18,6 +18,7 @@
 //! points), or the count and samples of every 3D curve (type code, natural interval, five
 //! evaluated points) and the points. Operands the Rust constructors refuse are `rejected`.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::Curve;
@@ -943,7 +944,7 @@ fn gen_analytic(rng: &mut Rng, scale: f64) -> SurfaceIn {
 /// Two analytic surfaces: independent, or the second a copy of the first moved by a
 /// tiny or a tolerance-sized offset (coincident, near-tangent and touching pairs).
 fn gen_ssi(rng: &mut Rng) -> Option<Value> {
-    let scale = 10f64.powi(rng.range_i64(-1, 2) as i32);
+    let scale = det::powi(10f64, rng.range_i64(-1, 2) as i32);
     let surface1 = gen_analytic(rng, scale);
     let surface2 = if rng.chance(0.3) {
         let mut s = surface1.clone();
@@ -1074,7 +1075,7 @@ fn gen_body_curve(rng: &mut Rng, scale: f64, body: &BodyIn) -> CurveIn {
 
 /// A curve/surface, curve/face or curve/B-rep case.
 fn gen_hit(rng: &mut Rng) -> Option<Value> {
-    let scale = 10f64.powi(rng.range_i64(-1, 2) as i32);
+    let scale = det::powi(10f64, rng.range_i64(-1, 2) as i32);
     let i = match rng.below(3) {
         0 => {
             if rng.chance(0.4) {
@@ -1168,7 +1169,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let scale = 10f64.powi(rng.range_i64(-1, 2) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-1, 2) as i32);
         let i = match rng.below(4) {
             0 => {
                 let curve1 = gen_curve(rng, scale);

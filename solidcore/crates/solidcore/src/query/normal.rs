@@ -542,6 +542,7 @@ mod tests {
     use crate::curve::curve::Curve;
     use crate::curve::line::Line;
     use crate::geom::axis2_placement::Axis2Placement;
+    use crate::math::det;
     use crate::math::Point3;
     use crate::surface::ball_patch::BallPatch;
     use crate::surface::curve_bounded_surface::CurveBoundedSurface;
@@ -880,9 +881,9 @@ mod tests {
         } else {
             Vec3::new(0.0, 1.0, 0.0)
         };
-        let moved = n.value * t.cos() + other * t.sin();
+        let moved = n.value * det::cos(t) + other * det::sin(t);
         let m = certify(&k, s, uv, moved, Sense::Surface).unwrap();
-        let chord = 2.0 * (t / 2.0).sin();
+        let chord = 2.0 * det::sin(t / 2.0);
         assert!(m.bound >= chord * (1.0 - 1e-9), "{} vs {chord}", m.bound);
         assert!(m.bound <= chord + 1e-12, "{} vs {chord}", m.bound);
     }

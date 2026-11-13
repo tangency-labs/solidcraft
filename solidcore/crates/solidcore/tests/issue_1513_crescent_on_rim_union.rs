@@ -24,6 +24,7 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
+use solidcore::math::det;
 use std::f64::consts::PI;
 
 use offset_fixture::volume;
@@ -47,11 +48,11 @@ const R: f64 = 10.0;
 /// meet at x = 8.2 in the crescent's frame.
 fn crescent_swept(k: &mut Kernel, angle_deg: f64) -> Brep {
     let y = (R * R - 8.2 * 8.2).sqrt();
-    let big = y.atan2(8.2).to_degrees();
-    let small = y.atan2(8.2 - R).to_degrees();
+    let big = det::atan2(y, 8.2).to_degrees();
+    let small = det::atan2(y, 8.2 - R).to_degrees();
     let centre = Vec3::new(
-        R * angle_deg.to_radians().cos(),
-        R * angle_deg.to_radians().sin(),
+        R * det::cos(angle_deg.to_radians()),
+        R * det::sin(angle_deg.to_radians()),
         0.0,
     );
     let inner = Curve::from(
@@ -71,8 +72,8 @@ fn crescent_swept(k: &mut Kernel, angle_deg: f64) -> Brep {
 /// The crescent prism as the r 6 cylinder minus the r 10 one.
 fn crescent_booleaned(k: &mut Kernel, angle_deg: f64) -> Brep {
     let centre = Vec3::new(
-        R * angle_deg.to_radians().cos(),
-        R * angle_deg.to_radians().sin(),
+        R * det::cos(angle_deg.to_radians()),
+        R * det::sin(angle_deg.to_radians()),
         0.0,
     );
     let small = create_cylinder(k, centre, 6.0, 10.0).unwrap();
@@ -83,8 +84,8 @@ fn crescent_booleaned(k: &mut Kernel, angle_deg: f64) -> Brep {
 /// The volume of the union of the r 10 and r 6 cylinders (h 10) whose axes are 10 apart.
 fn expected_volume() -> f64 {
     let (r, d) = (6.0_f64, R);
-    let lens = r * r * ((d * d + r * r - R * R) / (2.0 * d * r)).acos()
-        + R * R * ((d * d + R * R - r * r) / (2.0 * d * R)).acos()
+    let lens = r * r * det::acos((d * d + r * r - R * R) / (2.0 * d * r))
+        + R * R * det::acos((d * d + R * R - r * r) / (2.0 * d * R))
         - 0.5 * ((-d + r + R) * (d + r - R) * (d - r + R) * (d + r + R)).sqrt();
     (PI * (R * R + r * r) - lens) * 10.0
 }

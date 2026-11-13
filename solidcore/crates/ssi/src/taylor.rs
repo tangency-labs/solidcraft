@@ -14,6 +14,7 @@
 
 use crate::field::{casteljau_level, Bern};
 use crate::piece::{cross, dot, norm, scale, sub, unit, Piece, V3};
+use solidcore::math::det;
 
 /// A power series in (x, y) truncated at total order n: the coefficient of
 /// x^(d - j) y^j at d (d + 1) / 2 + j.
@@ -111,7 +112,7 @@ impl Series {
         let mut total = 0.0;
         for d in 0..=self.n {
             for j in 0..=d {
-                total += self.coef(d, j) * x.powi((d - j) as i32) * y.powi(j as i32);
+                total += self.coef(d, j) * det::powi(x, (d - j) as i32) * det::powi(y, j as i32);
             }
         }
         total
@@ -121,7 +122,7 @@ impl Series {
     #[cfg(test)]
     pub fn order_bound(&self, d: usize, a: f64, b: f64) -> f64 {
         (0..=d)
-            .map(|j| self.coef(d, j).abs() * a.powi((d - j) as i32) * b.powi(j as i32))
+            .map(|j| self.coef(d, j).abs() * det::powi(a, (d - j) as i32) * det::powi(b, j as i32))
             .sum()
     }
 
@@ -136,7 +137,9 @@ impl Series {
         let line = |start: f64, width: f64, e: usize| -> Vec<f64> {
             // (start + width p)^e in powers of p.
             (0..=e)
-                .map(|k| binom(e, k) * start.powi((e - k) as i32) * width.powi(k as i32))
+                .map(|k| {
+                    binom(e, k) * det::powi(start, (e - k) as i32) * det::powi(width, k as i32)
+                })
                 .collect()
         };
         let mut m = vec![vec![0.0; n + 1]; n + 1];
@@ -351,7 +354,7 @@ fn quotient_bounds(
     if !(floor > 0.0) {
         return None;
     }
-    let scale_of = |i: usize, j: usize| ws.powi(i as i32) * wt.powi(j as i32);
+    let scale_of = |i: usize, j: usize| det::powi(ws, i as i32) * det::powi(wt, j as i32);
     let mut hmax = vec![vec![0.0; order + 1]; order + 1];
     let mut wmax = vec![vec![0.0; order + 1]; order + 1];
     for i in 0..=order {
@@ -734,8 +737,9 @@ fn exact_quotient_bounds(
                 .iter()
                 .map(Bern::max_abs)
                 .fold(0.0, f64::max);
-            *entry_mut(&mut q, i, j)? =
-                largest / floor.powi((total + 1) as i32) / (ws.powi(i as i32) * wt.powi(j as i32));
+            *entry_mut(&mut q, i, j)? = largest
+                / det::powi(floor, (total + 1) as i32)
+                / (det::powi(ws, i as i32) * det::powi(wt, j as i32));
         }
     }
     Some(q)
@@ -796,7 +800,7 @@ fn derivative_bands(
             .iter()
             .map(|p| partial(p, i, j).max_abs())
             .fold(0.0, f64::max)
-            / (ws.powi(i as i32) * wt.powi(j as i32))
+            / (det::powi(ws, i as i32) * det::powi(wt, j as i32))
     };
     let p1 = pmax(1, 0).max(pmax(0, 1));
     let p2 = pmax(2, 0).max(pmax(1, 1)).max(pmax(0, 2));
@@ -940,7 +944,7 @@ mod tests {
         eprintln!(
             "A local ({sa:.6}, {ta:.6}) at {:?}, B local ({ub:.6}, {vb:.6}); normals' angle {:.2e}; |A_s| {:.3} |A_t| {:.3}",
             ea.point,
-            dot(dir, nb).abs().min(1.0).acos(),
+            det::acos(dot(dir, nb).abs().min(1.0)),
             norm(ea.ds),
             norm(ea.dt)
         );

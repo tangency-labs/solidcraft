@@ -30,6 +30,7 @@
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::p2::is_manifold_solid;
@@ -51,7 +52,7 @@ fn kernel(rail_end_on_continued_surface: bool) -> Kernel {
 /// and `h` wide, in closed form (as `wr631_cliff_overflow_construction`).
 fn removed_area(r: f64, w: f64, h: f64) -> f64 {
     let a = w.min(r);
-    let f = |s: f64| s / 2.0 * (r * r - s * s).max(0.0).sqrt() + r * r / 2.0 * (s / r).asin();
+    let f = |s: f64| s / 2.0 * (r * r - s * s).max(0.0).sqrt() + r * r / 2.0 * det::asin(s / r);
     let u_h = if h >= r {
         0.0
     } else {

@@ -1649,6 +1649,7 @@ mod tests {
     use crate::curve::line::Line;
     use crate::geom::extent1d::Extent1d;
     use crate::geom::tol::ZONE_TOL_3D;
+    use crate::math::det;
     use crate::topology::{Edge, Edgeuse, EdgeuseOwner, Region, Shell, Vertex, Vertexuse};
 
     /// A chain of wire edges v0 - v1 - v2 along `dirs`, each from a vertex to the next,
@@ -1981,7 +1982,7 @@ mod tests {
 
         let dir_deg = |deg: f64| -> Vec3 {
             let rad = deg * (PI / 180.0);
-            Vec3::new(rad.cos(), rad.sin(), 0.0)
+            Vec3::new(det::cos(rad), det::sin(rad), 0.0)
         };
 
         // Line-chain cases: (d2, expected)

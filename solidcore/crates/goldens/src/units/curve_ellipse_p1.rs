@@ -14,6 +14,7 @@
 //! out-of-plane normal (`SmCurve::IsArc` / the offset approximation), and point solves
 //! that reach unported solver pieces (see the report's `deferred_by_unit`).
 
+use solidcore::math::det;
 use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
@@ -1678,7 +1679,7 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
                 } else {
                     round(rng.uniform(-1.0, 1.0))
                 };
-                *p = [c[0] + r * t.cos(), c[1] + r * t.sin(), c[2] + z];
+                *p = [c[0] + r * det::cos(t), c[1] + r * det::sin(t), c[2] + z];
             }
             if rng.chance(0.05) {
                 pts[2] = pts[1]; // coincident points
@@ -1833,12 +1834,12 @@ fn raw_arc(
     [t0, len]: [f64; 2],
 ) -> SourceJ {
     let d = (a1 - a0) / spans as f64;
-    let pt = |a: f64, rr: f64| add3(c, add3(scale3(u, rr * a.cos()), scale3(v, rr * a.sin())));
+    let pt = |a: f64, rr: f64| add3(c, add3(scale3(u, rr * det::cos(a)), scale3(v, rr * det::sin(a))));
     let hw = |p: [f64; 3], w: f64| {
         let w = w * wscale;
         [p[0] * w, p[1] * w, p[2] * w, w]
     };
-    let w1 = (0.5 * d).cos();
+    let w1 = det::cos(0.5 * d);
     let mut cpts = vec![hw(pt(a0, r), 1.0)];
     let mut knots = vec![t0; 3];
     for i in 0..spans {
@@ -2199,8 +2200,8 @@ fn gen_nurb_circle(rng: &mut Rng) -> Inputs {
     } else {
         None
     };
-    let r = 10f64.powf(rng.uniform(-6.0, 5.0));
-    let c = scale3(rng.point3(-1.0, 1.0), 10f64.powf(rng.uniform(-3.0, 5.0)));
+    let r = det::powf(10f64, rng.uniform(-6.0, 5.0));
+    let c = scale3(rng.point3(-1.0, 1.0), det::powf(10f64, rng.uniform(-3.0, 5.0)));
     match rng.below(4) {
         0 => {
             let f = gen_frame(rng);
@@ -2213,7 +2214,7 @@ fn gen_nurb_circle(rng: &mut Rng) -> Inputs {
             let rr = 2.0
                 * (1.0
                     + if rng.chance(0.5) {
-                        10f64.powf(rng.uniform(-14.0, -2.0))
+                        det::powf(10f64, rng.uniform(-14.0, -2.0))
                     } else {
                         0.0
                     });
@@ -2228,12 +2229,12 @@ fn gen_nurb_circle(rng: &mut Rng) -> Inputs {
             let spans = min_spans.max(1) + rng.below(2) as usize;
             let a0 = rng.uniform(-PI, PI);
             let pl = plane(gen_dir(rng), gen_dir(rng));
-            let wscale = 10f64.powf(rng.uniform(-1.0, 1.0));
+            let wscale = det::powf(10f64, rng.uniform(-1.0, 1.0));
             let t0 = rng.uniform(-10.0, 10.0);
-            let len = 10f64.powf(rng.uniform(-2.0, 2.0));
+            let len = det::powf(10f64, rng.uniform(-2.0, 2.0));
             let mut src = raw_arc(c, pl, r, [a0, a0 + total], spans, wscale, [t0, len]);
             let n = 2 * spans + 1;
-            let e = 10f64.powf(rng.uniform(-15.0, -2.0));
+            let e = det::powf(10f64, rng.uniform(-15.0, -2.0));
             let i = rng.below(n as u64) as usize;
             src = match rng.below(4) {
                 0 => tweak_weight(src, i, e),

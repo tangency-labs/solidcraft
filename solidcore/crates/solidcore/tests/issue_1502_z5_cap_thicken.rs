@@ -36,6 +36,7 @@
 mod offset_fixture;
 
 use core::f64::consts::PI;
+use solidcore::math::det;
 
 use offset_fixture::{planar_faces_at, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
@@ -109,7 +110,7 @@ fn wr463() -> Kernel {
 
 /// The sector between the sphere's radii 10 and 11 over the cap's solid angle pi.
 fn want() -> f64 {
-    PI / 3.0 * (11.0_f64.powi(3) - 10.0_f64.powi(3))
+    PI / 3.0 * (det::powi(11.0_f64, 3) - det::powi(10.0_f64, 3))
 }
 
 /// `SmApiBrepComputeVolume` at `accuracy`.
@@ -147,8 +148,8 @@ fn rim_edges(k: &Kernel, b: &Brep) -> Vec<(EdgeId, bool)> {
         for i in 0..=16 {
             let t = edge.interval.evaluate(f64::from(i) / 16.0);
             let p = curve.evaluate_point(k, t).unwrap();
-            on_rim &=
-                (p.z - 5.0).abs() <= 1e-9 && (p.x.hypot(p.y) - (75.0_f64).sqrt()).abs() <= 1e-9;
+            on_rim &= (p.z - 5.0).abs() <= 1e-9
+                && (det::hypot(p.x, p.y) - (75.0_f64).sqrt()).abs() <= 1e-9;
         }
         if on_rim {
             rim.push((e, closed));

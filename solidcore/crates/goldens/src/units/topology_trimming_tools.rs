@@ -45,6 +45,7 @@
 //! `SmLine` or `SmEllipse` is an `SmBSplineCurve` (`rv_ellipse.json`).
 
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -2399,7 +2400,7 @@ fn gen_surface_net(rng: &mut Rng, closed_u: bool) -> SrfIn {
                         // a tube around z: rows go round, the last equals the first
                         let a = std::f64::consts::TAU * (i % n) as f64 / n as f64;
                         let r = 1.0 + 0.3 * j as f64;
-                        (r * a.cos(), r * a.sin(), j as f64)
+                        (r * det::cos(a), r * det::sin(a), j as f64)
                     } else {
                         (i as f64, j as f64, rng.uniform(-0.5, 0.5))
                     };
@@ -2458,8 +2459,8 @@ fn gen_frame(rng: &mut Rng) -> ([f64; 3], [f64; 3], [f64; 3], f64) {
         _ => {
             let a = rng.uniform(0.0, std::f64::consts::TAU);
             let b = rng.uniform(-1.2, 1.2);
-            let e1 = [a.cos(), a.sin(), 0.0];
-            let e2 = [-a.sin() * b.cos(), a.cos() * b.cos(), b.sin()];
+            let e1 = [det::cos(a), det::sin(a), 0.0];
+            let e2 = [-det::sin(a) * det::cos(b), det::cos(a) * det::cos(b), det::sin(b)];
             (e1, e2)
         }
     };
@@ -2549,7 +2550,7 @@ fn gen_loop(
         .map(|i| {
             let a = a0 + std::f64::consts::TAU * i as f64 / n as f64;
             let rr = r * rng.uniform(0.7, 1.0);
-            at(o, e1, e2, s, cx + rr * a.cos(), cy + rr * a.sin())
+            at(o, e1, e2, s, cx + rr * det::cos(a), cy + rr * det::sin(a))
         })
         .collect();
     let mut cs = Vec::new();

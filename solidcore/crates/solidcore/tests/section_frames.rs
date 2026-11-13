@@ -7,6 +7,7 @@
     clippy::indexing_slicing
 )]
 
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -51,7 +52,7 @@ fn a_cylinder_rim_left_down_its_wall_is_straight() {
     let frames = section_frames(&k, &b, &[rim], Vec3::new(0.0, 0.0, -1.0), &opts(9)).unwrap();
     assert_eq!(frames.len(), 9);
     for f in &frames {
-        assert!((f.p.z - 10.0).abs() <= 1e-9 && (f.p.x.hypot(f.p.y) - 5.0).abs() <= 1e-9);
+        assert!((f.p.z - 10.0).abs() <= 1e-9 && (det::hypot(f.p.x, f.p.y) - 5.0).abs() <= 1e-9);
         assert!(
             near(f.leave, Vec3::new(0.0, 0.0, -1.0), 1e-12),
             "{:?}",

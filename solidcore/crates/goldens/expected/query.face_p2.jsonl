@@ -106,7 +106,7 @@
 {"case":"gen0098","deferred":null,"error":null,"ints":{},"topology":null,"values":{"proto":[0.0,1665.1374714618203,1.0,1.0]}}
 {"case":"gen0099","deferred":null,"error":null,"ints":{},"topology":null,"values":{"has_trim_cache":[0.0],"pc":[100.0,0.0,-1.0,0.0,0.0001,1e+20,0.0,0.0,0.0,0.0],"status":[0.0]}}
 {"case":"gen0100","deferred":null,"error":null,"ints":{},"topology":null,"values":{"curve_classification":{"blocks":[[4e+20,4e+20,1.48e+22]],"n":67}}}
-{"case":"gen0101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"has_trim_cache":[0.0],"pc":[103.0,2.0,11.0,0.001576157663891597,0.00001,1e+20,3.870176837808246,0.0,0.0,1.0],"status":[0.0]}}
+{"case":"gen0101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"has_trim_cache":[0.0],"pc":[103.0,2.0,11.0,0.0015761576638947305,0.00001,1e+20,3.870176837808244,0.0,0.0,1.0],"status":[0.0]}}
 {"case":"gen0102","deferred":null,"error":null,"ints":{},"topology":null,"values":{"has_trim_cache":[0.0],"pc":[102.0,1.0,0.0,0.0,0.001,1e+20,0.0,0.8703071860190117,0.5784188781527051,1.0],"status":[0.0]}}
 {"case":"gen0103","deferred":null,"error":null,"ints":{},"topology":null,"values":{"which":[0.0]}}
 {"case":"gen0104","deferred":null,"error":null,"ints":{},"topology":null,"values":{"proto":[0.0,1320.3758184417788,100.0,100.0]}}

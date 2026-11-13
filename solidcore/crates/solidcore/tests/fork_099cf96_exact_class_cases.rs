@@ -72,6 +72,7 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::vector2d::Point2;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::primitive::api_primitives::{create_cone, create_cylinder, create_sphere};
@@ -91,7 +92,7 @@ const DOWN: V3 = [0.0, 0.0, -1.0];
 /// The ball R 10 below z = 4 less the round r 2 on its whole rim, in closed form.
 fn sphere_plane_closed_form() -> f64 {
     let cut_ball = 4000.0 * PI / 3.0 - 288.0 * PI;
-    let ring = 2.0 * 60f64.sqrt() * (PI - 3.75f64.sqrt() / 4.0 - 2.0 * 0.25f64.asin());
+    let ring = 2.0 * 60f64.sqrt() * (PI - 3.75f64.sqrt() / 4.0 - 2.0 * det::asin(0.25f64));
     cut_ball - PI * (40.5 - ring)
 }
 
@@ -130,7 +131,7 @@ impl Quadric {
             Self::Cylinder(p, d, r) => (parts(p, d).1 - r).abs(),
             Self::Cone(p, d, half) => {
                 let (along, across, _) = parts(p, d);
-                (across * half.cos() - along * half.sin()).abs()
+                (across * det::cos(half) - along * det::sin(half)).abs()
             }
             Self::Sphere(p, r) => (parts(p, Z_AXIS).2.sqrt() - r).abs(),
         }
@@ -203,7 +204,7 @@ fn oblique_plane_cylinder(k: &mut Kernel) -> Result<Brep> {
 /// A frustum about z, R 10 at z = 0 narrowing at 10 degrees, 30 high, cut by the plane
 /// z = 15 + 0.3 x.
 fn oblique_plane_cone(k: &mut Kernel) -> Result<Brep> {
-    let ta = 10f64.to_radians().tan();
+    let ta = det::tan(10f64.to_radians());
     let cone = create_cone(k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0 - 30.0 * ta, 30.0)?;
     let cut = cutter(k, [0.0, 0.0, 15.0], oblique_cone_normal())?;
     boolean_difference(k, cone, cut)
@@ -237,7 +238,13 @@ fn cone_cylinder_sharing_a_ball(k: &mut Kernel) -> Result<Brep> {
     let a = 10.0 * 2f64.sqrt();
     let cone = create_cone(k, Point3::new(0.0, 0.0, -10.0), a + 10.0, 0.0, a + 10.0)?;
     let post = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 30.0)?;
-    let post = placed(k, post, [g.cos(), 0.0, -g.sin()], Y_AXIS, [0.0, 0.0, 0.0])?;
+    let post = placed(
+        k,
+        post,
+        [det::cos(g), 0.0, -det::sin(g)],
+        Y_AXIS,
+        [0.0, 0.0, 0.0],
+    )?;
     boolean_union(k, cone, post)
 }
 
@@ -265,21 +272,22 @@ fn tee(k: &mut Kernel) -> Result<Brep> {
 fn cases() -> Vec<Case> {
     let h = 0.5f64.sqrt();
     let al = 10f64.to_radians();
-    let (ta, za) = (al.tan(), 10.0 / al.tan());
+    let (ta, za) = (det::tan(al), 10.0 / det::tan(al));
     let rho = (za - 15.0) * ta / (1.0 + 0.3 * ta * h);
     let ze = (1.0 + (1.0 + 4.0 * 1.01 * 75.0f64).sqrt()) / (2.0 * 1.01);
     let g = 20f64.to_radians();
     let a = 10.0 * 2f64.sqrt();
-    let u = [g.sin(), 0.0, g.cos()];
-    let s = (a * g.cos() - (a * a * g.cos() * g.cos() - 100.0 * (2.0 * g).cos()).sqrt())
-        / (2.0 * g).cos();
-    let zq = -5.0 - 5.0 * 1f64.cos();
+    let u = [det::sin(g), 0.0, det::cos(g)];
+    let s = (a * det::cos(g)
+        - (a * a * det::cos(g) * det::cos(g) - 100.0 * det::cos(2.0 * g)).sqrt())
+        / det::cos(2.0 * g);
+    let zq = -5.0 - 5.0 * det::cos(1f64);
     let yq = (100.0 - (zq + 10.0) * (zq + 10.0)).sqrt();
     // B's seam at (5, 5 sqrt 3, -5) splits the pipes' arc, and the fork's two points both lie
     // on its long piece. `hs` is halfway along the short one, from the seam (B's angle 0) to
     // the cut at z = -2 (B's angle asin 0.6).
-    let hs = 0.5 * 0.6f64.asin();
-    let zs = -5.0 + 5.0 * hs.sin();
+    let hs = 0.5 * det::asin(0.6f64);
+    let zs = -5.0 + 5.0 * det::sin(hs);
     let ys = (100.0 - (zs + 10.0) * (zs + 10.0)).sqrt();
     vec![
         Case {
@@ -290,8 +298,8 @@ fn cases() -> Vec<Case> {
             want: 1681.969921328409,
             kind: RoundKind::Revolved,
             faces: vec![
-                Quadric::Cone([0.0, 0.0, 20.0], DOWN, 0.5f64.atan()),
-                Quadric::Cone([0.0, 0.0, 9.2], DOWN, 5f64.atan()),
+                Quadric::Cone([0.0, 0.0, 20.0], DOWN, det::atan(0.5f64)),
+                Quadric::Cone([0.0, 0.0, 9.2], DOWN, det::atan(5f64)),
             ],
         },
         Case {
@@ -310,9 +318,9 @@ fn cases() -> Vec<Case> {
             name: "cylinders_touching_at_a_point",
             build: cylinders_touching_at_a_point,
             points: vec![
-                [5.0 * 1f64.sin(), yq, zq],
-                [-5.0 * 1f64.sin(), yq, zq],
-                [5.0 * hs.cos(), ys, zs],
+                [5.0 * det::sin(1f64), yq, zq],
+                [-5.0 * det::sin(1f64), yq, zq],
+                [5.0 * det::cos(hs), ys, zs],
             ],
             r: 1.0,
             want: 13442.703130586538,
@@ -355,7 +363,7 @@ fn cases() -> Vec<Case> {
             kind: RoundKind::Revolved,
             faces: vec![
                 Quadric::Sphere([0.0, 0.0, 0.0], 10.0),
-                Quadric::Cone([0.0, 0.0, 50.0], DOWN, 0.1f64.atan()),
+                Quadric::Cone([0.0, 0.0, 50.0], DOWN, det::atan(0.1f64)),
             ],
         },
         Case {

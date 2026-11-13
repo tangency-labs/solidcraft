@@ -42,6 +42,7 @@ use solidcore::blend::fillet_section::section::{GnFaces, GnSectionFsg};
 use solidcore::error::SolidError;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::vector2d::{Point2, Vec2};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, KnotType};
 use solidcore::nurbs::b_spline_surface::{
@@ -765,7 +766,7 @@ fn box_corner_round_moved(
         .weights
         .iter()
         .enumerate()
-        .map(|(i, &w)| w * rho.powi((i % nv) as i32))
+        .map(|(i, &w)| w * det::powi(rho, (i % nv) as i32))
         .collect();
     BSplineSurface::create_canonical(&CanonicalSurfaceData {
         u_degree: c.u_degree,

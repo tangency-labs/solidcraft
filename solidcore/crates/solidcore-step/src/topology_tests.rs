@@ -3,6 +3,7 @@
 //! their geometry's sense), each read, validated, spot-checked and its faces' sides checked
 //! against the material; hostile files are errors, never panics. Expected values are analytic.
 
+use solidcore::math::det;
 use std::fmt::Write as _;
 
 use super::*;
@@ -240,7 +241,7 @@ fn sides(b: &Brep) -> Vec<(usize, V, V)> {
             let m = 0.5 * (t0 + t1);
             let (a, c) = (solidcore_ops::pcurve::eval(&u.pcurve, m).unwrap(), solidcore_ops::pcurve::eval(&u.pcurve, m + 1e-4 * (t1 - t0)).unwrap());
             let along = if u.forward { [c[0] - a[0], c[1] - a[1]] } else { [a[0] - c[0], a[1] - c[1]] };
-            let n = (along[0].hypot(along[1])).max(1e-300);
+            let n = (det::hypot(along[0], along[1])).max(1e-300);
             let left = [-along[1] / n, along[0] / n];
             let uv = [a[0] + 1e-3 * left[0], a[1] + 1e-3 * left[1]];
             let (p, su, sv) = eval.derivs(uv[0], uv[1]).unwrap();
@@ -462,7 +463,7 @@ fn a_cone_reaches_its_apex_through_a_vertex_loop() {
     let e = w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"));
     // The cone widens down -z from its apex at z = 10 to radius 5 at z = 0.
     let a = w.axis([0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
-    let cone = w.add(format!("CONICAL_SURFACE('',#{a},5.,{})", real(0.5f64.atan())));
+    let cone = w.add(format!("CONICAL_SURFACE('',#{a},5.,{})", real(det::atan(0.5f64))));
     let o = w.oe(e, true);
     let outer = w.bound(&[o], true, true);
     let vl = w.add(format!("VERTEX_LOOP('',#{apex})"));
@@ -497,7 +498,7 @@ fn a_cone_with_its_seam_to_the_apex_gets_no_other() {
     let e = w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"));
     let seam = w.line_edge((v, p), (apex, top), true, len3(sub3(top, p)));
     let a = w.axis([0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
-    let cone = w.add(format!("CONICAL_SURFACE('',#{a},5.,{})", real(0.5f64.atan())));
+    let cone = w.add(format!("CONICAL_SURFACE('',#{a},5.,{})", real(det::atan(0.5f64))));
     let uses = [w.oe(e, true), w.oe(seam, true), w.oe(seam, false)];
     let outer = w.bound(&uses, true, true);
     let side = w.face(&[outer], cone, true);
@@ -519,8 +520,8 @@ fn a_cone_with_its_seam_to_the_apex_gets_no_other() {
 fn bands_and_caps_without_seams_get_one() {
     let mut w = W::default();
     let ring = |w: &mut W, r: f64, z: f64, at: f64| {
-        let v = w.vertex([r * at.cos(), r * at.sin(), z]);
-        let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [at.cos(), at.sin(), 0.0], r);
+        let v = w.vertex([r * det::cos(at), r * det::sin(at), z]);
+        let k = w.circle([0.0, 0.0, z], [0.0, 0.0, 1.0], [det::cos(at), det::sin(at), 0.0], r);
         w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
     };
     let (ob, ot, ib, it) = (ring(&mut w, 5.0, 0.0, 0.0), ring(&mut w, 5.0, 4.0, 1.0), ring(&mut w, 3.0, 0.0, 2.0), ring(&mut w, 3.0, 4.0, 3.0));
@@ -550,7 +551,7 @@ fn bands_and_caps_without_seams_get_one() {
     assert_eq!(counts(&s.brep), [2, 1, 4, 4 + 2 + 2, 4 + 2]);
     assert!(s.notes.iter().any(|n| n.contains("2 seam edges added")), "{:?}", s.notes);
     faces_away(&s.brep, 0, |p| {
-        let r = p[0].hypot(p[1]);
+        let r = det::hypot(p[0], p[1]);
         let k = 4.0 / r.max(1e-9);
         [p[0] * k, p[1] * k, p[2].clamp(1.0, 3.0)]
     });
@@ -595,7 +596,7 @@ fn a_band_narrower_than_its_tolerance_at_a_vertex_gets_its_seam_where_it_is_wide
         let mut w = W::default();
         // A 45 degree cone opening up +z, radius 1 at z = 0: radius 1 + z at height z.
         let r = |z: f64| 1.0 + z;
-        let at = |z: f64, angle: f64| [r(z) * angle.cos(), r(z) * angle.sin(), z];
+        let at = |z: f64, angle: f64| [r(z) * det::cos(angle), r(z) * det::sin(angle), z];
         let (lo, hi, rim) = (0.5, 0.95, 1.0);
         let t = PI / 3.0;
         let v_rim = w.vertex(at(rim, 0.0));
@@ -635,7 +636,7 @@ fn a_band_narrower_than_its_tolerance_at_a_vertex_gets_its_seam_where_it_is_wide
             (a[2] - b[2]).abs() > 0.475
         });
         let [a, b] = seam.unwrap().vertices.map(|v| s.brep.vertices[v as usize].point);
-        assert!(a[1].atan2(a[0]).abs() > 2.0 * t && b[1].atan2(b[0]).abs() > 2.0 * t, "seam at {a:?} {b:?}");
+        assert!(det::atan2(a[1], a[0]).abs() > 2.0 * t && det::atan2(b[1], b[0]).abs() > 2.0 * t, "seam at {a:?} {b:?}");
     }
 }
 
@@ -658,13 +659,13 @@ fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
     // The hole: a window from 10 degrees west of +x to 10 east, between latitudes 20 and 40,
     // bounded by two parallels and two meridians.
     let (west, east, south, north) = (-PI / 18.0, PI / 18.0, PI / 9.0, 2.0 * PI / 9.0);
-    let on = |lat: f64, lon: f64| [radius * lat.cos() * lon.cos(), radius * lat.cos() * lon.sin(), radius * lat.sin()];
+    let on = |lat: f64, lon: f64| [radius * det::cos(lat) * det::cos(lon), radius * det::cos(lat) * det::sin(lon), radius * det::sin(lat)];
     let (sw, se, ne, nw) = (w.vertex(on(south, west)), w.vertex(on(south, east)), w.vertex(on(north, east)), w.vertex(on(north, west)));
-    let s_edge = arc_about_z(&mut w, (sw, se), radius * south.cos(), radius * south.sin());
-    let n_edge = arc_about_z(&mut w, (nw, ne), radius * north.cos(), radius * north.sin());
+    let s_edge = arc_about_z(&mut w, (sw, se), radius * det::cos(south), radius * det::sin(south));
+    let n_edge = arc_about_z(&mut w, (nw, ne), radius * det::cos(north), radius * det::sin(north));
     // A meridian with its angle the latitude.
     let meridian = |w: &mut W, lon: f64, (a, b): (u64, u64)| {
-        let k = w.circle([0.0; 3], [lon.sin(), -lon.cos(), 0.0], [lon.cos(), lon.sin(), 0.0], radius);
+        let k = w.circle([0.0; 3], [det::sin(lon), -det::cos(lon), 0.0], [det::cos(lon), det::sin(lon), 0.0], radius);
         w.add(format!("EDGE_CURVE('',#{a},#{b},#{k},.T.)"))
     };
     let (w_edge, e_edge) = (meridian(&mut w, west, (sw, nw)), meridian(&mut w, east, (se, ne)));
@@ -692,7 +693,7 @@ fn a_band_whose_vertices_line_up_across_a_hole_gets_its_seam_clear_of_it() {
     });
     let seam = seam.unwrap_or_else(|| panic!("no seam from the foot to the top: {:?}", s.brep.vertices));
     let foot_end = seam.vertices.map(|v| s.brep.vertices[v as usize].point).into_iter().find(|p| p[2].abs() < 1e-9).unwrap();
-    let angle = foot_end[1].atan2(foot_end[0]);
+    let angle = det::atan2(foot_end[1], foot_end[0]);
     assert!(angle.abs() > east, "the seam at {angle} rad crosses the hole");
 }
 
@@ -773,7 +774,7 @@ fn a_half_torus_between_its_rims_gets_a_seam_round_the_tube() {
     let [t0, t1] = solidcore_ops::label::edge_curve_interval(seam).unwrap();
     assert!((t1 - t0 - std::f64::consts::PI).abs() < 1e-9, "{t0} {t1}");
     faces_away(&s.brep, 0, |p| {
-        let r = p[0].hypot(p[1]).max(1e-9);
+        let r = det::hypot(p[0], p[1]).max(1e-9);
         [20.0 * p[0] / r, 20.0 * p[1] / r, 1.0]
     });
 }
@@ -942,7 +943,7 @@ fn a_plate_with_a_through_hole() {
             assert_eq!(edges.len(), 4, "the square is the outer loop");
         }
         faces_away(&s.brep, 0, |p| {
-            let r = ((p[0] - 10.0).powi(2) + (p[1] - 10.0).powi(2)).sqrt();
+            let r = (det::powi(p[0] - 10.0, 2) + det::powi(p[1] - 10.0, 2)).sqrt();
             if (r - 3.0).abs() < 1e-6 {
                 // On the hole: material lies away from the axis.
                 [10.0 + (p[0] - 10.0) * 2.0, 10.0 + (p[1] - 10.0) * 2.0, p[2]]
@@ -1110,21 +1111,21 @@ fn vertex_parameters_on_lines_conics_and_splines() {
     // An ellipse's parameter is not the polar angle.
     let ellipse = Curve::Ellipse { position, semi_axis_1: 4.0, semi_axis_2: 1.0 };
     let t: f64 = 0.7;
-    let p = [4.0 * t.cos(), t.sin(), 0.0];
+    let p = [4.0 * det::cos(t), det::sin(t), 0.0];
     let m = map_edge(&ellipse, [4.0, 0.0, 0.0], p, true, false, false, tol).unwrap();
     assert!(m.interval[0].abs() < 1e-15 && (m.interval[1] - t).abs() < 1e-14, "{:?}", m.interval);
     // A hyperbola edge: rational quadratic pieces on the STEP parameters of its ends, through
     // the hyperbola's points; a parabola: one Bézier whose parameter is STEP's.
     let (a, b) = (3.0, 2.0);
     let hyperbola = Curve::Hyperbola { position, semi_axis: a, semi_imag_axis: b };
-    let at = |t: f64| [a * t.cosh(), b * t.sinh(), 0.0];
+    let at = |t: f64| [a * det::cosh(t), b * det::sinh(t), 0.0];
     let m = map_edge(&hyperbola, at(1.5), at(-2.5), true, false, false, tol).unwrap();
     assert_eq!(m.interval, [-2.5, 1.5]);
     assert!(!m.with_step && m.sense_mismatch);
     let c = CurveEval::new(&m.curve).unwrap();
     for k in 0..=40 {
         let p = c.point(-2.5 + 4.0 * f64::from(k) / 40.0).unwrap();
-        assert!(((p.x / a).powi(2) - (p.y / b).powi(2) - 1.0).abs() < 1e-12 && p.x > 0.0, "{p:?}");
+        assert!((det::powi(p.x / a, 2) - det::powi(p.y / b, 2) - 1.0).abs() < 1e-12 && p.x > 0.0, "{p:?}");
     }
     for t in [-2.5, -0.5, 0.5, 1.5] {
         assert!(c.point(t).unwrap().dist(v3(at(t))) < 1e-12, "{t}");
@@ -1640,7 +1641,7 @@ fn surfaces_of_extrusion_read_as_splines_or_cylinders() {
 fn parabola_and_hyperbola_edges_bound_faces() {
     for kind in ["PARABOLA('',#{a},0.5)", "HYPERBOLA('',#{a},1.,1.)"] {
         let mut w = W::default();
-        let at = |t: f64| if kind.starts_with("PARABOLA") { [0.5 * t * t, t, 0.0] } else { [t.cosh(), t.sinh(), 0.0] };
+        let at = |t: f64| if kind.starts_with("PARABOLA") { [0.5 * t * t, t, 0.0] } else { [det::cosh(t), det::sinh(t), 0.0] };
         let (p1, p2) = (at(-1.5), at(1.5));
         let (v1, v2) = (w.vertex(p1), w.vertex(p2));
         let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
@@ -1707,7 +1708,7 @@ fn face_domain_sliver_at_a_natural_bound() {
 /// the side gets a seam along its boundary row from the bottom curve's vertex to the top's.
 #[test]
 fn a_spline_closed_in_v_without_a_seam_gets_one() {
-    let octagon: Vec<V> = (0..8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4).map(|t| [5.0 * t.cos(), 5.0 * t.sin(), 0.0]).collect();
+    let octagon: Vec<V> = (0..8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4).map(|t| [5.0 * det::cos(t), 5.0 * det::sin(t), 0.0]).collect();
     let wrapped: Vec<V> = octagon.iter().chain(octagon.iter().take(3)).copied().collect();
     let knots = (0..15).map(|k| real(f64::from(k))).collect::<Vec<_>>().join(",");
     let ones = vec!["1"; 15].join(",");
@@ -1774,7 +1775,7 @@ fn a_spline_closed_in_v_without_a_seam_gets_one() {
 /// vertex at the apex.
 #[test]
 fn a_spline_cone_closed_in_v_gets_a_seam_to_its_apex() {
-    let octagon: Vec<V> = (0..8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4).map(|t| [5.0 * t.cos(), 5.0 * t.sin(), 0.0]).collect();
+    let octagon: Vec<V> = (0..8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4).map(|t| [5.0 * det::cos(t), 5.0 * det::sin(t), 0.0]).collect();
     let wrapped: Vec<V> = octagon.iter().chain(octagon.iter().take(3)).copied().collect();
     let knots = (0..15).map(|k| real(f64::from(k))).collect::<Vec<_>>().join(",");
     let ones = vec!["1"; 15].join(",");
@@ -1866,7 +1867,7 @@ impl Trims for Projected {
         let at = |p: Vec3| -> [f64; 2] {
             let d = p - o;
             // A turn is four quarters of form parameter.
-            let mut a = d.dot(y).atan2(d.dot(x));
+            let mut a = det::atan2(d.dot(y), d.dot(x));
             while crate::kernel::form::param(a) < centre - 2.0 {
                 a += TAU;
             }
@@ -1910,14 +1911,14 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
     let (eps, rl) = (1.9e-3 / r, r + 0.6e-3);
     let mut w = W::default();
     let v = |w: &mut W, p: V| (w.vertex(p), p);
-    let (p0, p1) = ([rl * eps.cos(), -rl * eps.sin(), 0.0], [rl * eps.cos(), rl * eps.sin(), h]);
-    let nq = [-q.sin(), q.cos(), 0.0];
+    let (p0, p1) = ([rl * det::cos(eps), -rl * det::sin(eps), 0.0], [rl * det::cos(eps), rl * det::sin(eps), h]);
+    let nq = [-det::sin(q), det::cos(q), 0.0];
     // The axis edge: where the planes through the axis' foot, (p0, p1) and the 100 degree side
     // meet, up to the top.
     let np = Vec3::from(p0).cross(Vec3::from(p1));
     let line = np.cross(Vec3::from(nq));
     let a1 = [line.x * h / line.z, line.y * h / line.z, h];
-    let (qb, qt) = ([r * q.cos(), r * q.sin(), 0.0], [r * q.cos(), r * q.sin(), h]);
+    let (qb, qt) = ([r * det::cos(q), r * det::sin(q), 0.0], [r * det::cos(q), r * det::sin(q), h]);
     let (a0, a1, p0, p1, q0, q1) = (v(&mut w, [0.0; 3]), v(&mut w, a1), v(&mut w, p0), v(&mut w, p1), v(&mut w, qb), v(&mut w, qt));
     let edge = |w: &mut W, a: (u64, V), b: (u64, V)| w.line_edge(a, b, true, len3(sub3(b.1, a.1)));
     let (axis, e_p, e_q) = (edge(&mut w, a0, a1), edge(&mut w, p0, p1), edge(&mut w, q0, q1));
@@ -1935,7 +1936,7 @@ fn a_projected_pcurve_past_the_quarter_line_a_face_form_ends_on_stays_in_the_fac
         w.face(&[b], surface, same_sense)
     };
     let (bottom, top) = (w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]), w.plane([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]));
-    let side_q = w.plane([0.0; 3], nq, [q.cos(), q.sin(), 0.0]);
+    let side_q = w.plane([0.0; 3], nq, [det::cos(q), det::sin(q), 0.0]);
     let side_p = w.plane([0.0; 3], [np.x, np.y, np.z], p0.1);
     let faces = [
         face(&mut w, &[(e_q, true), (arc_t, false), (e_p, false), (arc_b, true)], cyl, true),

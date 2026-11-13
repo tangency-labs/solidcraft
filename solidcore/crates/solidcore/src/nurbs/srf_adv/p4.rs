@@ -58,6 +58,7 @@
 //!   allocated are `NL_MEM_ERR`.
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
 use crate::nurbs::bezier::{srf_extend_4d, ExtendAt};
@@ -821,7 +822,7 @@ pub fn approx_cross_boundary_derivs(
 
         // Insert knots to bring derivatives in compliance.
         let rad = (eps * PI) / 180.0;
-        let sne = rad.sin();
+        let sne = det::sin(rad);
         let mut mx_: isize = -1;
 
         if als_ > eps {

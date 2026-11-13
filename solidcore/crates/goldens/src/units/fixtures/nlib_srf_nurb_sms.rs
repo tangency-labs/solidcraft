@@ -4,6 +4,7 @@
 //! the consumed numeric payload without allocation before growing storage.
 //! Parsing remains lazy with respect to ignored trailing tokens.
 
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 use crate::HarnessError;
@@ -25,7 +26,7 @@ pub(super) fn parse_sms(text: &str, path: &str) -> Result<ParsedSrf, HarnessErro
     let mut num = || parse(it.next().ok_or_else(|| error("truncated"))?);
     let int = |value: f64| -> Result<usize, HarnessError> {
         // usize::MAX as f64 rounds up on 64-bit hosts: use an exclusive bound.
-        let upper = 2.0_f64.powi(usize::BITS as i32);
+        let upper = det::powi(2.0_f64, usize::BITS as i32);
         if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value >= upper {
             return Err(error(&format!("bad count {value}")));
         }

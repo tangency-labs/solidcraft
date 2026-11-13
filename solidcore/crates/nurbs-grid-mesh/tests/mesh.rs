@@ -1,6 +1,7 @@
 //! Checks against answers known in closed form. The dense-surface check is the `coral` example.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 
+use solidcore::math::det;
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
@@ -38,7 +39,7 @@ fn bumpy_patch() -> NurbsSurface {
                 [
                     10.0 * x / (n - 1) as f64,
                     10.0 * y / (n - 1) as f64,
-                    2.0 * (x * 1.3).sin() * (y * 0.9).cos(),
+                    2.0 * det::sin(x * 1.3) * det::cos(y * 0.9),
                 ]
             })
         })
@@ -70,7 +71,7 @@ fn circle(s: &NurbsSurface, c: [f64; 2], r: f64, n: usize, clockwise: bool) -> V
     (0..n)
         .map(|k| {
             let a = if clockwise { -1.0 } else { 1.0 } * 2.0 * PI * k as f64 / n as f64;
-            on(s, c[0] + r * a.cos(), c[1] + r * a.sin())
+            on(s, c[0] + r * det::cos(a), c[1] + r * det::sin(a))
         })
         .collect()
 }
@@ -113,7 +114,7 @@ fn covers_exactly_the_region_inside_a_loop_facing_the_normal() {
     .unwrap();
     let (area, down, over_shared) = facts(&m);
     // The area of the 200-gon the loop is, in model units: the boundary is the edge's own points.
-    let polygon = 100.0 * 9.0 * (2.0 * PI / 200.0).sin();
+    let polygon = 100.0 * 9.0 * det::sin(2.0 * PI / 200.0);
     assert!(
         (area - polygon).abs() < 1e-9,
         "area {area} against {polygon}"
@@ -133,7 +134,7 @@ fn cuts_a_hole_and_turns_every_triangle_over_when_reversed() {
         square(&s, 0.1, 0.9),
         circle(&s, [0.5, 0.5], 0.2, 100, false),
     ];
-    let expect = 64.0 - 50.0 * 4.0 * (2.0 * PI / 100.0).sin();
+    let expect = 64.0 - 50.0 * 4.0 * det::sin(2.0 * PI / 100.0);
     let up = mesh_trimmed(&s, &loops, false, &MeshOptions::new(0.01)).unwrap();
     assert!(
         (facts(&up).0 - expect).abs() < 1e-9,
@@ -185,7 +186,7 @@ fn meshes_a_hole_smaller_than_one_cell() {
         &MeshOptions::new(0.01),
     )
     .unwrap();
-    let expect = 64.0 - 6.0 * 1e-4 * (2.0 * PI / 12.0).sin();
+    let expect = 64.0 - 6.0 * 1e-4 * det::sin(2.0 * PI / 12.0);
     let (area, down, over_shared) = facts(&m);
     assert!((area - expect).abs() < 1e-9, "area {area} against {expect}");
     assert_eq!((down, over_shared), (0, 0));
@@ -220,7 +221,7 @@ fn spaces_grid_lines_so_a_cell_strays_no_more_than_the_tolerance() {
                     .unwrap()
                     .point;
                 let d: f64 = (0..3)
-                    .map(|k| (exact[k] - (c[0][k] + c[1][k] + c[2][k] + c[3][k]) / 4.0).powi(2))
+                    .map(|k| det::powi(exact[k] - (c[0][k] + c[1][k] + c[2][k] + c[3][k]) / 4.0, 2))
                     .sum();
                 w = w.max(d.sqrt());
             }
@@ -269,7 +270,11 @@ fn pole_dome() -> NurbsSurface {
             let kv = &kv;
             (0..nv).map(move |j| {
                 let a = 1.5 * PI * greville(kv, j);
-                [10.0 * g * a.cos(), 10.0 * g * a.sin(), 6.0 * (1.0 - g * g)]
+                [
+                    10.0 * g * det::cos(a),
+                    10.0 * g * det::sin(a),
+                    6.0 * (1.0 - g * g),
+                ]
             })
         })
         .collect();
@@ -356,15 +361,15 @@ fn two_faces_sharing_an_edge_polyline_meet_without_a_crack() {
     let cut: Vec<LoopPoint> = (0..=60)
         .map(|k| {
             let t = f64::from(k) / 60.0;
-            on(&s, 0.1 + 0.8 * t, 0.5 + 0.2 * (6.0 * t).sin())
+            on(&s, 0.1 + 0.8 * t, 0.5 + 0.2 * det::sin(6.0 * t))
         })
         .collect();
-    let mut low = vec![on(&s, 0.9, 0.1), on(&s, 0.9, 0.5 + 0.2 * 6.0_f64.sin())];
+    let mut low = vec![on(&s, 0.9, 0.1), on(&s, 0.9, 0.5 + 0.2 * det::sin(6.0_f64))];
     low.extend(cut.iter().rev().skip(1).take(cut.len() - 2).copied());
     low.extend([on(&s, 0.1, 0.5), on(&s, 0.1, 0.1)]);
     let mut high = vec![on(&s, 0.1, 0.9), on(&s, 0.1, 0.5)];
     high.extend(cut.iter().skip(1).take(cut.len() - 2).copied());
-    high.extend([on(&s, 0.9, 0.5 + 0.2 * 6.0_f64.sin()), on(&s, 0.9, 0.9)]);
+    high.extend([on(&s, 0.9, 0.5 + 0.2 * det::sin(6.0_f64)), on(&s, 0.9, 0.9)]);
     let opts = MeshOptions {
         min_cells: 1,
         ..MeshOptions::new(0.01)
@@ -517,7 +522,7 @@ fn a_cut_cell_is_triangulated_facing_the_surface() {
     let hole: Vec<LoopPoint> = (0..n)
         .map(|k| {
             let a = -2.0 * PI * f64::from(k) / f64::from(n);
-            on(&s, cu + r * a.cos(), cv + r * a.sin())
+            on(&s, cu + r * det::cos(a), cv + r * det::sin(a))
         })
         .collect();
     // The domain's edges, 32 chords a side.

@@ -10,6 +10,7 @@
     clippy::float_cmp
 )]
 
+use solidcore::math::det;
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
@@ -54,8 +55,8 @@ fn start(s: &Seg2) -> Vec2 {
             start,
             ..
         } => v(
-            center.x + radius * start.cos(),
-            center.y + radius * start.sin(),
+            center.x + radius * det::cos(start),
+            center.y + radius * det::sin(start),
         ),
         Seg2::Cubic { p0, .. } => p0,
         Seg2::Bezier { p, .. } => p[0],
@@ -71,8 +72,8 @@ fn end(s: &Seg2) -> Vec2 {
             start,
             sweep,
         } => v(
-            center.x + radius * (start + sweep).cos(),
-            center.y + radius * (start + sweep).sin(),
+            center.x + radius * det::cos(start + sweep),
+            center.y + radius * det::sin(start + sweep),
         ),
         Seg2::Cubic { p3, .. } => p3,
         Seg2::Bezier { n, p } => p[usize::from(n)],
@@ -80,7 +81,7 @@ fn end(s: &Seg2) -> Vec2 {
 }
 
 fn dist(a: Vec2, b: Vec2) -> f64 {
-    (a.x - b.x).hypot(a.y - b.y)
+    det::hypot(a.x - b.x, a.y - b.y)
 }
 
 /// A line's or arc's length.
@@ -558,12 +559,12 @@ fn tiny_tool_between_circle_and_display_chord_is_not_lost() {
     };
     // a chord of 1e-3 sagitta spans 2 sqrt(2 r s) of arc: the square sits outside that chord
     let half_angle = (2.0 * 10.0 * 1e-3_f64).sqrt() / 10.0;
-    let at = v(half_angle.cos(), half_angle.sin()) * 9.9998;
+    let at = v(det::cos(half_angle), det::sin(half_angle)) * 9.9998;
     let half = v(0.000025, 0.000025);
     let square = rectangle(at - half, at + half);
     assert!(9.9998 + 0.000025 * 2.0_f64.sqrt() < 10.0);
     assert!(
-        9.9998 - 0.000025 * 2.0_f64.sqrt() > 10.0 * half_angle.cos(),
+        9.9998 - 0.000025 * 2.0_f64.sqrt() > 10.0 * det::cos(half_angle),
         "outside the chord"
     );
     let cut = planar_regions_boolean(
@@ -585,7 +586,7 @@ fn tiny_tool_between_circle_and_display_chord_is_not_lost() {
 /// A 200 x 37 plate turned by `theta` about the origin, and the fillet region of one of its
 /// corners: an arc of radius `r` tangent to both edges, closed by two lines meeting `reach` out.
 fn plate_and_corner_fillet(theta: f64, r: f64, reach: f64) -> (Region2, Region2) {
-    let (sn, cs) = theta.sin_cos();
+    let (sn, cs) = det::sin_cos(theta);
     let rot = |x: f64, y: f64| v(x * cs - y * sn, x * sn + y * cs);
     let (w, lo, hi) = (200.0, -40.25, -3.25);
     let plate = Region2 {
@@ -676,7 +677,7 @@ fn an_arc_tangent_to_the_edges_it_ends_on_leaves_no_hairline_edges() {
 /// straight 50 mm, its corners on that edge rounded to the nanometre and moved by `off`; both
 /// turned by `theta`.
 fn plate_and_strip_by_a_bent_edge(theta: f64, slope: f64, off: Vec2) -> (Region2, Region2) {
-    let (sn, cs) = theta.sin_cos();
+    let (sn, cs) = det::sin_cos(theta);
     let rot = |x: f64, y: f64| v(x * cs - y * sn, x * sn + y * cs);
     let nm = |p: Vec2| v((p.x * 1e9).round() / 1e9, (p.y * 1e9).round() / 1e9) + off;
     let plate = [
@@ -749,7 +750,7 @@ fn a_bent_edge_crossing_its_neighbour_by_their_corner_leaves_no_sliver() {
     for k in 0..16 {
         for d in [1e-9, 4e-9] {
             let a = f64::from(k) * TAU / 16.0;
-            let off = v(a.cos() * d, a.sin() * d);
+            let off = v(det::cos(a) * d, det::sin(a) * d);
             union_is_whole(
                 plate_and_strip_by_a_bent_edge(0.0, 0.01, off),
                 &format!("off {off:?}"),
@@ -820,7 +821,7 @@ fn a_drilled_box_moved_is_the_prism_it_was() {
         Some(false)
     );
     // turned 0.7 rad about (1, 2, 3) through the origin, and moved: still the same prism
-    let (c, sn) = (0.7_f64.cos(), 0.7_f64.sin());
+    let (c, sn) = (det::cos(0.7_f64), det::sin(0.7_f64));
     let n = {
         let l = 14.0_f64.sqrt();
         [1.0 / l, 2.0 / l, 3.0 / l]

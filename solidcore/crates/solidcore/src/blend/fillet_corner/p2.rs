@@ -2052,6 +2052,7 @@ mod tests {
     use super::*;
     use crate::blend::fillet_corner::p3::FilletCornerKind;
     use crate::curve::line::Line;
+    use crate::math::det;
     use crate::primitive::api_curves::create_analytic_circle;
     use crate::topology::Edgeuse;
 
@@ -2065,7 +2066,7 @@ mod tests {
             let a = std::f64::consts::TAU * (i as f64) / (n as f64);
             let v = pseudo
                 .brep_mut()
-                .add_vertex(Point3::new(a.cos(), a.sin(), 0.0))
+                .add_vertex(Point3::new(det::cos(a), det::sin(a), 0.0))
                 .unwrap();
             let mut fv = FilletVertex::new(&k, None);
             fv.set_fillet_vertex_type(FilletVertexType::RailXRail);

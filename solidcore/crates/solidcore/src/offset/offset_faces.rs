@@ -80,6 +80,7 @@ use crate::geom::attribute::{
 };
 use crate::geom::global_solver::SolverOperation;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::offset::offset_executive::p2::local_operation_simple;
@@ -544,7 +545,7 @@ impl OffsetFacesExecutive {
                     }
                     let cos =
                         normals[0].dot(normals[1]) / (normals[0].length() * normals[1].length());
-                    let limit = (TANGENCY_TOL_DEG * (crate::math::PI / 180.0)).cos();
+                    let limit = det::cos(TANGENCY_TOL_DEG * (crate::math::PI / 180.0));
                     // (`!(dCos > -limit) || !(dCos < limit)`: a NaN cosine skips too)
                     let at_an_angle = cos > -limit && cos < limit;
                     if !at_an_angle {
@@ -1570,7 +1571,7 @@ mod tests {
                         let (s, t) = edge::start_end_vertices(&b, e).unwrap();
                         [s, t].into_iter().flatten().all(|v| {
                             let p = vertex::point(&b, v).unwrap();
-                            ((p.x - 30.0).powi(2) + (p.y - 20.0).powi(2)).sqrt() > 9.99
+                            (det::powi(p.x - 30.0, 2) + det::powi(p.y - 20.0, 2)).sqrt() > 9.99
                                 && p.z > 11.9
                         })
                     })

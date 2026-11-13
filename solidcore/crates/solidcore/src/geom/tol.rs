@@ -106,6 +106,7 @@
 //!   (`query::brep::calculate_bounding_box`) where upstream ignores the status and
 //!   takes the scaled zero of whatever box the call left.
 
+use crate::math::det;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::Curve;
@@ -332,7 +333,7 @@ pub fn size_estimate_to_zone_tol_3d(size: f64) -> f64 {
     } else if (0.00005..=0.005).contains(&size) {
         1.0e-7
     } else {
-        tol3d(10f64.powf((size.abs().log10() / 2.0).floor()) * 1.0e-5)
+        tol3d(det::powf(10f64, (det::log10(size.abs()) / 2.0).floor()) * 1.0e-5)
     }
 }
 

@@ -83,6 +83,7 @@ use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::Point3;
 use crate::intersect::point_class::ClassObject;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::crv_fit::p1::ParamMethod;
@@ -302,11 +303,11 @@ impl FilletLaw {
         for i in 0..=100u32 {
             let t = ivl.evaluate(f64::from(i) / 100.0);
             let t_ang = t * angle_span;
-            let tan = t_ang.tan();
+            let tan = det::tan(t_ang);
             let val = tan * a / b;
-            let t_ang2 = val.atan();
-            let x = a * t_ang2.cos();
-            let y = b * t_ang2.sin();
+            let t_ang2 = det::atan(val);
+            let x = a * det::cos(t_ang2);
+            let y = b * det::sin(t_ang2);
             let rad = outer_radius - (x * x + y * y).sqrt();
             points.push(Point3::new(rad, t_ang, 0.0));
             params.push(t);

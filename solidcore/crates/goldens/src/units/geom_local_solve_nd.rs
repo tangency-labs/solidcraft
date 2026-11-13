@@ -16,6 +16,7 @@
 //! `x` and flags: 1 = Jacobian requested, 2 = failed), so the whole iteration path is
 //! compared, not only the result. Failures are normalised to `status_<SmStatus>`.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -599,9 +600,9 @@ fn coef(rng: &mut Rng, scale: f64, nice: bool) -> f64 {
     } else if r < 0.94 {
         rng.range_i64(-3, 3) as f64
     } else if r < 0.98 {
-        rng.uniform(-1.0, 1.0) * 10f64.powi(-(rng.range_i64(6, 14) as i32))
+        rng.uniform(-1.0, 1.0) * det::powi(10f64, -(rng.range_i64(6, 14) as i32))
     } else if r < 0.995 {
-        rng.uniform(-1.0, 1.0) * 10f64.powi(rng.range_i64(3, 9) as i32)
+        rng.uniform(-1.0, 1.0) * det::powi(10f64, rng.range_i64(3, 9) as i32)
     } else {
         match rng.below(3) {
             0 => f64::NAN,
@@ -759,14 +760,14 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         0.0
     };
     let found_tol = if rng.chance(0.15) {
-        10f64.powi(-(rng.range_i64(3, 12) as i32))
+        det::powi(10f64, -(rng.range_i64(3, 12) as i32))
     } else {
         0.0
     };
     let (size_scale, scaled_zero) = if rng.chance(0.2) {
         (
             rng.uniform(0.0, 10.0),
-            10f64.powi(-(rng.range_i64(0, 14) as i32)),
+            det::powi(10f64, -(rng.range_i64(0, 14) as i32)),
         )
     } else {
         (0.0, 1.0)
@@ -774,14 +775,14 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     let desired = match rng.below(6) {
         0 => Some(EFF_ZERO_SQ),
         1 => Some(EFF_ZERO / 10.0),
-        2 => Some(10f64.powi(-(rng.range_i64(1, 14) as i32))),
+        2 => Some(det::powi(10f64, -(rng.range_i64(1, 14) as i32))),
         _ => None,
     };
     let acceptable = match rng.below(7) {
         0 => EFF_ZERO,
         1 => EFF_ZERO_SQRT * 100.0,
         2 => 1.0e-12,
-        3 => 10f64.powi(-(rng.range_i64(1, 10) as i32)),
+        3 => det::powi(10f64, -(rng.range_i64(1, 10) as i32)),
         4 => 1.0,
         _ => EFF_ZERO_SQRT,
     };

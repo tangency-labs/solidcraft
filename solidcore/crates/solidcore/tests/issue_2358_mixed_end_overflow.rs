@@ -32,6 +32,7 @@ use solidcore::error::{EntityRef, SolidError};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::surface::surface::{Surface, SurfaceKind};
@@ -97,7 +98,7 @@ fn boss_seam(k: &mut Kernel, deg: f64, seam: f64) -> Brep {
     api_translate(
         k,
         Some(TransformObject::Brep(&mut cyl)),
-        Vec3::new(-2.0 * a.sin(), 0.0, -2.0 * a.cos()),
+        Vec3::new(-2.0 * det::sin(a), 0.0, -2.0 * det::cos(a)),
     )
     .unwrap();
     boolean_union(k, plate, cyl).unwrap()
@@ -106,8 +107,8 @@ fn boss_seam(k: &mut Kernel, deg: f64, seam: f64) -> Brep {
 /// The root ellipse's edges: on the plate's top, their middles on the cylinder.
 fn root(k: &Kernel, b: &Brep, deg: f64) -> Vec<EdgeId> {
     let a = deg.to_radians();
-    let axis = Vec3::new(a.sin(), 0.0, a.cos());
-    let foot = Point3::new(-2.0 * a.sin(), 0.0, -2.0 * a.cos());
+    let axis = Vec3::new(det::sin(a), 0.0, det::cos(a));
+    let foot = Point3::new(-2.0 * det::sin(a), 0.0, -2.0 * det::cos(a));
     let mut out = Vec::new();
     for &e in b.edge_list() {
         let Some(c) = edge::curve(b, e).unwrap() else {
@@ -154,7 +155,7 @@ fn rounded_seam(deg: f64, seam: f64, r: f64) -> Result<(f64, usize, Vec<Point3>)
 /// The bound r*, closed form.
 fn bound() -> f64 {
     let a = 20.0_f64.to_radians();
-    (6.0 * a.sin() - 2.0 * a.cos()) / (1.0 - a.sin())
+    (6.0 * det::sin(a) - 2.0 * det::cos(a)) / (1.0 - det::sin(a))
 }
 
 #[test]
@@ -169,10 +170,10 @@ fn the_bound_is_the_closed_form() {
 /// holds the integral of `(2 + x tan(deg)) c(x)` from `x0 = -2 / tan(deg)` to 6, with the
 /// chord `c(x) = 2 sqrt(36 - x^2)`; `big_c` and `big_d` integrate `c(x)` and `x c(x)`.
 fn union_closed_form(deg: f64) -> f64 {
-    let t = deg.to_radians().tan();
+    let t = det::tan(deg.to_radians());
     let x0 = -2.0 / t;
-    let big_c = |x: f64| x * (36.0 - x * x).sqrt() + 36.0 * (x / 6.0).asin();
-    let big_d = |x: f64| -2.0 / 3.0 * (36.0 - x * x).powf(1.5);
+    let big_c = |x: f64| x * (36.0 - x * x).sqrt() + 36.0 * det::asin(x / 6.0);
+    let big_d = |x: f64| -2.0 / 3.0 * det::powf(36.0 - x * x, 1.5);
     let below = 2.0 * (big_c(6.0) - big_c(x0)) + t * (big_d(6.0) - big_d(x0));
     36_000.0 + 25.0 * PI * 36.0 - below
 }
@@ -275,8 +276,8 @@ fn tilt_20_seam_over_the_rim_refused_on_the_whole_rim() {
 /// Two more faces.
 fn wall_split(k: &mut Kernel, b: &mut Brep, deg: f64) {
     let a = deg.to_radians();
-    let axis = Vec3::new(a.sin(), 0.0, a.cos());
-    let ux = Vec3::new(a.cos(), 0.0, -a.sin());
+    let axis = Vec3::new(det::sin(a), 0.0, det::cos(a));
+    let ux = Vec3::new(det::cos(a), 0.0, -det::sin(a));
     let walls: Vec<FaceId> = b
         .face_list()
         .iter()
@@ -290,7 +291,7 @@ fn wall_split(k: &mut Kernel, b: &mut Brep, deg: f64) {
         .collect();
     assert_eq!(walls.len(), 1);
     let before = b.face_list().len();
-    let origin = Point3::new(-2.0 * a.sin(), 0.0, -2.0 * a.cos()) - ux * 3.0;
+    let origin = Point3::new(-2.0 * det::sin(a), 0.0, -2.0 * det::cos(a)) - ux * 3.0;
     let normal = Vec3::Y.cross(axis).unitize().unwrap();
     let mut cutter = PlaneCutter::new(origin, normal);
     let tol = b.tolerance();
@@ -323,7 +324,7 @@ fn wall_split(k: &mut Kernel, b: &mut Brep, deg: f64) {
 #[test]
 fn tilt_40_wall_split_short_of_the_rail_end_refused() {
     let a = 40.0_f64.to_radians();
-    let r120 = (3.0 * a.sin() - 2.0 * a.cos()) / (1.0 - 0.5 * a.sin());
+    let r120 = (3.0 * det::sin(a) - 2.0 * det::cos(a)) / (1.0 - 0.5 * det::sin(a));
     let mut k = kernel();
     let mut b = boss_seam(&mut k, 40.0, 125.13);
     wall_split(&mut k, &mut b, 40.0);

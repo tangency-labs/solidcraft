@@ -24,6 +24,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::error::offset::{OffsetFailure, Unsoundness};
 use solidcore::error::Reason;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -39,7 +40,7 @@ use solidcore::{Brep, Kernel, SolidError};
 /// tip a 118 degree cone.
 fn drilled_box(k: &mut Kernel) -> Brep {
     let (r, top, depth) = (3.0, 20.0, 10.0);
-    let tip = r / 59.0_f64.to_radians().tan();
+    let tip = r / det::tan(59.0_f64.to_radians());
     let bottom = top - depth;
     let at = |x: f64, z: f64| Point3::new(20.0 + x, 20.0, z);
     let profile = [
@@ -218,7 +219,7 @@ fn wr_531_without_a_tip_cap_the_shell_is_refused_and_keeps_the_input() {
                 );
             }
             let v = volume(&k, &mut retained).unwrap();
-            let tip = 3.0 / 59.0_f64.to_radians().tan();
+            let tip = 3.0 / det::tan(59.0_f64.to_radians());
             let exact = 40.0 * 40.0 * 20.0 - PI * 3.0 * 3.0 * (10.0 + tip / 3.0);
             // Original block less the cylindrical bore and its conical drill tip.
             assert!((v - exact).abs() <= 1e-9 * exact, "{case}: {v}");

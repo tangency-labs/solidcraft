@@ -16,6 +16,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, BIG_DOUBLE};
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
@@ -205,7 +206,7 @@ fn worst_seam_angle(k: &Kernel, b: &mut Brep, f: FaceId) -> (f64, usize) {
                 .unwrap();
             // tangent faces' binormals are opposed; the angle from the cross product,
             // which resolves it below acos's 1e-8
-            worst = worst.max(ba.cross(bb).length().atan2(-ba.dot(bb)));
+            worst = worst.max(det::atan2(ba.cross(bb).length(), -ba.dot(bb)));
         }
     }
     (worst, seams)

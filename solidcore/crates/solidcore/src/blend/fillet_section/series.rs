@@ -595,6 +595,7 @@ impl<T: GnScalar> VSer<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// The series of `1 + 2 sigma + 3 eps` (and 0 elsewhere).
     fn lin() -> Ser<f64> {
@@ -680,7 +681,7 @@ mod tests {
             for k in 0..=MAX_E {
                 if i + k > 0 {
                     v = (v * 7.3 + 0.11) % 2.0 - 1.0;
-                    x.set(i, k, v * 10f64.powi(i as i32 - 3));
+                    x.set(i, k, v * det::powi(10f64, i as i32 - 3));
                 }
             }
         }

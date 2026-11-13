@@ -6,6 +6,7 @@
 //! faces at a setback of 13 without it).
 
 use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
@@ -117,7 +118,7 @@ fn max_patch_normal_angle(setback: f64, stay_inside: bool) -> solidcore::Result<
             // the normals' angle either way round, from the cross product, which resolves
             // it below acos's 2.1e-8 rad floor (tangency-labs/smlib#119)
             let (n1, n2) = (normal(s1)?, normal(s2)?);
-            let ang = n1.cross(n2).length().atan2(n1.dot(n2).abs()).to_degrees();
+            let ang = det::atan2(n1.cross(n2).length(), n1.dot(n2).abs()).to_degrees();
             worst = worst.max(ang);
         }
     }

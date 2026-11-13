@@ -17,6 +17,7 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::create_box;
@@ -198,8 +199,8 @@ fn legs_to_chords(basin: Basin, d: f64, n: usize) -> Vec<f64> {
     run.iter()
         .take(n)
         .map(|&w| {
-            let alpha = core::f64::consts::PI - (20.0f64).atan2(w);
-            2.0 * d * (alpha / 2.0).sin()
+            let alpha = core::f64::consts::PI - det::atan2(20.0f64, w);
+            2.0 * d * det::sin(alpha / 2.0)
         })
         .collect()
 }

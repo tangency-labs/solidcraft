@@ -19,6 +19,7 @@
 //! and ORIENTED_FACEs.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)] // test helpers
 
+use solidcore::math::det;
 use std::collections::BTreeMap;
 
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
@@ -110,7 +111,7 @@ impl IsoCurve {
     fn at(&self, t: f64) -> P {
         match self {
             IsoCurve::Line { origin, step } => add(*origin, mul(t, *step)),
-            IsoCurve::Circle { o, x, y, r } => add(*o, add(mul(r * t.cos(), *x), mul(r * t.sin(), *y))),
+            IsoCurve::Circle { o, x, y, r } => add(*o, add(mul(r * det::cos(t), *x), mul(r * det::sin(t), *y))),
             IsoCurve::BSpline { degree, points, weights, knots } => {
                 let control: Vec<[f64; 4]> = points.iter().zip(weights).map(|(q, w)| [q[0] * w, q[1] * w, q[2] * w, *w]).collect();
                 let h = de_boor(*degree, knots, &control, t);
@@ -125,7 +126,7 @@ impl IsoCurve {
             IsoCurve::Line { origin, step } => dot(sub(q, *origin), *step) / dot(*step, *step),
             IsoCurve::Circle { o, x, y, .. } => {
                 let d = sub(q, *o);
-                dot(d, *y).atan2(dot(d, *x))
+                det::atan2(dot(d, *y), dot(d, *x))
             }
             IsoCurve::BSpline { knots, .. } => {
                 let (lo, hi) = (knots[0], knots[knots.len() - 1]);
@@ -214,8 +215,8 @@ enum IsoSurface {
 
 impl IsoSurface {
     fn at(&self, u: f64, v: f64) -> P {
-        let (su, cu) = u.sin_cos();
-        let (sv, cv) = v.sin_cos();
+        let (su, cu) = det::sin_cos(u);
+        let (sv, cv) = det::sin_cos(v);
         let around = |o: P, x: P, y: P, z: P, r: f64, h: f64| add(add(o, mul(h, z)), add(mul(r * cu, x), mul(r * su, y)));
         match self {
             IsoSurface::Plane { .. } => panic!("a plane is measured by its loops"),
@@ -244,7 +245,7 @@ impl IsoSurface {
     fn invert(&self, p: P) -> (Option<f64>, f64) {
         let polar = |o: P, x: P, y: P| {
             let d = sub(p, o);
-            (d, dot(d, y).atan2(dot(d, x)))
+            (d, det::atan2(dot(d, y), dot(d, x)))
         };
         match self {
             IsoSurface::Cylinder { o, x, y, z, .. } | IsoSurface::Cone { o, x, y, z, .. } => {
@@ -255,12 +256,12 @@ impl IsoSurface {
                 let (d, u) = polar(*o, *x, *y);
                 let s = (dot(d, *z) / r).clamp(-1.0, 1.0);
                 let pole = 1.0 - s.abs() < 1e-12;
-                ((!pole).then_some(u), s.asin())
+                ((!pole).then_some(u), det::asin(s))
             }
             IsoSurface::Torus { o, x, y, z, major, .. } => {
                 let (d, u) = polar(*o, *x, *y);
-                let radial = dot(d, *x).hypot(dot(d, *y));
-                (Some(u), dot(d, *z).atan2(radial - major))
+                let radial = det::hypot(dot(d, *x), dot(d, *y));
+                (Some(u), det::atan2(dot(d, *z), radial - major))
             }
             IsoSurface::Revolution { curve, o, d } => {
                 // the generator's point at the same height and distance from the axis, and
@@ -273,7 +274,7 @@ impl IsoSurface {
                 let (h, radial) = frame(p);
                 let gap = |t: f64| {
                     let (ht, rt) = frame(curve.at(t));
-                    (ht - h).hypot(norm(rt) - norm(radial))
+                    det::hypot(ht - h, norm(rt) - norm(radial))
                 };
                 let IsoCurve::BSpline { knots, .. } = curve else { panic!("a revolution of a {curve:?} without pcurves") };
                 let (lo, hi) = (knots[0], knots[knots.len() - 1]);
@@ -291,7 +292,7 @@ impl IsoSurface {
                     }
                 }
                 let (_, r0) = frame(curve.at(t));
-                let u = dot(*d, cross(r0, radial)).atan2(dot(r0, radial));
+                let u = det::atan2(dot(*d, cross(r0, radial)), dot(r0, radial));
                 (Some(u), t)
             }
             other => panic!("no inversion of {other:?}"),
@@ -565,7 +566,7 @@ impl File {
             }
             "CONICAL_SURFACE" => {
                 let (o, x, y, z) = self.frame(rid(&p[1]));
-                IsoSurface::Cone { o, x, y, z, r: real(&p[2]), tan: real(&p[3]).tan() }
+                IsoSurface::Cone { o, x, y, z, r: real(&p[2]), tan: det::tan(real(&p[3])) }
             }
             "SPHERICAL_SURFACE" => {
                 let (o, x, y, z) = self.frame(rid(&p[1]));
@@ -759,7 +760,7 @@ fn ring(file: &File, surface: &IsoSurface, surface_id: u64, face: u64, uses: &[(
             let end = *options[i][chosen[i]].last().unwrap();
             let j = (i + 1) % uses.len();
             let next = options[j][chosen[j]][0];
-            (end[0] - next[0]).hypot(end[1] - next[1]) < 1e-7 || degenerate(end, next)
+            det::hypot(end[0] - next[0], end[1] - next[1]) < 1e-7 || degenerate(end, next)
         });
         if joined {
             let r: Vec<[f64; 2]> = (0..uses.len()).flat_map(|i| options[i][chosen[i]].iter().copied()).collect();
@@ -1090,7 +1091,7 @@ fn a_lofted_b_spline_solid_is_written_right_side_out() {
     let square = |r: f64, turn: f64, z: f64| -> Vec<Curve> {
         let corner = |i: usize| {
             let a = (45.0 + 90.0 * i as f64 + turn).to_radians();
-            [3.0 + r * a.cos(), 4.0 + r * a.sin(), 5.0 + z]
+            [3.0 + r * det::cos(a), 4.0 + r * det::sin(a), 5.0 + z]
         };
         (0..4).map(|i| segment(corner(i), corner((i + 1) % 4))).collect()
     };

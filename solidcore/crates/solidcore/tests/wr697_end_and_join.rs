@@ -22,6 +22,7 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, BIG_DOUBLE};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_sphere};
 use solidcore::query::api_queries::{get_edges, get_faces};
@@ -205,10 +206,10 @@ fn a_mixed_convexity_end_s_rail_ends_on_the_end_face_s_surface() {
     let mut removed = 0.0;
     for i in 0..=n {
         let t = f64::from(i) * h;
-        let f = (2.0 - 2.0 * t.cos())
-            * (40.0 - (400.0 - (2.0 * t.sin() - 2.0).powi(2)).sqrt())
+        let f = (2.0 - 2.0 * det::cos(t))
+            * (40.0 - (400.0 - det::powi(2.0 * det::sin(t) - 2.0, 2)).sqrt())
             * 2.0
-            * t.cos();
+            * det::cos(t);
         let w = if i == 0 || i == n {
             1.0
         } else if i % 2 == 1 {
@@ -441,7 +442,7 @@ fn teardrop_area_and_length() -> (f64, f64) {
             let (c, d) = teardrop_point(0.5 * (a + b) + 0.5 * (b - a) * x);
             let w = w * 0.5 * (b - a);
             area += w * 0.5 * (c[0] * d[1] - c[1] * d[0]);
-            length += w * d[0].hypot(d[1]);
+            length += w * det::hypot(d[0], d[1]);
         }
     }
     (area, length)
@@ -467,7 +468,7 @@ fn a_closed_convex_rim_meeting_itself_at_an_angle_is_rounded() {
     let rim = [[15.5, 0.0, 10.0]];
     for r in [0.5, 1.0] {
         let want = 10.0 * area - length * r * r * (1.0 - PI / 4.0)
-            + (3.0 * PI / 4.0 + 1.0) * r.powi(3) * (5.0 / 3.0 - PI / 2.0);
+            + (3.0 * PI / 4.0 + 1.0) * det::powi(r, 3) * (5.0 / 3.0 - PI / 2.0);
         let mut k = all_fixes();
         let mut b = teardrop_prism(&mut k);
         round(&mut k, &mut b, &rim, r);

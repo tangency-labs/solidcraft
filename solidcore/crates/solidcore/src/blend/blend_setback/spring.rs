@@ -35,6 +35,7 @@ use super::{axpy, bern_elevate, bern_mul, el, el_mut, sm_err, Bern, Hom, Refusal
 use super::{Face, FaceKind};
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 
 /// One half of a spring curve, from its rail end (`curve[0]`) to the base point (its last
@@ -97,12 +98,12 @@ fn to_plane(
             if !(rho > EFF_ZERO) {
                 return Err(sm_err());
             }
-            let theta = u2.atan2(u1);
+            let theta = det::atan2(u2, u1);
             if theta.abs() >= 0.5 * PI {
                 return Err(sm_err()); // more than a half turn between P and Q
             }
-            let tt = (0.5 * theta).tan();
-            let dtheta = (-theta.sin() * d1 + theta.cos() * d2) / rho;
+            let tt = det::tan(0.5 * theta);
+            let dtheta = (-det::sin(theta) * d1 + det::cos(theta) * d2) / rho;
             Ok(([tt, u3], [0.5 * (1.0 + tt * tt) * dtheta, d3]))
         }
     }
@@ -400,7 +401,7 @@ mod tests {
             "halves apart by {}",
             ep.distance(eq)
         );
-        let angle = |a: Vec3, b: Vec3| a.cross(b).length().atan2(a.dot(b));
+        let angle = |a: Vec3, b: Vec3| det::atan2(a.cross(b).length(), a.dot(b));
         let leave_p = euclid_of(&fp[1]) - euclid_of(&fp[0]);
         let leave_q = euclid_of(&fq[1]) - euclid_of(&fq[0]);
         assert!(angle(leave_p, tp) <= 1e-10, "{}", angle(leave_p, tp));
@@ -417,7 +418,7 @@ mod tests {
     ) -> (Point3, Vec3) {
         let x = |s: f64| {
             let (t, z) = (theta(s), h(s));
-            Vec3::new(rho(z) * t.cos(), rho(z) * t.sin(), z)
+            Vec3::new(rho(z) * det::cos(t), rho(z) * det::sin(t), z)
         };
         let d = 1e-6;
         (x(s), (x(s + d) - x(s - d)).unitize().unwrap())
@@ -462,9 +463,9 @@ mod tests {
         let x = |s: f64| {
             let (t, f) = (0.3 + 0.6 * s, 0.2 + 0.3 * s + 0.2 * s * (1.0 - s));
             Vec3::new(
-                10.0 * f.cos() * t.cos(),
-                10.0 * f.cos() * t.sin(),
-                10.0 * f.sin(),
+                10.0 * det::cos(f) * det::cos(t),
+                10.0 * det::cos(f) * det::sin(t),
+                10.0 * det::sin(f),
             )
         };
         let d = 1e-6;

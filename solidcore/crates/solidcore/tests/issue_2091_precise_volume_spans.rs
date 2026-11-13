@@ -17,6 +17,7 @@ use solidcore::mass::integrator::properties::{
     boundary_properties, brep_volume, face_properties, PropertyAttributes,
 };
 use solidcore::mass::integrator::{OdeIntegrator, OdeOptions, StepCounts};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
@@ -43,10 +44,10 @@ fn section(z: f64) -> Vec<Curve> {
         let half = deg.to_radians() / 2.0;
         let mid = start + half;
         let end = start + 2.0 * half;
-        let w = half.cos();
-        let p0 = Vec3::new(z, RADIUS * start.cos(), RADIUS * start.sin());
-        let p1 = Vec3::new(z, RADIUS * mid.cos() / w, RADIUS * mid.sin() / w);
-        let p2 = Vec3::new(z, RADIUS * end.cos(), RADIUS * end.sin());
+        let w = det::cos(half);
+        let p0 = Vec3::new(z, RADIUS * det::cos(start), RADIUS * det::sin(start));
+        let p1 = Vec3::new(z, RADIUS * det::cos(mid) / w, RADIUS * det::sin(mid) / w);
+        let p2 = Vec3::new(z, RADIUS * det::cos(end), RADIUS * det::sin(end));
         let cpw = [
             CPoint::new(p0.x, p0.y, p0.z, 1.0),
             CPoint::new(p1.x * w, p1.y * w, p1.z * w, w),
@@ -240,7 +241,7 @@ fn multispan_surface() -> Surface {
 fn gauss_legendre(n: usize) -> Vec<(f64, f64)> {
     (1..=n)
         .map(|i| {
-            let mut x = (PI * (i as f64 - 0.25) / (n as f64 + 0.5)).cos();
+            let mut x = det::cos(PI * (i as f64 - 0.25) / (n as f64 + 0.5));
             for _ in 0..100 {
                 let (mut p0, mut p1) = (1.0, x);
                 for k in 2..=n {
@@ -376,7 +377,7 @@ fn long_strip(n: usize) -> Surface {
             (0..n + 3)
                 .map(|j| {
                     let (x, y) = (0.5 * f64::from(i), j as f64);
-                    let z = 0.3 * (0.7 * y).sin() + 0.1 * x * x + 0.05 * x * y.cos();
+                    let z = 0.3 * det::sin(0.7 * y) + 0.1 * x * x + 0.05 * x * det::cos(y);
                     let w = if i == 1 { 0.9 } else { 1.0 };
                     CPoint::new(x * w, y * w, z * w, w)
                 })
@@ -556,7 +557,7 @@ fn dense_grid(n: usize) -> Surface {
             (0..n + 3)
                 .map(|j| {
                     let (x, y) = (i as f64, j as f64);
-                    let z = 3.0 * (x / 8.0).sin() * (y / 10.0).cos() + 0.02 * x * y;
+                    let z = 3.0 * det::sin(x / 8.0) * det::cos(y / 10.0) + 0.02 * x * y;
                     CPoint::new(x, y, z, 1.0)
                 })
                 .collect()

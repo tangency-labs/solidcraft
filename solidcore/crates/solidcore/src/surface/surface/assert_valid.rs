@@ -107,6 +107,7 @@
 //! - **Recursion.** A surface in a volume also recurses (into its base surface), after
 //!   checking its owned geometry nests at most `MAX_GEOMETRY_NESTING` (32) deep.
 
+use crate::math::det;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
@@ -1614,7 +1615,7 @@ fn rev_of(s: &Surface) -> Result<&SurfOfRevolution> {
 /// 90 degrees, where cos is tiny), and then it is the larger term.
 fn generator_scale_tolerance(line_scale: f64, half_angle: f64) -> f64 {
     let angle_rounding = 4.0 * f64::EPSILON * half_angle.abs();
-    let conditioning = half_angle.sin().abs() / (half_angle.cos() * half_angle.cos());
+    let conditioning = det::sin(half_angle).abs() / (det::cos(half_angle) * det::cos(half_angle));
     (1.0 + line_scale) * EFF_ZERO + conditioning * angle_rounding
 }
 
@@ -1845,8 +1846,8 @@ fn surf_of_revolution_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>
         let uv_domain = s.natural_uv_domain_with_nurb(k)?;
         let ivl = gen.natural_interval();
         let anal_min_x = anal.min().x;
-        let cos = (anal_min_x * PI / 180.0).cos();
-        let sin = (anal_min_x * PI / 180.0).sin();
+        let cos = det::cos(anal_min_x * PI / 180.0);
+        let sin = det::sin(anal_min_x * PI / 180.0);
         let pos = rev.position();
         let o = pos.origin();
         let x = pos.x_axis();
@@ -2270,7 +2271,7 @@ fn cone_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<bo
     if let Some(line) = line {
         let line_scale = line.line_scale();
         let half_angle = cone.semi_angle_deg() * (PI / 180.0);
-        let cone_scale = 1.0 / half_angle.cos();
+        let cone_scale = 1.0 / det::cos(half_angle);
         let tol = generator_scale_tolerance(line_scale, half_angle);
         // A tolerance at least as large as the scale it checks means the stored angle no
         // longer fixes even the magnitude of `1/cos` (it may have rounded to 90 degrees), so
@@ -3318,7 +3319,7 @@ mod tests {
     /// degrees, where the propagated tolerance is about 1e-7 of the scale, not a refusal.
     #[test]
     fn consistent_cone_at_89_999999_degrees_is_accepted() {
-        let height = 1000.0 * (1e-6_f64).to_radians().tan();
+        let height = 1000.0 * det::tan((1e-6_f64).to_radians());
         let s = Surface::from(Cone::new_bounded(
             O,
             X,
@@ -3337,15 +3338,15 @@ mod tests {
 
     #[test]
     fn generator_scale_tolerance_still_refuses_a_wrong_scale() {
-        let half_angle = (2.65_f64).atan2(1.3e-5);
-        let scale = 1.0 / half_angle.cos();
+        let half_angle = det::atan2(2.65_f64, 1.3e-5);
+        let scale = 1.0 / det::cos(half_angle);
         let tol = generator_scale_tolerance(scale, half_angle);
         // the rounding of the angle is covered ...
         assert!(tol > 1e-6 && tol < 1e-4, "{tol}");
         // ... a scale off by 1e-6 of itself, or by 1e-9 on a gentle cone, is not
         assert!(scale * 1e-6 > tol);
         let gentle = 0.3_f64;
-        let tol = generator_scale_tolerance(1.0 / gentle.cos(), gentle);
+        let tol = generator_scale_tolerance(1.0 / det::cos(gentle), gentle);
         assert!(1e-9 > tol, "{tol}");
     }
 

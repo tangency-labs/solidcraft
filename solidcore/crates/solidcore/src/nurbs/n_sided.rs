@@ -244,6 +244,7 @@ pub fn n_sided(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::math::Vec3;
     use crate::nurbs::math::CPoint;
 
@@ -267,7 +268,7 @@ mod tests {
         (0..5)
             .map(|i| {
                 let a = std::f64::consts::TAU * f64::from(i) / 5.0;
-                [10.0 * a.cos(), 10.0 * a.sin(), 0.0]
+                [10.0 * det::cos(a), 10.0 * det::sin(a), 0.0]
             })
             .collect()
     }

@@ -8,6 +8,7 @@
 //! read by `solidcore-ops`' `label`, which converts them.
 use super::vec::{v3, VecExt};
 use super::{Curve, CurveEval, Frame, Surface, SurfaceEval};
+use crate::math::det;
 
 /// A parameter's natural range: periodic with period 2π, or between two bounds (infinite for
 /// an unbounded direction). The record's `Natural`.
@@ -61,7 +62,7 @@ pub fn surface_natural(s: &Surface) -> [Natural; 2] {
             half_angle,
             ..
         } => {
-            let apex = -radius_at_origin / half_angle.tan();
+            let apex = -radius_at_origin / det::tan(*half_angle);
             let v = if *half_angle > 0. {
                 Natural::Range(apex, f64::INFINITY)
             } else {
@@ -127,9 +128,7 @@ pub fn curve_interval(
     let (x, y) = (v3(frame.x_axis), v3(frame.y_axis));
     let angle = |t: f64| {
         eval.point(t).map(|p| {
-            ((p - o).dot(y) / radii[1])
-                .atan2((p - o).dot(x) / radii[0])
-                .rem_euclid(TAU)
+            det::atan2((p - o).dot(y) / radii[1], (p - o).dot(x) / radii[0]).rem_euclid(TAU)
         })
     };
     let (a0, a1) = (angle(t0)?, angle(t1)?);

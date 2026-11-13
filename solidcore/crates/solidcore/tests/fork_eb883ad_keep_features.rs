@@ -12,6 +12,7 @@ use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cone, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
@@ -60,7 +61,7 @@ fn column_under_footprint() -> f64 {
     let spans = 4000;
     let h = PI / f64::from(spans);
     let f = |t: f64| {
-        let (c, d) = (t.cos(), 4.0 - 2.0 * t.sin());
+        let (c, d) = (det::cos(t), 4.0 - 2.0 * det::sin(t));
         8.0 * c * c * (8.0 - (64.0 - d * d).sqrt())
     };
     let mut sum = f(-0.5 * PI) + f(0.5 * PI);
@@ -96,12 +97,12 @@ fn wall_on_round(k: &Kernel, b: &Brep) -> f64 {
             let p = curve
                 .evaluate_point(k, ivl.evaluate(f64::from(s) / 256.0))
                 .unwrap();
-            on = ((p.x - 20.0).hypot(p.y - 4.0) - 2.0).abs() < tol
-                && ((p.y - 8.0).hypot(p.z - 12.0) - 8.0).abs() < tol;
+            on = (det::hypot(p.x - 20.0, p.y - 4.0) - 2.0).abs() < tol
+                && (det::hypot(p.y - 8.0, p.z - 12.0) - 8.0).abs() < tol;
             if !on {
                 break;
             }
-            let a = (p.y - 4.0).atan2(p.x - 20.0);
+            let a = det::atan2(p.y - 4.0, p.x - 20.0);
             if s > 0 {
                 let d: f64 = a - last;
                 span += d - (2.0 * PI) * (d / (2.0 * PI)).round();

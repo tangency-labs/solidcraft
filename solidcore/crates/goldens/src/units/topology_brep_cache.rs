@@ -3,6 +3,7 @@
 //! requests. Exact `BuildTrees` explicitly defers to the unported `query.brep` box
 //! calculation. Ported from upstream `SmBrepCache`; checked against its golden.
 
+use solidcore::math::det;
 use crate::case::CaseContext;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
@@ -334,7 +335,7 @@ impl UnitDiff for Runner {
         let vertices = (0..n)
             .map(|j| {
                 let t = 2.0 * std::f64::consts::PI * j as f64 / n as f64;
-                [scale * t.cos(), scale * t.sin(), z, tol]
+                [scale * det::cos(t), scale * det::sin(t), z, tol]
             })
             .collect();
         let faces = if rng.chance(0.7) {

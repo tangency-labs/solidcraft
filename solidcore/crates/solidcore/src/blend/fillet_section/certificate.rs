@@ -4600,6 +4600,7 @@ mod tests {
     use super::*;
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::geom::extent2d::Extent2d;
+    use crate::math::det;
     use crate::math::{Vec2, Vec3};
     use crate::nurbs::b_spline_curve::NurbCircleParam;
     use crate::surface::cone::Cone;
@@ -5230,10 +5231,10 @@ mod tests {
         /// control radii, is the leader. A constant `r` is no law.
         fn wedge(k: &Kernel, phi: f64, r: [f64; 3]) -> Self {
             let len = 10.0;
-            let (cp, sp) = (phi.cos(), phi.sin());
+            let (cp, sp) = (det::cos(phi), det::sin(phi));
             let f1 = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
             let f2 = plane(Vec3::ZERO, Vec3::X, Vec3::new(0.0, cp, sp));
-            let (bc, bs) = ((0.5 * phi).cos(), (0.5 * phi).sin());
+            let (bc, bs) = (det::cos(0.5 * phi), det::sin(0.5 * phi));
             let ctrl = |i: usize| {
                 let rho = r[i] / bs;
                 Vec3::new(len * i as f64 / 2.0, rho * bc, rho * bs)
@@ -6110,9 +6111,9 @@ mod tests {
             let (h0, h1) = (at(u, v0).z, at(u, v1).z);
             let rate = (h1 - h0) / (v1 - v0);
             let edge = at(u, v1);
-            let t = edge.y.atan2(edge.x);
+            let t = det::atan2(edge.y, edge.x);
             let radius = |h: f64| bot + (top - bot) * h / height;
-            let cone = |h: f64| Vec3::new(radius(h) * t.cos(), radius(h) * t.sin(), h);
+            let cone = |h: f64| Vec3::new(radius(h) * det::cos(t), radius(h) * det::sin(t), h);
             let (va, vb) = (v1 - 0.5 * (v1 - v0), v1 + 0.2 * (v1 - v0));
             let e = nurbs_partials_over_box_ending(&n, ends, u, u, va, vb, 1, FEET_BOX_CONTINUITY)
                 .unwrap();
@@ -6231,11 +6232,11 @@ mod tests {
         let k = Kernel::default();
         let (bot, r) = (5.0, 2.0);
         let a = 30.0_f64.to_radians();
-        let foot_h = r * (1.0 - a.sin());
-        let top = bot - foot_h * a.tan();
+        let foot_h = r * (1.0 - det::sin(a));
+        let top = bot - foot_h * det::tan(a);
         let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
         let fc = upright_cone(&k, bot, top, foot_h);
-        let rho = bot + r * (1.0 - a.sin()) / a.cos();
+        let rho = bot + r * (1.0 - det::sin(a)) / det::cos(a);
         let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
         let leader = BSplineCurve::create_circle_segment(
             3,
@@ -6252,7 +6253,7 @@ mod tests {
         let lpt = |s: f64| leader.evaluate_point(s).unwrap();
         let foot_c = |s: f64| {
             let l = lpt(s);
-            let q = (rho - r * a.cos()) / rho;
+            let q = (rho - r * det::cos(a)) / rho;
             Vec3::new(l.x * q, l.y * q, foot_h)
         };
         // the sides: the plane's normal is +z, towards the ball; the cone's by its net
@@ -6361,12 +6362,12 @@ mod tests {
         let k = Kernel::default();
         let (bot, r) = (5.0, 2.0);
         let a = 30.0_f64.to_radians();
-        let foot_h = r * (1.0 - a.sin());
+        let foot_h = r * (1.0 - det::sin(a));
         let height = 2.0 * foot_h;
-        let top = bot - height * a.tan();
+        let top = bot - height * det::tan(a);
         let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
         let fc = upright_cone(&k, bot, top, height);
-        let rho = bot + r * (1.0 - a.sin()) / a.cos();
+        let rho = bot + r * (1.0 - det::sin(a)) / det::cos(a);
         let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
         let leader = BSplineCurve::create_circle_segment(
             3,
@@ -6383,7 +6384,7 @@ mod tests {
         let lpt = |s: f64| leader.evaluate_point(s).unwrap();
         let foot_c = |s: f64| {
             let l = lpt(s);
-            let q = (rho - r * a.cos()) / rho;
+            let q = (rho - r * det::cos(a)) / rho;
             Vec3::new(l.x * q, l.y * q, foot_h)
         };
         // the quarter knot, doubled, in the cone net's u
@@ -6921,12 +6922,12 @@ mod tests {
         let k = Kernel::default();
         let (bot, r) = (5.0, 2.0);
         let a = 30.0_f64.to_radians();
-        let foot_h = r * (1.0 - a.sin());
+        let foot_h = r * (1.0 - det::sin(a));
         let height = 2.0 * foot_h;
-        let top = bot - height * a.tan();
+        let top = bot - height * det::tan(a);
         let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
         let fc = upright_cone(&k, bot, top, height);
-        let rho = bot + r * (1.0 - a.sin()) / a.cos();
+        let rho = bot + r * (1.0 - det::sin(a)) / det::cos(a);
         let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
         let leader = BSplineCurve::create_circle_segment(
             3,
@@ -6943,7 +6944,7 @@ mod tests {
         let lpt = |s: f64| leader.evaluate_point(s).unwrap();
         let foot_c = |s: f64| {
             let l = lpt(s);
-            let q = (rho - r * a.cos()) / rho;
+            let q = (rho - r * det::cos(a)) / rho;
             Vec3::new(l.x * q, l.y * q, foot_h)
         };
         let (cu, cv) = nearest_uv(&nc, foot_c(0.3));

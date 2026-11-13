@@ -22,6 +22,7 @@
     clippy::disallowed_methods
 )] // test (the turn's cos and sin)
 
+use solidcore::math::det;
 use std::fmt::Write as _;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -118,7 +119,10 @@ const CASES: &[(&str, &str, usize, f64, bool)] = &[
         "sweeps/3897-sweep-ring-along-a-short-arc-joined-to-a-collar",
         "b6",
         1,
-        0.0201,
+        // 0.0201 at #3185 with glibc's libm. The label stands, so the distance this margin
+        // divides is the form's rounding residual, set by the libm's last bits: 0.0198 with
+        // `solidcore::math::det`'s (#13866). The other labels moved under 1 % with it.
+        0.0198,
         true,
     ),
     (
@@ -229,7 +233,7 @@ fn a_torus_label_turned_past_its_bound_is_refused() {
         else {
             panic!()
         };
-        let (c, sn) = (t.cos(), t.sin());
+        let (c, sn) = (det::cos(t), det::sin(t));
         let (px, py) = (placement.x_axis(), placement.y_axis());
         AnalyticSupport::Torus {
             placement: Axis2Placement::from_stored(

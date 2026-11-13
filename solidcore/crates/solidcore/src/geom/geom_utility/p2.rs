@@ -74,6 +74,7 @@ use crate::geom::geom_utility::p1::{
 use crate::geom::matrix::Matrix;
 use crate::geom::tol::{in_tol, is_zero, tol3d, ZONE_TOL_3D};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
+use crate::math::det;
 use crate::math::{max2, max3, rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 // ---- types ---------------------------------------------------------------------------
@@ -415,8 +416,8 @@ pub fn line_line_at_distance(
         return Err(SolidError::geom_failed(OP, "the lines are too far apart"));
     }
     let half_proj = sqrt(at_distance * at_distance - dist_between * dist_between) / 2.0;
-    let dist_along_a = half_proj / beta.sin();
-    let dist_along_b = half_proj / (PI - beta).sin();
+    let dist_along_a = half_proj / det::sin(beta);
+    let dist_along_b = half_proj / det::sin(PI - beta);
     let scale1 = 1.0 / line_vec1.length();
     let a_on1 = dist_along_a * scale1;
     let b_on1 = dist_along_b * scale1;

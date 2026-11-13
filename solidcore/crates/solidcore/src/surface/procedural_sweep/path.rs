@@ -52,6 +52,7 @@
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::vector3d::Vec3;
+use crate::math::det;
 use crate::nurbs::b_spline_curve::p1::KnotType;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
@@ -439,7 +440,7 @@ impl PathMotion {
             SpanKind::Line => (span.x0, span.z0, Vec3::ZERO, Vec3::ZERO),
             SpanKind::Arc { axis, .. } => {
                 // turned by the angle the tangent has turned about the axis
-                let angle = span.x0.cross(x).dot(axis).atan2(span.x0.dot(x));
+                let angle = det::atan2(span.x0.cross(x).dot(axis), span.x0.dot(x));
                 let rate = axis.dot(x.cross(dx));
                 let (xe, ze) = (
                     rodrigues(span.x0, axis, angle),
@@ -579,11 +580,10 @@ impl PathMotion {
             let arc: Option<(Vec3, Vec3, f64)> = match span.kind {
                 SpanKind::Line => None,
                 SpanKind::Arc { axis, radius } => {
-                    let turned = span
-                        .x0
-                        .cross(end.axes[0])
-                        .dot(axis)
-                        .atan2(span.x0.dot(end.axes[0]));
+                    let turned = det::atan2(
+                        span.x0.cross(end.axes[0]).dot(axis),
+                        span.x0.dot(end.axes[0]),
+                    );
                     if !(turned.abs() < std::f64::consts::PI - 1e-6 && turned.abs() > 0.0) {
                         return Err(bad("an arc span turns less than half a turn"));
                     }
@@ -616,7 +616,7 @@ impl PathMotion {
                         None => (a + b) * 0.5,
                         Some((centre, axis, half)) => {
                             let on_axis = centre + axis * (a - centre).dot(axis);
-                            on_axis + rodrigues(a - on_axis, axis, half) * (1.0 / half.cos())
+                            on_axis + rodrigues(a - on_axis, axis, half) * (1.0 / det::cos(half))
                         }
                     });
                 }
@@ -1039,7 +1039,9 @@ pub(crate) fn rounding_floor(size: f64, reach: f64) -> f64 {
 /// `v` turned right-handed about the unit `axis` by `angle` (Rodrigues): the one rotation the
 /// sweeps' frames use (this module's arcs, `sweep::stations`' pieces and corners).
 pub(crate) fn rodrigues(v: Vec3, axis: Vec3, angle: f64) -> Vec3 {
-    v * angle.cos() + axis.cross(v) * angle.sin() + axis * (axis.dot(v) * (1.0 - angle.cos()))
+    v * det::cos(angle)
+        + axis.cross(v) * det::sin(angle)
+        + axis * (axis.dot(v) * (1.0 - det::cos(angle)))
 }
 
 /// Two unit tangents meet G1 where they are at most this far apart (docs/procedural-sweep.md
@@ -1134,7 +1136,7 @@ fn spans_of(
                 match prev.kind {
                     SpanKind::Line => prev.z0,
                     SpanKind::Arc { axis, .. } => {
-                        let angle = prev.x0.cross(x_end).dot(axis).atan2(prev.x0.dot(x_end));
+                        let angle = det::atan2(prev.x0.cross(x_end).dot(axis), prev.x0.dot(x_end));
                         rodrigues(prev.z0, axis, angle)
                     }
                 }

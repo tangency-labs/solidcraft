@@ -677,6 +677,7 @@ mod tests {
     use super::super::certificate::is_foot_past_domain_end;
     use super::super::station::{knot, span};
     use super::*;
+    use crate::math::det;
 
     /// tangency-labs/solidcraft#14284: `wr698`'s `circle_root` (a pipe of radius 10 lying
     /// along a 60 x 40 x 10 plate 4 degrees off x, its root rounded r 2 as its definition)
@@ -703,7 +704,7 @@ mod tests {
         let phi = 4.0_f64.to_radians();
         let place = Axis2Placement::new(
             Point3::new(0.0, 20.0, 16.0),
-            Vec3::new(-phi.sin(), 0.0, -phi.cos()),
+            Vec3::new(-det::sin(phi), 0.0, -det::cos(phi)),
             Vec3::new(0.0, 1.0, 0.0),
         );
         crate::topology::brep::p5::transform(&mut k, &mut pipe, &place, None, false).unwrap();

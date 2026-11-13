@@ -23,6 +23,7 @@ use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use solidcore::nurbs::b_spline_surface::SurfParamType;
@@ -295,8 +296,8 @@ fn a_circle_along_an_arc_is_the_exact_torus() {
                         / 23.0,
             );
             let p = sweep.definition().evaluate_definition_point(uv).unwrap();
-            let ring = p.x.hypot(p.y);
-            let minor = (ring - 10.0).hypot(p.z);
+            let ring = det::hypot(p.x, p.y);
+            let minor = det::hypot(ring - 10.0, p.z);
             assert!((minor - RADIUS).abs() <= 1e-12, "{minor}");
             assert!(p.x >= -1e-12 && p.y >= -1e-12, "{p:?}");
         }

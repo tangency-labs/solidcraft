@@ -35,6 +35,7 @@
 //! Every run has at least [`MIN_GENERATED`] generated cases.
 
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -2718,7 +2719,7 @@ fn gen_geometry(rng: &mut Rng, kind: u64) -> Inputs {
                 .choose(&[0.0, 1e-13, -1e-13, 1e-11, 1e-9, 1e-7])
                 .unwrap_or(&0.0);
             let digits = rng.below(5) as i32;
-            let q = (base * 10f64.powi(digits)).round() / 10f64.powi(digits);
+            let q = (base * det::powi(10f64, digits)).round() / det::powi(10f64, digits);
             Inputs::CleanupNoise {
                 uv: [q + noise, rng.uniform(-1.0, 1.0)],
             }

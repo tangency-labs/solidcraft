@@ -16,6 +16,7 @@
 //! helpers) report `[status, state...]` whatever the status.
 //! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -684,7 +685,7 @@ fn unit(rng: &mut Rng) -> [f64; 3] {
 fn direction(rng: &mut Rng) -> [f64; 3] {
     match rng.below(12) {
         0 => [0.0; 3],
-        1 => scale(unit(rng), 10f64.powi(-(rng.range_i64(11, 14) as i32))),
+        1 => scale(unit(rng), det::powi(10f64, -(rng.range_i64(11, 14) as i32))),
         2 => {
             let mut v = [0.0; 3];
             if let Some(c) = v.get_mut(rng.below(3) as usize) {
@@ -738,7 +739,7 @@ fn partner(rng: &mut Rng, v: [f64; 3]) -> [f64; 3] {
     match rng.below(8) {
         0 => scale(v, rng.uniform(0.2, 3.0)),
         1 => scale(v, -rng.uniform(0.2, 3.0)),
-        2 => add(v, scale(unit(rng), 10f64.powi(-(rng.range_i64(5, 14) as i32)))),
+        2 => add(v, scale(unit(rng), det::powi(10f64, -(rng.range_i64(5, 14) as i32)))),
         3 => perp(rng, norm(v)),
         _ => direction(rng),
     }
@@ -750,7 +751,7 @@ fn small(rng: &mut Rng) -> f64 {
         0 => 0.0,
         1 => 1e-6,
         2 => 1e-3,
-        _ => 10f64.powi(-(rng.range_i64(2, 12) as i32)),
+        _ => det::powi(10f64, -(rng.range_i64(2, 12) as i32)),
     }
 }
 
@@ -916,7 +917,7 @@ fn gen_args(rng: &mut Rng, op: Op) -> Vec<f64> {
             let mut p = [[0.0; 2]; 3];
             for q in &mut p {
                 let a = rng.uniform(0.0, std::f64::consts::TAU);
-                *q = [c[0] + r * a.cos(), c[1] + r * a.sin()];
+                *q = [c[0] + r * det::cos(a), c[1] + r * det::sin(a)];
             }
             match rng.below(6) {
                 // two (nearly) coincident points
@@ -942,7 +943,7 @@ fn gen_args(rng: &mut Rng, op: Op) -> Vec<f64> {
             let mut pts = [[0.0; 3]; 3];
             for q in &mut pts {
                 let a = rng.uniform(0.0, std::f64::consts::TAU);
-                *q = add(c, add(scale(u, r * a.cos()), scale(w, r * a.sin())));
+                *q = add(c, add(scale(u, r * det::cos(a)), scale(w, r * det::sin(a))));
             }
             if rng.chance(0.15) {
                 let t = rng.uniform(-2.0, 2.0);
@@ -1073,14 +1074,14 @@ fn gen_args(rng: &mut Rng, op: Op) -> Vec<f64> {
             let r = rng.uniform(0.0, 10.0);
             let ang = match rng.below(5) {
                 0 => 0.0,
-                1 => 10f64.powi(-(rng.range_i64(3, 14) as i32)) * rng.uniform(-1.0, 1.0),
+                1 => det::powi(10f64, -(rng.range_i64(3, 14) as i32)) * rng.uniform(-1.0, 1.0),
                 2 => std::f64::consts::TAU - 1e-9 * rng.uniform(0.0, 10.0),
                 _ => rng.uniform(-7.0, 7.0),
             };
             let p = if rng.chance(0.08) {
                 add(o, scale(z, rng.uniform(-3.0, 3.0)))
             } else {
-                add(o, add(add(scale(xn, r * ang.cos()), scale(yn, r * ang.sin())), scale(z, rng.uniform(-3.0, 3.0))))
+                add(o, add(add(scale(xn, r * det::cos(ang)), scale(yn, r * det::sin(ang))), scale(z, rng.uniform(-3.0, 3.0))))
             };
             let (smin, smax) = match rng.below(5) {
                 0 | 1 => (0.0, 360.0),

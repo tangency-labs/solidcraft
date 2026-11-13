@@ -56,6 +56,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::tol;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3, PI};
 use solidcore::nurbs::b_spline_curve::KnotType;
 use solidcore::nurbs::b_spline_surface::{
@@ -417,8 +418,8 @@ fn plane_stations(k: &Kernel, srf: &Surface) -> Vec<Station> {
             plane = plane.max((p.x - x0).abs());
         }
         let area = (0.5 * sum * (v1 - v0) / (3.0 * f64::from(n))).abs();
-        let alpha = 0.5 * PI + a.atan();
-        let want = 9.0 * (1.0 / (0.5 * alpha).tan() - 0.5 * (PI - alpha));
+        let alpha = 0.5 * PI + det::atan(a);
+        let want = 9.0 * (1.0 / det::tan(0.5 * alpha) - 0.5 * (PI - alpha));
         out.push(Station {
             x0,
             degrees: alpha.to_degrees(),
@@ -458,7 +459,7 @@ fn twisted_wedge(k: &mut Kernel) -> Graded {
         seams: Vec::new(),
     };
     // the fitted blend's tolerances: 1 degree, 0.01 / mm, 0.001 / mm^2, 0.0001 / mm^3
-    let loose = [1f64.to_radians().tan(), 0.01, 0.001, 0.0001];
+    let loose = [det::tan(1f64.to_radians()), 0.01, 0.001, 0.0001];
     let size = 3.0;
     let ids: Vec<FaceId> = b.faces().ids().collect();
     let edges: Vec<EdgeId> = b.edge_list().to_vec();

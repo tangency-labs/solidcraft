@@ -28,6 +28,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO_SQRT, PI};
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p4::NoObject;
@@ -129,7 +130,7 @@ pub(crate) fn extend_trace_to_its_rails(
         }
         let [n0, n1] = normals;
         let cos = smos_min(1.0, n0.dot(n1).abs());
-        angle = smos_min(angle, cos.acos());
+        angle = smos_min(angle, det::acos(cos));
     }
     angle = smos_max(angle, PI / 180.0);
 
@@ -167,7 +168,7 @@ pub(crate) fn extend_trace_to_its_rails(
     if !positive {
         return Ok(());
     }
-    let reach = (2.0 / (angle / 2.0).tan() + 1.0) * radius;
+    let reach = (2.0 / det::tan(angle / 2.0) + 1.0) * radius;
 
     // Each base surface's parameter directions that run across the edge (not mostly along
     // it, by the edge's direction on it in 3D proportions), and whether the default reaches.

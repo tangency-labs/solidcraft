@@ -406,10 +406,16 @@ def keyed_sites(raw, read_source):
 
 def run_clippy(root):
     conf = (root / "clippy.toml").read_text()
-    if "disallowed-methods" in conf:
-        raise SystemExit("clippy.toml sets disallowed-methods; merge it into METHODS here first")
+    # The workspace's own disallowed methods (the platform's transcendental functions) stay in
+    # the list: their rows are merged with METHODS, and their sites map to no pattern, so none
+    # becomes a row.
+    own = re.search(r"^disallowed-methods = \[\n(.*?)^\]\n", conf, re.M | re.S)
+    if "disallowed-methods" in conf and own is None:
+        raise SystemExit("clippy.toml's disallowed-methods is not one `[ ... ]` block at line starts")
+    kept = own.group(1).rstrip().rstrip(",") + ",\n" if own else ""
+    conf = conf[: own.start()] + conf[own.end() :] if own else conf
     with tempfile.TemporaryDirectory() as tmp:
-        paths = ",\n".join(f'  "{p}"' for p in METHODS)
+        paths = kept + ",\n".join(f'  "{p}"' for p in METHODS)
         allowed = ", ".join(f'"{t}"' for t in SIDE_EFFECTS_ALLOWED)
         Path(tmp, "clippy.toml").write_text(
             f"{conf}\ndisallowed-methods = [\n{paths},\n]\n"

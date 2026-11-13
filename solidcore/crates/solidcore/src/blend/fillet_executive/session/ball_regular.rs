@@ -44,6 +44,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
@@ -630,16 +631,16 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
             } else {
                 cp.cross(e1).unitize()?
             };
-            let phi = f64::atan2(q.dot(e2), q.dot(e1));
+            let phi = det::atan2(q.dot(e2), q.dot(e1));
             // the most of a cos(phi) + b sin(phi) over [0, phi]
             let da = e1.dot(cpp);
             let db = e2.dot(cpp);
             let mut most = da;
-            let at_end = da * phi.cos() + db * phi.sin();
+            let at_end = da * det::cos(phi) + db * det::sin(phi);
             if at_end > most {
                 most = at_end;
             }
-            let star = f64::atan2(db, da);
+            let star = det::atan2(db, da);
             if star > 0.0 && star < phi {
                 most = f64::sqrt(da * da + db * db);
             }

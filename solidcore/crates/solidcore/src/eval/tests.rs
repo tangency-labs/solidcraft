@@ -6,6 +6,7 @@
 use super::spline::orders;
 use super::vec::VecExt;
 use super::*;
+use crate::math::det;
 use crate::math::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -83,7 +84,7 @@ fn exact(s: &Surface, p: Vec3) -> (f64, Vec3, [f64; 2]) {
             half_angle,
         } => {
             let (o, z) = ax(frame);
-            let slope = half_angle.tan();
+            let slope = det::tan(*half_angle);
             let q = p - o;
             let h = q.dot(z);
             let rad = q - z * h;
@@ -555,9 +556,9 @@ fn a_rational_quarter_circle_has_the_circles_derivatives() {
     let s = quarter_cylinder();
     for u in [0.0, 0.2, 0.5, 0.9, 1.0] {
         let d = s.partials(u, 0.4).unwrap();
-        assert!((d[0][0].x.hypot(d[0][0].y) - 2.0).abs() < 1e-12);
+        assert!((det::hypot(d[0][0].x, d[0][0].y) - 2.0).abs() < 1e-12);
         let (r1, r2) = (d[1][0], d[2][0]);
-        let k = r1.cross(r2).len() / r1.len().powi(3);
+        let k = r1.cross(r2).len() / det::powi(r1.len(), 3);
         assert!((k - 0.5).abs() < 1e-12, "{k}");
         assert!(d[0][2].len() < 1e-12 && d[1][1].z.abs() < 1e-12);
     }
@@ -596,11 +597,18 @@ fn revolved_line_is_a_cylinder() {
     for &(u, v) in &[(0.0, 0.0), (0.5, 1.0), (1.0, 4.0), (0.25, 6.0)] {
         let (p, n) = s.eval(u, v).unwrap();
         assert!(
-            close(p, Vec3::new(2.0 * v.cos(), 2.0 * v.sin(), 5.0 * u), 1e-12),
+            close(
+                p,
+                Vec3::new(2.0 * det::cos(v), 2.0 * det::sin(v), 5.0 * u),
+                1e-12
+            ),
             "{p:?}"
         );
         // S_u = +Z, S_v = tangential: the normal points inward (−radial) for this profile.
-        assert!(close(n, Vec3::new(-v.cos(), -v.sin(), 0.0), 1e-12), "{n:?}");
+        assert!(
+            close(n, Vec3::new(-det::cos(v), -det::sin(v), 0.0), 1e-12),
+            "{n:?}"
+        );
     }
 }
 
@@ -942,7 +950,7 @@ fn curve_jets_are_exact_on_every_kind() {
     };
     let leader = Curve::Polyline {
         points: (0..=12)
-            .map(|k| (k as f64 * TAU / 12.0).sin_cos())
+            .map(|k| det::sin_cos(k as f64 * TAU / 12.0))
             .map(|(s, c)| [4.1 * c, 4.1 * s, 3.2])
             .collect(),
     };
@@ -1139,7 +1147,7 @@ fn a_form_on_arcs_of_its_own_is_the_surface_and_does_not_close_around_an_open_fa
                 v0 + (v1 - v0) * j as f64 / 12.,
             ];
             let p = own_at.point(uv).unwrap() - Vec3::new(1., 2., 3.);
-            let off = ((p.x.hypot(p.y) - 5.).powi(2) + p.z.powi(2)).sqrt() - 1.5;
+            let off = (det::powi(det::hypot(p.x, p.y) - 5., 2) + det::powi(p.z, 2)).sqrt() - 1.5;
             assert!(off.abs() < 1e-12, "{uv:?}: {off}");
         }
     }
@@ -1180,12 +1188,12 @@ fn a_hole_beside_the_seam_lies_in_its_face_turn() {
         radius: r,
     };
     let s = -10f64.to_radians();
-    let at = |a: f64, z: f64| [r * a.cos(), r * a.sin(), z];
+    let at = |a: f64, z: f64| [r * det::cos(a), r * det::sin(a), z];
     let ring = |z: f64| Curve::Circle {
         frame: Frame {
             origin: [0., 0., z],
-            x_axis: [s.cos(), s.sin(), 0.],
-            y_axis: [-s.sin(), s.cos(), 0.],
+            x_axis: [det::cos(s), det::sin(s), 0.],
+            y_axis: [-det::sin(s), det::cos(s), 0.],
         },
         radius: r,
     };
@@ -1384,7 +1392,7 @@ fn analytic_apexes_and_rings_of_radius_zero_are_poles() {
         half_angle: -0.4,
     })
     .unwrap();
-    let apex = 2.0 / 0.4f64.tan();
+    let apex = 2.0 / det::tan(0.4f64);
     assert_eq!(cone.collapse([0.7, apex], 0.0).unwrap(), Collapse::U);
     assert_eq!(
         cone.collapse([0.7, 0.5 * apex], 1e-6).unwrap(),

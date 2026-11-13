@@ -7,6 +7,7 @@
 //! record's angle u; the generator's parameter is −v on a line and, on an arc, the rational
 //! parameter of the record's angle v (closed form, [`Arc::param`]).
 
+use solidcore::math::det;
 use solidcore::Vec3;
 use solidcore_record::brep::{self, Frame};
 use crate::vec::VecExt as _;
@@ -65,7 +66,7 @@ impl Arc {
         let i = (((a - self.start) / self.step).floor().max(0.0) as usize).min(self.count.saturating_sub(1));
         let half = 0.5 * self.step;
         let local = a - (self.start + (i as f64 + 0.5) * self.step);
-        let s = 0.5 * ((0.5 * local).tan() / (0.5 * half).tan() + 1.0);
+        let s = 0.5 * (det::tan(0.5 * local) / det::tan(0.5 * half) + 1.0);
         (i as f64 + s) / self.count as f64 + turns
     }
 }
@@ -109,7 +110,7 @@ pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Re
         }
         brep::Surface::Cone { frame, radius_at_origin, half_angle } => {
             let (o, x, z) = axes(frame);
-            let slope = half_angle.tan();
+            let slope = det::tan(*half_angle);
             Ok((revolved(generator(&|h| o + x * (radius_at_origin + h * slope) + z * h)?, o, z)?, Params::Height))
         }
         brep::Surface::Sphere { frame, radius } => {
@@ -119,7 +120,7 @@ pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Re
         brep::Surface::Torus { frame, major_radius, minor_radius, tube_start } => {
             let (o, x, z) = axes(frame);
             // The tube angle counts from its start.
-            let (s, c) = tube_start.sin_cos();
+            let (s, c) = det::sin_cos(*tube_start);
             meridian(o + x * *major_radius, [x * c + z * s, z * c - x * s], z, *minor_radius, [0.0, TAU], o)
         }
         _ => {
@@ -139,11 +140,11 @@ fn arc(centre: Vec3, x: Vec3, y: Vec3, r: f64, angle: [f64; 2]) -> (EvalCurve, A
     let span = angle[1] - angle[0];
     let count = (span / std::f64::consts::FRAC_PI_2).ceil().clamp(1.0, 4.0) as usize;
     let step = span / count as f64;
-    let weight = (step / 2.0).cos();
+    let weight = det::cos(step / 2.0);
     // A point at angle `t`, its radius divided by `scale` (the middle control point of a span
     // lies 1 / cos(step / 2) out), as homogeneous coordinates of weight `w`.
     let at = |t: f64, scale: f64, w: f64| {
-        let p = centre + x * (r * t.cos() / scale) + y * (r * t.sin() / scale);
+        let p = centre + x * (r * det::cos(t) / scale) + y * (r * det::sin(t) / scale);
         [p.x * w, p.y * w, p.z * w, w]
     };
     let mut ctrl = vec![at(angle[0], 1.0, 1.0)];

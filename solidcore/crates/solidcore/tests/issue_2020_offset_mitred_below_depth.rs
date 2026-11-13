@@ -32,6 +32,7 @@
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::Point3;
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::primitive::api_primitives::create_box;
@@ -98,7 +99,7 @@ fn analytic(d: f64) -> f64 {
     let mut v = 40.0 * 30.0 * below;
     // over the axis: 816 L + 116 integral(w) + 4 integral(w^2), u = z - axis
     let (u0, u1) = (below - axis, top - axis);
-    let w_int = |u: f64| 0.5 * (u * (9.0 - u * u).max(0.0).sqrt() + 9.0 * (u / 3.0).asin());
+    let w_int = |u: f64| 0.5 * (u * (9.0 - u * u).max(0.0).sqrt() + 9.0 * det::asin(u / 3.0));
     let w2_int = |u: f64| 9.0 * u - u * u * u / 3.0;
     v += 816.0 * (u1 - u0) + 116.0 * (w_int(u1) - w_int(u0)) + 4.0 * (w2_int(u1) - w2_int(u0));
     v

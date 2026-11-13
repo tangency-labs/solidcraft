@@ -23,6 +23,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3};
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -46,7 +47,7 @@ fn arc(
 ) -> Curve {
     let sweep = end - start;
     let y = axis.cross(reference);
-    let x0 = reference * start.cos() + y * start.sin();
+    let x0 = reference * det::cos(start) + y * det::sin(start);
     let y0 = axis.cross(x0);
     let mut frame = Axis2Placement::default();
     frame.set_canonical(centre, x0, y0).unwrap();

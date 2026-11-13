@@ -31,6 +31,7 @@
 //!   result, as the fork's ride on the objects it splits and merges (#1980); the
 //!   kernel's own ids stay in the session store, found by handle.
 
+use crate::math::det;
 use std::collections::BTreeMap;
 
 use super::{invalid, FilletBody, FilletObject, FilletSession, SolverObject};
@@ -136,7 +137,7 @@ impl FilletSession<'_> {
             *normal = planar.normal;
         }
         let [n0, n1] = normals;
-        let phi = smos_max(-1.0, smos_min(1.0, n0.dot(n1))).acos();
+        let phi = det::acos(smos_max(-1.0, smos_min(1.0, n0.dot(n1))));
         let [geom] = base.fillet_geoms[..] else {
             return Ok(true);
         };
@@ -193,7 +194,7 @@ impl FilletSession<'_> {
                     continue;
                 }
                 let out = bisector * (sign / len); // edge to centre
-                let off = 1.0 / (angle / 2.0).sin();
+                let off = 1.0 / det::sin(angle / 2.0);
                 let centre = pnt + out * (radius * off);
                 let along = edge_d + out * (slope * off); // dC/dT
                 let speed = along.length();

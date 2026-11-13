@@ -77,6 +77,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{EFF_ZERO, PI};
 use crate::surface::surface::p2::{Surface, SurfaceEvaluate};
 use crate::topology::database_io::{DatabaseReader, FileType};
@@ -462,7 +463,7 @@ fn field_point<S: SurfaceEvaluate>(
     // This yields a vanishing twist vector at the ends of the tangent interpolation.
     // note: dT = 1.0 at minParam and dT = 0.0 at maxParam
     dt *= PI;
-    dt = 0.5 * dt.cos() + 0.5;
+    dt = 0.5 * det::cos(dt) + 0.5;
 
     // sTangentField(dParam) value is an interpolated value of the stored endTangentField values
     let tangent_field = start_tangent * dt + end_tangent * (1.0 - dt);

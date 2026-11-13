@@ -67,6 +67,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, BIG_DOUBLE};
 use solidcore::primitive::api_curves as curves;
 use solidcore::query::api_queries::{brep_bounding_box, get_edges};
@@ -112,7 +113,7 @@ fn extrude(k: &mut Kernel, cs: &[Curve], draft_deg: f64) -> Brep {
 /// The fork's `tangent_peg(draft)`.
 fn tangent_peg(k: &mut Kernel, draft_deg: f64) -> Brep {
     let p = Point3::new;
-    let d = 10.0 * draft_deg.to_radians().tan();
+    let d = 10.0 * det::tan(draft_deg.to_radians());
     let line = |a: Point3, b: Point3| Curve::from(curves::create_line_segment(a, b).unwrap());
     let bar = [
         line(p(0.0, 0.0, 0.0), p(40.0, 0.0, 0.0)),
@@ -325,11 +326,11 @@ fn concave_round_then_front_round_r2(k: &mut Kernel) -> Outcome {
     rounds_in_turn(k, 2.0, 2.0, false)
 }
 fn drafted_front_round_r2(k: &mut Kernel) -> Outcome {
-    let d = 10.0 * 5.0_f64.to_radians().tan();
+    let d = 10.0 * det::tan(5.0_f64.to_radians());
     one(k, 5.0, Kind::Round, &[[20.0, d, 10.0]], &[2.0], 0.0, false)
 }
 fn drafted_rounds_together_r2(k: &mut Kernel) -> Outcome {
-    let d = 10.0 * 5.0_f64.to_radians().tan();
+    let d = 10.0 * det::tan(5.0_f64.to_radians());
     let pts = [[20.0, d, 10.0], [32.0 + d, 8.0, 10.0]];
     one(k, 5.0, Kind::Round, &pts, &[2.0, 2.0], 0.0, false)
 }

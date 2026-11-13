@@ -3875,6 +3875,7 @@ mod tests {
     use super::*;
     use crate::error::SM_ERR_INVALID_INPUT;
     use crate::geom::a_object;
+    use crate::math::det;
     use crate::topology::Region;
 
     fn cross_body_face(k: &mut Kernel, surface: Surface) -> Brep {
@@ -4018,7 +4019,9 @@ mod tests {
                     assert!((p.z - 0.125).abs() <= 1e-9 * p.z.abs());
                     // The curve approximates the circle on the paraboloid to the
                     // requested 3D approximation tolerance, regardless of orientation.
-                    assert!(((p.x - 0.5).powi(2) + (p.y - 0.5).powi(2) - 0.125).abs() <= 1e-6);
+                    assert!(
+                        (det::powi(p.x - 0.5, 2) + det::powi(p.y - 0.5, 2) - 0.125).abs() <= 1e-6
+                    );
                     if !reverse {
                         for (actual, expected) in
                             [(p.x, expected.x), (p.y, expected.y), (p.z, expected.z)]

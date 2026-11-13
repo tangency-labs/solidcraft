@@ -28,6 +28,7 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::primitive::api_primitives::{create_box, create_cone, create_cylinder};
@@ -83,7 +84,7 @@ fn tilt(k: &mut Kernel, b: &mut Brep, tau: f64) {
     let pl = Axis2Placement::new(
         Point3::new(0.0, 0.0, 0.0),
         Vec3::new(1.0, 0.0, 0.0),
-        Vec3::new(0.0, tau.cos(), tau.sin()),
+        Vec3::new(0.0, det::cos(tau), det::sin(tau)),
     );
     solidcore::topology::brep::p5::transform(k, b, &pl, None, false).unwrap();
 }
@@ -130,7 +131,7 @@ struct Ball {
 
 /// The unit radial direction from the cylinder's axis at angle `theta`.
 fn radial(e1: Vec3, e2: Vec3, theta: f64) -> Vec3 {
-    e1 * theta.cos() + e2 * theta.sin()
+    e1 * det::cos(theta) + e2 * det::sin(theta)
 }
 
 /// The largest `| |X - spine| - r |` over a 21 x 21 grid of each round face's domain, the
@@ -177,9 +178,10 @@ fn round_flux(ball: &dyn Fn(f64) -> Ball, o: Point3) -> (f64, f64) {
     let (nt, np) = (720, 256);
     let point = |t: f64, p: f64| {
         let bl = ball(t);
-        let om = bl.a.dot(bl.b).acos();
-        let e = (bl.a * ((1.0 - p) * om).sin() + bl.b * (p * om).sin()) * (1.0 / om.sin());
-        let de = (bl.a * (-((1.0 - p) * om).cos()) + bl.b * (p * om).cos()) * (om / om.sin());
+        let om = det::acos(bl.a.dot(bl.b));
+        let e = (bl.a * det::sin((1.0 - p) * om) + bl.b * det::sin(p * om)) * (1.0 / det::sin(om));
+        let de =
+            (bl.a * (-det::cos((1.0 - p) * om)) + bl.b * det::cos(p * om)) * (om / det::sin(om));
         (bl.c + e * FILLET, e, de * FILLET)
     };
     let h = 1e-3;
@@ -271,8 +273,8 @@ fn plate_and_peg_round(tau: f64) -> (impl Fn(f64) -> Point3, f64, f64) {
 fn peg_round(rr: f64, tau: f64) -> (impl Fn(f64) -> Point3, f64, f64) {
     let (e1, e2, a) = (
         Vec3::new(1.0, 0.0, 0.0),
-        Vec3::new(0.0, tau.cos(), tau.sin()),
-        Vec3::new(0.0, -tau.sin(), tau.cos()),
+        Vec3::new(0.0, det::cos(tau), det::sin(tau)),
+        Vec3::new(0.0, -det::sin(tau), det::cos(tau)),
     );
     // on the cylinder of radius rho about the peg's axis at angle t, the height along the
     // axis where the plane z = h is
@@ -287,7 +289,7 @@ fn peg_round(rr: f64, tau: f64) -> (impl Fn(f64) -> Point3, f64, f64) {
     let strip = cylinder_flux(rr, e1, e2, o, &|t| w(rr + FILLET, FILLET, t), &|t| {
         w(rr, 0.0, t)
     });
-    assert!((strip + rr * rr * 2.0 * PI * FILLET / (3.0 * tau.cos())).abs() < 1e-12);
+    assert!((strip + rr * rr * 2.0 * PI * FILLET / (3.0 * det::cos(tau))).abs() < 1e-12);
     let (flux, area) = round_flux(&ball, o);
     (spine, flux + strip, area)
 }
@@ -358,13 +360,13 @@ fn pole_and_cone_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, Vec<
     k.fixes.fillet_exact_round_classes = exact;
     k.fixes.fillet_round_as_definition = definition;
     let alpha = 45f64.to_radians();
-    let d = R / alpha.sin();
+    let d = R / det::sin(alpha);
     let pole = create_cylinder(&mut k, Point3::new(0.0, 0.0, -12.0), R, 20.0).unwrap();
     let mut skirt = create_cone(
         &mut k,
         Point3::new(0.0, 0.0, d - 20.0),
-        20.0 * alpha.tan(),
-        alpha.tan(),
+        20.0 * det::tan(alpha),
+        det::tan(alpha),
         19.0,
     )
     .unwrap();
@@ -392,14 +394,14 @@ fn pole_and_cone_round() -> (impl Fn(f64) -> Point3, f64, f64) {
         Vec3::new(0.0, 0.0, 1.0),
     );
     // toward the cone's apex from the ball's centre
-    let uc = Vec3::new(0.0, -tau.sin(), tau.cos());
-    let apex = uc * (R / alpha.sin());
+    let uc = Vec3::new(0.0, -det::sin(tau), det::cos(tau));
+    let apex = uc * (R / det::sin(alpha));
     // A cylinder of radius rho about z and the cone tangent to the same ball of radius rho
     // about the origin meet where (x.a) cos(alpha) = +-(x.uc - rho sin(alpha)); the cone
     // leaves the pole on x.(a cos(alpha) + uc) = rho sin(alpha): on the cylinder at angle
     // t, the height
     let w = move |rho: f64, t: f64| {
-        rho * (alpha.sin() - radial(e1, e2, t).dot(uc)) / (alpha.cos() + tau.cos())
+        rho * (det::sin(alpha) - radial(e1, e2, t).dot(uc)) / (det::cos(alpha) + det::cos(tau))
     };
     let rho = R + FILLET;
     let spine = move |t: f64| radial(e1, e2, t) * rho + a * w(rho, t);
@@ -408,7 +410,7 @@ fn pole_and_cone_round() -> (impl Fn(f64) -> Point3, f64, f64) {
         let across = (c - uc * c.dot(uc)).unitize().unwrap();
         Ball {
             c,
-            a: -(across * alpha.cos() + uc * alpha.sin()),
+            a: -(across * det::cos(alpha) + uc * det::sin(alpha)),
             b: -radial(e1, e2, t),
         }
     };

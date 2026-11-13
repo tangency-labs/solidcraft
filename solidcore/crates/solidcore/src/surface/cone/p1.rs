@@ -135,6 +135,7 @@ use crate::geom::tol::{approx_tol3d, are_same, are_same_to_tol, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, INFINITE_PARAMETER, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{
@@ -579,7 +580,7 @@ impl Cone {
         let z_axis = x_axis.cross(y_axis);
         let mut line_vec = z_axis;
         let angle_rad = deg2rad(cone.semi_angle_deg);
-        let scale = 1.0 / angle_rad.cos();
+        let scale = 1.0 / det::cos(angle_rad);
         // (WR-713: upstream rotates for a positive semi-angle only, leaving the generator
         // of a negative one parallel to the axis)
         let rotate = if k.fixes.cone_unbounded_parameterized_as_nurb {
@@ -719,7 +720,7 @@ impl Cone {
         // modify m_dSemiAngleDeg for nonCylinder shapes
         let radius_diff = top_radius - bot_radius;
         if radius_diff.abs() > EFF_ZERO {
-            cone.semi_angle_deg = radius_diff.atan2(height) * 180.0 / PI;
+            cone.semi_angle_deg = det::atan2(radius_diff, height) * 180.0 / PI;
         }
 
         // The parameterization of the generator is the height from the origin.
@@ -867,7 +868,7 @@ impl Cone {
                 inside_out,
             )?,
             Some(h) => {
-                let top_radius = bot_radius + deg2rad(semi_angle_deg).tan() * h;
+                let top_radius = bot_radius + det::tan(deg2rad(semi_angle_deg)) * h;
                 let (cone_inside_out, make_nurb_gen_curve) = if k
                     .fixes
                     .cone_create_canonical_preserves_inside_out_and_checks_height
@@ -1026,14 +1027,14 @@ impl Cone {
     /// The radius at the height `height` (`GetRadius`).
     #[must_use]
     pub fn radius(&self, height: f64) -> f64 {
-        self.base_radius + deg2rad(self.semi_angle_deg).tan() * height
+        self.base_radius + det::tan(deg2rad(self.semi_angle_deg)) * height
     }
 
     /// Not upstream: the tangent of the semi-angle, the radius's slope along the axis as
     /// [`Self::radius`] takes it (the stored angle's, not a difference of two radii).
     #[must_use]
     pub(crate) fn tan_semi_angle(&self) -> f64 {
-        deg2rad(self.semi_angle_deg).tan()
+        det::tan(deg2rad(self.semi_angle_deg))
     }
 
     /// The radius at the bottom of the STEP domain (`GetBotRadius`; `SmCylinder`'s
@@ -1209,7 +1210,7 @@ impl Cone {
                 param: 0.0,
             });
         }
-        let height = -self.base_radius / (self.semi_angle_deg * PI / 180.0).tan();
+        let height = -self.base_radius / det::tan(self.semi_angle_deg * PI / 180.0);
         let point = self.rev.position.origin() + height * self.rev.position.z_axis();
         let param = self.gen()?.step_inversion(k, point)?;
         Ok(Apex {
@@ -1653,8 +1654,8 @@ impl Cone {
         let r = self.radius(v);
         let rv =
             (self.radius(linear_ivl.max()) - self.radius(linear_ivl.min())) / linear_ivl.length();
-        let cos_u = (uv.x * PI / 180.0).cos();
-        let sin_u = (uv.x * PI / 180.0).sin();
+        let cos_u = det::cos(uv.x * PI / 180.0);
+        let sin_u = det::sin(uv.x * PI / 180.0);
 
         let n = (hu + 1) * (hv + 1);
         let d = d
@@ -1952,7 +1953,7 @@ impl Cone {
                 scaled_zero,
             ) {
                 let angle_rad = deg2rad(semi_angle_deg);
-                let speed = 1.0 / angle_rad.cos();
+                let speed = 1.0 / det::cos(angle_rad);
                 let line_scale = gen_line.line_scale();
                 scaled_zero = EFF_ZERO * (1.0 + line_scale);
                 if !are_same_to_tol(line_scale, speed, scaled_zero) {
@@ -2193,7 +2194,7 @@ mod tests {
     fn canonical_cone_shape() {
         let c = cone123();
         assert!(!c.is_cylinder());
-        assert!((c.semi_angle_deg() - 1.0f64.atan2(3.0).to_degrees()).abs() < 1e-12);
+        assert!((c.semi_angle_deg() - det::atan2(1.0f64, 3.0).to_degrees()).abs() < 1e-12);
         assert!((c.bot_radius() - 1.0).abs() < 1e-12);
         assert!((c.top_radius() - 2.0).abs() < 1e-12);
         assert_eq!(c.type_code(), CONE_TYPE);
@@ -2618,7 +2619,11 @@ mod tests {
         for (u, v) in [(30.0_f64, 1.5), (200.0, 10.0), (120.0, -6.0)] {
             // radius 1 + v / 3, negative past the apex (the point turned by 180 degrees)
             let r = 1.0 + v / 3.0;
-            let p = Vec3::new(r * u.to_radians().cos(), r * u.to_radians().sin(), v);
+            let p = Vec3::new(
+                r * det::cos(u.to_radians()),
+                r * det::sin(u.to_radians()),
+                v,
+            );
             let (uv, _) = non_planar.step_inversion_unbounded(&k, p, 1e-9).unwrap();
             assert!(
                 (uv - Point2::new(u, v)).length() < 1e-9,
@@ -2642,7 +2647,7 @@ mod tests {
         let bot = 1.0;
         let semi_deg = 30.0;
         let h = 2.0;
-        let expected_top = bot + deg2rad(semi_deg).tan() * h;
+        let expected_top = bot + det::tan(deg2rad(semi_deg)) * h;
 
         for swap_uv in [false, true] {
             let def_cone = Cone::create_canonical_with_semi_angle(

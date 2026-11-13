@@ -18,6 +18,7 @@
 //! Missing downstream callees (for example `surface_p3` singularity discovery and
 //! `surface_p8` global point solves) defer under their own unit identifiers.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1279,7 +1280,7 @@ fn gen_curve(rng: &mut Rng, scale: f64) -> (CrvIn, [f64; 2]) {
         if rng.chance(0.1) {
             bb = [a[0] + scale, a[1], a[2]];
         }
-        let len = ((bb[0] - a[0]).powi(2) + (bb[1] - a[1]).powi(2) + (bb[2] - a[2]).powi(2)).sqrt();
+        let len = (det::powi(bb[0] - a[0], 2) + det::powi(bb[1] - a[1], 2) + det::powi(bb[2] - a[2], 2)).sqrt();
         let hi = if rng.chance(0.5) { len } else { len * rng.uniform(0.2, 1.0) };
         return (CrvIn::Line { a, b: bb }, [0.0, hi.max(1e-3)]);
     }
@@ -1587,7 +1588,7 @@ mod tests {
                 assert!(crate::compare::values_agree(radius, 2.0, None));
             }
             let sagitta_sq: f64 = (0..3)
-                .map(|axis| (points[2][axis] - (points[0][axis] + points[4][axis]) / 2.0).powi(2))
+                .map(|axis| det::powi(points[2][axis] - (points[0][axis] + points[4][axis]) / 2.0, 2))
                 .sum();
             assert!(sagitta_sq > 0.01, "edge {edge} must be curved");
             for (j, p) in block[21..36].as_chunks::<3>().0.iter().enumerate() {

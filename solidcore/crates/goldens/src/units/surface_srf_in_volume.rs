@@ -59,6 +59,7 @@
 //! unbend and twist maps, orient maps and next-map chains) and compare every report,
 //! including the nested reports of the base surface and the volume chain.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1275,7 +1276,7 @@ fn gen_transform(rng: &mut Rng) -> [[f64; 3]; 4] {
         1 => {
             // rotation about z by a random angle, translated
             let a = rng.uniform(-3.2, 3.2);
-            let (s, c) = a.sin_cos();
+            let (s, c) = det::sin_cos(a);
             [coord(rng, 5.0), [c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]]
         }
         2 => {
@@ -1416,7 +1417,7 @@ fn gen_placement(rng: &mut Rng) -> ([f64; 3], [f64; 3], [f64; 3]) {
         ([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
     } else {
         let a = rng.uniform(-3.2, 3.2);
-        let (s, c) = a.sin_cos();
+        let (s, c) = det::sin_cos(a);
         (coord(rng, 5.0), [c, s, 0.0], [-s, c, 0.0])
     }
 }
@@ -1824,7 +1825,7 @@ fn gen_exact_volume_case(rng: &mut Rng) -> Inputs {
         (3 | 6, 2) => {
             let t: f64 = if rng.chance(0.2) { 0.0 } else { rng.uniform(-3.0, 3.0) };
             frame_patch(rng, (0.2 * s, 3.0 * s), (-2.0 * s, 2.0 * s), f[3], &|r, z| {
-                at_frame(&f, r * t.cos(), r * t.sin(), z)
+                at_frame(&f, r * det::cos(t), r * det::sin(t), z)
             })
         }
         // unbend: planes normal to the axis

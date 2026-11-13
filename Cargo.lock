@@ -4741,6 +4741,7 @@ dependencies = [
 name = "solidcore"
 version = "1.0.1"
 dependencies = [
+ "libm",
  "serde",
  "thiserror 2.0.21",
 ]

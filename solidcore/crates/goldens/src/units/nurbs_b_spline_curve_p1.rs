@@ -24,6 +24,7 @@
 //! `TessellateByBisection`) are deferred. Every run has at least [`MIN_GENERATED`]
 //! generated cases.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1019,10 +1020,10 @@ fn gen_curve_op(rng: &mut Rng, c: &InlineCrv, this: &This) -> OpIn {
             },
         },
         15 => OpIn::Fixup {
-            tol: 10f64.powf(-rng.uniform(1.0, 12.0)),
+            tol: det::powf(10f64, -rng.uniform(1.0, 12.0)),
         },
         16 => OpIn::RemoveExtra {
-            tol: 10f64.powf(-rng.uniform(1.0, 10.0)),
+            tol: det::powf(10f64, -rng.uniform(1.0, 10.0)),
         },
         17 => OpIn::SetFromGw {
             crv: if rng.chance(0.85) {
@@ -1251,7 +1252,7 @@ fn gen_static_op(rng: &mut Rng) -> OpIn {
                 2 => -rng.uniform(0.1, 3.0),
                 _ => rng.uniform(0.05, 3.1),
             };
-            let (c, s) = (ang.cos(), ang.sin());
+            let (c, s) = (det::cos(ang), det::sin(ang));
             let p1 = [center[0] + r, center[1], center[2]];
             let r2 = if rng.chance(0.1) { r * 1.1 } else { r };
             let p2 = [center[0] + r2 * c, center[1] + r2 * s, center[2]];
@@ -1343,7 +1344,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             let (a, b) = ends(&c);
             c = insert_knot(&c, rng.uniform(a, b));
             op = OpIn::RemoveExtra {
-                tol: 10f64.powf(-rng.uniform(4.0, 9.0)),
+                tol: det::powf(10f64, -rng.uniform(4.0, 9.0)),
             };
         }
     }

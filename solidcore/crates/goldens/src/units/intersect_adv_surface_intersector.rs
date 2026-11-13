@@ -24,6 +24,7 @@
 //! in size or `FindInteriorCurves` with a candidate pair on a B-spline or on planes
 //! more than 5 degrees apart.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -828,7 +829,7 @@ fn curvature(rng: &mut Rng) -> f64 {
         1 => 1e-6 * rng.uniform(0.9, 1.1),
         2 => 1e-12 * rng.uniform(0.5, 2.0),
         3 => 1e4 * rng.uniform(0.5, 2.0),
-        _ => 10f64.powf(rng.uniform(-2.0, 2.0)),
+        _ => det::powf(10f64, rng.uniform(-2.0, 2.0)),
     };
     if rng.chance(0.5) {
         m
@@ -840,7 +841,7 @@ fn curvature(rng: &mut Rng) -> f64 {
 /// A symmetric shape tensor `[s11, s12, s22]` in the tangent frame.
 fn shape(rng: &mut Rng) -> [f64; 3] {
     let t = rng.uniform(0.0, core::f64::consts::PI);
-    let (c, s) = (t.cos(), t.sin());
+    let (c, s) = (det::cos(t), det::sin(t));
     let (k1, k2) = match rng.below(7) {
         0 => (0.0, 0.0),
         1 => (curvature(rng), 0.0),
@@ -906,7 +907,7 @@ fn eval_matrix(
 }
 
 fn jacobian(rng: &mut Rng) -> [[f64; 2]; 2] {
-    let s = 10f64.powf(rng.uniform(-2.0, 2.0));
+    let s = det::powf(10f64, rng.uniform(-2.0, 2.0));
     loop {
         let j = if rng.chance(0.3) {
             [[s, 0.0], [0.0, s * rng.uniform(0.5, 2.0)]]
@@ -1055,7 +1056,7 @@ fn gen_domain(rng: &mut Rng, nat: [f64; 4]) -> [f64; 4] {
 
 /// A surface pair at a point with parallel normals and its point values.
 fn gen_sing_point(rng: &mut Rng, uvs: [[f64; 2]; 2]) -> Vec<f64> {
-    let scale = 10f64.powf(rng.uniform(-3.0, 3.0));
+    let scale = det::powf(10f64, rng.uniform(-3.0, 3.0));
     let pos = mul(scale, rng.point3(-1.0, 1.0));
     let n = direction(rng);
     let e1 = norm(cross(n, unit_vec(rng)));
@@ -1071,13 +1072,13 @@ fn gen_sing_point(rng: &mut Rng, uvs: [[f64; 2]; 2]) -> Vec<f64> {
         1 => {
             let t = rng.uniform(0.0, core::f64::consts::PI);
             let d = curvature(rng);
-            let (c, s) = (t.cos(), t.sin());
+            let (c, s) = (det::cos(t), det::sin(t));
             rel([sh1[0] + d * s * s, sh1[1] - d * c * s, sh1[2] + d * c * c])
         }
         // the same tensor, rotated
         2 => {
             let t = rng.uniform(0.0, core::f64::consts::PI);
-            let (c, s) = (t.cos(), t.sin());
+            let (c, s) = (det::cos(t), det::sin(t));
             let [a, bb, d] = sh1;
             rel([
                 c * c * a + 2.0 * c * s * bb + s * s * d,
@@ -1133,7 +1134,7 @@ fn gen_set(rng: &mut Rng, sop: u8) -> OpIn {
         ang: *rng
             .choose(&[20.0f64.to_radians(), 0.01, 0.3, 1.0])
             .unwrap_or(&0.3),
-        approx: 10f64.powf(rng.uniform(-6.0, 0.0)),
+        approx: det::powf(10f64, rng.uniform(-6.0, 0.0)),
         tol: *rng.choose(&[0.0, 1e-6, 1e-3, 0.1]).unwrap_or(&0.0),
         sop,
     }
@@ -1398,7 +1399,7 @@ fn gen_tree_case(rng: &mut Rng) -> Option<Inputs> {
             let y = norm(cross(cross(x, unit_vec(rng)), x));
             let ang = rng.uniform(-4.0, 4.0).to_radians();
             let z = cross(x, y);
-            let y2 = add(mul(ang.cos(), y), mul(ang.sin(), z));
+            let y2 = add(mul(det::cos(ang), y), mul(det::sin(ang), z));
             let o2 = add(o, mul(s * rng.uniform(-1e-3, 1e-3), z));
             (plane_at(o, x, y, s), Some(plane_at(o2, x, y2, s)))
         }

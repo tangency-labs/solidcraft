@@ -1,6 +1,7 @@
 //! Regression tests for the runner's actual SMC decoder, without C++ linkage.
 
 use goldens::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::{NOW, NOZ};
 
 #[path = "../src/units/fixtures/nlib_crv_adv_p2_smc.rs"]
@@ -78,7 +79,7 @@ fn floating_counts_signed_zero_and_unrestricted_degree() {
 
 #[test]
 fn invalid_nonfinite_and_exclusive_counts() {
-    let exclusive = 2.0_f64.powi(usize::BITS as i32).to_string();
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32).to_string();
     for value in [
         "-1", "0.5", "NaN", "inf", "-inf", "1e100", "1e300", "1e999", &exclusive,
     ] {
@@ -92,7 +93,7 @@ fn invalid_nonfinite_and_exclusive_counts() {
 
 #[test]
 fn huge_headers_with_tiny_bodies_do_not_allocate() {
-    let huge = 2.0_f64.powi((usize::BITS - 4) as i32).to_string();
+    let huge = det::powi(2.0_f64, (usize::BITS - 4) as i32).to_string();
     for index in [0, 1] {
         let mut header = ["0", "0", "0", "2"];
         header[index] = &huge;
@@ -106,10 +107,10 @@ fn huge_headers_with_tiny_bodies_do_not_allocate() {
 
 #[test]
 fn checked_knot_coordinate_and_payload_arithmetic() {
-    let power = |bits| 2.0_f64.powi(bits).to_string();
+    let power = |bits| det::powi(2.0_f64, bits).to_string();
     let half = power(usize::BITS as i32 - 1);
     let quarter = power(usize::BITS as i32 - 2);
-    let exclusive = 2.0_f64.powi(usize::BITS as i32);
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32);
     let largest = f64::from_bits(exclusive.to_bits() - 1).floor();
     let remainder = (exclusive - largest - 1.0).to_string();
     for header in [
@@ -150,7 +151,7 @@ fn eager_bad_tail_precedes_bad_headers_overflow_and_truncation() {
         let parse_error = "bad".parse::<f64>().unwrap_err();
         assert_eq!(failure(&text), format!("{PATH}: {parse_error}"));
     }
-    let half = 2.0_f64.powi(usize::BITS as i32 - 1);
+    let half = det::powi(2.0_f64, usize::BITS as i32 - 1);
     assert_error(&format!("{half} {half} 0 2 bad"), "invalid float");
     // Numeric header validation still happens in the original n, p, flag, dim order.
     assert_error("-1 -2 0 -3", "bad count -1");

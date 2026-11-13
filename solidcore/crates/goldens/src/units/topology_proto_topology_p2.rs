@@ -32,6 +32,7 @@
 //! `topology.edge`, `topology.vertex`, `topology.face_p2`), and
 //! `SmProtoVertex::ContainsPoint` (unit `query.face_p2`).
 
+use solidcore::math::det;
 use serde_json::{json, Value};
 
 use solidcore::geom::extent1d::Extent1d;
@@ -1139,7 +1140,7 @@ fn real_face_script(rng: &mut Rng) -> Script {
         0 => 1.0,
         1 => 1e3,
         2 => 1e-3,
-        _ => 10f64.powf(rng.uniform(-2.0, 2.0)),
+        _ => det::powf(10f64, rng.uniform(-2.0, 2.0)),
     };
     // P(u, v) = (u s, v s, u v z s): planar or twisted
     let z = if rng.chance(0.3) { rng.uniform(-0.5, 0.5) } else { 0.0 };

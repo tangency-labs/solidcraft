@@ -37,6 +37,7 @@ use solidcore::geom::global_solver::{SolutionRequested, SolverOperation};
 use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::det;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
@@ -156,7 +157,7 @@ fn bspline_net(s: &Surface) -> Option<&BSplineSurface> {
 }
 
 fn angle(a: Vec3, b: Vec3) -> f64 {
-    a.cross(b).length().atan2(a.dot(b))
+    det::atan2(a.cross(b).length(), a.dot(b))
 }
 
 /// The largest angle between the faces' surface normals (turned as their face uses)

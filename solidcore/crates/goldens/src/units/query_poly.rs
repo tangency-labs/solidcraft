@@ -1286,6 +1286,7 @@ mod owner_tests {
 // ---- generator ----------------------------------------------------------------------
 
 mod gen {
+    use solidcore::math::det;
     use super::{BrepIn, ContainsIn, FaceIn, Inputs, LoopIn, MutIn, OpIn};
     use crate::Rng;
 
@@ -1327,7 +1328,7 @@ mod gen {
         }
         let a = rng.uniform(0.0, 6.0);
         let b = rng.uniform(-1.4, 1.4);
-        let x = [a.cos() * b.cos(), a.sin() * b.cos(), b.sin()];
+        let x = [det::cos(a) * det::cos(b), det::sin(a) * det::cos(b), det::sin(b)];
         let t = rng.point3(-1.0, 1.0);
         let d = t[0] * x[0] + t[1] * x[1] + t[2] * x[2];
         let mut y = [t[0] - d * x[0], t[1] - d * x[1], t[2] - d * x[2]];
@@ -1458,7 +1459,7 @@ mod gen {
                 4 => rng.uniform(-1.0e-7, 1.0e-7),
                 _ => 0.0,
             };
-            pts.push((r * a.cos(), r * a.sin(), w));
+            pts.push((r * det::cos(a), r * det::sin(a), w));
         }
         pts
     }

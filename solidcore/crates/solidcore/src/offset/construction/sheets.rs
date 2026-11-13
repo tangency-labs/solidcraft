@@ -51,6 +51,7 @@
 
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::Vec3;
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
@@ -477,7 +478,7 @@ fn joint_meets(
             // coefficients (each component within the hull of its coefficients)
             let cmax = x
                 .iter()
-                .map(|f| f.max_abs_coefficient().powi(2))
+                .map(|f| det::powi(f.max_abs_coefficient(), 2))
                 .sum::<f64>()
                 .sqrt();
             let floor = |v: f64| (v - ry).max(0.0).sqrt();
@@ -489,7 +490,7 @@ fn joint_meets(
             let first = |f: &Bernstein2| f.coefficients().first().copied().unwrap_or(0.0);
             let last = |f: &Bernstein2| f.coefficients().last().copied().unwrap_or(0.0);
             let norm = |pick: &dyn Fn(&Bernstein2) -> f64| {
-                x.iter().map(|f| pick(f).powi(2)).sum::<f64>().sqrt()
+                x.iter().map(|f| det::powi(pick(f), 2)).sum::<f64>().sqrt()
             };
             let creased = |dv: f64, cv: f64, yv: f64| dv <= -rd || cv - rc > s * (yv + ry).sqrt();
             if creased(first(&dd), norm(&first), first(&y))

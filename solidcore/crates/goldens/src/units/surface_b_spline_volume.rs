@@ -19,6 +19,7 @@
 //! `CalculateContinuitiesSimple`, `IsCurveInParamDomainSimple`) are compared by the
 //! runner of unit `surface.b_spline_volume_n_lib`.
 
+use solidcore::math::det;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -499,7 +500,7 @@ fn gen_transform(rng: &mut Rng) -> Tf {
         0 => [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         1 => {
             let a = rng.uniform(-3.2, 3.2);
-            let (s, c) = a.sin_cos();
+            let (s, c) = det::sin_cos(a);
             [coord(rng, 5.0), [c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]]
         }
         2 => {
@@ -710,7 +711,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                 ([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
             } else {
                 let a = rng.uniform(-3.2, 3.2);
-                let (s, c) = a.sin_cos();
+                let (s, c) = det::sin_cos(a);
                 (coord(rng, 5.0), [c, s, 0.0], [-s, c, 0.0])
             };
             let scale = match rng.below(3) {

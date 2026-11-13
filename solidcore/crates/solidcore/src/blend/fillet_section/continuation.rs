@@ -13,6 +13,7 @@
 //! Not upstream. Deviations: none. No recursion.
 
 use crate::error::{Result, SolidError};
+use crate::math::det;
 use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::srf_basic::Surface as Net;
 use crate::surface::extend::ExtendRefusal;
@@ -90,7 +91,7 @@ fn gn_weight_range(n: usize, src: [f64; 2], ext: [f64; 2], w: [f64; 2]) -> Resul
     let exp = i32::try_from(n).map_err(|_| {
         SolidError::blend_failed(OP, "the section's order does not fit an exponent")
     })?;
-    let a = |t: f64| (1.0 - t).powi(exp + 1) + t.powi(exp + 1);
+    let a = |t: f64| det::powi(1.0 - t, exp + 1) + det::powi(t, exp + 1);
     let far = |[x, y]: [f64; 2]| {
         if (x - 0.5).abs() >= (y - 0.5).abs() {
             x
@@ -124,7 +125,7 @@ fn gn_weight_range(n: usize, src: [f64; 2], ext: [f64; 2], w: [f64; 2]) -> Resul
     };
     let (bs, cs) = corners(src);
     let mag = |x: &[f64; 4]| x.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-    let hi = a(far(src)) * mag(&bs).powi(exp) * mag(&cs).powi(exp);
+    let hi = a(far(src)) * det::powi(mag(&bs), exp) * det::powi(mag(&cs), exp);
     let (be, ce) = corners(ext);
     let least = |x: &[f64; 4]| x.iter().fold(f64::INFINITY, |m, &v| m.min(v));
     let (bl, cl) = (least(&be), least(&ce));
@@ -135,7 +136,7 @@ fn gn_weight_range(n: usize, src: [f64; 2], ext: [f64; 2], w: [f64; 2]) -> Resul
             distance: None,
         });
     }
-    let lo = a(near(ext)) * bl.powi(exp) * cl.powi(exp);
+    let lo = a(near(ext)) * det::powi(bl, exp) * det::powi(cl, exp);
     // each a product of 3 n + 2 roundings at most: up and down by gamma_(4 n + 8)
     let g = gamma(4 * n + 8);
     let (hi, lo) = (hi * (1.0 + g), lo * (1.0 - g));
