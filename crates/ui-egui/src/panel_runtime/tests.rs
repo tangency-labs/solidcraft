@@ -3006,9 +3006,12 @@ fn raw_host_native_prepare_failure_and_capability_false_menu_preserve_atomicity(
             .unwrap()
             .controls
             .iter()
-            .find(|control| control.target == HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Popout })
-            .unwrap();
-        assert_eq!(control.enabled, native, "native capability must be truthful");
+            .find(|control| control.target == HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Popout });
+        assert_eq!(control.is_some_and(|control| control.enabled), native, "only supported pop-outs appear");
+        if !native {
+            assert!(control.is_none());
+            continue;
+        }
         let before = raw.content.runtime.layout().inspect();
         let commits = raw.content.native.commits;
         raw.content.native.fail_prepare = true;
@@ -9320,7 +9323,11 @@ fn native_reply_capabilities_match_live_sink_across_prepare_show_finish_stale_an
             raw.frame(Vec::new(), false);
             raw.menu(id("editor"));
             let popout = HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Popout };
-            assert_eq!(raw_control(&raw, &popout).enabled, expected.native_windows);
+            if !expected.native_windows {
+                assert!(raw.host.frame().unwrap().controls.iter().all(|control| control.target != popout));
+                continue;
+            }
+            assert!(raw_control(&raw, &popout).enabled);
             raw.content.native.fail_prepare = true;
             let before = raw.content.runtime.layout().inspect();
             raw.click(popout, true);
@@ -12735,7 +12742,8 @@ fn shared_menu_keyboard_entry_end_and_escape_restore_actual_opener() {
     for scale in [1.0, 2.0] {
         let mut raw = RawPanelHost::new(host_logs(1, Zone::Left), scale);
         raw.ctx.global_style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
-        raw.capacity.size = Size { width: 480.0, height: 100.0 };
+        // The compact menu still needs enough overflow to scroll a whole row out of view.
+        raw.capacity.size = Size { width: 480.0, height: 64.0 };
         raw.frame(Vec::new(), false);
         raw.frame(Vec::new(), false);
         let opener = raw_control(&raw, &HostControlTarget::Pointer(HostPointerTarget::Menu { instance: id("log-0") }));
@@ -12768,7 +12776,7 @@ fn shared_menu_keyboard_entry_end_and_escape_restore_actual_opener() {
         assert_eq!(response.id, focused);
         let menu = egui_rect(raw.host.frame().unwrap().menu_bounds.unwrap());
         let inner = menu.shrink(solidcraft_theme::Tokens::get().space_6);
-        assert!(inner.contains_rect(response.rect), "the final enabled action scrolls fully into the tiny menu's visible inner rectangle");
+        assert!(inner.contains_rect(response.rect), "final action {:?} should fit in the menu {inner:?}", response.rect);
         assert!(response.interact_rect.is_positive());
         assert_eq!(response.interact_rect, response.rect, "the focused row must be fully interactable too");
         raw.frame(vec![host_key(egui::Key::Escape, true)], false);

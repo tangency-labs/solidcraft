@@ -329,7 +329,7 @@ The standalone Assistant window keeps its native host and polls the existing
 Assistant service. The shared host keeps the same conversation and backend while
 the Assistant panel is shown, hidden or moved.
 
-On desktop, **Open in a window** moves a shared panel into a separate OS window.
+On desktop, **Pop out to window** moves a shared panel into a separate OS window.
 Closing the OS window returns the panel through its saved dock placement. The
 controller and document stay with the panel. The desktop adapter remembers the
 panel's window size and monitor for the current app session and checks that the
