@@ -102,14 +102,16 @@ pub fn blend_edges(
 ) -> Result<(Body, [SeamReport; 2])> {
     let ok_tolerance = |t: f64| t.is_finite() && t >= 0.0;
     let seam = how.seam;
-    if !(MIN_STATIONS..=MAX_STATIONS).contains(&how.stations)
-        || !(how.min_in_plane.is_finite() && (0.0..=1.0).contains(&how.min_in_plane))
-        || !how
+    let valid = (MIN_STATIONS..=MAX_STATIONS).contains(&how.stations)
+        && how.min_in_plane.is_finite()
+        && (0.0..=1.0).contains(&how.min_in_plane)
+        && how
             .crown
             .iter()
             .all(|c| c.is_finite() && (-0.9..=3.0).contains(c))
-        || !(how.stitch_tolerance.is_finite() && how.stitch_tolerance > 0.0)
-        || ![
+        && how.stitch_tolerance.is_finite()
+        && how.stitch_tolerance > 0.0
+        && [
             seam.gap_mm,
             seam.angle_rad,
             seam.curvature_per_mm,
@@ -117,8 +119,8 @@ pub fn blend_edges(
             seam.curvature_change_rate_per_mm3,
         ]
         .into_iter()
-        .all(ok_tolerance)
-    {
+        .all(ok_tolerance);
+    if !valid {
         return Err(Error::Argument);
     }
     let from_edge = order::edge(from.order, from.edge)?;
