@@ -3,7 +3,8 @@
 //! same thing. Each group paints in its kind's band ([`ObjectKind::band`]), each band over the ones
 //! before it: the sheet's drawing border ([`SheetLayout::paper`]); the images placed on it
 //! ([`groups`]), so a view's lines draw over a photo; each view on the sheet, its lines as
-//! [`paper_group`] makes them; the dimensions and notes of those views
+//! [`paper_group`] makes them; the labels of the views placed apart from their projection place
+//! ([`Drawing::label_text`]), and the dimensions and notes of those views
 //! ([`crate::drawing_dimension_paper`], [`crate::drawing_note_paper`]); the sheet's tables, once they
 //! join; the notes on the sheet itself; then its title block's logos, lines and projection symbol, in
 //! the drawing's projection ([`TitleBlockLayout::paper`]), with its labels and values set on them
@@ -142,6 +143,17 @@ pub struct ViewState {
     /// What it says beside its lines, when its status doesn't say why, as a note does: the features its
     /// configuration row fails to build, and the joints or motion study its position names that are
     /// gone ([`crate::drawing_view::state_reason`]).
+    pub why: Option<String>,
+    /// Its label, when it draws one ([`Drawing::label_text`]).
+    pub label: Option<LabelState>,
+}
+
+/// A view's label in a sheet scene (#13044).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LabelState {
+    /// Whether it is in the scene.
+    pub drawn: bool,
+    /// Why not, or why its text is left out.
     pub why: Option<String>,
 }
 
@@ -382,8 +394,9 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let lettering = Lettering::of(s, drawing);
     let (text, _) = block_text(record, &lettering, &cell_texts(s, drawing, sheet), true)?;
     let (notes, _) = sheet_notes(s, drawing, sheet, &lettering, true);
+    let (labels, _) = view_labels(drawing, drawing.views.iter().map(|v| &**v).filter(|v| v.sheet == sheet), &lettering, true);
     let (images, logos) = (crate::drawing_pictures::groups(drawing, sheet), crate::drawing_pictures::logo_items(drawing, sheet));
-    let mut assembly = assemble(record, drawing.projection, &text, &images, &logos, drawn)?;
+    let mut assembly = assemble(record, drawing.projection, &text, &images, &logos, &labels, drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions, each on
     // the session its view drew from.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
@@ -761,6 +774,64 @@ fn sheet_notes(s: &Session, d: &Drawing, sheet: u64, lettering: &Lettering, wait
     (notes, pending)
 }
 
+/// How far a view's label sits above its view's boundary, on paper.
+const LABEL_GAP_MM: f64 = 2.0;
+
+/// A view's label set on paper round its own middle ([`crate::drawing_note_paper::label_group`]), for
+/// [`assemble`] to place by its view. It reads no model, so it is set with the sheet's text.
+#[derive(Clone, Debug, PartialEq)]
+struct SetLabel {
+    view: u64,
+    group: Group,
+    fonts: Vec<Font>,
+    half: Vec2,
+    /// Where its middle sits from its view's centre: none above the view ([`label_place`]).
+    offset: Option<Vec2>,
+    why: Option<String>,
+}
+
+/// The labels `views` of `d` draw, in their order ([`Drawing::label_text`]), set in `lettering`; and
+/// whether a text waits for a font to fall back to, which only the window's sheet leaves to the
+/// search's thread (`wait` false).
+fn view_labels<'a>(d: &Drawing, views: impl Iterator<Item = &'a View>, lettering: &Lettering, wait: bool) -> (Vec<SetLabel>, bool) {
+    let read = |view: &View| Some((view.id, d.label_text(view.id)?, view.label.as_ref()?.offset.map(Vec2::from)));
+    let texts: Vec<(u64, String, Option<Vec2>)> = views.filter_map(read).collect();
+    if texts.is_empty() {
+        return (Vec::new(), false);
+    }
+    let fonts = PaperFonts::new(&lettering.font, &lettering.language, wait);
+    let mut pending = false;
+    let mut set = |(view, text, offset): (u64, String, Option<Vec2>)| {
+        let (paper, half) = crate::drawing_note_paper::label_group(view, &text, &fonts);
+        pending |= paper.pending;
+        SetLabel { view, group: paper.group, fonts: paper.fonts, half, offset, why: paper.why }
+    };
+    let labels = texts.into_iter().map(&mut set).collect();
+    (labels, pending)
+}
+
+/// Where a label `half` in size sits from its view's centre: at its `offset`, else centred over the
+/// view's `boundary` (centred on the view, as its lines are) and [`LABEL_GAP_MM`] above it, as ISO
+/// 128-30 puts a view's letter.
+fn label_place(offset: Option<Vec2>, half: Vec2, boundary: Option<Aabb2>) -> Vec2 {
+    offset.unwrap_or_else(|| {
+        let boundary = boundary.unwrap_or(Aabb2 { min: Vec2::ZERO, max: Vec2::ZERO });
+        Vec2::new(boundary.center().x, boundary.max.y + LABEL_GAP_MM + half.y)
+    })
+}
+
+/// The box round view `id`'s label on its sheet, for the view centred at `centre` with `boundary` on
+/// the sheet, as [`assemble`] places it: none when it draws no label, or while its text waits for a
+/// font to fall back to (the window's fonts, which never wait).
+pub(crate) fn label_box(d: &Drawing, id: u64, centre: Vec2, boundary: Aabb2) -> Option<Aabb2> {
+    let lettering = Lettering { units: String::new(), language: d.language.clone(), font: d.font.clone() };
+    let (labels, _) = view_labels(d, d.view(id).into_iter(), &lettering, false);
+    let label = labels.into_iter().find(|label| !label.group.items.is_empty())?;
+    let around = Aabb2 { min: boundary.min - centre, max: boundary.max - centre };
+    let at = centre + label_place(label.offset, label.half, Some(around));
+    Some(group_bounds(&moved(&label.group, at), &label.fonts))
+}
+
 /// The dimensions and the notes of `views` of `d`, by view and id.
 fn dimensions_on(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<Annotation> {
     let views: BTreeSet<u64> = views.collect();
@@ -874,6 +945,26 @@ impl Assembly {
         }
     }
 
+    /// Adds `label`, its view's, for the view centred at `centre` with `boundary` round it (centred on
+    /// the view), and says whether it was drawn. One with no text set isn't; one that would take the
+    /// scene past a paper scene's limits is left out and says why.
+    fn add_label(&mut self, label: &SetLabel, centre: Vec2, boundary: Option<Aabb2>) -> LabelState {
+        if label.group.items.is_empty() {
+            return LabelState { drawn: false, why: label.why.clone() };
+        }
+        let at = centre + label_place(label.offset, label.half, boundary);
+        match self.add(&label.group, &label.fonts, at, DrawnFor::View) {
+            Ok(bounds_mm) => {
+                self.objects.extend(SheetObject::on_paper(label.view, ObjectKind::ViewLabel, bounds_mm, None).map(banded(DrawnFor::View)));
+                LabelState { drawn: true, why: label.why.clone() }
+            }
+            Err(LeftOut::TooManyRecords) => {
+                LabelState { drawn: false, why: Some(format!("with its text the sheet is more than a paper scene's {MAX_RECORDS} records")) }
+            }
+            Err(LeftOut::Invalid(e)) => LabelState { drawn: false, why: Some(e) },
+        }
+    }
+
     /// The scene with its groups in paint order, checked whole, and its objects in the same order.
     fn finish(self) -> Result<(Scene, Vec<ViewState>, Vec<SheetObject>, Vec<DimensionState>, Vec<NoteState>)> {
         let mut scene = self.scene;
@@ -896,16 +987,18 @@ fn banded(of: DrawnFor) -> impl Fn(SheetObject) -> (u8, SheetObject) {
 }
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
-/// lines, in id order) moved to its centre, with its title block (`logos` under its lines), its symbol in
-/// `projection` and its cells' text as [`block_text`] set it, which its band puts on top
-/// ([`Assembly::finish`]). A view that would take the scene past a paper scene's limits is left out and
-/// says why, and the views after it are still drawn when they fit.
+/// lines, in id order) moved to its centre, each followed by its label of `labels` ([`label_place`]),
+/// with its title block (`logos` under its lines), its symbol in `projection` and its cells' text as
+/// [`block_text`] set it, which its band puts on top ([`Assembly::finish`]). A view or a label that
+/// would take the scene past a paper scene's limits is left out and says why, and the views after it
+/// are still drawn when they fit.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
     projection: Projection,
     text: &Set,
     images: &[Group],
     logos: &[Item],
+    labels: &[SetLabel],
     views: impl Iterator<Item = (u64, Vec2, D)>,
 ) -> Result<Assembly> {
     let size_mm = record.sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
@@ -963,7 +1056,8 @@ fn assemble<D: Borrow<Drawn>>(
         assembly
             .objects
             .extend(SheetObject::on_paper(view, ObjectKind::View, lines.unwrap_or(Aabb2::EMPTY), boundary_mm).map(banded(DrawnFor::View)));
-        assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone() });
+        let label = labels.iter().find(|label| label.view == view).map(|label| assembly.add_label(label, centre, drawn.boundary));
+        assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone(), label });
     }
     Ok(assembly)
 }
@@ -1156,7 +1250,9 @@ struct Assembled {
     text: Arc<Set>,
     /// The sheet's own notes, set with its block.
     notes: Arc<Vec<SheetNote>>,
-    /// Whether a text of the block or of a note on the sheet waits for a font to fall back to: until it doesn't, the block is
+    /// Its views' labels, set with its block.
+    labels: Arc<Vec<SetLabel>>,
+    /// Whether a text of the block, of a note on the sheet or of a label waits for a font to fall back to: until it doesn't, the block is
     /// set again on each [`extract`], and the sheet put together with it is never reused.
     pending: bool,
     serial: u64,
@@ -1400,15 +1496,17 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     {
         return Ok(last.answer.clone());
     }
-    // The title block's cells and the sheet's notes are read and set again only for another sheet,
-    // drawing, design, model or lettering (a name or a mass can change them), not for each view drawn.
-    let (cells, text, notes, pending) = match last {
-        Some(last) => (last.cells.clone(), last.text.clone(), last.notes.clone(), false),
+    // The title block's cells, the sheet's notes and its views' labels are read and set again only for
+    // another sheet, drawing, design, model or lettering (a name or a mass can change them), not for
+    // each view drawn.
+    let (cells, text, notes, labels, pending) = match last {
+        Some(last) => (last.cells.clone(), last.text.clone(), last.notes.clone(), last.labels.clone(), false),
         None => {
             let cells = cell_texts(s, &d, sheet);
             let (text, block_pending) = block_text(sheet_of(&d, sheet)?, &lettering, &cells, false)?;
             let (notes, notes_pending) = sheet_notes(s, &d, sheet, &lettering, false);
-            (cells, Arc::new(text), Arc::new(notes), block_pending || notes_pending)
+            let (labels, labels_pending) = view_labels(&d, d.views.iter().map(|v| &**v).filter(|v| v.sheet == sheet), &lettering, false);
+            (cells, Arc::new(text), Arc::new(notes), Arc::new(labels), block_pending || notes_pending || labels_pending)
         }
     };
     let doc = s.doc.clone();
@@ -1431,7 +1529,8 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
                 && last.inputs == inputs
                 && last.cells == cells
                 && last.text.faces() == text.faces()
-                && last.notes == notes =>
+                && last.notes == notes
+                && last.labels == labels =>
         {
             let answer = last.answer;
             (answer.scene, answer.views, answer.objects, answer.dimensions, answer.notes, answer.generation)
@@ -1442,7 +1541,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             cache.views.retain(|id, _| kept.contains(id));
             cache.dimensions.retain(|id, _| d.dimension(*id).is_some() || d.notes.by_id(*id).is_some());
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let mut assembly = assemble(record, d.projection, &text, &inputs.images, &inputs.logos, drawn)?;
+            let mut assembly = assemble(record, d.projection, &text, &inputs.images, &inputs.logos, &labels, drawn)?;
             assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
             assembly.add_sheet_notes(&notes);
             let (scene, views, objects, dimensions, notes) = assembly.finish()?;
@@ -1452,7 +1551,8 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     let answer =
         SheetView { scene, generation, views, stale, objects, dimensions, stale_dimensions, notes: notes_drawn, stale_notes, waiting_for_fonts };
     let serial = cache.serial;
-    cache.last = Some(Assembled { sheet, drawing: d, doc, state, lettering, cells, text, notes, pending, serial, inputs, answer: answer.clone() });
+    cache.last =
+        Some(Assembled { sheet, drawing: d, doc, state, lettering, cells, text, notes, labels, pending, serial, inputs, answer: answer.clone() });
     Ok(answer)
 }
 

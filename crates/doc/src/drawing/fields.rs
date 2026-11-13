@@ -23,12 +23,10 @@
 //! - **prompt:** any key; answers come with templates, so a prompt shows [`MISSING`] until then.
 
 use solidcraft_geom::cell::{Content, MISSING, Part, Source};
-use solidcraft_geom::drawing_view::Scale;
 use solidcraft_geom::revision::{Field, RevisionRow};
 use solidcraft_geom::title_block::{CellKind, TitleBlock};
 
 use super::Drawing;
-use super::view::ViewKind;
 use crate::{DocError, Metadata, Result};
 
 const COMPONENT: [&str; 6] = ["name", "part_number", "description", "revision", "material", "mass"];
@@ -202,16 +200,7 @@ impl Values<'_> {
             Source::Sheet => {
                 let sheet = d.sheets.get(self.sheet)?;
                 if key == "scale" {
-                    // The sheet's main scale: its base views', as a detail or projected view at its own scale
-                    // carries that scale in its label; with no base view, the scale its views draw at.
-                    let on_sheet = || d.views.iter().filter(|v| v.sheet == sheet.id);
-                    let mut base = on_sheet().filter(|v| matches!(v.kind, ViewKind::Base { .. })).peekable();
-                    let scale = if base.peek().is_some() {
-                        shared(base.map(|v| v.settings.scale))
-                    } else {
-                        shared(on_sheet().map(|v| d.resolve_view(v.id).ok().map(|r| r.scale.value)))
-                    };
-                    return scale.map(|s| s.to_string());
+                    return d.sheet_scale(sheet.id).map(|s| s.to_string());
                 }
                 if sheet.excluded.count {
                     return (key == "name").then(|| sheet.name.clone());
@@ -238,13 +227,6 @@ impl Values<'_> {
             Source::Prompt | Source::Row => None,
         }
     }
-}
-
-/// The one scale all of `scales` are, so neither the order the views were placed in nor their ids
-/// decide it: none when there are none, or when one is unknown or differs.
-fn shared(mut scales: impl Iterator<Item = Option<Scale>>) -> Option<Scale> {
-    let first = scales.next()??;
-    scales.all(|scale| scale == Some(first)).then_some(first)
 }
 
 #[cfg(test)]

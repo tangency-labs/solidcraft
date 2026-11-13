@@ -156,6 +156,8 @@ pub enum ObjectKind {
     Dimension,
     /// A note's text, with its leader when it points at the model.
     Note,
+    /// A view's label: its letter, name and scale, above the view unless moved (#13044).
+    ViewLabel,
 }
 
 impl ObjectKind {
@@ -172,6 +174,7 @@ impl ObjectKind {
             ObjectKind::View => "VIEW",
             ObjectKind::Dimension => "DIMENSION",
             ObjectKind::Note => "NOTE",
+            ObjectKind::ViewLabel => "VIEW_LABEL",
         }
     }
 
@@ -185,7 +188,7 @@ impl ObjectKind {
             ObjectKind::SheetBorder | ObjectKind::DrawingBorder => 0,
             ObjectKind::SheetImage => 1,
             ObjectKind::View => 2,
-            ObjectKind::Dimension => 3,
+            ObjectKind::Dimension | ObjectKind::ViewLabel => 3,
             ObjectKind::Note => match of {
                 DrawnFor::View => 3,
                 DrawnFor::Sheet => 5,
