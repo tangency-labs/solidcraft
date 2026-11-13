@@ -277,7 +277,7 @@ impl FaceIndex {
 }
 
 fn face_count(b: &ModelBody) -> usize {
-    b.mesh().tri_face.iter().map(|f| *f as usize + 1).max().unwrap_or(0)
+    b.body.face_count()
 }
 
 /// Names of a body's faces (by B-rep face index).
@@ -1709,5 +1709,12 @@ mod tests {
         }
         assert_eq!(curves.nearest(Vec2::new(5., 0.)).map(|(_, id)| id).as_deref(), Some("c0_0"), "a tie keeps the first curve");
         assert!(curves.segs.iter().all(|(id, ..)| id != "guide"), "construction curves name nothing");
+    }
+
+    #[test]
+    fn face_count_uses_exact_brep_without_display_mesh() {
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
+        let body = ModelBody::new("Cube".into(), body, 1);
+        assert_eq!(face_count(&body), 6);
     }
 }
