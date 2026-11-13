@@ -306,6 +306,25 @@ fn a_join_to_a_curved_face_with_an_offset_stops_that_far_short() {
     assert!((added - want).abs() < want * 2e-2, "added {added}, want {want}");
 }
 
+/// #12617: a New Body To Object on a curved face keeps its To offset too: a post from y = -30 to
+/// the tube's outside face 2 short of it ends at r 22, not on the face.
+#[test]
+fn a_new_body_to_a_curved_face_with_an_offset_stops_that_far_short() {
+    let mut s = tube();
+    window(&mut s, -30.0);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Window", "to": [0.0, -20.0, 10.0], "to_offset": -2.0, "operation": "new_body", "body_name": "Post"}),
+    );
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let made = body(&mut s, "Post")["volume_mm3"].as_f64().unwrap_or(0.0);
+    let n = 2000;
+    let want: f64 =
+        (0..n).map(|i| -3.0 + 6.0 * (i as f64 + 0.5) / n as f64).map(|x| (30.0 - (22.0f64 * 22.0 - x * x).sqrt()) * 4.0 * 6.0 / n as f64).sum();
+    assert!((made - want).abs() < want * 2e-2, "made {made}, want {want}");
+}
+
 /// #13188: a stored taper of 0 is a straight extrusion, also for a profile with a hole.
 #[test]
 fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {
