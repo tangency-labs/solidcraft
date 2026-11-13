@@ -1,20 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>New contact set</title>
-  <path d="M20.81 15.02L35.47 23.49L35.47 40.42L20.81 31.95Z" fill="#b8c3cf"/>
-  <path d="M50.14 15.02L35.47 23.49L35.47 40.42L50.14 31.95Z" fill="#8e9faf"/>
-  <path d="M35.47 6.55L50.14 15.02L35.47 23.49L20.81 15.02Z" fill="#e2e8ef"/>
-  <path d="M35.47 6.55L50.14 15.02L50.14 31.95L35.47 40.42L20.81 31.95L20.81 15.02Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M20.81 15.02L35.47 23.49L50.14 15.02" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M35.47 23.49L35.47 40.42" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M6.14 23.49L20.81 31.95L20.81 48.89L6.14 40.42Z" fill="#b8c3cf"/>
-  <path d="M35.47 23.49L20.81 31.95L20.81 48.89L35.47 40.42Z" fill="#8e9faf"/>
-  <path d="M20.81 15.02L35.47 23.49L20.81 31.95L6.14 23.49Z" fill="#e2e8ef"/>
-  <path d="M20.81 15.02L35.47 23.49L35.47 40.42L20.81 48.89L6.14 40.42L6.14 23.49Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M6.14 23.49L20.81 31.95L35.47 23.49" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M20.81 31.95L20.81 48.89" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M20.81 15.02L35.47 23.49L35.47 40.42" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M20.81 15.02L35.47 23.49L35.47 40.42" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
-  <circle cx="48.14" cy="47.72" r="11" fill="#ffffff"/>
-  <circle cx="48.14" cy="47.72" r="9.5" fill="#236ead"/>
-  <path d="M43.64 47.72L52.64 47.72M48.14 43.22L48.14 52.22" fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M3.42 24.50L16.41 32.00L16.41 47.00L3.42 39.50Z" fill="#b8c3cf"/>
+  <path d="M29.40 24.50L16.41 32.00L16.41 47.00L29.40 39.50Z" fill="#328bd3"/>
+  <path d="M16.41 17.00L29.40 24.50L16.41 32.00L3.42 24.50Z" fill="#e2e8ef"/>
+  <path d="M16.41 17.00L29.40 24.50L29.40 39.50L16.41 47.00L3.42 39.50L3.42 24.50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M3.42 24.50L16.41 32.00L29.40 24.50M16.41 32.00L16.41 47.00" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34.60 24.50L47.59 32.00L47.59 47.00L34.60 39.50Z" fill="#328bd3"/>
+  <path d="M60.58 24.50L47.59 32.00L47.59 47.00L60.58 39.50Z" fill="#8e9faf"/>
+  <path d="M47.59 17.00L60.58 24.50L47.59 32.00L34.60 24.50Z" fill="#e2e8ef"/>
+  <path d="M47.59 17.00L60.58 24.50L60.58 39.50L47.59 47.00L34.60 39.50L34.60 24.50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34.60 24.50L47.59 32.00L60.58 24.50M47.59 32.00L47.59 47.00" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="50" cy="48" r="11" fill="#ffffff"/>
+  <circle cx="50" cy="48" r="9.5" fill="#236ead"/>
+  <path d="M45.5 48L54.5 48M50 43.5L50 52.5" fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>

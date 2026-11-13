@@ -111,7 +111,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("edges: [[x,y,z] | {body, index}] ; distance: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is cut with it; false: exactly the picked edges); distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?: the body the edges are on (without it, each point is looked up on every placed body, shown or hidden, and a point on edges of 2 bodies is refused, naming them)"),
     CommandSpec::new("solid.combine", "Combine", crate::checked!("solid.combine", combine))
         .at("SOLID", "MODIFY")
-        .icon("combine")
+        .icon("boolean_union")
         .contract(&COMBINE_CONTRACT)
         .output(output_schema_for::<CombineResult>)
         .params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
