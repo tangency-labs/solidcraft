@@ -1,0 +1,67 @@
+{
+  "area": "shell",
+  "bodies": {},
+  "calls": [],
+  "case": "5182-delete-chamfered-hole-of-block",
+  "expected": {
+    "body_count": 1,
+    "faces": 6,
+    "method": "the hole's wall and chamfer are all its faces; deleting them heals the block's top and bottom across the hole: a plain 40x40x20 block, V = 32000, 6 faces",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#5182",
+      "tangency-labs/solidcraft#5368"
+    ],
+    "volume_mm3": 32000.0,
+    "what": "a chamfered O6 through hole in a block (synthetic: the report's part was an imported STEP), its wall and chamfer deleted: refused ('face 8 borders face 7, which is curved; only planar neighbours can extend')"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6400.0,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 32000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#5182",
+    "tangency-labs/solidcraft#5368"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a chamfered O6 through hole in a block (synthetic: the report's part was an imported STEP), its wall and chamfer deleted: refused ('face 8 borders face 7, which is curved; only planar neighbours can extend')",
+  "why_not": [
+    "body \"Block\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

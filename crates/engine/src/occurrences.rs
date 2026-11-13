@@ -213,6 +213,12 @@ pub(crate) struct PlacementIndex {
     placed: std::collections::HashMap<Vec<u64>, std::sync::Arc<[OccurrenceBody]>>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many name indexes [`PlacementIndex::bodies_at`] has made on this thread (tests).
+    pub(crate) static NAME_INDEXES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// How many placement paths [`PlacementIndex`] names before it stops remembering more.
 const PLACEMENT_PATHS_CACHED: usize = solidcraft_doc::MAX_PLACEMENTS;
 
@@ -244,11 +250,26 @@ impl PlacementIndex {
     }
 
     /// The component's bodies named at `path`, remembered until the index is replaced.
-    fn bodies_at(&mut self, path: &[u64], component: u64) -> std::sync::Arc<[OccurrenceBody]> {
+    /// `names` is the design's name index ([`solidcraft_doc::WorldNames`] of `doc` and `state`,
+    /// the index's own), made at the first path not named yet and kept by the caller for the
+    /// others: making it for every path made listing a subtree cost the subtree times the design
+    /// (a 561-body assembly's active placement took about 70 ms at each model scene build).
+    fn bodies_at<'n>(
+        &mut self,
+        path: &[u64],
+        component: u64,
+        names: &mut Option<solidcraft_doc::WorldNames<'n>>,
+        doc: &'n solidcraft_doc::Document,
+        state: &'n solidcraft_doc::ModelState,
+    ) -> std::sync::Arc<[OccurrenceBody]> {
         if let Some(bodies) = self.placed.get(path) {
             return bodies.clone();
         }
-        let names = solidcraft_doc::WorldNames::new(&self.doc, &self.state);
+        let names = names.get_or_insert_with(|| {
+            #[cfg(test)]
+            NAME_INDEXES.with(|n| n.set(n.get() + 1));
+            solidcraft_doc::WorldNames::new(doc, state)
+        });
         let empty = Vec::new();
         let bodies: std::sync::Arc<[OccurrenceBody]> = self
             .bodies
@@ -447,7 +468,8 @@ impl Session {
             component = o.component;
         }
         let leaf = leaf?;
-        let bodies = index.bodies_at(path, component).to_vec();
+        let (doc, state) = (index.doc.clone(), index.state.clone());
+        let bodies = index.bodies_at(path, component, &mut None, &doc, &state).to_vec();
         let leaf = &index.doc.occurrences[leaf];
         Some(OccurrencePlacement {
             occurrence: leaf.id,
@@ -653,9 +675,12 @@ impl Session {
         let mut stack = vec![(path.to_vec(), component, world)];
         let mut out = Vec::new();
         let mut count = 0;
+        // One name index for the whole subtree, made when a path first needs it.
+        let (doc, state) = (index.doc.clone(), index.state.clone());
+        let mut names = None;
         while let Some((path, component, world)) = stack.pop() {
             count += 1;
-            let bodies = index.bodies_at(&path, component);
+            let bodies = index.bodies_at(&path, component, &mut names, &doc, &state);
             if count > 100_000 || out.len() + bodies.len() > 100_000 {
                 return None;
             }
@@ -801,6 +826,10 @@ impl Session {
 
     /// Is a browser folder or group hidden itself (by tree key, see `Visibility::hidden_folders`)?
     pub fn folder_hidden(&self, key: &str) -> bool {
+        // A component Origin folder: hidden by default, shown only by name (`shown_component_origins`).
+        if let Some(path) = crate::origins::folder_path(key) {
+            return !self.visibility.shown_component_origins.contains(&path);
+        }
         if let Some(cache) = self.visibility_index() {
             return cache.as_ref().is_none_or(|c| c.folder_keys.contains(key));
         }
@@ -862,12 +891,20 @@ impl Session {
         if self.visibility.hidden_origin.iter().any(|h| h == name) {
             return false;
         }
-        match self.doc.features.iter().find(|f| f.name == name) {
-            Some(f) => self.feature_placement_visible(f.id) && !self.feature_folder_hidden(f.id, "construction"),
-            None => true,
+        // A feature first, so one named like a datum key still reaches it; then a component
+        // origin item, gated by its placement (a hidden placement hides its origin too) and its
+        // folder's own eye.
+        if let Some(f) = self.doc.features.iter().find(|f| f.name == name) {
+            return self.feature_placement_visible(f.id) && !self.feature_folder_hidden(f.id, "construction");
         }
+        if let Some((path, _)) = crate::origins::item(name) {
+            return self.visibility.shown_component_origins.contains(&path) && self.occurrence_visible(&path);
+        }
+        true
     }
 
+    /// Whether an occurrence shows in the world: its own eye and every ancestor placement's
+    /// eye along its path. A hidden placement hides its Origin folder and items too (#7313).
     pub fn body_visible(&self, name: &str) -> bool {
         if self.body_hidden_itself(name) || self.body_removed_later(name) {
             return false;
@@ -1005,5 +1042,10 @@ impl Session {
         }
         let hidden = std::mem::take(&mut self.visibility.hidden_occurrences);
         self.visibility.hidden_occurrences = hidden.into_iter().filter(|p| self.occurrence_placement(p).is_ok()).collect();
+        // A shown Origin folder whose placement is gone cannot be cleared by hand - browser.visibility
+        // refuses a path that no longer resolves, whichever eye it sets - so it prunes like
+        // hidden_occurrences does; undo restores the snapshot with the placement (#7313).
+        let shown = std::mem::take(&mut self.visibility.shown_component_origins);
+        self.visibility.shown_component_origins = shown.into_iter().filter(|p| self.occurrence_placement(p).is_ok()).collect();
     }
 }

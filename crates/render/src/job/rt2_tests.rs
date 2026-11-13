@@ -190,3 +190,120 @@ fn emission_runtime_json_is_bounded_explicit_and_roundtrips() {
     assert_eq!(serde_json::from_str::<RaytraceOptions>("{}").unwrap().emissions, None);
     assert_eq!(serde_json::from_str::<RaytraceOptions>("{\"emissions\":[]}").unwrap().emissions, Some(Vec::new()));
 }
+
+#[test]
+fn opus_quality_limits_are_explicit_finite_and_keep_transport_defaults() {
+    assert_eq!(JobOptions::default().samples, 64);
+    assert_eq!(JobOptions::default().max_depth, 8);
+    let options = JobOptions {
+        samples: MAX_SAMPLES_PER_PIXEL,
+        max_depth: u32::from(MAX_PATH_DEPTH),
+        caustics: Some(CausticOptions { photons: MAX_CAUSTIC_PHOTONS, max_depth: MAX_PATH_DEPTH, ..Default::default() }),
+        ..Default::default()
+    };
+    options.validate().unwrap();
+    assert!(JobOptions { samples: MAX_SAMPLES_PER_PIXEL + 1, ..options }.validate().is_err());
+    assert!(JobOptions { max_depth: u32::from(MAX_PATH_DEPTH) + 1, ..options }.validate().is_err());
+    assert!(CpuPathOptions { max_depth: MAX_PATH_DEPTH }.validate().is_ok());
+    assert!(CpuPathOptions { max_depth: MAX_PATH_DEPTH + 1 }.validate().is_err());
+    assert!(
+        CpuBudget::Workstation.validate_image(3840, 2160, Some(CpuProgressiveOptions { samples_per_pixel: MAX_SAMPLES_PER_PIXEL, seed: 81 })).is_ok()
+    );
+    assert!(CpuBudget::Studio.validate_samples(MAX_SAMPLES_PER_PIXEL).is_err());
+}
+
+#[test]
+fn quality_controls_preserve_authored_values_and_validate_finite_envelopes() {
+    let cpu: RaytraceOptions = serde_json::from_value(serde_json::json!({
+        "threads":4,"supersampling":2,"denoise":true,"denoise_diagnostics":true,
+        "denoise_settings":{"passes":2,"strength":0.5,"firefly_suppression":false,"optical_filter":false}
+    }))
+    .unwrap();
+    assert_eq!(cpu.threads, 4);
+    assert_eq!(cpu.supersampling, 2);
+    assert!(cpu.denoise_diagnostics);
+    assert!(!cpu.denoise_settings.optical_filter);
+    cpu.validate().unwrap();
+    let default_cpu: RaytraceOptions = serde_json::from_value(serde_json::json!({"denoise":true})).unwrap();
+    let default_gpu: JobOptions = serde_json::from_value(serde_json::json!({"denoise":true})).unwrap();
+    assert!(default_cpu.denoise_settings.optical_filter && default_gpu.denoise_settings.optical_filter);
+    assert!(serde_json::to_value(&default_cpu).unwrap().get("denoise_settings").is_none());
+    assert!(serde_json::to_value(default_gpu).unwrap().get("denoise_settings").is_none());
+    for invalid in [serde_json::json!(null), serde_json::json!("false"), serde_json::json!(0)] {
+        let wire = serde_json::json!({"denoise_settings":{"optical_filter":invalid}});
+        assert!(serde_json::from_value::<RaytraceOptions>(wire.clone()).is_err());
+        assert!(serde_json::from_value::<JobOptions>(wire).is_err());
+    }
+    assert_eq!(serde_json::from_value::<RaytraceOptions>(serde_json::to_value(&cpu).unwrap()).unwrap(), cpu);
+    for threads in [0, 1, MAX_CPU_THREADS] {
+        assert!(RaytraceOptions { threads, ..Default::default() }.validate().is_ok());
+    }
+    assert!(RaytraceOptions { threads: MAX_CPU_THREADS + 1, ..Default::default() }.validate().is_err());
+    for supersampling in [0, 3, u32::MAX] {
+        assert!(RaytraceOptions { supersampling, ..Default::default() }.validate().is_err());
+        assert!(JobOptions { supersampling, ..Default::default() }.validate().is_err());
+    }
+    for settings in [
+        DenoiseSettings { passes: 0, ..Default::default() },
+        DenoiseSettings { passes: 4, ..Default::default() },
+        DenoiseSettings { strength: f64::NAN, ..Default::default() },
+        DenoiseSettings { strength: -0.01, ..Default::default() },
+        DenoiseSettings { strength: 1.01, ..Default::default() },
+    ] {
+        assert!(settings.validate().is_err());
+    }
+    for options in [
+        JobOptions { supersampling: 2, ..Default::default() },
+        JobOptions { denoise_diagnostics: true, ..Default::default() },
+        JobOptions { denoise_settings: DenoiseSettings { strength: 0.5, ..Default::default() }, ..Default::default() },
+        JobOptions { denoise_settings: DenoiseSettings { optical_filter: false, ..Default::default() }, ..Default::default() },
+    ] {
+        assert!(!options.is_structural_default());
+        let wire = serde_json::to_value(options).unwrap();
+        assert_eq!(serde_json::from_value::<JobOptions>(wire.clone()).unwrap(), options);
+        if !options.denoise_settings.optical_filter {
+            assert_eq!(wire["denoise_settings"]["optical_filter"], false);
+        }
+        assert_eq!(options.retained_bytes().unwrap(), std::mem::size_of::<JobOptions>() as u64);
+    }
+}
+
+#[test]
+fn output_and_internal_sampling_bounds_are_checked_without_allocating_images() {
+    assert_eq!(supersampled_dimensions(7680, 4320, 2).unwrap(), (15360, 8640));
+    assert_eq!(supersampled_dimensions(8192, 4096, 2).unwrap(), (16384, 8192));
+    assert!(supersampled_dimensions(8193, 1, 2).is_err());
+    assert!(supersampled_dimensions(8192, 4097, 2).is_err());
+    assert!(supersampled_dimensions(u32::MAX, u32::MAX, 2).is_err());
+    assert!(linear_exr::encoded_limit(7680, 4320).is_ok());
+    assert!(linear_exr::encoded_limit(8192, 4096).is_ok());
+    assert!(linear_exr::encoded_limit(8192, 4097).is_err());
+    assert!(validate_cpu_denoise_image(15360, 8640).is_ok());
+    assert!(validate_cpu_denoise_image(16384, 8192).is_ok());
+    assert!(validate_cpu_denoise_image(16384, 8193).is_err());
+    assert!(CpuBudget::Workstation.validate_image(15360, 8640, Some(CpuProgressiveOptions { samples_per_pixel: 128, seed: 0 })).is_ok());
+    assert!(CpuBudget::Compact.validate_samples(128).is_err(), "Compact keeps its explicit resource envelope");
+    assert!(CpuBudget::Studio.validate_samples(128).is_ok());
+    assert!(CpuBudget::Workstation.validate_image(16384, 1, None).is_ok(), "scale1 native backend dimensions remain compatible");
+}
+
+#[test]
+fn diagnostic_masks_keep_exact_categories_and_reports_use_readable_keys() {
+    use DenoiseGuideClass::*;
+    assert_eq!(resolve_denoise_class([Surface; 4]), Surface);
+    assert_eq!(resolve_denoise_class([Optical; 4]), Optical);
+    assert_eq!(resolve_denoise_class([Surface, Optical]), Unavailable);
+    assert_eq!(resolve_denoise_class([Surface, Optical, Background, Emitter]), Background);
+    let mut report = DenoiseDiagnostics::new(2, 2);
+    for class in [Surface, Optical, PartialCoverage, Background] {
+        report.record(class);
+    }
+    let json = serde_json::to_value(report).unwrap();
+    assert_eq!(json["counts"]["partial_coverage"], 1);
+    assert_eq!(json["counts"]["surface"], 1);
+    assert_eq!(report.counts.iter().sum::<u64>(), 4);
+    for class in DenoiseGuideClass::ALL {
+        assert_eq!(DenoiseGuideClass::from_code(class.code()), Some(*class));
+        assert_eq!(class.color()[3], 255);
+    }
+}

@@ -1,0 +1,159 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  40.0,
+                  30.0,
+                  20.0
+                ],
+                [
+                  0.0,
+                  30.0,
+                  20.0
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              30.0,
+              20.0
+            ]
+          ],
+          "tolerance": 2.693582403567252
+        },
+        "kind": "chamfer",
+        "sizes": [
+          3.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-section-chamfer-box-edge-3",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        30,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "exact": true,
+      "order": "g0"
+    },
+    "faces": 7,
+    "method": "box 40x30x20, the top back edge (y = 30, z = 20, 40 long) between the planar end faces x = 0 and 40, set back s = 3 along both faces (square to each other): the chord cuts s^2/2 = 4.5 off the corner: V = 24000 - 40 * 4.5 = 23820. Faces 7; both seams of the chamfer with the faces G0, and not G1 (45 degrees).",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-7
+    },
+    "volume_mm3": 23820.0,
+    "what": "a box's top back edge chamfered 3: the chord between the faces' contact lines, a crease with each face"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "cov-fillet-section-chamfer-box-edge-3.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5120.705627484772,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 23819.999999999996
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a box's top back edge chamfered 3: the chord between the faces' contact lines, a crease with each face",
+  "why_not": []
+}

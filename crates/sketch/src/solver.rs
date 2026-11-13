@@ -274,9 +274,14 @@ impl State<'_> {
                 };
                 crate::curves::ellipse_polyline(self.p(*ci), self.p(*m), r)
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
+            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, handles }) => {
                 let p = self.spline_points(pts, *periodic);
-                crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())
+                if handles.is_empty() || *control {
+                    crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())
+                } else {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::spline_polyline_with_handles(&p, &handles, *periodic)
+                }
             }
             Some(CurveKind::Conic { a, b, apex, rho }) => crate::curves::conic_polyline(self.p(*a), self.p(*apex), self.p(*b), *rho),
             _ => Vec::new(),
@@ -362,7 +367,7 @@ impl State<'_> {
                     })
                     .collect()
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
+            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, handles }) => {
                 let p = self.spline_points(pts, *periodic);
                 if p.len() < 2 {
                     return Vec::new();
@@ -372,6 +377,13 @@ impl State<'_> {
                 } else if *control {
                     let k = (*degree as usize).min(solidcore_record::MAX_BEZIER_DEGREE).min(p.len().saturating_sub(1)).max(1);
                     crate::curves::bspline_beziers(&p, k).iter().filter_map(|span| solidcraft_geom::bezier(span)).collect()
+                } else if !handles.is_empty() {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::fit_beziers_with_handles(&p, &handles, *periodic)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 })
+                        .collect()
                 } else {
                     crate::curves::fit_beziers_mode(&p, *periodic)
                         .unwrap_or_default()
@@ -458,10 +470,15 @@ impl State<'_> {
                 let (cc, r) = self.round(c);
                 (cc - self.p(p)) / (r * r).max(1e-24)
             }
-            CurveKind::Spline { pts, control, degree, periodic, nurbs } => {
+            CurveKind::Spline { pts, control, degree, periodic, nurbs, handles } => {
                 let q = self.spline_points(pts, *periodic);
                 let at_end = pts.last() == Some(&p) && pts.first() != Some(&p);
-                crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, nurbs.as_ref(), t), at_end)
+                if handles.is_empty() || *control {
+                    crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, nurbs.as_ref(), t), at_end)
+                } else {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::end_curvature(&|t| crate::curves::spline_point_with_handles(&q, &handles, *periodic, t), at_end)
+                }
             }
             CurveKind::Conic { a, b, apex, rho } => {
                 let (pa, pb, px) = (self.p(*a), self.p(*b), self.p(*apex));
@@ -474,9 +491,14 @@ impl State<'_> {
         match self.sk.curves.get(c).map(|c| &c.kind)? {
             CurveKind::Line { a, b } => (self.p(*b) - self.p(*a)).normalized(),
             CurveKind::Circle { .. } | CurveKind::Arc { .. } => (self.p(p) - self.round(c).0).perp().normalized(),
-            CurveKind::Spline { pts, control, periodic, .. } => {
+            CurveKind::Spline { pts, control, periodic, handles, .. } => {
                 let q = self.spline_points(pts, *periodic);
-                crate::curves::spline_end_tangent_mode(&q, *control, *periodic, pts.last() == Some(&p) && pts.first() != Some(&p))
+                if handles.is_empty() {
+                    crate::curves::spline_end_tangent_mode(&q, *control, *periodic, pts.last() == Some(&p) && pts.first() != Some(&p))
+                } else {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::spline_end_tangent_with_handles(&q, &handles, *periodic, pts.last() == Some(&p) && pts.first() != Some(&p))
+                }
             }
             CurveKind::Conic { a, b, apex, .. } => {
                 if p == *a {
@@ -1133,6 +1155,16 @@ fn distance_opening_slope(s: &State, b: &Block, v: usize) -> Option<f64> {
             // Unequal nonzero components avoid symmetry with axes and 45-degree guides.
             let direction = d.normalized().unwrap_or(Vec2::new(0.6, 0.8));
             Some(point(*q, direction) - point(*p, direction))
+        }
+        // The same for a horizontal or vertical distance: the magnitude has no slope where the
+        // two points line up, so open towards `q` being past `p` along the axis.
+        Block::User(_, ConstraintKind::DistanceX { p, q, value }) if *value > TOL && (s.p(*q).x - s.p(*p).x).abs() <= TOL => {
+            let axis = Vec2::new(1.0, 0.0);
+            Some(point(*q, axis) - point(*p, axis))
+        }
+        Block::User(_, ConstraintKind::DistanceY { p, q, value }) if *value > TOL && (s.p(*q).y - s.p(*p).y).abs() <= TOL => {
+            let axis = Vec2::new(0.0, 1.0);
+            Some(point(*q, axis) - point(*p, axis))
         }
         Block::User(_, ConstraintKind::PointLineDistance { p, l, value }) if *value > TOL => {
             let (a, b) = s.line(*l);
@@ -1839,7 +1871,84 @@ pub fn solve_after_edit(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[V
 /// geometry restoration are identical at every analysis level.
 pub fn solve_after_edit_with_analysis(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[Vec2]>, analysis: Analysis) -> SolveReport {
     let old_values: Vec<Option<f64>> = sk.constraints.iter().map(|c| old.get(&c.id).copied()).collect();
-    solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut Budget::full())
+    let before = stored.is_none().then(|| sk.clone());
+    let report = solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut Budget::full());
+    if report.keeps_orientation() {
+        return report;
+    }
+    match before.and_then(|before| solve_in_steps(&before, old, analysis)) {
+        Some((stepped, stepped_report)) => {
+            *sk = stepped;
+            stepped_report
+        }
+        None => report,
+    }
+}
+
+/// A value edit solved in [`EDIT_STEPS`] steps (each a few times more of them than the last
+/// try), the whole sketch at a time, each step a full solve (seed and iteration) from the last
+/// step's solution. Continuation follows one solution branch by the iteration alone, from
+/// sub-step to sub-step; that branch can end before the new values where a solve from the
+/// values a step before still reaches them keeping every turn (the linkage family in
+/// `continuation_tests`). `None` when no try reaches the new values keeping every orientation,
+/// when nothing that can be stepped changed, or when the sketch is not solved for the old values.
+fn solve_in_steps(start: &Sketch, old: &DrivingValues, analysis: Analysis) -> Option<(Sketch, SolveReport)> {
+    let changed: Vec<(usize, f64, f64)> = start
+        .constraints
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| {
+            let new = c.kind.value()?;
+            let was = *old.get(&c.id)?;
+            (was != new && was.is_finite() && new.is_finite()).then_some((i, was, new))
+        })
+        .collect();
+    let steppable = |&(i, was, new): &(usize, f64, f64)| start.constraints.get(i).is_some_and(|c| steppable(&c.kind, was, new));
+    if changed.is_empty() || !changed.iter().all(steppable) || !solved_for(start, old) {
+        return None;
+    }
+    'tries: for steps in EDIT_STEPS {
+        let mut at = start.clone();
+        let mut values = old.clone();
+        let mut last = None;
+        for k in 1..=steps {
+            let t = k as f64 / steps as f64;
+            for &(i, was, new) in &changed {
+                if let Some(c) = at.constraints.get_mut(i) {
+                    c.kind.set_value(if k == steps { new } else { was + (new - was) * t });
+                }
+            }
+            let from: Vec<Option<f64>> = at.constraints.iter().map(|c| values.get(&c.id).copied()).collect();
+            let step_analysis = if k == steps { analysis } else { Analysis::StatusOnly };
+            let report = solve_from(&mut at, &Hold::default(), None, step_analysis, Some(&from), &mut Budget::full());
+            if !report.keeps_orientation() {
+                continue 'tries;
+            }
+            values = at.driving_values();
+            last = Some(report);
+        }
+        return last.map(|report| (at, report));
+    }
+    None
+}
+
+/// How many steps [`solve_in_steps`] tries a value edit in, fewest first.
+const EDIT_STEPS: [usize; 4] = [2, 4, 8, 16];
+
+/// The sketch's geometry is a solved state for the driving values `old`: there is a state to
+/// step from and orientations to keep, as `ValueEdit::starts_solved` decides it per component
+/// (a sketch stored unsolved has neither, and its one-jump result stands).
+fn solved_for(sk: &Sketch, old: &DrivingValues) -> bool {
+    let mut was = sk.clone();
+    for c in &mut was.constraints {
+        if let (Some(_), Some(v)) = (c.kind.value(), old.get(&c.id)) {
+            c.kind.set_value(*v);
+        }
+    }
+    let lay = layout(&was, &Hold::default());
+    let mut x = initial_x(&was, &lay);
+    let (blocks, _) = build_blocks(&was, &lay, &points_on_curves(&was));
+    max_abs(&system(&was, &lay, &blocks, &mut x, false).0) < ACCEPT
 }
 
 /// The orientations of `stored` that `solved` (the same sketch, its links moved and solved

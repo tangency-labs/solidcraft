@@ -68,17 +68,14 @@ fn grid_prim() -> impl Strategy<Value = Prim> {
     prim(grid(), grid_size())
 }
 
-/// A union across only a box edge or corner is non-manifold, so the kernel may
-/// refuse it. This is the same analytic boundary case allowed by box_box_exact.
+/// Two boxes that meet only along an edge or at a corner: their union is the two solids touching
+/// there (non-manifold along the contact, one body, check-clean).
 fn edge_only_boxes(a: &Prim, b: &Prim) -> bool {
     let (Prim::Box { at: a, size: sa }, Prim::Box { at: b, size: sb }) = (a, b) else { return false };
     let gap = [0, 1, 2].map(|i| a[i].max(b[i]) - (a[i] + sa[i]).min(b[i] + sb[i]));
     gap.iter().all(|g| *g <= 0.0) && gap.iter().filter(|g| **g == 0.0).count() >= 2
 }
 
-fn edge_contact_refusal(a: &Prim, b: &Prim, op: BoolOp, result: &Result<f64, TestCaseError>) -> bool {
-    op == BoolOp::Union && edge_only_boxes(a, b) && result.as_ref().is_err_and(|e| e.to_string().contains("zero-thickness edge contact"))
-}
 fn free_prim() -> impl Strategy<Value = Prim> {
     prim(free(), free_size())
 }
@@ -107,13 +104,8 @@ fn close(x: f64, y: f64, scale: f64) -> bool {
 fn identity(a: &Prim, b: &Prim) -> Result<(), TestCaseError> {
     let (ba, bb) = (a.body(), b.body());
     let (va, vb) = (vol(&ba), vol(&bb));
-    let (vu, vi, vc) = (run(&ba, &bb, BoolOp::Union), run(&ba, &bb, BoolOp::Intersect)?, run(&ba, &bb, BoolOp::Cut)?);
-    if edge_contact_refusal(a, b, BoolOp::Union, &vu) {
-        prop_assert!(close(vi, 0.0, va + vb), "edge-only contact must have no intersection volume");
-    } else {
-        let vu = vu?;
-        prop_assert!(close(vu + vi, va + vb, va + vb), "union+intersect {} != A+B {} (A {va:.3}, B {vb:.3}, U {vu:.3}, I {vi:.3})", vu + vi, va + vb);
-    }
+    let (vu, vi, vc) = (run(&ba, &bb, BoolOp::Union)?, run(&ba, &bb, BoolOp::Intersect)?, run(&ba, &bb, BoolOp::Cut)?);
+    prop_assert!(close(vu + vi, va + vb, va + vb), "union+intersect {} != A+B {} (A {va:.3}, B {vb:.3}, U {vu:.3}, I {vi:.3})", vu + vi, va + vb);
     prop_assert!(close(vc, va - vi, va + vb), "cut {vc:.3} != A-I {:.3}", va - vi);
     Ok(())
 }
@@ -127,11 +119,7 @@ fn scale(a: &Prim, b: &Prim, k: f64) -> Result<(), TestCaseError> {
     let (ba, bb, ka, kb) = (a.body(), b.body(), sc(a).body(), sc(b).body());
     let s = vol(&ba) + vol(&bb);
     for op in [BoolOp::Union, BoolOp::Intersect, BoolOp::Cut] {
-        let (one, big) = (run(&ba, &bb, op), run(&ka, &kb, op));
-        if edge_contact_refusal(a, b, op, &one) && edge_contact_refusal(a, b, op, &big) {
-            continue;
-        }
-        let (one, big) = (one?, big? / (k * k * k));
+        let (one, big) = (run(&ba, &bb, op)?, run(&ka, &kb, op)? / (k * k * k));
         prop_assert!(close(one, big, s), "{op:?} at scale 1 gives {one:.4}, at scale {k} gives {big:.4} (normalised)");
     }
     Ok(())
@@ -173,11 +161,7 @@ proptest! {
         let (ba, bb) = (a.body(), b.body());
         let s = vol(&ba) + vol(&bb);
         for op in [BoolOp::Union, BoolOp::Intersect] {
-            let (ab, ba_) = (run(&ba, &bb, op), run(&bb, &ba, op));
-            if edge_contact_refusal(&a, &b, op, &ab) && edge_contact_refusal(&a, &b, op, &ba_) {
-                continue;
-            }
-            let (ab, ba_) = (ab?, ba_?);
+            let (ab, ba_) = (run(&ba, &bb, op)?, run(&bb, &ba, op)?);
             prop_assert!(close(ab, ba_, s), "{op:?}: A,B gives {ab:.4} but B,A gives {ba_:.4}");
         }
     }
@@ -192,11 +176,7 @@ proptest! {
         let (ta, tb) = (mv(&ba), mv(&bb));
         let s = vol(&ba) + vol(&bb);
         for op in [BoolOp::Union, BoolOp::Intersect, BoolOp::Cut] {
-            let (here, there) = (run(&ba, &bb, op), run(&ta, &tb, op));
-            if edge_contact_refusal(&a, &b, op, &here) && edge_contact_refusal(&a, &b, op, &there) {
-                continue;
-            }
-            let (here, there) = (here?, there?);
+            let (here, there) = (run(&ba, &bb, op)?, run(&ta, &tb, op)?);
             prop_assert!(close(here, there, s), "{op:?} at origin {here:.4}, moved by {off} gives {there:.4}");
         }
     }
@@ -240,17 +220,10 @@ proptest! {
         let (ba, bb) = (pa.body(), pb.body());
         let (va, vb) = (sa.iter().product::<f64>(), sb.iter().product::<f64>());
         let s = va + vb;
-        // Per axis: the gap between the boxes (<0 overlap, 0 touch, >0 apart).
-        let gap: Vec<f64> = (0..3).map(|i| a[i].max(b[i]) - (a[i] + sa[i]).min(b[i] + sb[i])).collect();
-        // Touching along an edge or at a corner only: a union there is not a manifold solid.
-        // The kernel refuses it on purpose ("zero-thickness edge contact"). Allowed, as an error.
-        let edge_only = gap.iter().all(|g| *g <= 0.0) && gap.iter().filter(|g| **g == 0.0).count() >= 2;
         prop_assert!(close(run(&ba, &bb, BoolOp::Intersect)?, overlap, s), "intersect != closed-form overlap {overlap}");
         prop_assert!(close(run(&ba, &bb, BoolOp::Cut)?, va - overlap, s), "cut != closed form {}", va - overlap);
-        match run(&ba, &bb, BoolOp::Union) {
-            Err(_) if edge_only => {}
-            r => prop_assert!(close(r?, s - overlap, s), "union != closed form {}", s - overlap),
-        }
+        // Touching along an edge or at a corner only, the union is the two solids touching there.
+        prop_assert!(close(run(&ba, &bb, BoolOp::Union)?, s - overlap, s), "union != closed form {}", s - overlap);
     }
 
     /// Two boxes that share part of a face must fuse into one solid. This is the most common
@@ -267,31 +240,73 @@ proptest! {
 // Cases the property tests found, as plain tests. Ignored until the kernel bug is fixed: run them
 // with `cargo test -p solidcraft-kernel --test boolean_props -- --ignored`.
 
-/// The saved commutativity case is an intentional non-manifold join refusal,
-/// not a failure to join overlapping volumes. Intersection and cut remain valid.
+/// The saved commutativity case: two boxes meeting only along an edge. Their union in either
+/// order is the two solids touching along it, 437.5 + 625 = 1062.5; they share no volume, and
+/// cutting one by the other leaves it whole.
 #[test]
-fn edge_only_box_join_is_refused_in_both_orders() {
+fn edge_only_box_join_is_the_two_solids_touching_in_both_orders() {
     let a = Prim::Box { at: [15.0, 22.5, 0.0], size: [5.0, 5.0, 17.5] };
     let b = Prim::Box { at: [2.5, 12.5, 0.0], size: [12.5, 10.0, 5.0] };
     assert!(edge_only_boxes(&a, &b));
     assert!(!edge_only_boxes(&a, &Prim::Box { at: [15.0, 22.5, 0.0], size: [5.0, 5.0, 5.0] }));
     let (a, b) = (a.body(), b.body());
     for (left, right) in [(&a, &b), (&b, &a)] {
-        let error = run(left, right, BoolOp::Union).expect_err("an edge-only join is non-manifold");
-        assert!(error.to_string().contains("zero-thickness edge contact"), "{error}");
+        let union = run(left, right, BoolOp::Union).unwrap();
+        assert!(close(union, 1062.5, 1062.5), "{union}");
         assert_eq!(run(left, right, BoolOp::Intersect).unwrap(), 0.0);
         assert!(close(run(left, right, BoolOp::Cut).unwrap(), vol(left), vol(left)));
     }
 }
 
+/// Two boxes meeting at one corner: their union is the two solids touching there, 125 + 125.
+#[test]
+fn corner_only_box_join_is_the_two_solids_touching() {
+    let a = Prim::Box { at: [0.0, 0.0, 0.0], size: [5.0, 5.0, 5.0] };
+    let b = Prim::Box { at: [5.0, 5.0, 5.0], size: [5.0, 5.0, 5.0] };
+    assert!(edge_only_boxes(&a, &b));
+    let (a, b) = (a.body(), b.body());
+    for (left, right) in [(&a, &b), (&b, &a)] {
+        let union = run(left, right, BoolOp::Union).unwrap();
+        assert!(close(union, 250.0, 250.0), "{union}");
+        assert_eq!(run(left, right, BoolOp::Intersect).unwrap(), 0.0);
+    }
+}
+
 /// The saved scale-invariance failure: these boxes meet at y=30, z=20 along an
-/// edge, so a join is refused at every scale. Intersection and cut still scale.
+/// edge, and every operation, the union of the two solids touching there among them, scales.
 #[test]
 fn edge_only_box_contact_is_scale_invariant() {
     let a = Prim::Box { at: [0.0, 15.0, 7.5], size: [7.5, 15.0, 12.5] };
     let b = Prim::Box { at: [0.0, 30.0, 20.0], size: [5.0, 5.0, 5.0] };
     assert!(edge_only_boxes(&a, &b));
     for k in [0.05, 1.0, 40.0] {
+        check(scale(&a, &b, k));
+        check(scale(&b, &a, k));
+    }
+}
+
+/// A cylinder lying along a box's top edge, tangent there to the box's top face (scale_invariant's
+/// shrunk case). From 10x the two faces, a step off the edge, made too small an angle and were
+/// taken for parallel (a zero sector), and from 100x for one surface (coincident faces): the
+/// union failed.
+#[test]
+fn cylinder_resting_on_a_box_edge_is_scale_invariant() {
+    let a = Prim::Cyl { at: [0.0, 2.5, 15.0], axis: 1, r: 7.5, h: 25.0 };
+    let b = Prim::Box { at: [0.0, 0.0, 0.0], size: [5.0, 5.0, 7.5] };
+    for k in [0.05, 1.0, 40.0, 100.0, 1000.0] {
+        check(scale(&a, &b, k));
+        check(scale(&b, &a, k));
+    }
+}
+
+/// Two cylinders side by side, touching along a line. From 100x their faces, a step off the
+/// line, were taken for one surface: the union failed, and at 1000x the intersection was a
+/// whole cylinder.
+#[test]
+fn cylinders_touching_along_a_line_are_scale_invariant() {
+    let a = Prim::Cyl { at: [0.0, 0.0, 0.0], axis: 1, r: 7.5, h: 25.0 };
+    let b = Prim::Cyl { at: [15.0, 2.5, 0.0], axis: 1, r: 7.5, h: 25.0 };
+    for k in [100.0, 1000.0] {
         check(scale(&a, &b, k));
         check(scale(&b, &a, k));
     }
@@ -328,6 +343,22 @@ fn grid_small_sphere_thin_box_union_is_sound() {
     let a = Prim::Sph { at: [20.0, 10.0, 27.5], r: 3.75 };
     let b = Prim::Box { at: [15.0, 0.0, 22.5], size: [7.5, 20.0, 5.0] };
     check(identity(&a, &b));
+}
+
+/// A sphere and a box apart from each other: moved 1e5 mm away, their union is refused ("a NURBS
+/// form that is not its analytic surface"), where at the origin it is the two solids.
+#[test]
+#[ignore = "kernel bug, solidcore#3131"]
+fn disjoint_sphere_box_union_moved_far() {
+    let a = Prim::Sph { at: [0.0, 0.0, 10.0], r: 2.5 }.body();
+    let b = Prim::Box { at: [0.0, 0.0, 0.0], size: [5.0, 5.0, 5.0] }.body();
+    let t = Vec3::new(1.0e5, -1.0e5 * 0.7, 1.0e5 * 0.3);
+    let mv = |x: &Body| transform(x, t, Vec3::ZERO, Vec3::Z, 0.0).expect("translate");
+    let (va, vb) = (vol(&a), vol(&b));
+    let here = run(&a, &b, BoolOp::Union).unwrap();
+    assert!(close(here, va + vb, va + vb), "{here}");
+    let there = run(&mv(&a), &mv(&b), BoolOp::Union).unwrap();
+    assert!(close(there, here, va + vb), "{there} moved, {here} at the origin");
 }
 
 /// Two crossing cylinders: the union moved 1000 mm away loses about a tenth of its volume.

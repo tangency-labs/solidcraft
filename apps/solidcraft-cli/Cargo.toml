@@ -28,6 +28,8 @@ raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
 profile = ["solidcraft-engine/profile"]
 
 [dependencies]
+solidcraft-viewport-gpu = { workspace = true }
+solidcraft-viewport = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-gpu = { workspace = true }
@@ -40,3 +42,4 @@ serde_json = { workspace = true }
 image = { workspace = true }
 # Tests measure meshes at their own tolerances.
 solidcraft-kernel = { workspace = true }
+wat = "1"

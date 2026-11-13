@@ -1,0 +1,1 @@
+| tests/step-regressions/tiny_rounds_coarse_tolerance.step | SolidCraft contributors | written entity by entity from formulas (a 0.05 mm quarter round, corner ball and quarter torus in a file of 0.1 mm uncertainty); import regression fixture | MIT OR Apache-2.0 |

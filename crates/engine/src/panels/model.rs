@@ -197,10 +197,31 @@ pub struct PanelSpec {
     pub features: PanelFeatures,
     #[serde(default)]
     pub side_height_policy: SideHeightPolicy,
+    /// A rigid, expanded Bottom row. Other zones retain their ordinary bounds
+    /// and collapse capability. The declared height must satisfy those bounds.
+    #[serde(default)]
+    pub fixed_bottom_height: Option<f32>,
     #[serde(default)]
     pub header_actions: Vec<HeaderActionSpec>,
     #[serde(default)]
     pub text_heavy: bool,
+}
+
+impl PanelSpec {
+    pub fn size_bounds(&self, zone: Zone) -> (Size, Size) {
+        let (mut min, mut max) = (self.min_size, self.max_size);
+        if zone == Zone::Bottom
+            && let Some(height) = self.fixed_bottom_height
+        {
+            min.height = height;
+            max.height = height;
+        }
+        (min, max)
+    }
+
+    pub fn collapsible_in(&self, zone: Zone) -> bool {
+        self.features.collapsible && !(zone == Zone::Bottom && self.fixed_bottom_height.is_some())
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -230,6 +251,11 @@ impl PanelRegistry {
         spec.default_size.validate()?;
         if !spec.default_size.within(spec.min_size, spec.max_size) {
             return Err(error(Rule::Bounds, "min <= default <= max required in both dimensions"));
+        }
+        if spec.fixed_bottom_height.is_some_and(|height| {
+            !height.is_finite() || height < spec.min_size.height || height > spec.max_size.height || !spec.allowed_zones.contains(&Zone::Bottom)
+        }) {
+            return Err(error(Rule::Bounds, "fixed Bottom height must satisfy registered bounds in an allowed Bottom zone"));
         }
         if !spec.allowed_zones.contains(&Zone::Floating) || !spec.allowed_zones.contains(&spec.default_zone) {
             return Err(error(Rule::Placement, "Floating and default_zone must be allowed"));
@@ -411,7 +437,7 @@ pub fn default_weight() -> f32 {
 }
 
 pub fn validate_weight(weight: f32) -> PanelResult<()> {
-    if !weight.is_finite() || weight < 0.0 || weight > MAX_LOGICAL {
+    if !weight.is_finite() || !(0.0..=MAX_LOGICAL).contains(&weight) {
         return Err(error(Rule::Bounds, "weight must be finite and in [0, 32768]"));
     }
     Ok(())
@@ -608,6 +634,122 @@ impl PartialEq for Layout {
     }
 }
 
+/// Compare complete arrangements while ignoring generated section/column names.
+/// Ordered groups and every reference to a live or remembered group keep their
+/// identity relationships. Instance IDs, geometry and placement memory stay exact.
+pub fn arrangements_equal(left: &Layout, right: &Layout) -> bool {
+    match (canonical_arrangement(left), canonical_arrangement(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn arrangement_id(names: &mut BTreeMap<String, String>, id: &str, prefix: &str) -> Option<String> {
+    if let Some(name) = names.get(id) {
+        return Some(name.clone());
+    }
+    if names.len() >= MAX_RESERVED_IDENTITIES {
+        return None;
+    }
+    let name = format!("{prefix}.{}", names.len());
+    names.insert(id.to_string(), name.clone());
+    Some(name)
+}
+
+fn arrangement_location(
+    location: &mut SectionLocation,
+    sections: &mut BTreeMap<String, String>,
+    columns: &mut BTreeMap<String, String>,
+) -> Option<()> {
+    if let SectionLocation::Window { return_to, .. } = location {
+        if let Some(id) = &mut return_to.section {
+            id.0 = arrangement_id(sections, &id.0, "section")?;
+        }
+        if let Some(id) = &mut return_to.column {
+            id.0 = arrangement_id(columns, &id.0, "column")?;
+        }
+        if let Some(join) = &mut return_to.join {
+            join.section.0 = arrangement_id(sections, &join.section.0, "section")?;
+        }
+    }
+    Some(())
+}
+
+fn canonical_arrangement(layout: &Layout) -> Option<Layout> {
+    // Bound every collection and string before copying. The comparison has no
+    // registry and does not allocate geometry or change the authoritative model.
+    if layout.instances.len() > MAX_INSTANCES || layout.sections.len() > MAX_SECTIONS || layout.columns.len() > MAX_SECTIONS {
+        return None;
+    }
+    valid_id(&layout.workspace.0).ok()?;
+    layout.extent_priority_context.validate().ok()?;
+    for column in &layout.columns {
+        valid_id(&column.id.0).ok()?;
+    }
+    for section in &layout.sections {
+        if section.tabs.len() > MAX_TABS {
+            return None;
+        }
+        valid_id(&section.id.0).ok()?;
+        valid_id(&section.active.0).ok()?;
+        section.location.validate().ok()?;
+        if let Some(column) = &section.column {
+            valid_id(&column.0).ok()?;
+        }
+        for instance in &section.tabs {
+            valid_id(&instance.0).ok()?;
+        }
+    }
+    for instance in &layout.instances {
+        valid_id(&instance.id.0).ok()?;
+        valid_id(&instance.kind.0).ok()?;
+        valid_id(&instance.memory.section.0).ok()?;
+        instance.memory.location.validate().ok()?;
+        if let Some(column) = &instance.memory.column {
+            valid_id(&column.0).ok()?;
+        }
+    }
+    let mut sections = BTreeMap::new();
+    let mut columns = BTreeMap::new();
+    for section in &layout.sections {
+        arrangement_id(&mut sections, &section.id.0, "section")?;
+    }
+    for column in &layout.columns {
+        arrangement_id(&mut columns, &column.id.0, "column")?;
+    }
+    let mut canonical = layout.clone();
+    for column in &mut canonical.columns {
+        column.id.0 = arrangement_id(&mut columns, &column.id.0, "column")?;
+    }
+    for section in &mut canonical.sections {
+        section.id.0 = arrangement_id(&mut sections, &section.id.0, "section")?;
+        if let Some(column) = &mut section.column {
+            column.0 = arrangement_id(&mut columns, &column.0, "column")?;
+        }
+        arrangement_location(&mut section.location, &mut sections, &mut columns)?;
+    }
+    for instance in &mut canonical.instances {
+        instance.memory.section.0 = arrangement_id(&mut sections, &instance.memory.section.0, "section")?;
+        if let Some(column) = &mut instance.memory.column {
+            column.0 = arrangement_id(&mut columns, &column.0, "column")?;
+        }
+        arrangement_location(&mut instance.memory.location, &mut sections, &mut columns)?;
+    }
+    for record in &mut canonical.extent_priority_context.records {
+        match &mut record.target {
+            ExtentPriorityTarget::Section(section) | ExtentPriorityTarget::SectionReturn(section) => {
+                section.0 = arrangement_id(&mut sections, &section.0, "section")?;
+            }
+            ExtentPriorityTarget::Memory(_) | ExtentPriorityTarget::MemoryReturn(_) => {}
+        }
+        if let Some(column) = &mut record.column {
+            column.0 = arrangement_id(&mut columns, &column.0, "column")?;
+        }
+    }
+    canonical.extent_priority_context.records.sort_by(|left, right| left.target.cmp(&right.target));
+    Some(canonical)
+}
+
 impl Layout {
     fn latent_priority_overrides(&self) -> impl Iterator<Item = &ExtentPriorityRecord> {
         self.extent_priority_context.overrides().filter(move |record| match &record.target {
@@ -759,15 +901,25 @@ pub fn tab_bounds(layout: &Layout, registry: &PanelRegistry, section: &Section) 
     let mut max = Size { width: MAX_LOGICAL, height: MAX_LOGICAL };
     for id in &section.tabs {
         let spec = registry.get(&layout.instance(id)?.kind)?;
-        min.width = min.width.max(spec.min_size.width);
-        min.height = min.height.max(spec.min_size.height);
-        max.width = max.width.min(spec.max_size.width);
-        max.height = max.height.min(spec.max_size.height);
+        let (lower, upper) = spec.size_bounds(section.location.zone());
+        min.width = min.width.max(lower.width);
+        min.height = min.height.max(lower.height);
+        max.width = max.width.min(upper.width);
+        max.height = max.height.min(upper.height);
     }
     if min.width > max.width || min.height > max.height {
         return Err(error(Rule::IncompatibleTabs, "tab size constraints have no intersection"));
     }
     Ok((min, max))
+}
+
+pub fn section_collapsible(layout: &Layout, registry: &PanelRegistry, section: &Section) -> PanelResult<bool> {
+    for id in &section.tabs {
+        if !registry.get(&layout.instance(id)?.kind)?.collapsible_in(section.location.zone()) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 pub fn column_bounds(layout: &Layout, registry: &PanelRegistry, column: &ColumnId) -> PanelResult<(f32, f32)> {
@@ -908,7 +1060,7 @@ pub fn validate(layout: &Layout, registry: &PanelRegistry) -> PanelResult<()> {
             if s.tabs.len() > 1 && !spec.features.tabbable {
                 return Err(error(Rule::FeatureDisabled, "panel cannot join tabs"));
             }
-            if s.collapsed && !spec.features.collapsible {
+            if s.collapsed && !spec.collapsible_in(zone) {
                 return Err(error(Rule::FeatureDisabled, "panel cannot collapse"));
             }
             if zone == Zone::Window && !spec.features.popout {
@@ -939,9 +1091,9 @@ pub fn validate(layout: &Layout, registry: &PanelRegistry) -> PanelResult<()> {
             for id in &s.tabs {
                 let spec = registry.get(&layout.instance(id)?.kind)?;
                 if !spec.allowed_zones.contains(&return_to.zone)
-                    || !return_to.size.within(spec.min_size, spec.max_size)
+                    || !return_to.size.within(spec.size_bounds(return_to.zone).0, spec.size_bounds(return_to.zone).1)
                     || return_to.column_width.is_some_and(|width| width < spec.min_size.width || width > spec.max_size.width)
-                    || (return_to.collapsed && !spec.features.collapsible)
+                    || (return_to.collapsed && !spec.collapsible_in(return_to.zone))
                 {
                     return Err(error(Rule::Placement, "native return violates member constraints"));
                 }

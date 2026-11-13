@@ -114,6 +114,168 @@ pub fn started(dir: &Path) {
     let _ = std::fs::remove_file(dir.join(MARKER));
 }
 
+/// The window closed while the app was still starting (behind its starting page, #1210). A close
+/// the user asked for is not a failed start: the marker goes, so closing a couple of launches early
+/// cannot put the next one in safe mode. A close the app made itself (its graphics device was lost
+/// and it starts again) keeps the marker: that start did fail.
+pub fn closed_while_starting(dir: &Path, by_user: bool) {
+    if by_user {
+        started(dir);
+    }
+}
+
+/// A saved backend change that this launch is trying. Keep this value until the first
+/// frame is presented, so only this launch's matching attempt can be confirmed or reverted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackendAttempt {
+    pub requested: String,
+    pub previous: String,
+}
+
+/// The backend to use before creating any graphics device, with any pending recovery notice.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BackendLaunch {
+    pub backend: Option<String>,
+    pub attempt: Option<BackendAttempt>,
+    pub note: Option<String>,
+}
+
+type GraphicsSettings = serde_json::Map<String, serde_json::Value>;
+const BACKEND_TRIAL: &str = "backend_trial";
+const MAX_BACKEND_PREFERENCE_BYTES: usize = 256;
+
+/// Read only object-shaped settings. A missing or empty file means defaults; other failures
+/// are reported so the caller can use its safe renderer without overwriting unreadable data.
+fn read_backend_settings(path: &Path) -> Result<GraphicsSettings, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(GraphicsSettings::new()),
+        Err(error) => return Err(format!("could not read graphics settings: {error}")),
+    };
+    if text.trim().is_empty() {
+        return Ok(GraphicsSettings::new());
+    }
+    serde_json::from_str(&text).map_err(|error| format!("could not read graphics settings: {error}"))
+}
+
+/// The attempt marker and backend are written together: a crash must leave a whole old or
+/// new record, never a selected API whose recovery data was only partly written.
+fn write_backend_settings(path: &Path, graphics: &GraphicsSettings) -> Result<(), String> {
+    let bytes = serde_json::to_vec(graphics).map_err(|error| format!("could not encode graphics settings: {error}"))?;
+    solidcraft_engine::io::safe_write::write_atomic(path, &bytes, false).map_err(|error| format!("could not save graphics settings: {error}"))
+}
+
+/// UI choices are single API names. The previous value remains verbatim, including legacy
+/// comma lists and blanks, because startup already knows how to interpret those preferences.
+fn backend_trial(graphics: &GraphicsSettings) -> Option<(BackendAttempt, bool)> {
+    let trial = graphics.get(BACKEND_TRIAL)?.as_object()?;
+    let requested = trial.get("requested")?.as_str()?;
+    if !matches!(requested, "auto" | "dx12" | "vulkan" | "gl" | "metal") {
+        return None;
+    }
+    let previous = trial.get("previous")?.as_str()?;
+    if previous.len() > MAX_BACKEND_PREFERENCE_BYTES {
+        return None;
+    }
+    let started = trial.get("started")?.as_bool()?;
+    Some((BackendAttempt { requested: requested.into(), previous: previous.into() }, started))
+}
+
+/// Describe a restored choice using the same catalog as the Graphics preferences page.
+pub(super) fn backend_reverted_note(requested: &str, previous: &str) -> String {
+    let requested = solidcraft_ui_egui::prefs::graphics_backend_label(requested);
+    let previous = solidcraft_ui_egui::prefs::graphics_backend_label(previous);
+    solidcraft_ui_text::format("prefs.graphics_api_start_reverted", &[("requested", &requested), ("previous", &previous)])
+}
+
+/// Prepare a UI-selected API before any adapter is opened. Safe mode, an explicit environment
+/// override and process-local fallback launches pass `false` and leave the attempt untouched.
+/// An interrupted attempt restores its previous API. A new attempt is returned only after its
+/// started marker reaches disk; any I/O error must make the caller avoid the requested API.
+pub fn prepare_backend_start(path: &Path, allow_trial: bool) -> Result<BackendLaunch, String> {
+    prepare_backend_launch(read_backend_settings(path)?, allow_trial, |graphics| write_backend_settings(path, graphics))
+}
+
+/// Separate the state transition from persistence so a refused marker write is testable
+/// without depending on the test user's filesystem permissions.
+fn prepare_backend_launch(
+    mut graphics: GraphicsSettings,
+    allow_trial: bool,
+    save: impl FnOnce(&GraphicsSettings) -> Result<(), String>,
+) -> Result<BackendLaunch, String> {
+    let backend = graphics.get("backend").and_then(serde_json::Value::as_str).map(str::to_string);
+    let mut launch = BackendLaunch { backend, ..Default::default() };
+    if !allow_trial || !graphics.contains_key(BACKEND_TRIAL) {
+        return Ok(launch);
+    }
+    let parsed = backend_trial(&graphics);
+    let requested = graphics.get(BACKEND_TRIAL).and_then(|trial| trial.get("requested")).and_then(serde_json::Value::as_str);
+    if requested.is_some() && requested != launch.backend.as_deref() {
+        // Another edit replaced the selected API; stale recovery data cannot undo that edit.
+        graphics.remove(BACKEND_TRIAL);
+    } else if let Some((attempt, started)) = parsed {
+        if attempt.requested == attempt.previous {
+            graphics.remove(BACKEND_TRIAL);
+        } else if started {
+            graphics.insert("backend".into(), serde_json::Value::String(attempt.previous.clone()));
+            graphics.remove(BACKEND_TRIAL);
+            launch.backend = Some(attempt.previous.clone());
+            launch.note = Some(backend_reverted_note(&attempt.requested, &attempt.previous));
+        } else {
+            let trial = graphics
+                .get_mut(BACKEND_TRIAL)
+                .and_then(serde_json::Value::as_object_mut)
+                .ok_or_else(|| "graphics backend attempt changed before it could start".to_string())?;
+            trial.insert("started".into(), serde_json::Value::Bool(true));
+            launch.attempt = Some(attempt);
+        }
+    } else {
+        // A damaged guard must not turn a protected API into an unguarded attempt. Prefer its
+        // intact previous value; otherwise use Automatic, preserving the other graphics keys.
+        let previous = graphics
+            .get(BACKEND_TRIAL)
+            .and_then(|trial| trial.get("previous"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| value.len() <= MAX_BACKEND_PREFERENCE_BYTES)
+            .unwrap_or("auto")
+            .to_string();
+        launch.note = Some(backend_reverted_note(launch.backend.as_deref().unwrap_or("auto"), &previous));
+        graphics.insert("backend".into(), serde_json::Value::String(previous.clone()));
+        graphics.remove(BACKEND_TRIAL);
+        launch.backend = Some(previous);
+    }
+    save(&graphics)?;
+    Ok(launch)
+}
+
+/// Only a matching, started attempt still owning the saved backend may change recovery state.
+/// A newer preference edit is left alone, including a newly pending attempt at the same API.
+fn finish_backend_start(path: &Path, attempt: &BackendAttempt, revert: bool) -> Result<(), String> {
+    let mut graphics = read_backend_settings(path)?;
+    let matches = backend_trial(&graphics).is_some_and(|(saved, started)| started && saved == *attempt)
+        && graphics.get("backend").and_then(serde_json::Value::as_str) == Some(attempt.requested.as_str());
+    if !matches {
+        return Ok(());
+    }
+    graphics.remove(BACKEND_TRIAL);
+    if revert {
+        graphics.insert("backend".into(), serde_json::Value::String(attempt.previous.clone()));
+    }
+    write_backend_settings(path, &graphics)
+}
+
+/// Keep a backend only after the window has presented its first frame. Handled startup
+/// failures must call `rollback_backend_start` instead, even if the ordinary crash marker clears.
+pub fn confirm_backend_start(path: &Path, attempt: &BackendAttempt) -> Result<(), String> {
+    finish_backend_start(path, attempt, false)
+}
+
+/// A handled window-start failure restores the previous backend before the host retries.
+/// Reading fresh settings and matching the attempt avoids erasing a later preference edit.
+pub fn rollback_backend_start(path: &Path, attempt: &BackendAttempt) -> Result<(), String> {
+    finish_backend_start(path, attempt, true)
+}
+
 /// The software adapter among `adapters` (WARP on Windows, lavapipe or llvmpipe elsewhere), else
 /// the first one that can draw to `surface`.
 pub fn pick_cpu_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&eframe::wgpu::Surface<'_>>) -> Result<eframe::wgpu::Adapter, String> {
@@ -260,7 +422,7 @@ pub const FLOAT_DEPTH_STENCIL: eframe::wgpu::Features = eframe::wgpu::Features::
 /// asks for a float one only when whichever it picks has it.
 pub fn float_depth_everywhere(options: &eframe::egui_wgpu::WgpuConfiguration) -> bool {
     let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { return false };
-    let mut desc = solidcraft_gpu::instance_descriptor_from_env();
+    let mut desc = solidcraft_viewport_gpu::instance_descriptor_from_env();
     desc.backends = setup.instance_descriptor.backends;
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(setup.instance_descriptor.backends));
@@ -277,7 +439,7 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = backends;
     desc.flags = eframe::wgpu::InstanceFlags::from_build_config().with_env();
-    desc.backend_options.dx12.shader_compiler = solidcraft_gpu::dx12_compiler();
+    desc.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(backends));
     let found: Vec<String> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().device_type)).collect();
@@ -486,6 +648,284 @@ mod tests {
         assert!(settings_directory(Some(file.as_os_str()), Some(default)).is_err());
     }
 
+    // These restart contracts apply to Windows and macOS as well as Linux.
+    #[test]
+    fn graphics_restart_applies_saved_choices_and_reopens_saved_designs() {
+        use std::ffi::OsStr;
+        let program = std::env::current_exe().unwrap();
+        let designs = vec!["/saved/first design.sc".to_string(), "/saved/second.sc".to_string()];
+        let command = crate::graphics_restart_command(&program, &[], &designs);
+        assert_eq!(command.get_program(), program.as_os_str());
+        assert_eq!(command.get_args().collect::<Vec<_>>(), designs.iter().map(OsStr::new).collect::<Vec<_>>());
+        let changes: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+        for variable in [
+            crate::startup::RETRY_BACKEND_ENV,
+            crate::startup::FALLBACK_NOTE_ENV,
+            crate::startup::RENDERER_ENV,
+            crate::startup::SAFE_MODE_ENV,
+            crate::device_lost::LOST_ENV,
+            crate::device_lost::REASON_ENV,
+        ] {
+            assert_eq!(changes.get(OsStr::new(variable)), Some(&None), "{variable}");
+        }
+        assert!(!changes.contains_key(OsStr::new(crate::startup::WGPU_BACKEND_ENV)));
+        assert!(!changes.contains_key(OsStr::new("SOLIDCRAFT_SETTINGS_DIR")));
+        assert!(!changes.contains_key(OsStr::new("WGPU_ADAPTER_NAME")));
+    }
+
+    #[test]
+    fn graphics_restart_uses_an_appimage_only_from_its_own_existing_mount() {
+        use crate::graphics_restart_program;
+        use std::ffi::OsStr;
+        let root = std::env::temp_dir().join("solidcraft-graphics-restart-fixture");
+        let appdir = root.join("mount");
+        let mounted = appdir.join("usr").join("bin").join("solidcraft");
+        let image = root.join("SolidCraft.AppImage");
+        let outside = root.join("source").join("solidcraft");
+        let looks_similar = root.join("mount-other").join("solidcraft");
+        let exists = |path: &std::path::Path| path == image;
+        assert_eq!(graphics_restart_program(Some(&mounted), Some(image.as_os_str()), Some(appdir.as_os_str()), exists), Some(image.clone()));
+        for executable in [&outside, &looks_similar] {
+            assert_eq!(
+                graphics_restart_program(Some(executable), Some(image.as_os_str()), Some(appdir.as_os_str()), exists),
+                Some(executable.to_path_buf()),
+                "a launcher inherited from another process is ignored"
+            );
+        }
+        for (appimage, directory) in [
+            (None, Some(appdir.as_os_str())),
+            (Some(image.as_os_str()), None),
+            (Some(OsStr::new("")), Some(appdir.as_os_str())),
+            (Some(image.as_os_str()), Some(OsStr::new(""))),
+            (Some(OsStr::new("relative.AppImage")), Some(appdir.as_os_str())),
+        ] {
+            assert_eq!(graphics_restart_program(Some(&mounted), appimage, directory, exists), Some(mounted.clone()));
+        }
+        assert_eq!(
+            graphics_restart_program(Some(&mounted), Some(image.as_os_str()), Some(appdir.as_os_str()), |_| false),
+            Some(mounted.clone()),
+            "a missing outer image cannot replace the running executable"
+        );
+        assert_eq!(graphics_restart_program(None, Some(image.as_os_str()), Some(appdir.as_os_str()), exists), None);
+    }
+
+    #[test]
+    fn graphics_restart_keeps_launch_options_and_uses_the_current_saved_tabs() {
+        let original = [
+            "--safe-mode",
+            "--control",
+            "7878",
+            "original design.sc",
+            "--theme-file",
+            "a theme.json",
+            "--sample",
+            "--max-file-size",
+            "2GB",
+            "other-original.sc",
+            "--max-file-size=3GB",
+        ];
+        let args = crate::graphics_restart_args(original.into_iter().map(str::to_string));
+        assert_eq!(args, ["--control", "7878", "--theme-file", "a theme.json", "--max-file-size", "2GB", "--max-file-size=3GB"]);
+        let program = std::env::current_exe().unwrap();
+        let designs = ["current saved.sc".to_string()];
+        let command = crate::graphics_restart_command(&program, &args, &designs);
+        assert_eq!(
+            command.get_args().map(|value| value.to_string_lossy().into_owned()).collect::<Vec<_>>(),
+            ["--control", "7878", "--theme-file", "a theme.json", "--max-file-size", "2GB", "--max-file-size=3GB", "current saved.sc"]
+        );
+        for missing_value in ["--control", "--theme-file", "--max-file-size"] {
+            assert!(crate::graphics_restart_args([missing_value.to_string()]).is_empty());
+        }
+    }
+
+    #[test]
+    fn startup_graphics_api_is_authoritative_over_stale_ui_preferences() {
+        use serde_json::json;
+        for choice in ["auto", "vulkan", "dx12", "metal", "gl", "dx12,vulkan"] {
+            for safe in [false, true] {
+                let mut app = crate::SolveApp::new(crate::Session::default(), crate::Services::default());
+                let stored = json!({"preferences":{"graphics_backend":"gl"}}).to_string();
+                let saved = json!({"backend":choice});
+                crate::restore_preferences(&mut app, Some(&stored), Some(&saved), safe);
+                assert_eq!(app.preferences.graphics_backend, choice);
+            }
+        }
+        let mut app = crate::SolveApp::new(crate::Session::default(), crate::Services::default());
+        app.preferences.graphics_backend = "vulkan".into();
+        crate::restore_graphics_preferences(&mut app, None);
+        assert_eq!(app.preferences.graphics_backend, "auto");
+    }
+    fn backend_settings(path: &Path) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn pending_backend(previous: &str) -> serde_json::Value {
+        serde_json::json!({
+            "backend": "vulkan",
+            "backend_trial": {"requested": "vulkan", "previous": previous, "started": false},
+            "msaa": 8,
+            "adapter": "Saved GPU",
+            "window_system": "x11",
+            "future_setting": {"enabled": true}
+        })
+    }
+
+    #[test]
+    fn backend_start_marks_the_attempt_before_selection_and_keeps_it_after_a_presented_frame() {
+        let dir = scratch("backend-confirm");
+        let path = dir.join("graphics.json");
+        let original = pending_backend("auto");
+        std::fs::write(&path, original.to_string()).unwrap();
+
+        let launch = prepare_backend_start(&path, true).unwrap();
+        assert_eq!(launch.backend.as_deref(), Some("vulkan"));
+        assert!(launch.note.is_none());
+        let attempt = launch.attempt.unwrap();
+        assert_eq!(attempt, BackendAttempt { requested: "vulkan".into(), previous: "auto".into() });
+        let mut started = original.clone();
+        started["backend_trial"]["started"] = serde_json::json!(true);
+        assert_eq!(backend_settings(&path), started, "selection is returned only after the started marker is durable");
+
+        confirm_backend_start(&path, &attempt).unwrap();
+        let mut kept = original;
+        kept.as_object_mut().unwrap().remove(BACKEND_TRIAL);
+        assert_eq!(backend_settings(&path), kept, "confirmation changes no other graphics preferences");
+        let next = prepare_backend_start(&path, true).unwrap();
+        assert_eq!(next.backend.as_deref(), Some("vulkan"));
+        assert!(next.attempt.is_none() && next.note.is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn interrupted_backend_start_restores_the_exact_previous_choice_once() {
+        solidcraft_ui_egui::i18n::install();
+        let _language = solidcraft_ui_text::scope("en");
+        let dir = scratch("backend-interrupted");
+        let path = dir.join("graphics.json");
+        for (previous, label) in [("auto", "Automatic"), (" dx12, vulkan ", " dx12, vulkan "), ("", "Automatic")] {
+            let mut expected = pending_backend(previous);
+            std::fs::write(&path, expected.to_string()).unwrap();
+            assert!(prepare_backend_start(&path, true).unwrap().attempt.is_some());
+
+            // A process crash leaves the started marker; the next normal launch rolls back.
+            let recovered = prepare_backend_start(&path, true).unwrap();
+            assert_eq!(recovered.backend.as_deref(), Some(previous));
+            assert!(recovered.attempt.is_none());
+            assert_eq!(
+                recovered.note,
+                Some(format!("The previous start with Vulkan did not open the window. SolidCraft restored {label}.")),
+                "recovery describes both APIs using their displayed names"
+            );
+            expected["backend"] = serde_json::json!(previous);
+            expected.as_object_mut().unwrap().remove(BACKEND_TRIAL);
+            assert_eq!(backend_settings(&path), expected, "only the attempted API is reverted");
+            assert!(prepare_backend_start(&path, true).unwrap().note.is_none(), "the notice is not repeated");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn safe_override_and_fallback_launches_leave_backend_attempts_untouched() {
+        let dir = scratch("backend-bypass");
+        let path = dir.join("graphics.json");
+        assert_eq!(prepare_backend_start(&path, true).unwrap(), BackendLaunch::default());
+        assert!(!path.exists(), "default startup does not create a settings file");
+        for started in [false, true] {
+            let mut saved = pending_backend("dx12");
+            saved["backend_trial"]["started"] = serde_json::json!(started);
+            let bytes = serde_json::to_vec_pretty(&saved).unwrap();
+            std::fs::write(&path, &bytes).unwrap();
+            let launch = prepare_backend_start(&path, false).unwrap();
+            assert_eq!(launch.backend.as_deref(), Some("vulkan"));
+            assert!(launch.attempt.is_none() && launch.note.is_none());
+            assert_eq!(std::fs::read(&path).unwrap(), bytes, "even an interrupted attempt waits for a normal launch");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn backend_start_rollback_and_confirmation_cannot_overwrite_a_newer_choice() {
+        let dir = scratch("backend-ownership");
+        let path = dir.join("graphics.json");
+        let saved = pending_backend("dx12");
+        std::fs::write(&path, saved.to_string()).unwrap();
+        let attempt = prepare_backend_start(&path, true).unwrap().attempt.unwrap();
+        rollback_backend_start(&path, &attempt).unwrap();
+        let mut reverted = saved.clone();
+        reverted["backend"] = serde_json::json!("dx12");
+        reverted.as_object_mut().unwrap().remove(BACKEND_TRIAL);
+        assert_eq!(backend_settings(&path), reverted, "handled failure restores the last working preference");
+
+        for newer in [
+            serde_json::json!({"backend": "gl"}),
+            serde_json::json!({"backend": "vulkan", "backend_trial": {"previous": "dx12", "requested": "vulkan", "started": false}}),
+            serde_json::json!({"backend": "vulkan", "backend_trial": {"previous": "auto", "requested": "vulkan", "started": true}}),
+            serde_json::json!({"backend": "gl", "backend_trial": {"previous": "dx12", "requested": "vulkan", "started": true}}),
+        ] {
+            let bytes = serde_json::to_vec_pretty(&newer).unwrap();
+            std::fs::write(&path, &bytes).unwrap();
+            confirm_backend_start(&path, &attempt).unwrap();
+            rollback_backend_start(&path, &attempt).unwrap();
+            assert_eq!(std::fs::read(&path).unwrap(), bytes, "stale launch state cannot consume another preference");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn malformed_backend_guards_use_the_previous_api_or_automatic_without_touching_other_settings() {
+        let dir = scratch("backend-malformed");
+        let path = dir.join("graphics.json");
+        for (trial, expected_backend) in [
+            (serde_json::json!(null), "auto"),
+            (serde_json::json!(42), "auto"),
+            (serde_json::json!({}), "auto"),
+            (serde_json::json!({"requested": "vulkan", "previous": "dx12"}), "dx12"),
+            (serde_json::json!({"requested": "vulkan", "previous": "dx12", "started": "yes"}), "dx12"),
+            (serde_json::json!({"requested": "vulkan", "previous": "x".repeat(257), "started": false}), "auto"),
+        ] {
+            let mut saved = pending_backend("auto");
+            saved["backend_trial"] = trial;
+            std::fs::write(&path, saved.to_string()).unwrap();
+            let launch = prepare_backend_start(&path, true).unwrap();
+            assert_eq!(launch.backend.as_deref(), Some(expected_backend));
+            assert!(launch.attempt.is_none());
+            saved["backend"] = serde_json::json!(expected_backend);
+            saved.as_object_mut().unwrap().remove(BACKEND_TRIAL);
+            assert_eq!(backend_settings(&path), saved);
+        }
+
+        let mut saved = pending_backend("auto");
+        saved["backend"] = serde_json::json!("gl");
+        std::fs::write(&path, saved.to_string()).unwrap();
+        let launch = prepare_backend_start(&path, true).unwrap();
+        assert_eq!(launch.backend.as_deref(), Some("gl"), "a stale marker cannot replace a newer API");
+        assert!(launch.attempt.is_none() && launch.note.is_none());
+        saved.as_object_mut().unwrap().remove(BACKEND_TRIAL);
+        assert_eq!(backend_settings(&path), saved);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_backend_attempt_is_never_returned_when_its_marker_cannot_be_saved() {
+        for started in [false, true] {
+            let mut saved = pending_backend("dx12");
+            saved["backend_trial"]["started"] = serde_json::json!(started);
+            let graphics = saved.as_object().unwrap().clone();
+            let error = prepare_backend_launch(graphics, true, |_| Err("fixture: write refused".into())).unwrap_err();
+            assert_eq!(error, "fixture: write refused", "no selected backend escapes a failed transition");
+        }
+
+        let dir = scratch("backend-unreadable");
+        let path = dir.join("graphics.json");
+        for damaged in ["{", "[]", "null"] {
+            std::fs::write(&path, damaged).unwrap();
+            assert!(prepare_backend_start(&path, true).is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), damaged, "unreadable settings are never overwritten");
+        }
+        assert!(prepare_backend_start(&dir, true).is_err(), "a filesystem read failure is reported");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn intel_macs_start_without_indirect_call_validation() {
         use eframe::wgpu::InstanceFlags as F;
@@ -564,6 +1004,23 @@ mod tests {
         // A damaged marker counts as none.
         std::fs::write(d.join(MARKER), "zz").unwrap();
         assert_eq!(begin(&d), 0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Closing the window from the starting page twice is not two failed starts (#1210); a close
+    /// after a lost device still counts toward safe mode.
+    #[test]
+    fn closing_while_starting_is_not_a_failed_start_unless_the_app_closed_itself() {
+        let d = scratch("closed-while-starting");
+        for _ in 0..FAILED_STARTS_FOR_SAFE_MODE + 1 {
+            assert_eq!(begin(&d), 0, "a user's close never counts");
+            closed_while_starting(&d, true);
+        }
+        assert_eq!(begin(&d), 0);
+        closed_while_starting(&d, false);
+        assert_eq!(begin(&d), 1, "the device was lost: that start failed");
+        closed_while_starting(&d, false);
+        assert_eq!(begin(&d), FAILED_STARTS_FOR_SAFE_MODE);
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -698,7 +1155,7 @@ mod tests {
         if cfg!(target_os = "windows") && std::env::var_os(WGPU_BACKEND_ENV).is_none() {
             assert_eq!(backends, eframe::wgpu::Backends::DX12);
         }
-        let mut desc = solidcraft_gpu::instance_descriptor_from_env();
+        let mut desc = solidcraft_viewport_gpu::instance_descriptor_from_env();
         desc.backends = backends;
         let instance = eframe::wgpu::Instance::new(desc);
         let adapters = pollster::block_on(instance.enumerate_adapters(backends));

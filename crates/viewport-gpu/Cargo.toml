@@ -1,0 +1,33 @@
+[package]
+name = "solidcraft-viewport-gpu"
+description = "The viewport renderer's GPU work the Craft apps share, on wgpu: the viewport's pipelines, offscreen pictures, adapter selection and display plans evaluated in a compute shader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+log = { workspace = true }
+serde = { workspace = true }
+solidcore-record = { workspace = true }
+solidcore-tess = { workspace = true }
+solidcraft-color = { workspace = true }
+solidcraft-viewport = { workspace = true }
+thiserror = { workspace = true }
+wgpu = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = { workspace = true }
+# Native backends, so tests and command-line hosts can open a device without a window.
+wgpu = { workspace = true, features = ["metal", "vulkan", "dx12"] }
+# wgpu's GL backend statically imports opengl32.dll on Windows, which the Windows Server Core
+# images lack, so the headless CLI there cannot even load with it linked in (STATUS_DLL_NOT_FOUND,
+# 0xC0000135). Windows draws with D3D12 (WARP) or Vulkan instead; keep GL for the other platforms.
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))'.dependencies]
+wgpu = { workspace = true, features = ["gles"] }
+
+[dev-dependencies]
+# The HLSL the D3D12 backend compiles (tests check it suits FXC).
+naga = { workspace = true, features = ["wgsl-in", "hlsl-out"] }
