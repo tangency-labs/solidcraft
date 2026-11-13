@@ -1212,7 +1212,8 @@ fn leftmost_points_a_rounding_apart_keep_one_order() {
 /// only 100 of its widths: the faces beyond were rebuilt on a plane that did not hold them
 /// (WR-536), and the call failed (1001, 1006, 1007, or an edge off the plane). Each case's union,
 /// intersection and both differences now build, closed, and their areas agree: the union is the
-/// two differences and the intersection, which share no area.
+/// two differences and the intersection, which share no area, and it is also the operands' areas
+/// (from the inputs) less the intersection's: area(A) + area(B) - area(A and B).
 #[test]
 fn far_faces_of_recorded_sheet_cuts_build_and_their_areas_agree() {
     use std::io::BufRead;
@@ -1250,6 +1251,17 @@ fn far_faces_of_recorded_sheet_cuts_build_and_their_areas_agree() {
         assert!(
             (union - parts).abs() <= 1e-9 * union,
             "case {n} ({}): union {union}, parts {parts}",
+            c.test
+        );
+        // the operands' own areas, from the inputs: a result that drops faces (far ones, say)
+        // loses their area from the union and from the differences alike, which the check above
+        // cannot see
+        let area_a = c.a.iter().map(area).sum::<f64>();
+        let area_b = c.b.iter().map(area).sum::<f64>();
+        let whole = area_a + area_b - common;
+        assert!(
+            (union - whole).abs() <= 1e-9 * (area_a + area_b),
+            "case {n} ({}): union {union}, area(A) + area(B) - area(A and B) {whole}",
             c.test
         );
         n += 1;
