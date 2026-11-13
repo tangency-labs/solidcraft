@@ -704,4 +704,113 @@ mod tests {
             NetworkRefusal::Rational
         );
     }
+
+    /// The cubic through `points` at their chord-length parameters, with averaged knots: how an
+    /// edit-point curve is fitted, so two curves through points at the same stations but at
+    /// different heights are parameterised differently.
+    fn ep_curve(points: &[[f64; 3]]) -> BSplineCurve {
+        let pts: Vec<Vec3> = points.iter().map(|q| Vec3::new(q[0], q[1], q[2])).collect();
+        let mut params = vec![0.0];
+        for w in pts.windows(2) {
+            if let [a, b] = w {
+                params.push(params.last().copied().unwrap() + (*b - *a).length());
+            }
+        }
+        let total = *params.last().unwrap();
+        let params: Vec<f64> = params.iter().map(|t| t / total).collect();
+        let knots = interp_knot_vector(&params, 3).unwrap();
+        let c = through(&pts, &params, &knots, 3).unwrap();
+        BSplineCurve::from_gw_nurb(3, &c)
+    }
+
+    /// A deck: a roofline and a shoulder through the same five stations along x at different
+    /// heights (their chord-length parameters differ at each station), and three sections
+    /// across, each ending on the two rails' own points at its station.
+    fn deck() -> (Vec<BSplineCurve>, Vec<BSplineCurve>) {
+        let xs = [0.0, 10.0, 25.0, 40.0, 50.0];
+        let (roof, shoulder) = ([0.0, 6.0, 9.0, 7.0, 5.0], [0.0, 2.0, 1.0, 4.0, 5.0]);
+        let rail = |y: f64, z: &[f64; 5]| {
+            let pts: Vec<[f64; 3]> = xs.iter().zip(z).map(|(&x, &z)| [x, y, z]).collect();
+            ep_curve(&pts)
+        };
+        let us = vec![rail(0.0, &roof), rail(10.0, &shoulder)];
+        let section = |i: usize| {
+            let (x, za, zb) = (xs[i], roof[i], shoulder[i]);
+            spline(
+                &[
+                    [x, 0.0, za],
+                    [x, 3.0, za + 2.0],
+                    [x, 7.0, zb + 2.0],
+                    [x, 10.0, zb],
+                ],
+                3,
+            )
+        };
+        (us, vec![section(0), section(2), section(4)])
+    }
+
+    /// Every point of `c` at `n + 1` even steps lies within `bound` of the surface (found by the
+    /// kernel's projection, independent of the network's parameters).
+    fn on_surface(k: &Kernel, s: &BSplineSurface, c: &BSplineCurve, bound: f64, n: usize) {
+        let surf = crate::surface::surface::Surface::from(s.clone());
+        let nurb = c.nurb.as_ref().unwrap();
+        let (a, b) = nurb.param_bounds();
+        for i in 0..=n {
+            let t = a + (b - a) * i as f64 / n as f64;
+            let q = nurb.eval(t, Side::Left).unwrap();
+            let d = crate::query::api_queries::surface_closest_point(k, &surf, q)
+                .unwrap()
+                .closest
+                .distance;
+            assert!(
+                d <= bound + 1e-9,
+                "{q:?} is {d} off the surface (bound {bound})"
+            );
+        }
+    }
+
+    /// The deck: main refuses it (a gap at the mean parameters, though every crossing is
+    /// exact); its curves crossing once each and in order, it has a surface, and each of its five
+    /// curves lies on it within the bound.
+    #[test]
+    fn a_deck_whose_crossings_are_not_at_common_parameters_has_a_surface() {
+        let k = Kernel::default();
+        let (us, vs) = deck();
+        let tol = 1e-3;
+        let g = gordon(&k, &us, &vs, tol)
+            .unwrap()
+            .unwrap_or_else(|r| panic!("refused: {r:?}"));
+        assert!(g.bound <= tol, "{}", g.bound);
+        for c in us.iter().chain(&vs) {
+            on_surface(&k, &g.surface, c, g.bound, 20);
+        }
+    }
+
+    /// A section crossing the roofline twice is refused, as before.
+    #[test]
+    fn a_curve_crossing_another_twice_is_still_refused() {
+        let k = Kernel::default();
+        let us = [
+            line([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]),
+            line([0.0, 10.0, 0.0], [10.0, 10.0, 0.0]),
+        ];
+        // the middle section dips below y = 0 and comes back across it
+        let vs = [
+            line([0.0, 0.0, 0.0], [0.0, 10.0, 0.0]),
+            spline(
+                &[
+                    [5.0, 0.0, 0.0],
+                    [5.0, -4.0, 0.0],
+                    [5.0, 4.0, 0.0],
+                    [5.0, 10.0, 0.0],
+                ],
+                3,
+            ),
+            line([10.0, 0.0, 0.0], [10.0, 10.0, 0.0]),
+        ];
+        assert!(matches!(
+            gordon(&k, &us, &vs, 1e-6).unwrap().unwrap_err(),
+            NetworkRefusal::Crossings { u: 0, v: 1, count } if count >= 2
+        ));
+    }
 }
