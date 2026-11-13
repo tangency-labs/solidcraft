@@ -1,5 +1,7 @@
 //! Planar prisms: booleans of planar regions, the extrusion of planar material, whether a body
 //! is a uniform prism (its section) or the same prism as another, and edges read in a plane.
+//! Also the figures of a drawing sheet: a figure placed at its size, a regular outline, and a
+//! label's box inside an outline.
 //!
 //! Each is a recipe of kernel calls (`solidcore::prism`): the kernel checks the profiles, splits
 //! their loops, makes their curves, reads sheets back as regions, extrudes a region and proves a
@@ -28,6 +30,7 @@ pub use solidcore::prism::profile::ProfileRefusal;
 
 use crate::body::{finish, Body, Expect};
 use crate::boolean::{union_all, BooleanOp};
+use crate::error::status;
 use crate::order::{self, Order};
 use crate::session::{read_body, run, run_on, Answer};
 use crate::{Error, Result};
@@ -392,4 +395,101 @@ pub fn region_area(region: &Region2) -> Result<kp::Area> {
 #[must_use]
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
+}
+
+/// A figure placed on its sheet ([`place_figure`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlacedFigure {
+    /// The figure's segments, in its order.
+    pub segments: Vec<Seg2>,
+    /// The points asked for (a text's anchor, say), in their order.
+    pub points: Vec<Vec2>,
+    /// The unit direction the figure's `+x` now points along (a text's baseline).
+    pub direction: Vec2,
+}
+
+/// `figure` and `points` scaled by `scale`, turned counter-clockwise by `angle` (radians) about
+/// their own origin and moved to `origin` ([`kp::place_figure_2d`]): a drawing symbol, a table of
+/// segments and text anchors in units of its size, placed on its sheet. An arc's start turns by
+/// the angle and its sweep stays; a mirror is refused.
+///
+/// # Errors
+/// The kernel's refusal ([`Error::Status`]): a scale not above 0 or not finite, a value not
+/// finite, or more than [`kp::MAX_SEGMENTS`] segments or points.
+pub fn place_figure(
+    figure: &[Seg2],
+    points: &[Vec2],
+    scale: f64,
+    angle: f64,
+    origin: Vec2,
+) -> Result<PlacedFigure> {
+    let figure: Vec<kp::Seg2> = figure.iter().map(convert::seg2).collect();
+    let points: Vec<_> = points.iter().copied().map(convert::vec2).collect();
+    let at = kp::FigurePlacement {
+        scale,
+        angle,
+        origin: convert::vec2(origin),
+    };
+    let placed = kp::place_figure_2d(&figure, &points, at).map_err(status)?;
+    Ok(PlacedFigure {
+        segments: placed.segments.iter().map(convert::record_seg2).collect(),
+        points: placed
+            .points
+            .into_iter()
+            .map(convert::record_vec2)
+            .collect(),
+        direction: convert::record_vec2(placed.direction),
+    })
+}
+
+/// The corners of the regular outline with `sides` sides, each `side` long, about `centre`,
+/// counter-clockwise from the angle `first_angle` ([`kp::regular_polygon_2d`]): a revision tag's
+/// triangle is 3 sides from `π/2`.
+///
+/// # Errors
+/// The kernel's refusal ([`Error::Status`]): fewer than 3 sides or more than
+/// [`kp::MAX_SEGMENTS`], a side not above 0, or a value not finite.
+pub fn regular_outline(
+    centre: Vec2,
+    sides: usize,
+    side: f64,
+    first_angle: f64,
+) -> Result<Vec<Vec2>> {
+    let corners =
+        kp::regular_polygon_2d(convert::vec2(centre), sides, side, first_angle).map_err(status)?;
+    Ok(corners.into_iter().map(convert::record_vec2).collect())
+}
+
+/// A label's box inside an outline ([`label_in_outline`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LabelFit {
+    /// The box's height (its width is the height times the aspect asked for).
+    pub height: f64,
+    /// Its lower-left corner.
+    pub min: Vec2,
+}
+
+/// The tallest label box `width_per_height` times as wide as it is tall, centred across on
+/// `x = centre_x`, `margin` clear of each edge of the convex, counter-clockwise `outline`
+/// (square to the edge) and no taller than `max_height`, at its lowest
+/// ([`kp::box_fit_in_convex_polygon`]). `None` when no box fits.
+///
+/// # Errors
+/// The kernel's refusal ([`Error::Status`]): an outline not convex and counter-clockwise, of
+/// fewer than 3 corners or an edge of no length, or a value negative, not finite or beyond 1e9.
+pub fn label_in_outline(
+    outline: &[Vec2],
+    centre_x: f64,
+    width_per_height: f64,
+    margin: f64,
+    max_height: f64,
+) -> Result<Option<LabelFit>> {
+    let outline: Vec<_> = outline.iter().copied().map(convert::vec2).collect();
+    let fit =
+        kp::box_fit_in_convex_polygon(&outline, centre_x, width_per_height, margin, max_height)
+            .map_err(status)?;
+    Ok(fit.map(|f| LabelFit {
+        height: f.height,
+        min: convert::record_vec2(f.min),
+    }))
 }
