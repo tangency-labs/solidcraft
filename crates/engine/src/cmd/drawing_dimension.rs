@@ -123,8 +123,9 @@ pub static COMMANDS: &[CommandSpec] = &[
              now, in paper mm from the sheet's lower-left corner, its lines before an arrowhead stops one: {extension_lines, \
              dimension_lines: [[[x, y], ..]], arrows: [{tip, points: the unit direction}], text_boxes: [[4 corners]]: start and end \
              on the line's side, then end and start on the far side} (none when it isn't drawn; one the sheet leaves out for its \
-             limits, or on a view whose lines fail, still has one, and drawing.scene's drawn says), layout_why?: why it has no layout, or no box for its text, when \
-             status doesn't say}. Read-only; no model is evaluated.",
+             limits, or on a view whose lines fail, still has one, and drawing.scene's drawn says; none while its text waits for a \
+             font, which is never waited for here), layout_why?: why it has no layout, or no box for its text, when status \
+             doesn't say}. Read-only; no model is evaluated.",
         ),
 ];
 
@@ -608,12 +609,17 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+/// Why a dimension has no layout while the search for a font to fall back to runs: the search is
+/// never waited for here, as add and its dry run run on the window thread.
+const TEXT_WAITS: &str = "its text waits for a font to fall back to; drawing.scene draws it when one is found";
+
 /// Where `dimension` of `d`, read as `r`, sits on its view's sheet now, as the sheet draws it: laid out
 /// through its view's frame ([`paper_group`]), then moved to the view's centre. Or none, with why when
 /// its status doesn't say it, in the sheet's words: its view draws its parts apart, isn't drawn (a
 /// style it can't draw yet, or nothing to measure), has no place for what it measures, or its group
-/// alone fails the paper scene's checks. A text that can't be set has no box, and says why. It reads
-/// the model as it is evaluated and draws no view's lines, so a view whose lines fail still answers.
+/// alone fails the paper scene's checks; or its text still waits for a font ([`TEXT_WAITS`]). A text
+/// that can't be set has no box, and says why. It reads the model as it is evaluated and draws no
+/// view's lines, so a view whose lines fail still answers.
 fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved) -> (Option<DimensionLayoutResult>, Option<String>) {
     let id = dimension.view;
     if let Some(apart) = crate::drawing_view::draws_apart(d, id) {
@@ -639,9 +645,14 @@ fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved
     else {
         return not_drawn();
     };
-    let Some(paper) = paper_group(dimension, r, &frame, view.line_group.value, &PaperFonts::new(&d.font, &d.language, true)) else {
+    // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
+    let Some(paper) = paper_group(dimension, r, &frame, view.line_group.value, &PaperFonts::new(&d.font, &d.language, false)) else {
         return (None, (!r.points.is_empty()).then(|| NO_PLACE.to_string()));
     };
+    // No layout at all until the font is found: a short span's lines depend on its text's width.
+    if paper.pending {
+        return (None, Some(TEXT_WAITS.to_string()));
+    }
     // As the sheet takes it: alone on its sheet, its group must pass the paper scene's checks.
     let mut alone = Scene::new(size, vec![moved(&paper.group, centre)]);
     alone.add_fonts(paper.fonts);

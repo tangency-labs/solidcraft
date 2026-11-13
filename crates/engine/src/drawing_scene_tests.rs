@@ -109,13 +109,17 @@ fn built(s: &Session, sheet: u64) -> SheetScene {
 /// shows, then a short piece of work, until there is none and no text waits for its font.
 fn settled(s: &mut Session, sheet: u64) -> SheetView {
     let started = std::time::Instant::now();
-    let mut answer = extract(s, sheet).unwrap();
-    while step(s) || answer.waiting_for_fonts {
+    extract(s, sheet).unwrap();
+    loop {
+        let more = step(s);
+        // Read after the step: its own read of a dimension can leave the dimension's text waiting.
+        let answer = extract(s, sheet).unwrap();
+        if !more && !answer.waiting_for_fonts {
+            return answer;
+        }
         assert!(started.elapsed().as_secs() < 120, "the sheet never settled");
         std::thread::yield_now();
-        answer = extract(s, sheet).unwrap();
     }
-    extract(s, sheet).unwrap()
 }
 
 /// The scene as its JSON text: what byte for byte compares.
@@ -612,8 +616,11 @@ fn a_title_blocks_text_waits_for_its_font_off_the_windows_thread() {
 fn a_dimensions_text_waits_for_its_font_off_the_windows_thread() {
     let (mut s, sheet, [front, _]) = front_and_top();
     settled(&mut s, sheet);
-    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}, "override_text": "\u{30f7} 100"});
+    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}});
     let added = run(&mut s, "drawing.dimension.add", p)["dimension"].as_str().and_then(ids::decode).unwrap();
+    // Its text through edit, which lays nothing out: add asks for a font itself (it never waits), and
+    // the read this test watches must be the first to ask.
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(added), "set": {"override_text": "\u{30f7} 100"}}));
     extract(&mut s, sheet).unwrap();
     step(&mut s);
     assert!(s.drawing_scenes.dimensions[&added].drawn.pending, "the window's sheet asked, not waited");
@@ -636,8 +643,11 @@ fn a_dimensions_text_waits_for_its_font_off_the_windows_thread() {
 fn a_view_drawn_again_reads_its_dimensions_text_without_waiting() {
     let (mut s, sheet, [front, _]) = front_and_top();
     settled(&mut s, sheet);
-    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}, "override_text": "\u{30f8} 100"});
+    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}});
     let added = run(&mut s, "drawing.dimension.add", p)["dimension"].as_str().and_then(ids::decode).unwrap();
+    // Its text through edit, which lays nothing out: add asks for a font itself (it never waits), and
+    // the read this test watches must be the first to ask.
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(added), "set": {"override_text": "\u{30f8} 100"}}));
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}}));
     extract(&mut s, sheet).unwrap();
     // Both views wait (the top one is projected from the front one): step until the front view's
@@ -650,6 +660,23 @@ fn a_view_drawn_again_reads_its_dimensions_text_without_waiting() {
     assert!(s.drawing_scenes.dimensions[&added].drawn.pending, "the view's job asked, not waited");
     assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
     assert!(!s.drawing_scenes.dimensions[&added].drawn.pending);
+}
+
+/// Adding a dimension whose number needs a font to fall back to never waits for the search, as add
+/// and its dry run run on the window thread: the reply has no layout and says its text waits. Once the
+/// sheet has drawn it, inspect has the layout. The character is this test's alone.
+#[test]
+fn adding_a_dimension_never_waits_for_its_texts_font() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    settled(&mut s, sheet);
+    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}, "override_text": "\u{30f9} 100"});
+    let added = run(&mut s, "drawing.dimension.add", p);
+    let waits = "its text waits for a font to fall back to; drawing.scene draws it when one is found";
+    assert!(added.get("layout").is_none() && added["layout_why"] == json!(waits), "{added}");
+    settled(&mut s, sheet);
+    // Found, or known to be in no font: either way the answer is in, and the layout with it.
+    let inspected = run(&mut s, "drawing.dimension.inspect", json!({"dimension": added["dimension"]}));
+    assert!(inspected.get("layout").is_some() && inspected["layout_why"] != json!(waits), "{inspected}");
 }
 
 /// The model's state alone changing, the design and the sheet as they were, sets the title

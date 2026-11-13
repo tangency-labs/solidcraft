@@ -2326,15 +2326,17 @@ fn add_and_repair_answer_with_the_layout_inspect_gives() {
 }
 
 /// A layout follows the drawing's units in its text alone: the top front edge's length in an inch
-/// drawing reads "3.15" (80 / 25.4 = 3.1496), with the lines and arrows it has in millimetres, and a
-/// box over the same middle (x 200) as wide as "3.15" measures, narrower than "80.00".
+/// drawing reads "3.1496" (80 / 25.4; an inch length shows at least three decimals, four when the
+/// fourth counts, whatever the record's decimals: `display_units::length_precision`), with the lines
+/// and arrows it has in millimetres, and each box as wide as its own text measures over the same
+/// middle (x 200).
 #[test]
 fn a_layout_follows_the_drawings_units() {
     let (mut s, view) = front_view();
     let mm = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
     run(&mut s, "drawing.set", json!({"units": "in"}));
     let inches = run(&mut s, INSPECT, json!({"dimension": mm["dimension"]}));
-    assert_eq!(inches["text"], json!("3.15"), "{inches}");
+    assert_eq!(inches["text"], json!("3.1496"), "{inches}");
     for key in ["extension_lines", "dimension_lines"] {
         assert_eq!(layout_lines(&inches, key), layout_lines(&mm, key), "{key}");
     }
@@ -2344,9 +2346,10 @@ fn a_layout_follows_the_drawings_units() {
         let corners = &layout_boxes(reply)[0];
         (corners[1].x - corners[0].x, (corners[0].x + corners[1].x) * 0.5)
     };
-    let ((narrow, middle), (wide, _)) = (across(&inches), across(&mm));
-    assert!((narrow - measured("3.15")).abs() < 1e-9 && (wide - measured("80.00")).abs() < 1e-9 && narrow < wide, "{inches} {mm}");
-    assert!((middle - 200.0).abs() < 1e-9, "{inches}");
+    for (reply, text) in [(&inches, "3.1496"), (&mm, "80.00")] {
+        let (width, middle) = across(reply);
+        assert!((width - measured(text)).abs() < 1e-9 && (middle - 200.0).abs() < 1e-9, "{text}: {reply}");
+    }
 }
 
 /// In a deferred drawing the layout reads the model as it is now, as `value` and `text` do, while the
