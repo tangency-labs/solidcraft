@@ -419,6 +419,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     } else if matches!(d.kind, Kind::PatternRect { .. }) {
         // Each direction's pick shows in its own group, with its quantity and spacing (#9634).
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
+    } else if matches!(d.kind, Kind::Move { mode: crate::dialogs_move::FREE, .. }) {
+        // Local or Fixed follows the inputs.
+        input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
+        crate::dialogs_move::frame_row(app, d, ui);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }

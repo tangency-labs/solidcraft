@@ -1072,7 +1072,11 @@ impl Dialog {
                     rail2,
                 ]
             }),
-            "solid.move" => Dialog::new(crate::dialogs_move::kind(0, &s.doc), crate::dialogs_move::inputs(0)),
+            "solid.move" => {
+                let mut d = Dialog::new(crate::dialogs_move::kind(0, &s.doc), crate::dialogs_move::inputs(0));
+                d.extra.insert("fixed".into(), json!(app.preferences.move_starts_fixed));
+                d
+            }
             "solid.hole" => Dialog::new(hole_defaults(s), single_hole_inputs()),
             "solid.box" => Dialog::new(
                 Kind::Primitive {

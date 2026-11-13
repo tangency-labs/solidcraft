@@ -89,6 +89,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 let response = setting::drive_joints_ghost(app, ui);
                 crate::scenario::publish_target("prefs:drive_joints_ghost", response.rect);
+                let response = setting::move_starts_fixed(app, ui);
+                crate::scenario::publish_target("prefs:move_starts_fixed", response.rect);
                 ui.horizontal_wrapped(|ui| {
                     let tip = app.tr("prefs.move_drag_highlights_tip");
                     let response = setting::move_drag_highlights(app, ui).backing_on_hover_text(tip);

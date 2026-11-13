@@ -374,6 +374,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     // one sets it. The triad is the manipulator here, so the box comes without the drag arrow
     // every other dialog's value gets (`dir` is None below).
     if matches!(d.kind, Kind::Move { .. }) {
+        crate::dialogs_move::sync(app, &mut d);
         let mut dragging = false;
         let triad_id = egui::Id::unique("sc_move_triad");
         if let Some(t) = crate::dialogs_move::triad(app, &d) {

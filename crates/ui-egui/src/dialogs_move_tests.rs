@@ -79,6 +79,7 @@ fn editing_a_move_in_a_turned_component_keeps_world_distances() {
     if let Kind::Move { y, .. } = &mut d.kind {
         *y = "-12 mm".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -605,6 +606,7 @@ fn changing_the_move_type_keeps_the_move_made_so_far() {
     if let Kind::Move { angle, .. } = &mut d.kind {
         *angle = "90 deg".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -637,6 +639,7 @@ fn changing_move_types_keeps_an_off_origin_rotation() {
     if let Kind::Move { z, .. } = &mut d.kind {
         *z = "7 mm".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -749,6 +752,7 @@ fn editing_a_free_move_shows_the_values_it_was_made_with() {
         *ry = "0 deg".into();
         *rz = "0 deg".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -1372,9 +1376,8 @@ fn editing_a_placed_body_move_preserves_its_world_transform() {
     assert!(before.min.dist(after.min) < 1e-6 && before.max.dist(after.max) < 1e-6, "{before:?} -> {after:?}");
 }
 
-/// The rings stay on the world axes, so a turn dragged on one goes about the axis it shows, on
-/// top of the turns already made. It went about that axis as the earlier turn had left it, when
-/// the angles always applied about X, then Y, then Z. The body's centre stays where it is.
+/// Fixed, the rings stay on the world axes, so a turn dragged on one goes about the axis it shows,
+/// on top of the turns already made, whichever came first. The body's centre stays where it is.
 #[test]
 fn a_ring_turns_about_the_axis_it_shows_after_another_turn() {
     let mut h = crate::scenario::Harness::new();
@@ -1385,6 +1388,7 @@ fn a_ring_turns_about_the_axis_it_shows_after_another_turn() {
     h.app.cam.distance = 180.0;
     h.app.run("select.set", json!({"items": [Sel::Body { name: "Body1".into() }]})).unwrap();
     h.app.start("solid.move");
+    h.app.dialog.as_mut().unwrap().extra.insert("fixed".into(), json!(true));
     if let Some(Kind::Move { ry, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
         *ry = "40 deg".into();
     }
@@ -1404,9 +1408,11 @@ fn a_ring_turns_about_the_axis_it_shows_after_another_turn() {
     assert!((apply_point(&m, centre) - centre).len() < 1e-4, "{p}");
 }
 
-/// A Move dialog on the 20 × 30 × 10 box, seen from a corner so every ring has width on screen.
+/// A Move dialog on the 20 × 30 × 10 box, seen from a corner so every ring has width on screen,
+/// on the body's own axes (Local) unless a test says otherwise.
 fn turning_box() -> (crate::scenario::Harness, Vec3) {
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.move_starts_fixed = false;
     h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
     let centre = Vec3::new(10.0, 15.0, 5.0);
     h.app.cam = h.app.cam.looking_from(Vec3::new(1.0, 0.8, 0.6));
@@ -1444,49 +1450,100 @@ fn shown_angles(h: &crate::scenario::Harness) -> [String; 3] {
 
 /// The whole move the dialog makes, in the world.
 fn whole_move(h: &crate::scenario::Harness) -> Mat {
-    let p = params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let p = params(&h.app, d).unwrap();
     transform(&h.app, &p).unwrap()
+}
+
+/// What Move shows is what OK makes: the commands the dialog previews, drawn by the fast move
+/// preview and run as OK runs them, put the picked bodies in the same place, and the dialog's own
+/// reading of its move (`transform`, which places the triad) takes them there too. A dialog that
+/// sends a value one of them reads differently draws the body somewhere it doesn't land. An edit
+/// is checked as the app opens it, rolled back to before the move.
+fn assert_shown_where_ok_puts_it(app: &mut SolveApp, d: &Dialog) {
+    use solidcraft_engine::geom::Aabb3;
+    let mut ok = app.session.scratch();
+    let back = app.session.doc.marker;
+    if let Some((id, _)) = d.editing {
+        let at = app.session.doc.feature_index(id).unwrap();
+        crate::dialogs::roll_marker(app, Some(at)).unwrap();
+    }
+    let cmds = crate::dialogs::preview_commands(app, d).unwrap();
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+    let drawn = crate::move_preview::MovePreview::default().compute(app, &cmds, colors).expect("the fast preview takes it").expect("drawn").bounds;
+    let m = transform(app, &params(app, d).unwrap()).unwrap();
+    let names = bodies_of(app, d);
+    let before = app.session.world_state().unwrap();
+    let mut read = Aabb3::EMPTY;
+    for name in &names {
+        for p in &before.body(name).unwrap().mesh().positions {
+            read.add(apply_point(&m, *p));
+        }
+    }
+    if d.editing.is_some() {
+        crate::dialogs::roll_marker(app, back).unwrap();
+    }
+    for (command, params) in &cmds {
+        ok.execute(command, params).unwrap();
+    }
+    let after = ok.world_state().unwrap();
+    let mut made = Aabb3::EMPTY;
+    for name in &names {
+        made = made.union(&after.body(name).unwrap().mesh().bounds());
+    }
+    let near = |a: &Aabb3, b: &Aabb3| a.min.dist(b.min) < 1e-4 && a.max.dist(b.max) < 1e-4;
+    assert!(near(&drawn, &made), "{cmds:?}: drawn at {drawn:?}, OK puts it at {made:?}");
+    assert!(near(&read, &made), "{cmds:?}: the dialog reads its move to {read:?}, OK puts it at {made:?}");
 }
 
 /// Assert that `m` turns as `want` does (its rotation part only).
 fn assert_turn(m: &Mat, want: &[[f64; 3]; 3]) {
-    let rows = [0, 1, 2].map(|r| [m[0][r], m[1][r], m[2][r]]);
-    for (got, want) in rows.iter().flatten().zip(want.iter().flatten()) {
-        assert!((got - want).abs() < 1e-5, "{rows:?} != {want:?}");
+    for (got, want) in rows_of(m).iter().flatten().zip(want.iter().flatten()) {
+        assert!((got - want).abs() < 1e-5, "{:?} != {want:?}", rows_of(m));
     }
 }
 
-/// After a turn, the next ring's box reads what was dragged and the first angle stays. It read
-/// "Y Angle 0 deg" while one set of angles in a fixed order described the combined turn: after a
+/// After a turn, the next ring's box reads what was dragged and the first angle stays, in both
+/// frames. It read "Y Angle 0 deg" when one set of angles described the combined turn: after a
 /// quarter turn about Z, a turn about Y is all X in that form.
 #[test]
 fn the_second_angle_reads_what_was_dragged() {
     let rot = |a: Vec3, th: f64| gizmo::rotation(a, th.to_radians());
-    let (mut h, centre) = turning_box();
-    set_angles(&mut h, ["0 deg", "0 deg", "90 deg"]);
-    turn_ring(&mut h, 1, 35.0);
-    assert_eq!(shown_angles(&h), ["0 deg", "35 deg", "90 deg"]);
-    let mut d = h.app.dialog.clone().unwrap();
-    assert_eq!(d.primary().map(|p| (p.0, p.2.clone())), Some(("Y Angle", "35 deg".to_string())));
-    let m = whole_move(&h);
-    assert_turn(&m, &gizmo::mul(&rot(Vec3::Y, 35.0), &rot(Vec3::Z, 90.0)));
-    assert!((apply_point(&m, centre) - centre).len() < 1e-4, "the body turns on the spot");
+    for fixed in [false, true] {
+        let (mut h, centre) = turning_box();
+        h.app.dialog.as_mut().unwrap().extra.insert("fixed".into(), json!(fixed));
+        set_angles(&mut h, ["0 deg", "0 deg", "90 deg"]);
+        turn_ring(&mut h, 1, 35.0);
+        assert_eq!(shown_angles(&h), ["0 deg", "35 deg", "90 deg"], "fixed {fixed}");
+        let mut d = h.app.dialog.clone().unwrap();
+        assert_eq!(d.primary().map(|p| (p.0, p.2.clone())), Some(("Y Angle", "35 deg".to_string())), "fixed {fixed}");
+        let want = if fixed { gizmo::mul(&rot(Vec3::Y, 35.0), &rot(Vec3::Z, 90.0)) } else { gizmo::mul(&rot(Vec3::Z, 90.0), &rot(Vec3::Y, 35.0)) };
+        let m = whole_move(&h);
+        assert_turn(&m, &want);
+        assert!((apply_point(&m, centre) - centre).len() < 1e-4, "the body turns on the spot");
+    }
 }
 
 /// Going back to an angle with a later turn on top keeps every turn made and counts that angle
-/// from zero, because no sum of angles makes the turn.
+/// from zero, because no sum of angles makes the turn. Each ring turns about the axis it shows:
+/// the world's (Fixed) or the one the turns so far leave it on (Local).
 #[test]
 fn going_back_to_an_earlier_ring_starts_its_angle_over_and_keeps_the_turns() {
     let rot = |a: Vec3, th: f64| gizmo::rotation(a, th.to_radians());
-    let (mut h, centre) = turning_box();
-    set_angles(&mut h, ["30 deg", "0 deg", "0 deg"]);
-    turn_ring(&mut h, 1, 20.0);
-    assert_eq!(shown_angles(&h), ["30 deg", "20 deg", "0 deg"]);
-    turn_ring(&mut h, 0, 10.0);
-    assert_eq!(shown_angles(&h), ["10 deg", "0 deg", "0 deg"]);
-    let m = whole_move(&h);
-    assert_turn(&m, &gizmo::mul(&gizmo::mul(&rot(Vec3::X, 10.0), &rot(Vec3::Y, 20.0)), &rot(Vec3::X, 30.0)));
-    assert!((apply_point(&m, centre) - centre).len() < 1e-4);
+    for fixed in [false, true] {
+        let (mut h, centre) = turning_box();
+        h.app.dialog.as_mut().unwrap().extra.insert("fixed".into(), json!(fixed));
+        set_angles(&mut h, ["30 deg", "0 deg", "0 deg"]);
+        turn_ring(&mut h, 1, 20.0);
+        assert_eq!(shown_angles(&h), ["30 deg", "20 deg", "0 deg"], "fixed {fixed}");
+        turn_ring(&mut h, 0, 10.0);
+        assert_eq!(shown_angles(&h), ["10 deg", "0 deg", "0 deg"], "fixed {fixed}");
+        let [x30, y20, x10] = [rot(Vec3::X, 30.0), rot(Vec3::Y, 20.0), rot(Vec3::X, 10.0)];
+        let want = if fixed { gizmo::mul(&gizmo::mul(&x10, &y20), &x30) } else { gizmo::mul(&gizmo::mul(&x30, &y20), &x10) };
+        let m = whole_move(&h);
+        assert_turn(&m, &want);
+        assert!((apply_point(&m, centre) - centre).len() < 1e-4, "fixed {fixed}");
+    }
 }
 
 /// A dragged angle stays within one turn: a full turn is back at 0, not 360 (or -580).
@@ -1546,4 +1603,256 @@ fn a_ring_dragged_back_to_its_start_is_back_at_its_angle() {
     }
     ring(&mut d, 0.0, true, true);
     assert_eq!(rx_of(&d), "12.50 deg", "a click leaves the typed angle as it is");
+}
+
+/// Move works in the world, so the triad of a body in a placed component sits on the body where
+/// it is placed, not where it was modelled, and a turn leaves the body's centre there.
+#[test]
+fn the_triad_sits_on_a_body_where_its_component_places_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "translate": [50, 10, 20]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.start("solid.move");
+    let mut d = h.app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    let world = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - world).len() < 1e-6, "triad at {at:?}, body at {world:?}");
+    if let Kind::Move { rz, .. } = &mut d.kind {
+        *rz = "90 deg".into();
+    }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let turned = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    assert!((turned - world).len() < 1e-6, "turned from {world:?} to {turned:?}");
+    // Editing a later move finds the body the same way, where it stands before that move.
+    let moved = h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": ["5 mm", "0 mm", "0 mm"]})).unwrap()["feature"].as_u64().unwrap();
+    let d = crate::dialogs::for_feature(&h.app, moved, None).unwrap();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - turned - Vec3::X * 5.0).len() < 1e-6, "triad at {at:?}, body was at {turned:?}");
+}
+
+/// Rotate holds the picked axis still, and a move's type can change on the way, in a placed
+/// component too: the dialog names the world point it turns about, which a turn with no origin
+/// would take as the component's origin.
+#[test]
+fn a_placed_body_turns_about_the_picked_axis_through_a_type_change() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 10, 20]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let world = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    h.app.start("solid.move");
+    let mut d = h.app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    if let Kind::Move { rz, .. } = &mut d.kind {
+        *rz = "90 deg".into();
+    }
+    switch_type(&h.app, &mut d, ROTATE);
+    d.inputs[1].items = vec![Sel::Axis { name: "Z".into() }];
+    if let Kind::Move { angle, .. } = &mut d.kind {
+        *angle = "90 deg".into();
+    }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    // A quarter turn on the spot, then a quarter turn about the world's Z through the origin.
+    let want = gizmo::apply(&gizmo::rotation(Vec3::Z, std::f64::consts::FRAC_PI_2), world);
+    let got = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    assert!((got - want).len() < 1e-5, "{got:?} != {want:?}");
+}
+
+/// In a turned component the stored axis is the component's, like the distances: read as the
+/// world's, the reopened move drew the body elsewhere, and OK would have moved it there.
+#[test]
+fn reopening_a_move_in_a_turned_component_changes_nothing() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "30 deg", "translate": [130, 20, 20]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let id = h
+        .app
+        .run("solid.move", json!({"bodies": ["Body1"], "translate": ["10 mm", "-5 mm", "0 mm"], "axis": [1.0, 0.0, 0.0], "angle": "25 deg"}))
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let bounds = |h: &crate::scenario::Harness| h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds();
+    let before = bounds(&h);
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - before.center()).len() < 1e-4, "triad at {at:?}, body at {:?}", before.center());
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let after = bounds(&h);
+    assert!((after.min - before.min).len() < 1e-3 && (after.max - before.max).len() < 1e-3, "{before:?} -> {after:?}");
+}
+
+/// A stored turn is about the origin, but its triad sits on the body where the move leaves it,
+/// not at the origin plus the stored distance. The stored values stay until a ring is dragged,
+/// which then turns the body on the spot.
+#[test]
+fn a_reopened_turned_move_has_its_triad_on_the_body() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let id = h
+        .app
+        .run("solid.move", json!({"bodies": ["Body1"], "translate": ["30 mm", "0 mm", "0 mm"], "axis": [0.0, 0.0, 1.0], "angle": "90 deg"}))
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let body = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().bounds().center();
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - body).len() < 1e-6, "triad at {at:?}, body at {body:?}");
+    let p = params(&h.app, &d).unwrap();
+    assert_eq!((&p["translate"][0], &p["angle"]), (&json!("30 mm"), &json!("90 deg")), "the stored values stay: {p}");
+
+    let change = Change::Rotate { axis: 2, angle: 10_f64.to_radians() };
+    drag(&h.app, &mut d, crate::gizmo::Drag { handle: crate::gizmo::Handle::Ring(2), change, started: true, done: true });
+    let Kind::Move { rz, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!(rz, "100 deg");
+    let at = triad(&h.app, &d).unwrap().center;
+    assert!((at - body).len() < 1e-4, "a ring turns the body on the spot: {at:?}, body at {body:?}");
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
+    let p = params(&h.app, &d).unwrap();
+    let m = transform(&h.app, &p).unwrap();
+    assert!((apply_point(&m, Vec3::new(10.0, 10.0, 10.0)) - body).len() < 1e-4, "{p}");
+}
+
+/// A component copied with Create Copy turns about the world origin (`occurrence.move`), not about
+/// its frame's like a body of it: the copy of a placed part turned a quarter on its centre stays on
+/// the part, where it landed 100 mm off when the move was given for the frame's origin.
+#[test]
+fn a_turned_copy_of_a_placed_component_turns_on_its_centre() {
+    let (mut h, occurrence) = part_harness();
+    h.app.run("occurrence.move", json!({"occurrence": occurrence, "translate": [100, 0, 0]})).unwrap();
+    h.app.start("solid.move");
+    h.settle();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Occurrence { path: vec![occurrence] }];
+    d.extra.insert("copy".into(), json!(true));
+    set_angles(&mut h, ["0 deg", "0 deg", "90 deg"]);
+    let p = params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(p["occurrences"] == json!([[occurrence]]) && p.get("angle").is_some(), "{p}");
+    let copy = h.app.session.execute("solid.move", &p).unwrap()["occurrences"][0].as_u64().unwrap();
+    let mut landed = solidcraft_engine::geom::Aabb3::EMPTY;
+    for name in h.app.session.occurrence_bodies(&[copy], true).unwrap() {
+        landed = landed.union(&h.app.session.world_state().unwrap().body(&name).unwrap().mesh().bounds());
+    }
+    assert!(landed.center().dist(Vec3::new(110.0, 10.0, 10.0)) < 1e-6, "{landed:?}");
+}
+
+/// Local, the triad turns with the body, so its arrows and rings stay on the body; Fixed, they
+/// stay on the world. A dragged arrow changes its own distance alone, and the box reads it.
+#[test]
+fn the_triad_turns_with_the_body_unless_fixed() {
+    for (fixed, way) in [(false, Vec3::Y), (true, Vec3::X)] {
+        let (mut h, centre) = turning_box();
+        h.app.dialog.as_mut().unwrap().extra.insert("fixed".into(), json!(fixed));
+        set_angles(&mut h, ["0 deg", "0 deg", "90 deg"]);
+        let t = triad(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert!((gizmo::axis(&t.axes, 0) - way).len() < 1e-9, "fixed {fixed}: {:?}", t.axes);
+        let by = way * 20.0;
+        h.step(&json!({"drag": [{"gizmo": "x"}, {"gizmo": "x", "by": [by.x, by.y, by.z]}], "steps": 12})).unwrap();
+        h.frames(2);
+        let Kind::Move { x, y, z, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not a move") };
+        assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("20 mm", "0 mm", "0 mm"), "fixed {fixed}");
+        assert!((apply_point(&whole_move(&h), centre) - centre - by).len() < 1e-4, "fixed {fixed}");
+        let d = h.app.dialog.clone().unwrap();
+        assert_shown_where_ok_puts_it(&mut h.app, &d);
+    }
+}
+
+/// A turn spins the body where the distances have put it: they go on reading along the triad's
+/// axes, and the body stays where it is.
+#[test]
+fn a_turn_after_a_distance_leaves_the_body_there() {
+    let (mut h, centre) = turning_box();
+    if let Some(Kind::Move { x, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *x = "10 mm".into();
+    }
+    h.frames(2);
+    turn_ring(&mut h, 2, 90.0);
+    let Kind::Move { x, y, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not a move") };
+    assert_eq!((x.as_str(), y.as_str()), ("0 mm", "-10 mm"));
+    assert!((apply_point(&whole_move(&h), centre) - centre - Vec3::X * 10.0).len() < 1e-4);
+    let d = h.app.dialog.clone().unwrap();
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
+}
+
+/// Changing frames keeps the move; only the values start from zero on the new axes.
+#[test]
+fn local_and_fixed_can_swap_mid_move() {
+    let (mut h, centre) = turning_box();
+    set_angles(&mut h, ["0 deg", "0 deg", "90 deg"]);
+    let before = whole_move(&h);
+    let mut d = h.app.dialog.take().unwrap();
+    set_fixed(&h.app, &mut d, true);
+    assert_eq!(triad(&h.app, &d).map(|t| t.axes), Some(WORLD));
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_eq!(shown_angles(&h), ["0 deg", "0 deg", "0 deg"]);
+    let after = whole_move(&h);
+    assert_turn(&after, &rows_of(&before));
+    assert!((apply_point(&after, centre) - centre).len() < 1e-4);
+    let d = h.app.dialog.clone().unwrap();
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
+}
+
+/// Local axes are the body's own: as its component places it, and as earlier moves turned it.
+#[test]
+fn the_triad_starts_on_the_bodys_own_axes() {
+    let z = |h: &crate::scenario::Harness| {
+        let mut d = h.app.dialog.clone().unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+        gizmo::axis(&triad(&h.app, &d).unwrap().axes, 2)
+    };
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": ["0", "0", "0"], "axis": [1.0, 0.0, 0.0], "angle": "90 deg"})).unwrap();
+    h.app.preferences.move_starts_fixed = false;
+    h.app.start("solid.move");
+    assert!((z(&h) + Vec3::Y).len() < 1e-9, "{:?}", z(&h));
+
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "translate": [50, 10, 20]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.preferences.move_starts_fixed = false;
+    h.app.start("solid.move");
+    assert!((z(&h) + Vec3::Y).len() < 1e-9, "{:?}", z(&h));
+}
+
+/// Move starts as it always did, its triad on fixed axes and staying on them; the preference
+/// starts it on the body's own axes, turning with it. The Axes row switches between the two.
+#[test]
+fn move_starts_on_fixed_axes_unless_the_preference_says_local() {
+    for (starts_fixed, x) in [(true, Vec3::X), (false, Vec3::Y)] {
+        let mut h = crate::scenario::Harness::new();
+        assert!(h.app.preferences.move_starts_fixed, "Fixed is the default");
+        h.app.preferences.move_starts_fixed = starts_fixed;
+        h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+        h.app.run("select.set", json!({"items": [Sel::Body { name: "Body1".into() }]})).unwrap();
+        h.app.start("solid.move");
+        h.frames(3);
+        set_angles(&mut h, ["0 deg", "0 deg", "90 deg"]);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(fixed(d), starts_fixed);
+        let t = triad(&h.app, d).unwrap();
+        assert!((gizmo::axis(&t.axes, 0) - x).len() < 1e-9, "starts fixed {starts_fixed}: {:?}", t.axes);
+        let other = if starts_fixed { "dialog:axes:local" } else { "dialog:axes:fixed" };
+        h.step(&json!({"click": {"handle": other}})).unwrap();
+        h.frames(2);
+        assert_eq!(fixed(h.app.dialog.as_ref().unwrap()), !starts_fixed, "the Axes row switches");
+    }
 }
