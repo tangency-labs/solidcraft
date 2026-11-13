@@ -9,8 +9,10 @@
 //! constant, u the circle's angle plus a constant, or minus it where the circle turns the other
 //! way); a line along a ruling of a cylinder or cone (u constant, v linear). Each exact pcurve is
 //! checked by lifting it. On a spline face, a straight (u, v) line is taken where it lifts onto
-//! the edge within the tolerance. Anything else, and any exact one that misses, is refused
-//! (`Failed`, "no exact pcurve"): nothing is fitted.
+//! the edge within the tolerance. Other spline edges on spline faces get a piecewise-linear
+//! pcurve only when its lift is certified over every span by rounded interval arithmetic
+//! (`On::certified`). Unproved spans are subdivided, never accepted from sampled checks;
+//! projection failures and exhausted budgets are typed refusals. [`exact_pcurves`] never fits.
 //!
 //! Periodic parameters are unwrapped along each curve, and each loop's uses are moved by whole
 //! periods so every use starts where the one before it ends: a seam edge used twice gets two
@@ -25,11 +27,18 @@
 //! range) are the caller's, before it converts the record (`solidcore-ops`' `pcurve`).
 //!
 //! Deviations: the B-spline cut and the knot span search are kept here ([`segment`],
-//! [`find_span`]) as the routine had them.
+//! [`find_span`]) as the routine had them. Certified fitting uses an explicit stack, at most
+//! 32 subdivision levels and `MAX_SPANS` accepted or pending spans; no recursion.
 use super::spline::EvalSurface;
 use super::uv::{self, Domain};
 use super::vec::{v3, VecExt};
 use super::{Axes, Curve, Curve2, CurveEval, EvalError, Surface, SurfaceEval};
+use crate::blend::fillet_section::{
+    certificate::{curve_derivs_over, nurbs_partials_over_box, NurbsCurve},
+    interval::Ivl,
+    series::{v_add, v_scale, v_sub, V3},
+    station::Nurbs,
+};
 use crate::math::Vec3;
 use crate::SolidError;
 
@@ -126,7 +135,7 @@ pub fn pcurves_within(
 ) -> Result<Vec<Vec<Curve2>>> {
     check_size(loops, tolerance)?;
     let on = On::new(surface_record)?.within(domain);
-    let each = each_pcurve(surface_record, &on, loops, tolerance)?;
+    let each = each_pcurve(surface_record, &on, loops, tolerance, true)?;
     let mut out = Vec::new();
     for (l, pcs) in loops.iter().zip(each) {
         let mut fitted = Vec::new();
@@ -150,7 +159,7 @@ pub fn exact_pcurves(
 ) -> Result<Vec<Vec<Option<Curve2>>>> {
     check_size(loops, tolerance)?;
     let on = On::new(surface_record)?.within(domain);
-    Ok(each_pcurve(surface_record, &on, loops, tolerance)?
+    Ok(each_pcurve(surface_record, &on, loops, tolerance, false)?
         .into_iter()
         .map(|l| l.into_iter().map(Result::ok).collect())
         .collect())
@@ -170,13 +179,14 @@ fn check_size(loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<()> {
     Ok(())
 }
 
-/// Each use's pcurve: the given one, or its closed form; a use with neither is its `Failed`
+/// Each use's pcurve: given, closed form, or certified when requested; no result is its `Failed`
 /// error, any other error fails the face.
 fn each_pcurve(
     surface_record: &Surface,
     on: &On,
     loops: &[Vec<EdgeUse<'_>>],
     tolerance: f64,
+    certify: bool,
 ) -> Result<Vec<Vec<Result<Curve2>>>> {
     super::check::surface(surface_record).map_err(|e| Error::Invalid(e.to_string()))?;
     // A seam edge used twice is worked out once.
@@ -213,7 +223,7 @@ fn each_pcurve(
             } else {
                 tolerance
             };
-            let pc = on.pcurve(u.curve, &c, u.interval, own).map_err(|e| {
+            let pc = on.pcurve(u.curve, &c, u.interval, own, certify).map_err(|e| {
                 let at = |t: f64| c.point(t).map(|p| [p.x, p.y, p.z]);
                 let message = format!(
                     "pcurve of loop {w} use {i} ({:?} to {:?}): {e}",
@@ -395,17 +405,155 @@ impl On {
         curve: &CurveEval,
         range: [f64; 2],
         tol: f64,
+        certify: bool,
     ) -> Result<Curve2> {
         if let Some(pc) = self.exact(record, curve, range, tol)? {
             if self.lifts(&pc, curve, range, 0.5 * tol) {
                 return Ok(pc);
             }
         }
+        if let (true, SurfaceEval::Eval(EvalSurface::Nurbs(surface), _), CurveEval::Spline(edge)) =
+            (certify, &self.surface, curve)
+        {
+            return self.certified(surface, edge, curve, range, tol);
+        }
         Err(Error::Failed(format!(
             "not supported yet: no exact pcurve of {} on {}",
             curve_kind(record),
             self.surface_kind()
         )))
+    }
+
+    /// A projected polygon in UV, with a certificate for its lift on every span. For the
+    /// residual `E(t) = S(P(t)) - C(t)`, the mean value theorem gives
+    /// `|E(t)| <= |E(m)| + max(m-a,b-m) sup_[a,b] |S_u P'_u + S_v P'_v - C'|`.
+    /// Both terms are enclosed by the existing NURBS interval evaluators (including all
+    /// arithmetic rounding), not by samples. On smooth boxes the quadratic Taylor bound
+    /// `|E(m)| + r |E'(m)| + r²/2 sup |E''|` tightens it, with
+    /// `E'' = S_uu P'_u² + 2 S_uv P'_u P'_v + S_vv P'_v² - C''`.
+    /// Surface boxes require C0 continuity (C1 for the quadratic bound); edge
+    /// spans break at every knot. This is the Taylor enclosure of definitions-and-certificates
+    /// §4.2, applied to a linear interpolant (the NURBS Book §9.2). Projection only proposes
+    /// coefficients; it is never the acceptance check. The target is half the edge tolerance,
+    /// just as for the existing exact pcurves. A cap refuses the fit without widening it.
+    fn certified(
+        &self,
+        surface: &super::spline::Nurbs,
+        edge: &super::spline::EvalCurve,
+        curve: &CurveEval,
+        [t0, t1]: [f64; 2],
+        tol: f64,
+    ) -> Result<Curve2> {
+        let [nu, nv] = surface.count();
+        let [p, q] = surface.degree();
+        let [u, v] = surface.knots();
+        let mut pw = Vec::new();
+        for i in 0..nu {
+            for j in 0..nv {
+                let h = surface
+                    .ctrl()
+                    .get(j * nu + i)
+                    .ok_or_else(|| Error::Invalid("pcurve surface net".into()))?;
+                pw.extend_from_slice(h);
+            }
+        }
+        let sn = Nurbs {
+            p,
+            q,
+            nu,
+            nv,
+            u: u.clone(),
+            v: v.clone(),
+            pw,
+        };
+        let cn = NurbsCurve {
+            p: edge.degree(),
+            n: edge.ctrl().len(),
+            u: edge.knots().to_vec(),
+            pw: edge.ctrl().iter().flatten().copied().collect(),
+        };
+        // A discontinuous curve has no continuous polygon on its whole interval.
+        let (mut previous, mut multiplicity) = (None, 0usize);
+        for &k in &cn.u {
+            multiplicity = if previous == Some(k) {
+                multiplicity + 1
+            } else {
+                1
+            };
+            previous = Some(k);
+            if k > t0 && k < t1 && multiplicity > cn.p {
+                return Err(Error::Failed("certified pcurve: discontinuous edge".into()));
+            }
+        }
+        let project = |t| -> Result<[f64; 2]> {
+            let pt = curve
+                .point(t)
+                .ok_or_else(|| Error::Failed("certified pcurve: edge evaluation".into()))?;
+            let mut uv = self.project_in(pt, tol * 0.125).ok_or_else(|| {
+                Error::Failed("certified pcurve: edge cannot be projected within tolerance".into())
+            })?;
+            // The certificate evaluates the net on its knots. The surface evaluator wraps
+            // closed nets, so keep every candidate inside that same natural domain.
+            for ((x, knots), (degree, count)) in
+                uv.iter_mut().zip([u, v]).zip([(p, nu), (q, nv)])
+            {
+                let (Some(&lo), Some(&hi)) = (knots.get(degree), knots.get(count)) else {
+                    return Err(Error::Invalid("pcurve surface domain".into()));
+                };
+                *x = x.max(lo).min(hi);
+            }
+            Ok(uv)
+        };
+        let mut breaks = vec![t0];
+        for &t in edge.knots().iter().filter(|&&t| t0 < t && t < t1) {
+            if breaks.last().copied() != Some(t) {
+                breaks.push(t);
+            }
+            if breaks.len() > MAX_SPANS {
+                return Err(Error::TooLarge(
+                    "certified pcurve: too many edge spans".into(),
+                ));
+            }
+        }
+        breaks.push(t1);
+        let mut points = vec![project(t0)?];
+        let mut knots = vec![t0, t0];
+        for pair in breaks.windows(2) {
+            let (Some(&a), Some(&b), Some(&pa)) = (pair.first(), pair.get(1), points.last()) else {
+                return Err(Error::Invalid("pcurve fitting span".into()));
+            };
+            let mut pending = vec![(a, b, pa, project(b)?, 0u32)];
+            while let Some((a, b, pa, pb, depth)) = pending.pop() {
+                if points.len() >= MAX_SPANS {
+                    return Err(Error::TooLarge(
+                        "certified pcurve: too many fitted spans".into(),
+                    ));
+                }
+                let bound = lift_bound(&sn, &cn, [a, b], [pa, pb]);
+                if bound.is_some_and(|e| e.is_finite() && e <= 0.5 * tol) {
+                    points.push(pb);
+                    knots.push(b);
+                    continue;
+                }
+                if depth >= 32 || points.len() + pending.len() + 1 >= MAX_SPANS {
+                    return Err(Error::TooLarge(format!(
+                        "certified pcurve: lift bound {bound:?} exceeds {} within subdivision budget",
+                        0.5 * tol
+                    )));
+                }
+                let m = 0.5 * (a + b);
+                if !(a < m && m < b) {
+                    return Err(Error::Failed(
+                        "certified pcurve: no representable subdivision".into(),
+                    ));
+                }
+                let pm = project(m)?;
+                pending.push((m, b, pm, pb, depth + 1));
+                pending.push((a, m, pa, pm, depth + 1));
+            }
+        }
+        knots.push(t1);
+        Ok(Curve2::Spline { knots, points })
     }
 
     /// The closed-form pcurve where there is one (unchecked).
@@ -849,6 +997,85 @@ impl On {
         }
         Ok(())
     }
+}
+
+/// A whole-span lift-error bound for a linear UV segment. L1 norms enclose Euclidean
+/// norms. All arithmetic, including interpolation coefficients and the span radius, is
+/// outward rounded; an evaluator unable to enclose a weight or a knot proves nothing.
+fn lift_bound(sn: &Nurbs, cn: &NurbsCurve, [a, b]: [f64; 2], [pa, pb]: [[f64; 2]; 2]) -> Option<f64> {
+    let h = Ivl::from(b) - Ivl::from(a);
+    let d = [
+        (Ivl::from(pb[0]) - Ivl::from(pa[0])) / h,
+        (Ivl::from(pb[1]) - Ivl::from(pa[1])) / h,
+    ];
+    let m = 0.5 * (a + b);
+    let dt = Ivl::from(m) - Ivl::from(a);
+    let qm = [
+        Ivl::from(pa[0]) + d[0] * dt,
+        Ivl::from(pa[1]) + d[1] * dt,
+    ];
+    let sm = nurbs_partials_over_box(sn, qm[0].lo, qm[0].hi, qm[1].lo, qm[1].hi, 1, 0).ok()?;
+    let cm = curve_derivs_over(cn, Ivl::from(m), 1, None).ok()?;
+    let e = v_sub(sm.at(0, 0), *cm.first()?);
+    let s = nurbs_partials_over_box(
+        sn,
+        pa[0].min(pb[0]),
+        pa[0].max(pb[0]),
+        pa[1].min(pb[1]),
+        pa[1].max(pb[1]),
+        1,
+        0,
+    )
+    .ok()?;
+    let c = curve_derivs_over(cn, Ivl::new(a, b), 1, None).ok()?;
+    let de = v_sub(
+        v_add(v_scale(s.at(1, 0), d[0]), v_scale(s.at(0, 1), d[1])),
+        *c.get(1)?,
+    );
+    let norm = |v: V3<Ivl>| -> Option<Ivl> {
+        if ![v.x, v.y, v.z].iter().all(|x| x.is_finite()) {
+            return None;
+        }
+        Some(Ivl::from(v.x.mag()) + Ivl::from(v.y.mag()) + Ivl::from(v.z.mag()))
+    };
+    let radius = (Ivl::from(m) - Ivl::from(a))
+        .hull(Ivl::from(b) - Ivl::from(m))
+        .mag();
+    let radius = Ivl::from(radius);
+    let linear = (norm(e)? + radius * norm(de)?).hi;
+    let quadratic = (|| -> Option<f64> {
+        let s = nurbs_partials_over_box(
+            sn,
+            pa[0].min(pb[0]),
+            pa[0].max(pb[0]),
+            pa[1].min(pb[1]),
+            pa[1].max(pb[1]),
+            2,
+            1,
+        )
+        .ok()?;
+        let c = curve_derivs_over(cn, Ivl::new(a, b), 2, None).ok()?;
+        let em = v_sub(
+            v_add(v_scale(sm.at(1, 0), d[0]), v_scale(sm.at(0, 1), d[1])),
+            *cm.get(1)?,
+        );
+        let second = v_sub(
+            v_add(
+                v_add(
+                    v_scale(s.at(2, 0), d[0] * d[0]),
+                    v_scale(s.at(1, 1), Ivl::from(2.0) * d[0] * d[1]),
+                ),
+                v_scale(s.at(0, 2), d[1] * d[1]),
+            ),
+            *c.get(2)?,
+        );
+        Some((norm(e)? + radius * norm(em)? + Ivl::from(0.5) * radius * radius * norm(second)?).hi)
+    })();
+    Some(
+        quadratic
+            .filter(|x| x.is_finite())
+            .map_or(linear, |x| linear.min(x)),
+    )
 }
 
 /// The `d`th coordinate of `q` (`d` is 0 or 1).
