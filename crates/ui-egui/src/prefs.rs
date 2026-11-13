@@ -1276,6 +1276,9 @@ preference_settings! {
     max_step_file_mb: u64 = DEFAULT_STEP_MB, PAGE_GENERAL;
     /// The largest design file opened or saved, in MB (#4086): from the default (256) up to 16 GB.
     max_design_file_mb: u64 = DEFAULT_DESIGN_MB, PAGE_GENERAL;
+    /// A FreeCAD file opens or inserts as its sketches and features, rebuilt; off brings in only
+    /// its solids as one Import feature, as before.
+    freecad_history: bool = true, PAGE_GENERAL => check_id("settings.freecad_history");
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.

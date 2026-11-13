@@ -591,6 +591,103 @@ pub fn join_curves(a: &Curve, b: &Curve, tolerance: f64) -> Result<Curve> {
     })?
 }
 
+/// How far one curve strays from another curve or from a sheet ([`curve_deviation`],
+/// [`curve_surface_deviation`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Deviation {
+    /// The largest distance found at the stations.
+    pub max: f64,
+    /// Where on the first curve it is.
+    pub at: [f64; 3],
+    /// Its foot on the other curve or the sheet.
+    pub to: [f64; 3],
+    /// Each station's point and its foot, in order along the first curve: a comb.
+    pub comb: Vec<([f64; 3], [f64; 3])>,
+    /// The kernel's certified bound of the largest distance, where it applies (two
+    /// non-rational splines on one domain); `None` elsewhere.
+    pub bound: Option<f64>,
+}
+
+fn deviation_of(d: solidcore::query::deviation::Deviation) -> Deviation {
+    let a = |p: Point3| [p.x, p.y, p.z];
+    Deviation {
+        max: d.max,
+        at: a(d.at),
+        to: a(d.to),
+        comb: d.comb.into_iter().map(|(p, q)| (a(p), a(q))).collect(),
+        bound: d.bound,
+    }
+}
+
+/// How far curve `a` strays from curve `b`: `samples` stations at even steps of `a`'s range,
+/// each dropped on `b` (the kernel's [`solidcore::query::deviation::curve_deviation`]), the
+/// largest distance found with where it is, the station pairs, and the certified bound where it
+/// applies. The curves are splines, rational splines or polylines, each over its whole range.
+///
+/// # Errors
+/// [`Error::Argument`] for another kind of curve, one the record refuses, or a station count
+/// outside 2..=10000; the kernel's status otherwise (no station dropping onto `b`).
+pub fn curve_deviation(a: &Curve, b: &Curve, samples: usize) -> Result<Deviation> {
+    run("curve::curve_deviation", |k| {
+        let ka = match blend_input(k, a)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        let kb = match blend_input(k, b)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        Ok(
+            match solidcore::query::deviation::curve_deviation(k, &ka.curve, &kb.curve, samples) {
+                Ok(d) => Ok(deviation_of(d)),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })?
+}
+
+/// How far curve `c` strays from the one-face `sheet`: as [`curve_deviation`], each station
+/// dropped on the face's surface over its parameter box (the kernel's
+/// [`solidcore::query::deviation::curve_surface_deviation`]); no certified bound.
+///
+/// # Errors
+/// As [`curve_deviation`]; [`Error::Argument`] for a sheet that is not one face; those of
+/// [`crate::Body::from_record`].
+pub fn curve_surface_deviation(
+    c: &Curve,
+    sheet: &solidcore_record::brep::Brep,
+    samples: usize,
+) -> Result<Deviation> {
+    let (body, _) = crate::Body::from_record(sheet, true)?;
+    crate::session::read_body("curve::curve_surface_deviation", &body, |k, b| {
+        let [f] = b.face_list() else {
+            return Ok(Err(Error::Argument));
+        };
+        let face = b.face(*f)?;
+        let Some(surface) = face.surface.as_ref() else {
+            return Ok(Err(Error::Argument));
+        };
+        let kc = match blend_input(k, c)? {
+            Ok(made) => made,
+            Err(e) => return Ok(Err(e)),
+        };
+        Ok(
+            match solidcore::query::deviation::curve_surface_deviation(
+                k,
+                &kc.curve,
+                surface,
+                &face.uv_domain,
+                samples,
+            ) {
+                Ok(d) => Ok(deviation_of(d)),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })?
+}
+
 pub use solidcore::curve::stretch::Stretch;
 
 /// `curve` with the control points `picked` stretched by a drag `delta` of point `handle` from
