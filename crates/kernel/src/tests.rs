@@ -2830,8 +2830,8 @@ fn loft_builds_through_a_section_with_a_segment_of_no_length() {
     assert!(m.bbox.min.dist(Vec3::ZERO) < 1e-9 && m.bbox.max.dist(Vec3::new(40.0, 20.0, 10.0)) < 1e-9, "{:?}", m.bbox);
 }
 
-/// Two 5000-gons (a grid of their pairing would be past its bound): matched as lofts were
-/// before the pairing, the loft builds, the regular prism to 1e-9.
+/// Two 5000-gons (a grid of their pairing would be past its bound): paired through a band of
+/// the grid, the loft builds, the regular prism to 1e-9.
 #[test]
 fn loft_through_sections_too_large_to_pair_builds() {
     let n = 5000;

@@ -60,8 +60,8 @@ const TURN: f64 = 1.0;
 const UNPAIRED: f64 = 0.1;
 /// The most cells the grid of a pairing may have ((m + 1) by (n + 1): two sections of about 2000
 /// segments each). Each start's search stores one byte a cell, and the search over every start
-/// visits about log2(n) times the grid. Two sections with a larger grid are matched as lofts were
-/// before the pairing ([`resampled`]), so no loft is refused for its size below the caller's
+/// visits about log2(n) times the grid. Two sections with a larger grid are paired from one start
+/// through a band of the grid ([`banded_walk`]), so no loft is refused for its size below the caller's
 /// `max_segments`.
 pub const MAX_CELLS: usize = 4_000_000;
 /// The deepest the divide and conquer over the starts goes (log2 of the vertex count: about 22
@@ -480,24 +480,35 @@ fn centroid(segs: &[Seg2]) -> Point2 {
     sum * (1.0 / n)
 }
 
-/// Whether the loop is one full circle (arcs of one centre and radius).
+/// Whether the loop is one full circle: arcs of one centre and radius, each starting where the
+/// one before ends, all turning the same way, and together once round. Arcs that turn back over
+/// each other (a half circle and its reverse) are not a circle.
 fn is_circle(segs: &[Seg2]) -> bool {
-    !segs.is_empty()
-        && segs.iter().all(|s| matches!(s, Seg2::Arc { .. }))
-        && segs.iter().zip(segs.iter().skip(1)).all(|pair| match pair {
-            (
-                Seg2::Arc {
-                    center: c1,
-                    radius: r1,
-                    ..
-                },
-                Seg2::Arc {
-                    center: c2,
-                    radius: r2,
-                    ..
-                },
-            ) => dist(*c1, *c2) < 1e-9 && (r1 - r2).abs() < 1e-9,
-            _ => false,
+    use std::f64::consts::TAU;
+    let arcs: Vec<(Vec2, f64, f64, f64)> = segs
+        .iter()
+        .filter_map(|s| match *s {
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => Some((center, radius, start, sweep)),
+            _ => None,
+        })
+        .collect();
+    let Some(&(c, r, _, w)) = arcs.first() else {
+        return false;
+    };
+    let turned: f64 = arcs.iter().map(|a| a.3).sum();
+    arcs.len() == segs.len()
+        && arcs
+            .iter()
+            .all(|a| dist(a.0, c) < 1e-9 && (a.1 - r).abs() < 1e-9 && a.3 * w > 0.0)
+        && (turned.abs() - TAU).abs() < 1e-9
+        && arcs.iter().zip(arcs.iter().skip(1)).all(|(x, y)| {
+            let gap = (y.2 - (x.2 + x.3)).rem_euclid(TAU);
+            gap.min(TAU - gap) < 1e-9
         })
 }
 
@@ -1097,6 +1108,73 @@ fn between(
     between(g, (mid, &lo), high, best, depth + 1)
 }
 
+/// The least-cost walk for two loops whose whole grid is past [`MAX_CELLS`]: from one start
+/// (`b`'s vertex that pairs most cheaply with `a`'s vertex 0), through a band of columns about
+/// where each of `a`'s vertices falls at its share of the length round `b`, as wide as the bound
+/// allows (the band's cells, at most (m + 1)(2h + 1) + 2n, stay within it). Corners pair wherever
+/// they lie within the band of where their shares put them: about 400 vertices either way for two
+/// loops of 5000.
+fn banded_walk(g: &Grid) -> Result<Walk> {
+    let (m, n) = (g.a.count(), g.b.count());
+    let s = (0..n)
+        .min_by(|x, y| g.pair(0, *x).total_cmp(&g.pair(0, *y)))
+        .ok_or_else(unpaired)?;
+    let h = MAX_CELLS
+        .saturating_sub(n.saturating_mul(2))
+        .checked_div(m + 1)
+        .unwrap_or(0)
+        .saturating_sub(1)
+        .checked_div(2)
+        .unwrap_or(0);
+    if h == 0 {
+        return Err(SolidError::InvalidInput {
+            operation: OP,
+            reason: "loft sections too large to pair",
+        });
+    }
+    let (la, lb): (f64, f64) = (g.a.len.iter().sum(), g.b.len.iter().sum());
+    // The column of each row: `b`'s vertex from `s` whose share of `b`'s length round from `s`
+    // is nearest the share of `a`'s length before the row's vertex.
+    let mut centre: Vec<usize> = Vec::new();
+    let (mut k, mut db, mut da) = (0usize, 0.0f64, 0.0f64);
+    for i in 0..=m {
+        let target = da / la;
+        while k < n {
+            let next = db + g.b.len.get(wrap(s + k, n)).copied().unwrap_or(0.0);
+            if (next / lb - target).abs() <= (db / lb - target).abs() {
+                (db, k) = (next, k + 1);
+            } else {
+                break;
+            }
+        }
+        centre.push(if i == 0 {
+            s
+        } else if i == m {
+            s + n
+        } else {
+            s + k
+        });
+        da += g.a.len.get(i).copied().unwrap_or(0.0);
+    }
+    // Each row's band also spans the columns of the rows either side, so a walk can step from
+    // any column of one row's band into the next row and run along it.
+    let column = |i: usize, c: usize| centre.get(i).copied().unwrap_or(c);
+    let lo: Vec<usize> = (0..=m)
+        .map(|i| {
+            let c = column(i, s);
+            let before = i.checked_sub(1).map_or(c, |b| column(b, c));
+            c.min(before).saturating_sub(h).max(s)
+        })
+        .collect();
+    let hi: Vec<usize> = (0..=m)
+        .map(|i| {
+            let c = column(i, s);
+            (c.max(column(i + 1, c)) + h).min(s + n)
+        })
+        .collect();
+    walk(g, s, &lo, &hi).ok_or_else(unpaired)
+}
+
 /// What an event of the correspondence is on one of the loops: one of its vertices, or a point
 /// inside one of its segments.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1115,10 +1193,11 @@ fn correspond(a: &[Seg2], fa: Frame, b: &[Seg2], fb: Frame) -> Result<Correspond
         b: Side::new(b, fb)?,
     };
     let (m, n) = (g.a.count(), g.b.count());
-    if (m + 1).saturating_mul(n + 1) > MAX_CELLS {
-        return Ok(resampled(&g));
-    }
-    let w = best_walk(&g)?;
+    let w = if (m + 1).saturating_mul(n + 1) > MAX_CELLS {
+        banded_walk(&g)?
+    } else {
+        best_walk(&g)?
+    };
     // The events round both loops, in order, from the one at `a`'s vertex 0.
     let mut events: Vec<(Place, Place)> = Vec::new();
     let (mut i, mut j) = (0usize, w.start);
@@ -1212,116 +1291,6 @@ fn correspond(a: &[Seg2], fa: Frame, b: &[Seg2], fb: Frame) -> Result<Correspond
         b_cuts,
         b_start,
     })
-}
-
-/// A piece of a loop being halved ([`resampled`]): its length, its segment, and the parameters it
-/// runs between; the longest first, and of equal ones the last round the loop.
-#[derive(Clone, Copy, Debug)]
-struct Piece {
-    len: f64,
-    seg: usize,
-    t0: f64,
-    t1: f64,
-}
-
-impl PartialEq for Piece {
-    fn eq(&self, o: &Self) -> bool {
-        self.cmp(o) == std::cmp::Ordering::Equal
-    }
-}
-
-impl Eq for Piece {}
-
-impl PartialOrd for Piece {
-    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(o))
-    }
-}
-
-impl Ord for Piece {
-    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
-        self.len
-            .total_cmp(&o.len)
-            .then(self.seg.cmp(&o.seg))
-            .then(self.t0.total_cmp(&o.t0))
-    }
-}
-
-/// The cuts that halve the longest pieces of the loop `side` until it has `count` segments.
-fn halvings(side: &Side, count: usize) -> Vec<Vec<f64>> {
-    let mut heap: std::collections::BinaryHeap<Piece> = side
-        .len
-        .iter()
-        .enumerate()
-        .map(|(seg, &len)| Piece {
-            len,
-            seg,
-            t0: 0.0,
-            t1: 1.0,
-        })
-        .collect();
-    let mut cuts: Vec<Vec<f64>> = vec![Vec::new(); side.count()];
-    let mut have = side.count();
-    while have < count {
-        let Some(p) = heap.pop() else {
-            break;
-        };
-        let mid = p.t0 + (p.t1 - p.t0) * 0.5;
-        if let Some(c) = cuts.get_mut(p.seg) {
-            c.push(mid);
-        }
-        for (t0, t1) in [(p.t0, mid), (mid, p.t1)] {
-            heap.push(Piece {
-                len: p.len * 0.5,
-                seg: p.seg,
-                t0,
-                t1,
-            });
-        }
-        have += 1;
-    }
-    for c in &mut cuts {
-        c.sort_by(f64::total_cmp);
-    }
-    cuts
-}
-
-/// The vertices of the loop `side` cut at `cuts`, in the shared frame.
-fn cut_points(side: &Side, cuts: &[Vec<f64>]) -> Vec<Vec2> {
-    let mut out = Vec::new();
-    for (e, s) in side.segs.iter().enumerate() {
-        out.push(side.frame.point(s.start()));
-        for &t in cuts.get(e).map_or(&[][..], Vec::as_slice) {
-            out.push(side.frame.point(s.point_at(t)));
-        }
-    }
-    out
-}
-
-/// Two loops too large to pair ([`MAX_CELLS`]) matched as lofts were before the pairing: the one
-/// with fewer segments has its longest pieces halved until the counts agree, and the second starts
-/// where every vertex lines up best with the first's of the same number (the largest sum of dot
-/// products of their places in the shared frame).
-fn resampled(g: &Grid) -> Correspondence {
-    let (m, n) = (g.a.count(), g.b.count());
-    let a_cuts = halvings(&g.a, n);
-    let b_cuts = halvings(&g.b, m);
-    let (pa, pb) = (cut_points(&g.a, &a_cuts), cut_points(&g.b, &b_cuts));
-    let count = pb.len();
-    let fit = |k: usize| -> f64 {
-        pa.iter()
-            .enumerate()
-            .filter_map(|(i, a)| pb.get(wrap(i + k, count)).map(|b| dot(*a, *b)))
-            .sum()
-    };
-    let b_start = (0..count)
-        .min_by(|x, y| fit(*y).total_cmp(&fit(*x)))
-        .unwrap_or(0);
-    Correspondence {
-        a_cuts,
-        b_cuts,
-        b_start,
-    }
 }
 
 /// Whether `ts` are strictly increasing, inside (0, 1).
@@ -2211,7 +2180,7 @@ mod tests {
         );
         let along = dot(r - a, b - a) / len2(b - a);
         assert!(
-            (r.x - a.x) * (b.y - a.y) - (r.y - a.y) * (b.x - a.x) < 1e-9 * len2(b - a)
+            ((r.x - a.x) * (b.y - a.y) - (r.y - a.y) * (b.x - a.x)).abs() < 1e-9 * len2(b - a)
                 && along > 0.0
                 && along < 1.0,
             "{r:?}"
@@ -2486,11 +2455,11 @@ mod tests {
         poly(&pts)
     }
 
-    /// Sections whose grid would be past [`MAX_CELLS`] are matched as lofts were before the
-    /// pairing, not refused: two 5000-gons pair vertex for vertex, and a 3000-gon lofted to a
-    /// 5000-gon has its longest pieces halved to 5000.
+    /// Sections whose grid would be past [`MAX_CELLS`] are paired through a band of it, not
+    /// refused: two 5000-gons pair vertex for vertex, and a 3000-gon lofted to a 5000-gon of the
+    /// same radius runs each vertex to the point of the other in about its direction.
     #[test]
-    fn sections_too_large_to_pair_are_matched_as_before() {
+    fn sections_too_large_for_the_whole_grid_are_paired_in_a_band() {
         let m = match_loft_sections(
             &[at(0.0, gon(5000, 10.0)), at(10.0, gon(5000, 20.0))],
             20_000,
@@ -2507,12 +2476,93 @@ mod tests {
         )
         .unwrap();
         sound(&m);
-        assert_eq!((m[0].segs.len(), m[1].segs.len()), (5000, 5000));
+        assert_eq!(m[0].segs.len(), m[1].segs.len());
+        for (a, b) in starts(&m[0]).iter().zip(starts(&m[1])) {
+            let turn = (angle(b) - angle(*a)).rem_euclid(2.0 * PI);
+            assert!(
+                turn.min(2.0 * PI - turn) < 2.0 * PI / 3000.0,
+                "{a:?} runs to {b:?}"
+            );
+        }
         // Past the caller's bound, refused.
         assert!(
             match_loft_sections(&[at(0.0, gon(3000, 10.0)), at(10.0, gon(5000, 10.0))], 4000)
                 .is_err()
         );
+    }
+
+    /// The 40 x 20 rectangle in 5000 segments, `split` of them along its bottom side or along its
+    /// top side.
+    fn split_rectangle(top: bool, split: usize) -> Vec<Seg2> {
+        let mut pts = vec![(0.0, 0.0)];
+        let along = |k: usize| 40.0 * k as f64 / split as f64;
+        if top {
+            pts.extend([(40.0, 0.0), (40.0, 20.0)]);
+            pts.extend((1..split).map(|k| (40.0 - along(k), 20.0)));
+            pts.push((0.0, 20.0));
+        } else {
+            pts.extend((1..split).map(|k| (along(k), 0.0)));
+            pts.extend([(40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+        }
+        poly(&pts)
+    }
+
+    /// Two 5000-segment rectangles past [`MAX_CELLS`], one split along its bottom and the other
+    /// along its top, pair all four corners: their vertex numbers differ by about 5000 at two of
+    /// them, which no one turn of the numbering (lofts before the pairing) can line up.
+    #[test]
+    fn corners_pair_in_sections_too_large_for_the_whole_grid() {
+        let (a, b) = (split_rectangle(false, 4997), split_rectangle(true, 4997));
+        assert_eq!((a.len(), b.len()), (5000, 5000));
+        let m = match_loft_sections(&[at(0.0, a), at(10.0, b)], 20_000).unwrap();
+        sound(&m);
+        assert_eq!(m[0].segs.len(), m[1].segs.len());
+        for c in [p(0.0, 0.0), p(40.0, 0.0), p(40.0, 20.0), p(0.0, 20.0)] {
+            let k = starts(&m[0])
+                .iter()
+                .position(|q| dist(*q, c) < 1e-12)
+                .unwrap();
+            assert!(
+                dist(starts(&m[1])[k], c) < 1e-9,
+                "{c:?} runs to {:?}",
+                starts(&m[1])[k]
+            );
+        }
+    }
+
+    /// A half circle and the same half circle back (arcs of one centre and radius that do not go
+    /// round once) is not a full circle: matched as any other loop, it stays on its half.
+    #[test]
+    fn a_half_circle_and_its_reverse_is_not_a_circle() {
+        let back = vec![
+            Seg2::Arc {
+                center: p(0.0, 0.0),
+                radius: 5.0,
+                start: 0.0,
+                sweep: PI,
+            },
+            Seg2::Arc {
+                center: p(0.0, 0.0),
+                radius: 5.0,
+                start: PI,
+                sweep: -PI,
+            },
+        ];
+        assert!(!is_circle(&back));
+        let whole = |k: usize| Seg2::Arc {
+            center: p(0.0, 0.0),
+            radius: 5.0,
+            start: k as f64 * PI,
+            sweep: PI,
+        };
+        assert!(is_circle(&[whole(0), whole(1)]));
+        if let Ok(m) = match_loft_sections(&[at(0.0, gon(4, 10.0)), at(10.0, back)], 100) {
+            for s in &m[1].segs {
+                for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                    assert!(s.point_at(t).y > -1e-9, "{:?}", s.point_at(t));
+                }
+            }
+        }
     }
 
     /// A segment whose geometry is not finite, or a plane axis that is not a unit vector, is
