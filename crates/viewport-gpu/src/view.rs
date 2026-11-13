@@ -610,6 +610,10 @@ pub struct GpuScene {
     /// context, see-through): every one of their vertices drawn again, in this scene's palette,
     /// whose entries for their faces hold the highlight colour. No triangle is copied.
     pub recoloured: Vec<BlockTris>,
+    /// Whole highlighted bodies' edges: the model's own edge lines, drawn again from its blocks
+    /// in the highlight's colours and widths. Nothing is copied: lighting a whole assembly built
+    /// and uploaded every edge again (tens of megabytes) at each change of the hovered row.
+    pub lit_edges: Vec<LitEdges>,
     /// Whole hovered bodies the model draws as placements of shared triangles: those meshes with
     /// the body's highlight colour on each placement.
     pub hover_instanced: Vec<InstancedMesh>,
@@ -712,6 +716,34 @@ pub struct BlockTris {
     pub tris: Vec<std::ops::Range<u32>>,
     /// All of the body's vertices in the block's canonical vertex stream.
     pub vertices: std::ops::Range<u32>,
+}
+
+/// A body's edge lines in a model scene block ([`BlockBytes::lines`], by line), drawn again in
+/// three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides the
+/// edge, a dimmed line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LitEdges {
+    /// The block's key ([`SceneBlock::key`]).
+    pub block: u64,
+    pub lines: std::ops::Range<u32>,
+    pub halo: u32,
+    pub core: u32,
+    pub hidden: u32,
+}
+
+/// The largest palette index a lit line can name: its style rides in the draw's first vertex,
+/// six vertices a style, within a `u32`.
+const LIT_LINE_MAX_PALETTE: u32 = (u32::MAX / 6) >> 8;
+
+/// How a lit line is drawn (`vs_line_lit`): its palette index, whether it is lifted toward the
+/// eye over the faces beside it (as [`GpuScene::lifted_line`] with no normals), and its width
+/// (eighths of a pixel, 1 to 127). `None` for a palette index too large to carry.
+pub fn lit_line_style(c: PaletteIndex, width: f32, lifted: bool) -> Option<u32> {
+    if c.0 > LIT_LINE_MAX_PALETTE {
+        return None;
+    }
+    let eighths = if width.is_finite() { (width * 8.0).round().clamp(1.0, 127.0) as u32 } else { 8 };
+    Some((c.0 << 8) | (u32::from(lifted) << 7) | eighths)
 }
 
 /// How a built triangle is drawn: opaque, see-through (glass), faded context, or (in the
@@ -820,12 +852,32 @@ pub struct BlockBuilder {
     bodies: Vec<BodySpan>,
     /// The body being written: its first vertex and the box so far.
     spanning: Option<(u32, [[f32; 3]; 2])>,
+    /// Where the body being written ended its edge lines ([`BlockBuilder::end_edges`]).
+    edges_end: Option<u32>,
 }
 
 impl BlockBuilder {
+    /// How many lines the block has so far (a body's lines are those added while it was built).
+    pub fn lines_len(&self) -> u32 {
+        u32::try_from(self.lines.len() / LINE_SIZE).unwrap_or(u32::MAX)
+    }
+
+    /// The body being written has added all its edge lines: what follows (its vertex markers)
+    /// is not an edge.
+    pub fn end_edges(&mut self) {
+        self.edges_end = Some(self.lines_len());
+    }
+
+    /// Where the body being written ended its edge lines, when it said so
+    /// ([`BlockBuilder::end_edges`]).
+    pub fn edges_end(&self) -> Option<u32> {
+        self.edges_end
+    }
+
     /// The triangles from here to [`BlockBuilder::end_body`] are one body's (its box is kept, so
     /// it can be left out of a view it is not in).
     pub fn begin_body(&mut self) {
+        self.edges_end = None;
         let at = u32::try_from(self.vertices.len() / TRI_SIZE).unwrap_or(u32::MAX);
         self.spanning = Some((at, [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]]));
     }
@@ -1669,6 +1721,39 @@ fn scene_bind<'a>(scene: &'a Batches, fallback: &'a wgpu::BindGroup) -> &'a wgpu
     scene.palette.as_ref().map_or(fallback, |p| &p.bind)
 }
 
+/// Draw each of `edges`' lines from the model block they are in, in the style `style` picks
+/// ([`lit_line_style`]): it rides in the first vertex (`vs_line_lit`). A block not on the GPU
+/// any more (the model changed since the highlight was built) draws nothing.
+fn lit_lines(
+    pass: &mut wgpu::RenderPass<'static>,
+    p: &wgpu::RenderPipeline,
+    blocks: &std::collections::HashMap<u64, BlockGpu>,
+    edges: &[LitEdges],
+    style: fn(&LitEdges) -> u32,
+    tally: &Tally,
+) {
+    if edges.is_empty() {
+        return;
+    }
+    pass.set_pipeline(p);
+    for e in edges {
+        let Some(batch) = blocks.get(&e.block).and_then(|b| b.lines.as_ref()) else { continue };
+        let first = style(e).saturating_mul(6);
+        // The block's lines may span several buffers: each draws its share of the range.
+        let mut at = 0u32;
+        for (buffer, count) in &batch.parts {
+            let end = at.saturating_add(*count);
+            let (from, to) = (e.lines.start.max(at), e.lines.end.min(end));
+            if from < to {
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(first..first + 6, from - at..to - at);
+                tally.segments(to - from);
+            }
+            at = end;
+        }
+    }
+}
+
 /// The blocks' buffers, then the scene's own, as one batch (the blocks' buffers are shared,
 /// not copied).
 fn joined<'a>(blocks: impl Iterator<Item = &'a Option<Batch>>, own: Option<Batch>) -> Option<Batch> {
@@ -1932,6 +2017,8 @@ struct Batches {
     selected_blocks: Vec<BlockTris>,
     /// Whole faded or see-through bodies redrawn from the model's blocks in this scene's palette.
     recoloured: Vec<BlockTris>,
+    /// Whole highlighted bodies' edges redrawn from the model's blocks in this scene's palette.
+    lit_edges: Vec<LitEdges>,
     /// Whole highlighted bodies drawn as placements of the scene's shared triangles.
     hover_instanced: Vec<InstancedDraw>,
     selected_instanced: Vec<InstancedDraw>,
@@ -2006,6 +2093,7 @@ impl Batches {
             self.hover_blocks = sc.hover_blocks;
             self.selected_blocks = sc.selected_blocks;
             self.recoloured = sc.recoloured;
+            self.lit_edges = sc.lit_edges;
             self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref());
             self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref());
             let mut kept = std::mem::take(&mut self.blocks);
@@ -2405,6 +2493,10 @@ pub struct Renderer {
     line: wgpu::RenderPipeline,
     /// Lines behind the model (depth test >).
     line_hidden: wgpu::RenderPipeline,
+    /// The scene's own lines in another colour and width ([`LitEdges`], `vs_line_lit`), where
+    /// they are seen and where the model hides them.
+    line_lit: wgpu::RenderPipeline,
+    line_lit_hidden: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
     /// Reference planes, axes and the ground shadow: as `trans` and `line`, but not cut by a section.
     guide_trans: wgpu::RenderPipeline,
@@ -3330,6 +3422,8 @@ impl Renderer {
             (
                 pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
+                pipeline("sc_lines_lit", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+                pipeline("sc_lines_lit_hidden", "vs_line_lit", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
             )
         };
         let lines_all = || {
@@ -3370,7 +3464,7 @@ impl Renderer {
             let (tri_hl, trans, glass_far, glass_near, ghost, xray, (glass_far_smooth, glass_near_smooth, trans_smooth), tri_hl_instanced) =
                 see_through_tris.join();
             let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
-            let (line, line_hidden) = lines.join();
+            let (line, line_hidden, line_lit, line_lit_hidden) = lines.join();
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_stencil) = resets.join();
@@ -3446,6 +3540,8 @@ impl Renderer {
                 xray,
                 line,
                 line_hidden,
+                line_lit,
+                line_lit_hidden,
                 overlay,
                 guide_trans: guide_trans.join(),
                 guide_line,
@@ -4283,6 +4379,7 @@ impl Renderer {
         lines(pass, &res.line_hidden, &m.hidden);
         in_moving(pass, &|pass, mv| lines(pass, &res.line_hidden, &mv.hidden));
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
+        lit_lines(pass, &res.line_lit_hidden, &m.blocks, &h.lit_edges, |e| e.hidden, tally);
         lines(pass, &res.line_hidden, &h.hidden);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line, &m.lines);
@@ -4290,6 +4387,9 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         lines(pass, &res.line, &sk.lines);
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
+        // Whole bodies' edges first, so an edge or a face's outline lit over them keeps its own.
+        lit_lines(pass, &res.line_lit, &m.blocks, &h.lit_edges, |e| e.halo, tally);
+        lit_lines(pass, &res.line_lit, &m.blocks, &h.lit_edges, |e| e.core, tally);
         lines(pass, &res.line, &h.lines);
         lines(pass, &res.guide_line, &h.guide_lines);
         pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);

@@ -841,6 +841,23 @@ fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
 
 @vertex
 fn vs_line(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+    return line_vertex(vi, local_a, local_b, c, wbits);
+}
+
+/// A scene's own lines drawn again in another colour and width (a whole hovered body's edges,
+/// `LitEdges`): the draw's first vertex carries them, as `6 * style + corner`, so the lines are
+/// drawn from the buffer they are already in. `style`: the palette index from bit 8, a raised
+/// line (`lifted_width`, no normals) at bit 7, and the width in eighths of a pixel below it.
+@vertex
+fn vs_line_lit(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+    let style = vi / 6u;
+    let eighths = style & 127u;
+    var w = bitcast<u32>(f32(eighths) / 8.0);
+    if ((style & 128u) != 0u) { w = 0x80000000u | (eighths << 24u); }
+    return line_vertex(vi % 6u, local_a, local_b, style >> 8u, w);
+}
+
+fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u32) -> LOut {
     let a = placed(local_a);
     let b = placed(local_b);
     var pa = a;
