@@ -79,6 +79,7 @@ fn editing_a_move_in_a_turned_component_keeps_world_distances() {
     if let Kind::Move { y, .. } = &mut d.kind {
         *y = "-12 mm".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -606,6 +607,7 @@ fn changing_the_move_type_keeps_the_move_made_so_far() {
     if let Kind::Move { angle, .. } = &mut d.kind {
         *angle = "90 deg".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -638,6 +640,7 @@ fn changing_move_types_keeps_an_off_origin_rotation() {
     if let Kind::Move { z, .. } = &mut d.kind {
         *z = "7 mm".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -750,6 +753,7 @@ fn editing_a_free_move_shows_the_values_it_was_made_with() {
         *ry = "0 deg".into();
         *rz = "0 deg".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -1450,6 +1454,47 @@ fn whole_move(h: &crate::scenario::Harness) -> Mat {
     transform(&h.app, &p).unwrap()
 }
 
+/// What Move shows is what OK makes: the commands the dialog previews, drawn by the fast move
+/// preview and run as OK runs them, put the picked bodies in the same place, and the dialog's own
+/// reading of its move (`transform`, which places the triad) takes them there too. A dialog that
+/// sends a value one of them reads differently draws the body somewhere it doesn't land. An edit
+/// is checked as the app opens it, rolled back to before the move.
+fn assert_shown_where_ok_puts_it(app: &mut SolveApp, d: &Dialog) {
+    use solidcraft_engine::geom::Aabb3;
+    let mut ok = app.session.scratch();
+    let back = app.session.doc.marker;
+    if let Some((id, _)) = d.editing {
+        let at = app.session.doc.feature_index(id).unwrap();
+        crate::dialogs::roll_marker(app, Some(at)).unwrap();
+    }
+    let cmds = crate::dialogs::preview_commands(app, d).unwrap();
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+    let drawn = crate::move_preview::MovePreview::default().compute(app, &cmds, colors).expect("the fast preview takes it").expect("drawn").bounds;
+    let m = transform(app, &params(app, d).unwrap()).unwrap();
+    let names = bodies_of(app, d);
+    let before = app.session.world_state().unwrap();
+    let mut read = Aabb3::EMPTY;
+    for name in &names {
+        for p in &before.body(name).unwrap().mesh().positions {
+            read.add(apply_point(&m, *p));
+        }
+    }
+    if d.editing.is_some() {
+        crate::dialogs::roll_marker(app, back).unwrap();
+    }
+    for (command, params) in &cmds {
+        ok.execute(command, params).unwrap();
+    }
+    let after = ok.world_state().unwrap();
+    let mut made = Aabb3::EMPTY;
+    for name in &names {
+        made = made.union(&after.body(name).unwrap().mesh().bounds());
+    }
+    let near = |a: &Aabb3, b: &Aabb3| a.min.dist(b.min) < 1e-4 && a.max.dist(b.max) < 1e-4;
+    assert!(near(&drawn, &made), "{cmds:?}: drawn at {drawn:?}, OK puts it at {made:?}");
+    assert!(near(&read, &made), "{cmds:?}: the dialog reads its move to {read:?}, OK puts it at {made:?}");
+}
+
 /// Assert that `m` turns as `want` does (its rotation part only).
 fn assert_turn(m: &Mat, want: &[[f64; 3]; 3]) {
     let rows = [0, 1, 2].map(|r| [m[0][r], m[1][r], m[2][r]]);
@@ -1568,6 +1613,7 @@ fn the_triad_sits_on_a_body_where_its_component_places_it() {
     if let Kind::Move { rz, .. } = &mut d.kind {
         *rz = "90 deg".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -1602,6 +1648,7 @@ fn a_placed_body_turns_about_the_picked_axis_through_a_type_change() {
     if let Kind::Move { angle, .. } = &mut d.kind {
         *angle = "90 deg".into();
     }
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -1631,6 +1678,7 @@ fn reopening_a_move_in_a_turned_component_changes_nothing() {
     let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
     let at = triad(&h.app, &d).unwrap().center;
     assert!((at - before.center()).len() < 1e-4, "triad at {at:?}, body at {:?}", before.center());
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
         h.app.run(&command, params).unwrap();
     }
@@ -1664,6 +1712,7 @@ fn a_reopened_turned_move_has_its_triad_on_the_body() {
     assert_eq!(rz, "100 deg");
     let at = triad(&h.app, &d).unwrap().center;
     assert!((at - body).len() < 1e-4, "a ring turns the body on the spot: {at:?}, body at {body:?}");
+    assert_shown_where_ok_puts_it(&mut h.app, &d);
     let p = params(&h.app, &d).unwrap();
     let m = transform(&h.app, &p).unwrap();
     assert!((apply_point(&m, Vec3::new(10.0, 10.0, 10.0)) - body).len() < 1e-4, "{p}");
