@@ -5,8 +5,8 @@ use std::rc::Rc;
 use std::task::Waker;
 
 use solidcraft_engine::io::vfs;
-use solidcraft_ui_egui::i18n::tr;
 use solidcraft_ui_egui::{FilePickerFuture, SolveApp, open_elsewhere::DiskAnswer, ui_kit};
+use solidcraft_ui_text::tr;
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
@@ -276,7 +276,7 @@ pub fn show(files: &Rc<Files>, ctx: &egui::Context) {
     let directory = files.server.directory.borrow().clone();
     let join = |name: &str| if directory.is_empty() { name.to_string() } else { format!("{directory}/{name}") };
     let title = if picker.save.is_some() { tr("web.server.save") } else { tr("web.server.open") };
-    let closed = ui_kit::Window::new(egui::Id::new("server_folder_picker"), "folder", title).cards(3.0).show_body(ctx, |ui| {
+    let closed = ui_kit::Window::new(egui::Id::unique("server_folder_picker"), "folder", title).cards(3.0).show_body(ctx, |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.selectable_value(&mut picker.place, 0, tr("web.server.computer"));
             ui.selectable_value(&mut picker.place, 1, tr("web.server.browser"));
@@ -303,7 +303,7 @@ pub fn show(files: &Rc<Files>, ctx: &egui::Context) {
             });
         } else {
             ui.horizontal(|ui| {
-                ui.label(solidcraft_ui_egui::i18n::format("web.server.location", &[("path", &directory)]));
+                ui.label(solidcraft_ui_text::format("web.server.location", &[("path", &directory)]));
                 if ui_kit::button(ui, tr("web.server.up"), ui_kit::Button::Small).clicked() {
                     let parent = directory.rsplit_once('/').map_or("", |(p, _)| p);
                     *files.server.directory.borrow_mut() = parent.to_string();

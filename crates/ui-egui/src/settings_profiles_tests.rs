@@ -15,15 +15,38 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 }
 
 #[test]
+fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_apply() {
+    let mut h = Harness::new();
+    crate::keymap::bind(&mut h.app, "panel.sash.left", "Ctrl+Left", false).unwrap();
+    crate::keymap::bind(&mut h.app, "panel.sash.right", "", false).unwrap();
+    h.app.preferences.live_panel_drag_preview = false;
+    run(&mut h, "settings.profile.save", json!({"name":"Panels"}));
+    let profile = run(&mut h, "settings.profile.export", json!({"name":"Panels"}))["profile"].clone();
+    assert_eq!(profile["shortcuts"]["panel.sash.left"], "Ctrl+Left");
+    assert_eq!(profile["shortcuts"]["panel.sash.right"], "");
+    assert_eq!(profile["preferences"]["live_panel_drag_preview"], false);
+    h.app.preferences.live_panel_drag_preview = true;
+    crate::keymap::reset(&mut h.app, None);
+    run(&mut h, "settings.profile.import", json!({"profile":profile,"name":"Imported panels"}));
+    run(&mut h, "settings.profile.apply", json!({"name":"Imported panels"}));
+    assert_eq!(crate::keymap::keys(&h.app, "panel.sash.left"), ["Ctrl+Left"]);
+    assert!(crate::keymap::keys(&h.app, "panel.sash.right").is_empty());
+    assert!(!h.app.preferences.live_panel_drag_preview);
+}
+
+#[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 98, "page presentation must not alter profile membership");
+    assert_eq!(keys.len(), 97, "include the live panel drag preference among the current portable settings");
     for key in [
         "nav",
+        "maya_horizontal_zoom",
         "mouse_gestures",
         "radial_context_menu",
         "zoom_reverse",
         "theme",
+        "theme_day",
+        "theme_night",
         "ui_scale",
         "ui_font",
         "navigator_style",
@@ -60,6 +83,38 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let doc = capture(&h.app, "Laptop");
     assert_eq!(doc["format"], FORMAT);
     assert_eq!(sanitize(&doc).unwrap(), doc, "a captured profile passes its own checks unchanged");
+}
+
+#[test]
+fn profile_panel_layout_is_checked_separately_from_ordinary_preferences() {
+    use solidcraft_engine::panels::{Layout, LayoutEnvelope, PanelRegistry, WorkspaceId, encode};
+
+    let h = Harness::new();
+    let mut doc = capture(&h.app, "Layout");
+    assert_eq!(doc["panel_layout"]["version"], 2, "Classic captures the shared workspace layout");
+    let envelope = LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()));
+    let bytes = encode(&envelope, &PanelRegistry::default()).unwrap();
+    let layout = json!({"version":1,"envelope":String::from_utf8(bytes).unwrap()});
+    doc["panel_layout"] = layout.clone();
+    assert_eq!(sanitize(&doc).unwrap()["panel_layout"], layout, "the current layout travels by value");
+    let workspaces = json!({"version":2,"selected":"fixture.workspace","workspaces":{"fixture.workspace":layout["envelope"]}});
+    doc["panel_layout"] = workspaces.clone();
+    assert_eq!(sanitize(&doc).unwrap()["panel_layout"], workspaces, "workspace arrangements and selection travel together");
+
+    for invalid in [
+        Value::Null,
+        json!([]),
+        json!({"version":99,"envelope":"future"}),
+        json!({"version":1,"envelope":"not a layout"}),
+        json!({"version":1,"envelope":"x".repeat(256 * 1024 + 1)}),
+        json!({"version":1,"catalogue":[1,2,3]}),
+        json!({"version":2,"selected":"fixture.workspace","workspaces":{}}),
+        json!({"version":2,"selected":"missing","workspaces":{"fixture.workspace":layout["envelope"]}}),
+        json!({"version":2,"selected":"different","workspaces":{"different":layout["envelope"]}}),
+    ] {
+        doc["panel_layout"] = invalid;
+        assert!(sanitize(&doc).is_err(), "an explicit invalid layout must not become a profile that silently omits it");
+    }
 }
 
 #[test]
@@ -215,7 +270,7 @@ fn theme_options_profiles_restore_replace_and_preserve_stale_values() {
     assert_eq!(out["skipped"], json!([]));
     assert_eq!(serde_json::to_value(&h.app.preferences.theme_options).unwrap(), options);
     h.frames(2);
-    assert_eq!(crate::theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
+    assert_eq!(solidcraft_theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
     run(&mut h, "settings.profile.apply", json!({"name":"Empty"}));
     assert!(h.app.preferences.theme_options.is_empty());
     run(&mut h, "settings.profile.apply", json!({"name":"Options"}));
@@ -356,10 +411,10 @@ fn cancel_in_preferences_takes_a_switch_back() {
 fn starting_a_profile_command_opens_preferences_instead_of_failing() {
     let mut h = Harness::new();
     h.app.start("settings.profile.save");
-    assert!(h.app.prefs_window.open);
-    assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GENERAL);
+    assert!(h.app.prefs_window.shell.open);
+    assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GENERAL);
     h.frames(2);
-    assert!(h.app.prefs_window.open);
+    assert!(h.app.prefs_window.shell.open);
 }
 
 #[test]
@@ -376,7 +431,7 @@ fn typing_a_profile_name_keeps_focus_out_of_preferences_search() {
     for text in ["Lap", "top"] {
         h.step(&json!({"text": text})).expect("type a profile name");
         h.frames(2);
-        assert_eq!(h.app.prefs_window.filter, "profiles", "profile-name text went to Preferences search");
+        assert_eq!(h.app.prefs_window.shell.filter, "profiles", "profile-name text went to Preferences search");
         assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(name_focus), "the name field keeps focus");
     }
     assert!(h.widget("Laptop").is_some(), "the name field contains the typed name");
@@ -384,7 +439,7 @@ fn typing_a_profile_name_keeps_focus_out_of_preferences_search() {
     h.frames(2);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
     assert_eq!(h.app.settings_profiles.names(), ["Laptop"]);
-    assert_eq!(h.app.prefs_window.filter, "profiles");
+    assert_eq!(h.app.prefs_window.shell.filter, "profiles");
 }
 
 #[test]
@@ -432,7 +487,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
                 .unwrap();
             let count = crate::scenario::rect_of("dialog:section:Profiles:count").unwrap();
             assert!((count.left() - title.right() - 12.0).abs() < 1.1, "{theme}: count follows the painted title");
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let rule = h
                 .shapes
                 .iter()
@@ -550,11 +605,11 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
         let active = crate::scenario::rect_of("prefs:profile:Desk:active").unwrap();
         assert!(desk.contains_rect(active));
         assert!((active.height() - 18.0).abs() < 0.5);
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == desk && rect.fill == t.selected_bg && rect.stroke.color == t.form_primary)));
-        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if desk.contains(text.pos) && text.galley.job.text == "Desk" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_label)))));
+        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if desk.contains(text.pos) && text.galley.job.text == "Desk" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::ui_kit::type_face::semibold(t.font_label)))));
         let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if body.contains(text.pos) && text.galley.job.text == "Appearance" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_caption)))));
+        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if body.contains(text.pos) && text.galley.job.text == "Appearance" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::ui_kit::type_face::semibold(t.font_caption)))));
         assert!(laptop.contains_rect(crate::scenario::rect_of("prefs:profile:Laptop:apply").unwrap()));
         h.step(&json!({"click":{"handle":"prefs:profile:Laptop:apply"}})).unwrap();
         h.frames(3);
@@ -592,8 +647,8 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
             Some("Laptop"),
             "replacement keeps the typed name too"
         );
-        assert!(h.app.prefs_window.filter.is_empty(), "name entry must not type into search");
-        assert!(h.app.prefs_window.open);
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "name entry must not type into search");
+        assert!(h.app.prefs_window.shell.open);
     }
 }
 
@@ -637,7 +692,7 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
     assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk"]);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
     assert!(!h.app.preferences.zoom_reverse);
-    assert!(h.app.prefs_window.open && h.app.prefs_window.filter.is_empty());
+    assert!(h.app.prefs_window.shell.open && h.app.prefs_window.shell.filter.is_empty());
     assert_eq!(
         h.output
             .accesskit_update
@@ -653,7 +708,12 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
 
     h.step(&json!({"choose_file":"Laptop.solidcraft-profile.json"})).unwrap();
     h.step(&json!({"click":{"handle":"prefs:profile:import"}})).unwrap();
-    h.frames(6);
+    for _ in 0..600 {
+        if h.app.settings_profiles.names() == ["Travel", "Desk", "Laptop"] {
+            break;
+        }
+        h.frames(1);
+    }
     assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk", "Laptop"]);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
     assert!(!h.app.preferences.zoom_reverse, "import keeps the active settings");
@@ -709,7 +769,7 @@ fn general_profile_row_rename_commits_or_cancels_without_closing_preferences() {
         let committed = matches!(action, "Enter" | "Tab" | "ok");
         assert_eq!(h.app.settings_profiles.names(), [if committed { "Travel" } else { "Laptop" }, "Desk"], "{action}");
         assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
-        assert!(h.app.prefs_window.open && h.app.prefs_window.filter.is_empty(), "{action}");
+        assert!(h.app.prefs_window.shell.open && h.app.prefs_window.shell.filter.is_empty(), "{action}");
         assert!(crate::scenario::rect_of("prefs:profile:rename_popup").is_none());
     }
 }
@@ -731,7 +791,7 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
         h.frames(3);
         assert_eq!(h.app.settings_profiles.names(), ["Laptop", "Desk"]);
         assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
-        assert!(h.app.prefs_window.open);
+        assert!(h.app.prefs_window.shell.open);
         if to == "Desk" {
             assert!(h.widget("another settings profile is called `Desk`").is_some(), "the existing act outcome surfaces duplicates");
         }
@@ -739,20 +799,15 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
 }
 
 #[test]
-fn profile_keys_preserve_the_literal_pre_split_baseline() {
+fn profile_keys_cover_the_current_portable_preferences() {
     let expected = [
         "browser_bodies_folders",
-        "browser_collapsed",
         "browser_eye_left",
-        "browser_float",
-        "browser_share",
-        "browser_show",
-        "browser_width",
         "center_arc_follows_cursor",
         "color_vision",
         "dialog_buttons",
-        "dialog_place",
         "direct_interaction",
+        "escape_twice_finishes_sketch",
         "free_orbit",
         "free_orbit_upright",
         "hidden_toolbar_tabs",
@@ -762,15 +817,18 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "history_sketches",
         "home_fit_size",
         "invert_navigator_arrows",
+        "keep_hover_while_navigating",
         "keep_work_on_tab_switch",
         "language",
         "layout",
         "line_drag_draws_one",
         "line_hover_tangent_arc",
+        "live_panel_drag_preview",
         "logo_accent",
         "look_at_anim",
         "look_at_speed",
         "manipulator_free_alt",
+        "maya_horizontal_zoom",
         "middle_double_click",
         "mouse_gestures",
         "nav",
@@ -792,8 +850,10 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "ribbon_click_ends_tool",
         "ribbon_icon_grid",
         "ribbon_labels",
+        "ribbon_menus_follow_hover",
         "ribbon_menus_skip_pinned",
         "ribbon_reveal",
+        "ribbon_tabs_only",
         "right_drag_orbits",
         "select_other_hidden",
         "selection_shift_add_only",
@@ -807,6 +867,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "sketch_face_activates_part",
         "sketch_open_look_at",
         "sketch_recent_snap",
+        "sketch_snap_to_visible_grid",
         "sketch_state_icons",
         "sketch_tab_always",
         "sketch_tracking_guides",
@@ -815,16 +876,14 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "status_bar",
         "suppress_sketch_snap",
         "theme",
+        "theme_day",
         "theme_follow",
+        "theme_night",
         "theme_options",
-        "timeline_collapsed",
-        "timeline_left",
-        "timeline_left_browser_collapsed",
-        "timeline_left_width",
         "timeline_origin_bodies",
-        "timeline_under_browser",
         "toast_place",
         "trackpad_pan",
+        "trackpad_twist_turns",
         "trackpad_zoom_modifier",
         "ui_font",
         "ui_scale",
@@ -842,7 +901,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 98);
+    assert_eq!(expected.len(), 97);
     assert_eq!(actual, expected);
 }
 
@@ -850,7 +909,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
 fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     let mut h = Harness::new();
     let defaults = crate::prefs::Prefs::default();
-    assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc);
+    assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc && !defaults.ribbon_menus_follow_hover);
     for (key, page) in [("keep_work_on_tab_switch", crate::prefs::PAGE_LAYOUT), ("line_hover_tangent_arc", crate::prefs::PAGE_SKETCH)] {
         let homes: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter_map(|(field, page)| (*field == key).then_some(*page)).collect();
         assert_eq!(homes, [Some(page)], "{key} keeps its new page home");
@@ -867,6 +926,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.invert_navigator_arrows = true;
     h.app.preferences.home_fit_size = 0.5;
     h.app.preferences.ribbon_click_ends_tool = false;
+    h.app.preferences.ribbon_menus_follow_hover = true;
     h.app.preferences.sketch_face_activates_part = true;
     run(&mut h, "settings.profile.save", json!({"name":"Moved"}));
     let saved = h.app.settings_profiles.prefs();
@@ -878,6 +938,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         ("invert_navigator_arrows", json!(true)),
         ("navigator_fit", json!(true)),
         ("ribbon_click_ends_tool", json!(false)),
+        ("ribbon_menus_follow_hover", json!(true)),
         ("sketch_face_activates_part", json!(true)),
     ] {
         assert_eq!(doc["preferences"][key], value, "capture retains {key}");
@@ -906,10 +967,11 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.invert_navigator_arrows = defaults.invert_navigator_arrows;
     h.app.preferences.home_fit_size = defaults.home_fit_size;
     h.app.preferences.ribbon_click_ends_tool = defaults.ribbon_click_ends_tool;
+    h.app.preferences.ribbon_menus_follow_hover = defaults.ribbon_menus_follow_hover;
     h.app.preferences.sketch_face_activates_part = defaults.sketch_face_activates_part;
     let out = run(&mut h, "settings.profile.apply", json!({"name":"Moved"}));
     assert_eq!(out["skipped"], json!([]));
-    assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc);
+    assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc && h.app.preferences.ribbon_menus_follow_hover);
     assert_eq!(capture(&h.app, "Moved"), doc);
     for value in [0.05, 1.1] {
         let mut invalid = doc.clone();
@@ -918,6 +980,24 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         let out = run(&mut h, "settings.profile.apply", json!({"name":imported["name"]}));
         assert_eq!(out["skipped"], json!(["home_fit_size"]));
         assert_eq!(h.app.preferences.home_fit_size, 0.5, "an out-of-range profile value is refused");
+    }
+}
+
+#[test]
+fn theme_day_and_night_are_captured_restored_and_saved_in_appearance_profiles() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"theme":"system", "theme_day":"akari", "theme_night":"onyx"}));
+    run(&mut h, "settings.profile.save", json!({"name":"System pair"}));
+    let saved = h.app.settings_profiles.list[0].clone();
+    assert_eq!(saved["preferences"]["theme_day"], "akari");
+    assert_eq!(saved["preferences"]["theme_night"], "onyx");
+    assert_eq!(sanitize(&saved).unwrap(), saved);
+    h.call("ui.prefs", json!({"theme_day":"light", "theme_night":"dark"}));
+    run(&mut h, "settings.profile.apply", json!({"name":"System pair"}));
+    assert_eq!((&h.app.preferences.theme_day[..], &h.app.preferences.theme_night[..]), ("akari", "onyx"));
+    for key in ["theme_day", "theme_night"] {
+        let pages: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter(|(field, _)| *field == key).map(|(_, page)| *page).collect();
+        assert_eq!(pages, [Some(crate::prefs::PAGE_APPEARANCE)]);
     }
 }
 
@@ -937,7 +1017,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.frames(2);
     assert!(crate::scenario::rect_of("dialog:list:Laptop").is_some(), "the card's padding opens its real menu");
     h.step(&json!({"key":"Escape"})).unwrap();
-    assert!(h.app.prefs_window.open);
+    assert!(h.app.prefs_window.shell.open);
     assert!(crate::scenario::rect_of("dialog:list:Laptop").is_none(), "Escape dismisses the sidebar menu itself");
     h.step(&json!({"key":"Enter"})).unwrap();
     h.frames(2);
@@ -968,7 +1048,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     h.step(&json!({"widget":"Save"})).unwrap();
     h.frames(3);
     assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
-    assert!(h.app.prefs_window.open, "saving a profile keeps Preferences open");
+    assert!(h.app.prefs_window.shell.open, "saving a profile keeps Preferences open");
     let saved = run(&mut h, "settings.profile.export", json!({"name":"Laptop"}));
     assert_eq!(saved["profile"]["preferences"]["direct_interaction"], true);
     h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
@@ -976,7 +1056,7 @@ fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
     let profiles_label = h.app.tr("prefs.profiles").to_string();
     h.step(&json!({"widget":profiles_label})).unwrap();
     h.frames(3);
-    assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GENERAL);
+    assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GENERAL);
     assert_eq!(
         h.output
             .accesskit_update

@@ -37,11 +37,8 @@ impl Faces {
                                     let [t0, t1] = r.edges[u.edge as usize].interval;
                                     (0..64).map(move |k| {
                                         let x = k as f64 / 64.0;
-                                        solidcraft_geom::brep::pcurve::eval(
-                                            &u.pcurve,
-                                            if u.forward { t0 + (t1 - t0) * x } else { t1 - (t1 - t0) * x },
-                                        )
-                                        .unwrap()
+                                        solidcore_ops::pcurve::eval(&u.pcurve, if u.forward { t0 + (t1 - t0) * x } else { t1 - (t1 - t0) * x })
+                                            .unwrap()
                                     })
                                 })
                                 .collect(),

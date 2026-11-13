@@ -207,7 +207,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     let Some((lines, _, _)) = picked_box(app, d) else { return };
     let Some(frame) = frame_of(app, d) else { return };
     let Some(plane) = app.session.active_sketch.and_then(|id| crate::canvas::profile_plane(app, id)) else { return };
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let painter = ui.painter().clone();
     let stroke = Stroke::new(1.5, t.accent);
     // The picks where OK would leave them.
@@ -240,7 +240,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         return;
     }
     for (i, (rect, part, cursor)) in parts.into_iter().enumerate() {
-        let response = ui.interact(rect, egui::Id::new(("sc_transform_handle", i)), Sense::drag()).on_hover_cursor(cursor);
+        let response = ui.interact(rect, egui::Id::unique(("sc_transform_handle", i)), Sense::drag()).on_hover_cursor(cursor);
         crate::scenario::publish_handle(&format!("transform:handle:{i}"), rect.center());
         if response.drag_started()
             && let Some(from) = response.interact_pointer_pos().and_then(|p| pointer_on_sketch(&plane, proj, p))

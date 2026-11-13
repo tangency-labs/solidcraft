@@ -2,7 +2,7 @@
 
 use serde_json::json;
 use solidcraft_engine::recovery::{self, Autosaver, Entry};
-use solidcraft_engine::{Result, Session};
+use solidcraft_engine::{Result as EngineResult, Session};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -25,15 +25,21 @@ pub struct Autosaves {
 
 impl Autosaves {
     /// Save the active design immediately, including when taking over a recovered entry.
-    pub fn save(&mut self, session: &Session) -> Result<bool> {
+    pub fn save(&mut self, session: &Session) -> EngineResult<bool> {
         save_slot(&self.dir, &mut self.active, session, true, true)
+    }
+
+    /// Save a background tab's design now, under that tab's own autosaver. A recovered design
+    /// that lands behind keeps an entry of its own before the recovery entry it came from goes.
+    pub(crate) fn save_background(&mut self, slot: &mut crate::documents::DocSlot) -> EngineResult<bool> {
+        save_slot(&self.dir, &mut slot.autosave, &slot.session, true, true)
     }
 }
 
 /// Bring one tab's autosave up to date. `due`: its turn has come. `wait`: write on this thread
 /// and wait for it (Save, close, shutdown); otherwise the write runs on a worker thread, so a
 /// scheduled autosave of several large designs never holds up the window (#3044).
-fn save_slot(dir: &Path, slot: &mut Option<Autosaver>, session: &Session, due: bool, wait: bool) -> Result<bool> {
+fn save_slot(dir: &Path, slot: &mut Option<Autosaver>, session: &Session, due: bool, wait: bool) -> EngineResult<bool> {
     // Clean tabs need no serialization or entry, even between scheduled saves.
     if !session.is_dirty() {
         if let Some(mut a) = slot.take() {
@@ -121,10 +127,10 @@ pub(crate) fn ago(secs: u64) -> String {
 pub fn ago_between(now: u64, secs: u64) -> String {
     let d = now.saturating_sub(secs);
     match d {
-        0..=59 => crate::i18n::tr("recovery.just_now").to_string(),
-        60..=3599 => crate::i18n::format("recovery.min_ago", &[("count", &(d / 60).to_string())]),
-        3600..=86_399 => crate::i18n::format("recovery.hours_ago", &[("count", &(d / 3600).to_string())]),
-        _ => crate::i18n::format("recovery.days_ago", &[("count", &(d / 86_400).to_string())]),
+        0..=59 => solidcraft_ui_text::tr("recovery.just_now").to_string(),
+        60..=3599 => solidcraft_ui_text::format("recovery.min_ago", &[("count", &(d / 60).to_string())]),
+        3600..=86_399 => solidcraft_ui_text::format("recovery.hours_ago", &[("count", &(d / 3600).to_string())]),
+        _ => solidcraft_ui_text::format("recovery.days_ago", &[("count", &(d / 86_400).to_string())]),
     }
 }
 
@@ -140,40 +146,43 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let mut act: Option<(Entry, bool)> = None;
     let mut discard_all = false;
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_recover_prompt"), "restore", crate::i18n::tr_label("Recover unsaved design?"))
-        .actions("", crate::i18n::tr_label("Later"), None)
-        .show_with_left(
-            ctx,
-            true,
-            |ui| {
-                ui_kit::text(
-                    ui,
-                    crate::i18n::tr_label("SolidCraft closed before these designs were saved. Their last autosave can be opened."),
-                    ui_kit::Text::Report("intro", false),
-                );
-                for (index, e) in app.recoverable.iter().take(20).enumerate() {
-                    ui_kit::divider(ui, &format!("entry:{index}"));
-                    ui_kit::label_actions(ui, &e.name, |ui| {
-                        if ui_kit::button(ui, crate::i18n::tr_label("Recover"), ui_kit::Button::Normal).clicked() {
-                            act = Some((e.clone(), true));
-                        }
-                        if ui_kit::button(ui, crate::i18n::tr_label("Discard"), ui_kit::Button::Normal).clicked() {
-                            act = Some((e.clone(), false));
-                        }
-                    });
-                    let file = e.path.clone().unwrap_or_else(|| crate::i18n::tr("recovery.never_saved").to_string());
-                    let detail =
-                        crate::i18n::format("recovery.detail", &[("file", &file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))]);
-                    ui_kit::text(ui, &detail, ui_kit::Text::Note(&format!("detail:{index}")));
-                }
-            },
-            // Away from Later: it asks first, then discards every listed autosave (#9299).
-            |ui| {
-                let response = ui_kit::button(ui, crate::i18n::tr("recovery.discard_all"), ui_kit::Button::Normal);
-                crate::scenario::publish_target("recovery:discard_all", response.rect);
-                discard_all = response.clicked();
-            },
-        );
+    let (closed, action) =
+        ui_kit::Window::new(egui::Id::unique("sc_recover_prompt"), "restore", solidcraft_ui_text::tr_label("Recover unsaved design?"))
+            .actions("", solidcraft_ui_text::tr_label("Later"), None)
+            .show_with_left(
+                ctx,
+                true,
+                |ui| {
+                    ui_kit::text(
+                        ui,
+                        solidcraft_ui_text::tr_label("SolidCraft closed before these designs were saved. Their last autosave can be opened."),
+                        ui_kit::Text::Report("intro", false),
+                    );
+                    for (index, e) in app.recoverable.iter().take(20).enumerate() {
+                        ui_kit::divider(ui, &format!("entry:{index}"));
+                        ui_kit::label_actions(ui, &e.name, |ui| {
+                            if ui_kit::button(ui, solidcraft_ui_text::tr_label("Recover"), ui_kit::Button::Normal).clicked() {
+                                act = Some((e.clone(), true));
+                            }
+                            if ui_kit::button(ui, solidcraft_ui_text::tr_label("Discard"), ui_kit::Button::Normal).clicked() {
+                                act = Some((e.clone(), false));
+                            }
+                        });
+                        let file = e.path.clone().unwrap_or_else(|| solidcraft_ui_text::tr("recovery.never_saved").to_string());
+                        let detail = solidcraft_ui_text::format(
+                            "recovery.detail",
+                            &[("file", &file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))],
+                        );
+                        ui_kit::text(ui, &detail, ui_kit::Text::Note(&format!("detail:{index}")));
+                    }
+                },
+                // Away from Later: it asks first, then discards every listed autosave (#9299).
+                |ui| {
+                    let response = ui_kit::button(ui, solidcraft_ui_text::tr("recovery.discard_all"), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("recovery:discard_all", response.rect);
+                    discard_all = response.clicked();
+                },
+            );
     if discard_all {
         app.recovery_discard_all = true;
         return;
@@ -183,8 +192,57 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         apply(app, entry, recover);
     }
     if later {
-        app.recoverable.clear();
+        let _ = answer(app, "later", None);
     }
+}
+
+/// The prompt as the control channel's `ui.inspect` reports it (`dialog`), or `None` when
+/// nothing waits to be recovered.
+pub fn describe(app: &SolveApp) -> Option<serde_json::Value> {
+    if app.recoverable.is_empty() {
+        return None;
+    }
+    let designs: Vec<_> = app
+        .recoverable
+        .iter()
+        .take(20)
+        .map(|e| json!({"id": e.id, "name": e.name, "path": e.path, "features": e.features, "saved_at": e.saved_at, "autosaved": ago(e.saved_at)}))
+        .collect();
+    Some(json!({
+        "kind": "recover_unsaved",
+        "title": "Recover unsaved design?",
+        "designs": designs,
+        "actions": ["recover", "discard", "later"],
+    }))
+}
+
+/// What the prompt's buttons do: `recover` or `discard` the design `id` (default: the first one
+/// listed), or `later` (keep them all for the next launch). The control channel's
+/// `ui.recover` answers through here too.
+pub fn answer(app: &mut SolveApp, action: &str, id: Option<&str>) -> Result<(), String> {
+    if app.recoverable.is_empty() {
+        return Err("no Recover unsaved design? prompt is open".into());
+    }
+    if action == "later" {
+        app.recoverable.clear();
+        return Ok(());
+    }
+    if action != "recover" && action != "discard" {
+        return Err(format!("unknown action `{action}` (recover, discard or later)"));
+    }
+    let e = match id {
+        Some(id) => app.recoverable.iter().find(|e| e.id == id).cloned().ok_or_else(|| format!("no recovered design `{id}` is offered"))?,
+        None => app.recoverable.first().cloned().ok_or("no recovered design is offered")?,
+    };
+    if action == "recover" && app.session.is_dirty() {
+        return Err("save or discard the open design's changes before recovering another".into());
+    }
+    // `file_load` refuses this later, after `apply` has taken the entry off the list.
+    if action == "recover" && app.docs.count() >= crate::documents::MAX_OPEN && !crate::documents::active_is_blank(app) {
+        return Err("too many open designs; close a tab before opening another".into());
+    }
+    apply(app, e, action == "recover");
+    Ok(())
 }
 
 /// A design copy the web app kept in the browser (#10220), as its "Restore unsaved design?"
@@ -209,27 +267,27 @@ pub enum CopyAnswer {
 /// for every copy, each with Restore, Open saved version (when it has a file) and Discard, in the
 /// same words as the desktop's recovery window. Answers which copy and what was chosen.
 pub fn browser_copies_window(ctx: &egui::Context, language: &str, copies: &[BrowserCopy]) -> Option<(usize, CopyAnswer)> {
-    let _language = crate::i18n::scope(language);
+    let _language = solidcraft_ui_text::scope(language);
     copies.first()?;
     let title = match copies {
-        [one] => crate::i18n::format("recovery.restore_title_one", &[("name", &crate::i18n::tr_name(one.name)), ("when", &one.when)]),
-        _ => crate::i18n::tr("recovery.restore_title").to_string(),
+        [one] => solidcraft_ui_text::format("recovery.restore_title_one", &[("name", &crate::i18n::tr_name(one.name)), ("when", &one.when)]),
+        _ => solidcraft_ui_text::tr("recovery.restore_title").to_string(),
     };
     let mut act = None;
-    let _ = ui_kit::Window::new(egui::Id::new("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
-        ui_kit::text(ui, crate::i18n::tr("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
+    let _ = ui_kit::Window::new(egui::Id::unique("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
+        ui_kit::text(ui, solidcraft_ui_text::tr("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
         for (index, c) in copies.iter().enumerate() {
             if copies.len() > 1 {
                 ui_kit::divider(ui, &format!("entry:{index}"));
-                let row = crate::i18n::format("recovery.restore_row", &[("name", &crate::i18n::tr_name(c.name)), ("when", &c.when)]);
+                let row = solidcraft_ui_text::format("recovery.restore_row", &[("name", &crate::i18n::tr_name(c.name)), ("when", &c.when)]);
                 ui_kit::text(ui, &row, ui_kit::Text::Report(&format!("row:{index}"), false));
             }
             ui.horizontal(|ui| {
-                let mut answers = vec![(CopyAnswer::Restore, crate::i18n::tr("recovery.restore"))];
+                let mut answers = vec![(CopyAnswer::Restore, solidcraft_ui_text::tr("recovery.restore"))];
                 if c.open_saved {
-                    answers.push((CopyAnswer::OpenSaved, crate::i18n::tr("recovery.open_saved")));
+                    answers.push((CopyAnswer::OpenSaved, solidcraft_ui_text::tr("recovery.open_saved")));
                 }
-                answers.push((CopyAnswer::Discard, crate::i18n::tr_label("Discard")));
+                answers.push((CopyAnswer::Discard, solidcraft_ui_text::tr_label("Discard")));
                 for (answer, text) in answers {
                     if ui_kit::button(ui, text, ui_kit::Button::Normal).clicked() {
                         act = Some((index, answer));
@@ -245,15 +303,15 @@ pub fn browser_copies_window(ctx: &egui::Context, language: &str, copies: &[Brow
 fn confirm_discard_all(app: &mut SolveApp, ctx: &egui::Context) {
     let count = app.recoverable.len();
     let title = if count == 1 {
-        crate::i18n::tr("recovery.discard_all_title_one").to_string()
+        solidcraft_ui_text::tr("recovery.discard_all_title_one").to_string()
     } else {
-        crate::i18n::format("recovery.discard_all_title", &[("count", &count.to_string())])
+        solidcraft_ui_text::format("recovery.discard_all_title", &[("count", &count.to_string())])
     };
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_recover_discard_all"), "delete", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_recover_discard_all"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
-        .actions(crate::i18n::tr("recovery.discard_all"), crate::i18n::tr("ui.cancel"), None)
+        .actions(solidcraft_ui_text::tr("recovery.discard_all"), solidcraft_ui_text::tr("ui.cancel"), None)
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, crate::i18n::tr("recovery.discard_all_detail"), ui_kit::Text::Report("discard_all", false));
+            ui_kit::text(ui, solidcraft_ui_text::tr("recovery.discard_all_detail"), ui_kit::Text::Report("discard_all", false));
         });
     match action {
         ui_kit::Action::Ok => {
@@ -455,6 +513,21 @@ mod tests {
         assert!(entries(&dir).is_empty());
         drop(app);
         assert!(recovery::orphans(&dir).is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Saving a background tab's design writes it under that tab's own autosaver: a recovered
+    /// design that lands behind keeps an entry of its own before the old recovery entry goes.
+    #[test]
+    fn a_background_tabs_design_saves_under_its_own_autosaver() {
+        let (mut app, dir) = app("save-background", Duration::ZERO);
+        edit(&mut app);
+        documents::new_tab(&mut app);
+        let uid = app.docs.background().next().map(|s| s.uid).expect("a background tab");
+        let (autosave, docs) = (&mut app.autosave, &mut app.docs);
+        let slot = docs.background_slot_mut(uid).expect("the background slot");
+        assert!(autosave.as_mut().expect("autosave").save_background(slot).unwrap(), "it wrote the design");
+        assert_eq!(entries(&dir).len(), 1, "the background design has an entry of its own");
         fs::remove_dir_all(dir).unwrap();
     }
 

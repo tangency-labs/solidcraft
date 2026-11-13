@@ -151,6 +151,7 @@ fn play(h: &mut Harness) {
     h.frames(2);
 }
 
+/// Clicks and a drag that start on an offset trim independent ends and preserve the expected undo history.
 #[test]
 fn trimming_construction_source_and_offsets_by_click_or_drag_is_independent() {
     for drag in [false, true] {
@@ -171,18 +172,18 @@ fn trimming_construction_source_and_offsets_by_click_or_drag_is_independent() {
         let before = h.app.session.doc.to_json();
         let undo = h.app.session.undo.len();
         if drag {
-            let a = screen(&mut h, 4.0, 5.0);
-            let b = screen(&mut h, 15.0, 5.0);
+            let a = screen(&mut h, 15.0, 5.0);
+            let b = screen(&mut h, -10.0, 5.0);
             let mut path = vec![a];
             path.extend(steps(a, b, 16));
-            let c = screen(&mut h, -10.0, 5.0);
+            let c = screen(&mut h, 15.0, 5.0);
             path.extend(steps(b, c, 16));
             path.extend(steps(c, b, 16));
             press_and_move(&mut h, &path);
             assert_eq!(h.app.session.doc.to_json(), before);
             release(&mut h, b);
         } else {
-            let points = [[10.0, 10.0], [10.0 - 2f64.sqrt(), 10.0 + 2f64.sqrt()], [10.0 + 2f64.sqrt(), 10.0 - 2f64.sqrt()]];
+            let points = [[10.0 + 2f64.sqrt(), 10.0 - 2f64.sqrt()], [10.0 - 2f64.sqrt(), 10.0 + 2f64.sqrt()], [10.0, 10.0]];
             for point in points {
                 h.step(&json!({"click":{"sketch":point}})).unwrap();
                 h.frames(2);

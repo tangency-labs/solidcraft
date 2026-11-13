@@ -678,7 +678,7 @@ pub fn take_drops(files: &Rc<Files>, raw: &mut egui::RawInput, theme: bool) {
 /// any later page.
 fn hold_page_lock(page: &str) {
     let Some(locks) = web_locks() else { return };
-    let Ok(request) = Reflect::get(&locks, &"request".into()).and_then(|f| f.dyn_into::<Function>().map_err(JsValue::from)) else { return };
+    let Ok(request) = Reflect::get(&locks, &"request".into()).and_then(|f| f.dyn_into::<Function>()) else { return };
     // A promise that never settles: the lock is let go only when the page goes.
     let hold = Closure::<dyn FnMut(JsValue) -> js_sys::Promise>::new(|_lock: JsValue| js_sys::Promise::new(&mut |_, _| {}));
     let name = format!("{}{page}", keep::LOCK_PREFIX);

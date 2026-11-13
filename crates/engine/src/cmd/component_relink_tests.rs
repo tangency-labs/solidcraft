@@ -547,6 +547,8 @@ fn relink_repairs_a_moved_source_for_every_instance_in_one_undo_step() {
     assert!((volume(&mut s) - 12000.0).abs() < 1e-5);
     run(&mut s, "edit.redo", json!({}));
     assert_eq!(serde_json::to_value(&*s.doc).unwrap(), after);
+    // A move not captured stops a save (#9736).
+    run(&mut s, "component.capture_position", json!({}));
     run(&mut s, "file.save", json!({}));
     let mut reopened = Session::default();
     run(&mut reopened, "doc.open", json!({"path": assembly}));
@@ -649,5 +651,103 @@ fn relink_keeps_joint_definitions_and_reports_solver_diagnostics() {
     let result = run(&mut s, "component.relink", json!({"component": component, "path": replacement}));
     assert!(result["joint_errors"].as_array().unwrap().iter().any(|e| e["name"] == "Seat"));
     assert!(result["warnings"].as_array().unwrap().iter().any(|w| w.as_str().is_some_and(|w| w.contains("joint Seat:"))));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #12227: relinking one placement of several leaves the others on the old source. The placement
+/// shows a component linked to the new design, made once and reused for the next placement.
+#[test]
+fn relink_of_one_placement_leaves_the_others_on_the_old_source() {
+    let dir = folder("placement");
+    let original = dir.join("original.solidcraft");
+    let taller = dir.join("taller.solidcraft");
+    part(&original, 30);
+    part(&taller, 45);
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": original}));
+    let component = inserted["component"].as_u64().unwrap();
+    let first = inserted["occurrence"].as_u64().unwrap();
+    let mut copy = |x: i32| run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [x, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let (second, third) = (copy(50), copy(100));
+    let placed = |s: &Session, o: u64| s.doc.occurrences.iter().find(|x| x.id == o).cloned().unwrap();
+    let was = placed(&s, second);
+    let link = s.doc.links[&component].clone();
+    let before = serde_json::to_value(&*s.doc).unwrap();
+    let undo = s.undo.len();
+
+    let result = run(&mut s, "component.relink", json!({"component": component, "occurrence": second, "path": taller}));
+    let linked = result["component"].as_u64().unwrap();
+    assert_ne!(linked, component);
+    assert_eq!(result["previous_component"], component);
+    assert_eq!(result["geometry_changed"], true);
+    let now = placed(&s, second);
+    assert_eq!((now.component, now.parent, now.transform, now.grounded), (linked, was.parent, was.transform, was.grounded));
+    assert_eq!([first, third].map(|o| placed(&s, o).component), [component; 2]);
+    assert_eq!(s.doc.links[&component], link);
+    assert_eq!(s.doc.occurrences.len(), 3);
+    assert_eq!(s.undo.len(), undo + 1);
+    assert!((volume(&mut s) - (2.0 * 6000.0 + 9000.0)).abs() < 1e-5);
+    let components = s.doc.components.len();
+
+    let again = run(&mut s, "component.relink", json!({"component": component, "occurrence": third, "path": taller}));
+    assert_eq!(again["component"], linked);
+    assert_eq!(s.doc.components.len(), components);
+    assert_ne!(placed(&s, second).name, placed(&s, third).name);
+    assert!((volume(&mut s) - (6000.0 + 2.0 * 9000.0)).abs() < 1e-5);
+
+    for (params, refusal) in [
+        (json!({"component": linked, "occurrence": second, "path": taller}), "already shows this design"),
+        (json!({"component": component, "occurrence": second, "path": original}), "doesn't show that component"),
+        (json!({"component": component, "occurrence": "first", "path": taller}), "must be a placement id"),
+    ] {
+        let err = s.execute("component.relink", &params).unwrap_err().to_string();
+        assert!(err.contains(refusal), "{params}: {err}");
+    }
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A joint on the relinked placement names a face of the bodies it showed: it is moved to the
+/// same face of the bodies it shows now.
+#[test]
+fn relink_of_one_placement_moves_its_joints_to_the_same_faces() {
+    let dir = folder("placement-joints");
+    let original = dir.join("original.solidcraft");
+    let copy = dir.join("copy.solidcraft");
+    part(&original, 30);
+    std::fs::copy(&original, &copy).unwrap();
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": original}));
+    let component = inserted["component"].as_u64().unwrap();
+    let first = inserted["occurrence"].as_u64().unwrap();
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [50, 0, 0]}))["occurrence"].as_u64().unwrap();
+    // Not the first face, so a mapping that always answers the first face fails.
+    let (index, face) = {
+        let state = s.model.state();
+        let body = state.bodies.iter().find(|b| b.component == component).unwrap();
+        let names = solidcraft_doc::naming::face_names(body);
+        (names.len() - 1, names[names.len() - 1].clone())
+    };
+    run(
+        &mut s,
+        "joint.create",
+        json!({"name": "Seat", "type": "rigid", "a": {"occurrence": first, "point": [0,0,0]}, "b": {"occurrence": second, "face": face}}),
+    );
+
+    let result = run(&mut s, "component.relink", json!({"component": component, "occurrence": second, "path": copy}));
+    assert_eq!(result["geometry_changed"], false);
+    assert_eq!(result["joint_errors"], json!([]), "{result}");
+    let linked = result["component"].as_u64().unwrap();
+    let names = {
+        let state = s.model.state();
+        let body = state.bodies.iter().find(|b| b.component == linked).unwrap();
+        solidcraft_doc::naming::face_names(body).to_vec()
+    };
+    let moved = s.doc.assembly.joints[0].b.snap.face_names().into_iter().next().cloned().unwrap();
+    assert_ne!(moved, face);
+    // The copy is the same design, so the same face comes at the same place in the new body.
+    assert_eq!(moved, names[index], "{moved} is not the face that was {face}: {names:?}");
     let _ = std::fs::remove_dir_all(dir);
 }

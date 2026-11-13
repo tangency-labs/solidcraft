@@ -434,7 +434,7 @@ mod tests {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), solidcraft_ui_egui::Services::default());
         app.home.open = false;
         let ctx = Context::default();
-        let _ = ctx.run_ui(egui::RawInput { focused: true, ..Default::default() }, |_| {});
+        ctx.run_ui(egui::RawInput { focused: true, ..Default::default() }, |_| {}).textures_delta.clear();
         let mut bridge = NavBridge { shared: Arc::new(Mutex::new(Shared::default())) };
         let queue = |bridge: &NavBridge| {
             let mut shared = bridge.shared.lock().unwrap();

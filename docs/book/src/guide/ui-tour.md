@@ -1,6 +1,7 @@
 # A tour of the window
 
-![The SolidCraft window with the sample plate open, its parts numbered 1 to 8](../media/ui-tour/window.png)
+<img class="dark-ui" src="../media/ui-tour/window.png" alt="The SolidCraft window with the sample plate open, its parts numbered 1 to 8">
+<img class="light-ui" src="../media/ui-tour/window.light.png" alt="The SolidCraft window with the sample plate open, its parts numbered 1 to 8">
 
 **1** Title bar · **2** Toolbar · **3** Browser · **4** Viewport · **5** Axis view ·
 **6** Navigation bar · **7** Timeline · **8** Command search
@@ -14,20 +15,30 @@ view.
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
-  unsaved changes). On the right: Report a bug, Help (?), Preferences (which hold the theme) and the
-  window's buttons. On Linux, to have your desktop's own title bar and window buttons instead, set
+  unsaved changes). Double-click a design's tab to rename the design: type the name, then press
+  Enter or click elsewhere to keep it, or Esc to leave the old one (Preferences › Interface turns
+  this off, for a double-click that maximizes the window instead). On the right: Report a bug,
+  Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
+  desktop's own title bar and window buttons instead, set
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
   folder (see [Troubleshooting](troubleshooting.md#reset-the-settings)) and restart; `app` (the
   default) puts the application bar back.
+  The operating system's window title automatically shows the active design, such as
+  `Bracket — SolidCraft`. Unsaved changes add an asterisk: `Bracket * — SolidCraft`.
+  Taskbars and window switchers use this title; the application bar itself is unchanged.
+  With no design open, the title is `SolidCraft`.
 - **Toolbar.** The workspace switcher (DESIGN) sits on the left. The tabs (MODEL, SURFACE,
   ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW and SHEET METAL) hold sections of commands. SKETCH appears while
   editing a sketch; SHEET METAL is always there and is highlighted for the active sheet body. Both select automatically
   when entered, and the other tabs remain available. Click a
-  panel's name for all its commands. Drag a command from the dropdown onto a panel's label
+  panel's name for all its commands. With **Switch panel menus on hover** enabled in
+  **Preferences > Layout > Toolbar tabs**, click once to open a menu, then hover another
+  panel's name to switch. Move outside the ribbon and open menu to close it.
+  Drag a command from the dropdown onto a panel's label
   or empty space to append it; the insertion line shows its destination. Drop onto an existing
   button to insert before it. Buttons can also move between panels, and the layout is saved.
   Click the **+** after the tabs, right-click a tab or empty toolbar space, or use
-  **Preferences > Interface > Toolbar tabs** to hide or restore tabs. Every existing tab,
+  **Preferences > Layout > Toolbar tabs** to hide or restore tabs. Every existing tab,
   including Sheet Metal and Weldments, stays visible by default. Tabs you hide stay hidden in every
   design until you show them again. Hidden tabs keep
   their customised buttons, commands in search and shortcuts; with all tabs hidden, **+** remains.
@@ -35,9 +46,11 @@ view.
   origin, bodies, sketches, construction planes, canvases, joints and components. The eye at the
   row's right end shows or hides an item (**Preferences › Interface › Eye next to the fold arrow**
   puts it back beside the fold arrow; press an eye and drag up or down over other eyes to show or hide them all at once, as one undo step), a component's radio button makes it the active component,
-  and right-clicking any row gives that item's menu. Right-click the design or a component and choose **Expand All** or
-  **Collapse All** to open or close every folder under that row (the design row stays visible
-  when the whole tree is collapsed). Components start closed, so a large assembly opens as a
+  and right-clicking any row gives that item's menu. Right-click the design or a component and choose
+  **Organize → Collapse All** to close every component, folder and group in the whole tree, at
+  every level (the design row stays open, so its first level stays listed). On the design,
+  **Organize → Expand All** opens everything; on a component, **Expand Below** and **Collapse
+  Below** open or close only the rows under it. Components start closed, so a large assembly opens as a
   short list; open one with its fold arrow, or use **Find in Browser** on a body to open the rows
   down to it (**Preferences › Interface › Components start open** opens every component from the
   start, as before). **Preferences › Layout › Browser rows start closed** (off by default) starts
@@ -79,6 +92,9 @@ view.
   in the default and Inventor presets. In every preset, Ctrl+left drag (Cmd on macOS) that starts
   on empty space orbits; a Ctrl+click still adds to the selection. Shift+right-drag snaps to the nearest standard or
   diagonal view; Shift does not request snapping when the preset already requires it to orbit.
+  An orbit drag that reaches the edge of the view carries on: the cursor reappears at the opposite
+  edge, so you can keep turning round the model without letting go (not on Wayland or in the browser).
+  **Preferences › Navigation › Wrap the cursor while orbiting** turns this off.
 
   Enable **Preferences → Navigation → Free orbit** to rotate the mouse and 3D mouse continuously
   through both poles, preserving roll. During an orbit drag, Shift snaps the view direction and
@@ -138,6 +154,10 @@ view.
   value box in the viewport. Preferences › Interface › **Dialogs** › *In the left column* opens
   them in the browser's place instead (and the History's, when it is at the left), at least as
   wide as that column; the column comes back as it was when the dialog closes.
+  While a dialog
+  holds the column, the view's top-left corner shows the design's name: click it to open the
+  Origin, Bodies and (with the History at the left) the features over the view, and click a row
+  to pick it for the dialog's active box.
   Interface › **Dialog buttons** › **Top** puts OK, Cancel and Apply in
   the dialog's title row, right of the title, where they stay while sections open and close;
   Cancel then also takes the place of the close button. Enter and Esc work as before. The Sketch
@@ -217,6 +237,14 @@ along the bar to reorder it; right-click it and choose **Remove from Quick Acces
 The bar is empty, and so not shown, until a command is added, and holds up to 24 commands. Narrow
 windows hide it with Undo and Redo. It is saved with the toolbar's customisations, so it is
 exported with the keyboard shortcuts and carried by settings profiles.
+
+Layout › **Show only the ribbon's tabs** (off by default) folds the ribbon to its tab
+row, so the view gets the room its panels took. Click a tab to show its panels over the view; they
+close again when a command starts, when the pointer leaves them, when Escape is pressed or when the
+open tab is clicked again. The command **Ribbon Tabs Only** (VIEW tab, the toolbar's right-click
+menu and command search) switches the option, so it can be given a key in Keyboard Shortcuts:
+choose it again to keep the whole ribbon shown. Scripts run `view.ribbon_tabs_only` with
+`{"on": true}` or `{"on": false}`, or with no parameters to switch.
 
 Interface › Layout › **Show origin and bodies at the top** (off by default) puts the active
 component's Bodies folder and the Origin (planes, axes and point) at the top of the History when

@@ -1,0 +1,326 @@
+{
+ "cases": [
+  {
+   "name": "fuzz06628_squeeze_vertex_of_own_brep",
+   "inputs": {
+    "ang": 0.1,
+    "approx": 1e-06,
+    "brep_a": {
+     "dom": [
+      -1.0,
+      -1.0,
+      1.0,
+      1.0
+     ],
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "n": [
+        -0.559123135141337,
+        0.7811695207977465,
+        0.4717521417646846
+       ],
+       "o": [
+        -1.0,
+        1.0031080775952232,
+        -1.7827244181741975
+       ]
+      }
+     }
+    },
+    "brep_b": {
+     "file": "surf_rev.smb",
+     "kind": "file",
+     "rebuild": false
+    },
+    "ctor": 0,
+    "ops": [
+     {
+      "a": [
+       0,
+       0,
+       10730
+      ],
+      "b": [
+       1,
+       0,
+       14785
+      ],
+      "op": "relate"
+     },
+     {
+      "a": [
+       0,
+       0,
+       24579
+      ],
+      "b": [
+       1,
+       0,
+       30152
+      ],
+      "op": "relate"
+     },
+     {
+      "a": [
+       0,
+       0,
+       62571
+      ],
+      "b": [
+       1,
+       0,
+       62571
+      ],
+      "op": "relate"
+     },
+     {
+      "bv": [
+       0,
+       0,
+       10730
+      ],
+      "op": "squeeze",
+      "ov": [
+       0,
+       0,
+       11343
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "fuzz08367_squeeze_vertex_of_own_brep",
+   "inputs": {
+    "ang": 0.001,
+    "approx": 0.0001,
+    "brep_a": {
+     "file": "torus.smb",
+     "kind": "file",
+     "rebuild": true
+    },
+    "brep_b": {
+     "file": "torus.smb",
+     "kind": "file",
+     "rebuild": false
+    },
+    "ctor": 0,
+    "ops": [
+     {
+      "a": [
+       0,
+       0,
+       65117
+      ],
+      "b": [
+       1,
+       0,
+       65117
+      ],
+      "op": "relate"
+     },
+     {
+      "a": [
+       0,
+       0,
+       1502
+      ],
+      "b": [
+       1,
+       0,
+       61900
+      ],
+      "op": "relate"
+     },
+     {
+      "bv": [
+       0,
+       0,
+       1502
+      ],
+      "op": "squeeze",
+      "ov": [
+       0,
+       0,
+       49597
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "fuzz19033_squeeze_vertex_of_own_brep",
+   "inputs": {
+    "ang": -1.0,
+    "approx": -0.0,
+    "brep_a": {
+     "file": "sphere.smb",
+     "kind": "file",
+     "rebuild": false
+    },
+    "brep_b": {
+     "file": "sphere.smb",
+     "kind": "file",
+     "rebuild": false
+    },
+    "ctor": 0,
+    "ops": [
+     {
+      "a": [
+       0,
+       0,
+       37802
+      ],
+      "b": [
+       1,
+       0,
+       39393
+      ],
+      "op": "relate"
+     },
+     {
+      "a": [
+       0,
+       0,
+       28225
+      ],
+      "b": [
+       0,
+       0,
+       26806
+      ],
+      "op": "relate"
+     },
+     {
+      "bv": [
+       0,
+       0,
+       28225
+      ],
+      "op": "squeeze",
+      "ov": [
+       1,
+       0,
+       26806
+      ]
+     },
+     {
+      "op": "iir"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fuzz19955_squeeze_vertex_of_own_brep",
+   "inputs": {
+    "ang": -0.0,
+    "approx": 1e-300,
+    "brep_a": {
+     "file": "box_with_large_fillet.smb",
+     "kind": "file",
+     "rebuild": false
+    },
+    "brep_b": {
+     "file": "box_with_large_fillet.smb",
+     "kind": "file",
+     "rebuild": false
+    },
+    "ctor": 0,
+    "ops": [
+     {
+      "a": [
+       0,
+       0,
+       2
+      ],
+      "b": [
+       0,
+       0,
+       2
+      ],
+      "op": "relate"
+     },
+     {
+      "bv": [
+       0,
+       0,
+       2
+      ],
+      "op": "squeeze",
+      "ov": [
+       1,
+       0,
+       2
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "fuzz23628_squeeze_vertex_of_own_brep",
+   "inputs": {
+    "ang": 0.001,
+    "approx": 0.0001,
+    "brep_a": {
+     "file": "surf_rev.smb",
+     "kind": "file",
+     "rebuild": false
+    },
+    "brep_b": {
+     "kind": "network"
+    },
+    "ctor": 0,
+    "ops": [
+     {
+      "a": [
+       0,
+       0,
+       16906
+      ],
+      "b": [
+       1,
+       0,
+       16906
+      ],
+      "op": "relate"
+     },
+     {
+      "a": [
+       0,
+       0,
+       6602
+      ],
+      "b": [
+       1,
+       0,
+       19744
+      ],
+      "op": "relate"
+     },
+     {
+      "capture": 1e-05,
+      "op": "mgr_new",
+      "override_tol": 0.0
+     },
+     {
+      "op": "set_rels"
+     },
+     {
+      "bv": [
+       0,
+       0,
+       16906
+      ],
+      "op": "squeeze",
+      "ov": [
+       0,
+       0,
+       16906
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,1421 @@
+{
+ "cases": [
+  {
+   "name": "helix_base_valid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "helix_base_left",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 5,
+    "rorl": 0,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "helix_r0_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case r0_0; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 0,
+    "rad1": 2,
+    "turns": 5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "helix_r1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case r1_0; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 0,
+    "turns": 5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "helix_tol_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case tol_0; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0
+   }
+  },
+  {
+   "name": "helix_tol_neg",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case tol_neg; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": -1
+   }
+  },
+  {
+   "name": "helix_tol_1e-9",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case tol_1e-9; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "helix_tol_just_below_min",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case tol_just_below_min; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "helix_turns_max_124_25",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case turns_max_124_25; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 124.25,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "helix_turns_125",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case turns_125; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 125,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "helix_height_1e18",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case height_1e18; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 1e+18,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "helix_r0_1e18",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case r0_1e18; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 1e+18,
+    "rad1": 2,
+    "turns": 5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "helix_tol_1e18",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:687 (TestSmCreateHelixInvalidInputs, case tol_1e18; base h=10 r0=r1=2 turns=5 tol=1e-3)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 1e+18
+   }
+  },
+  {
+   "name": "prog_helix_segment",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1975 (CreateHelixSegment h=20 r=0.25 turns=0.25 RH tol=1e-7)",
+   "inputs": {
+    "op": "spiral",
+    "height": 20,
+    "rad0": 0.25,
+    "rad1": 0.25,
+    "turns": 0.25,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 1e-07
+   }
+  },
+  {
+   "name": "conical_grow",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:565 (CreateHelixSegment -> N_CrvApproxSpiral, NumPoints=0)",
+   "inputs": {
+    "op": "spiral",
+    "height": 5,
+    "rad0": 1,
+    "rad1": 3,
+    "turns": 3,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.0001
+   }
+  },
+  {
+   "name": "conical_shrink_to_apex",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:565 (CreateHelixSegment -> N_CrvApproxSpiral, NumPoints=0)",
+   "inputs": {
+    "op": "spiral",
+    "height": 5,
+    "rad0": 3,
+    "rad1": 0,
+    "turns": 2.5,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "from_apex",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:565 (CreateHelixSegment -> N_CrvApproxSpiral, NumPoints=0)",
+   "inputs": {
+    "op": "spiral",
+    "height": 5,
+    "rad0": 0,
+    "rad1": 3,
+    "turns": 2.5,
+    "rorl": 0,
+    "num_points": 0,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "tiny_turns_zero_spans",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:565 (CreateHelixSegment -> N_CrvApproxSpiral, NumPoints=0)",
+   "inputs": {
+    "op": "spiral",
+    "height": 1,
+    "rad0": 1,
+    "rad1": 1,
+    "turns": 0.0001,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "eighth_turn",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:565 (CreateHelixSegment -> N_CrvApproxSpiral, NumPoints=0)",
+   "inputs": {
+    "op": "spiral",
+    "height": 1,
+    "rad0": 1,
+    "rad1": 1,
+    "turns": 0.125,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "span_limit_hit",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:565 (CreateHelixSegment -> N_CrvApproxSpiral, NumPoints=0)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 124,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "span_limit_initial_over",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:565 (CreateHelixSegment -> N_CrvApproxSpiral, NumPoints=0)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 200,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "fixed_points_2",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:137 (NumPoints > 0)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 1,
+    "rorl": 1,
+    "num_points": 2,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "fixed_points_9",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:137 (NumPoints > 0)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 1,
+    "rorl": 1,
+    "num_points": 9,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "fixed_points_1_fits",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:141 (NumPoints 1 -> fit)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 1,
+    "rorl": 1,
+    "num_points": 1,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "fixed_points_neg_fits",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:141 (NumPoints < 1 -> fit)",
+   "inputs": {
+    "op": "spiral",
+    "height": 10,
+    "rad0": 2,
+    "rad1": 2,
+    "turns": 1,
+    "rorl": 1,
+    "num_points": -5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "fixed_points_500",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:137",
+   "inputs": {
+    "op": "spiral",
+    "height": 3,
+    "rad0": 1,
+    "rad1": 0.5,
+    "turns": 7,
+    "rorl": 1,
+    "num_points": 500,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "radius_tolerance_zeroed",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:113",
+   "inputs": {
+    "op": "spiral",
+    "height": 4,
+    "rad0": 5e-08,
+    "rad1": 2,
+    "turns": 3,
+    "rorl": 1,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "rorl_2_is_left",
+   "upstream_ref": "source/SMLib/src/NL_Spiral.cpp:131",
+   "inputs": {
+    "op": "spiral",
+    "height": 4,
+    "rad0": 1,
+    "rad1": 1,
+    "turns": 2,
+    "rorl": 2,
+    "num_points": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "volume_trilinear",
+   "upstream_ref": "source/SMLib/src/SmBSplineVolume.cpp:153 (sm_AllocateNurbVolume) / :268 (sm_AllocateAndCopyNurbVolume)",
+   "inputs": {
+    "op": "volume",
+    "cp_hi": [
+     1,
+     1,
+     1
+    ],
+    "degree": [
+     1,
+     1,
+     1
+    ],
+    "knot_hi": [
+     3,
+     3,
+     3
+    ],
+    "knots": [
+     0.0,
+     0.3333333333333333,
+     0.6666666666666666,
+     1.0,
+     0.0,
+     0.3333333333333333,
+     0.6666666666666666,
+     1.0,
+     0.0,
+     0.3333333333333333,
+     0.6666666666666666,
+     1.0
+    ],
+    "cpts": [
+     [
+      0.0,
+      -0.0,
+      1.0,
+      1.0
+     ],
+     [
+      0.5,
+      -0.25,
+      1.1428571428571428,
+      1.125
+     ],
+     [
+      1.0,
+      -0.5,
+      1.2857142857142856,
+      1.25
+     ],
+     [
+      1.5,
+      -0.75,
+      1.4285714285714286,
+      1.0
+     ],
+     [
+      2.0,
+      -1.0,
+      1.5714285714285714,
+      1.125
+     ],
+     [
+      2.5,
+      -1.25,
+      1.7142857142857144,
+      1.25
+     ],
+     [
+      3.0,
+      -1.5,
+      1.8571428571428572,
+      1.0
+     ],
+     [
+      3.5,
+      -1.75,
+      2.0,
+      1.125
+     ]
+    ]
+   }
+  },
+  {
+   "name": "volume_cubic_4x5x6",
+   "upstream_ref": "source/SMLib/src/SmBSplineVolume.cpp:153 (sm_AllocateNurbVolume) / :268 (sm_AllocateAndCopyNurbVolume)",
+   "inputs": {
+    "op": "volume",
+    "cp_hi": [
+     3,
+     4,
+     5
+    ],
+    "degree": [
+     3,
+     3,
+     3
+    ],
+    "knot_hi": [
+     7,
+     8,
+     9
+    ],
+    "knots": [
+     0.0,
+     0.14285714285714285,
+     0.2857142857142857,
+     0.42857142857142855,
+     0.5714285714285714,
+     0.7142857142857143,
+     0.8571428571428571,
+     1.0,
+     0.0,
+     0.125,
+     0.25,
+     0.375,
+     0.5,
+     0.625,
+     0.75,
+     0.875,
+     1.0,
+     0.0,
+     0.1111111111111111,
+     0.2222222222222222,
+     0.3333333333333333,
+     0.4444444444444444,
+     0.5555555555555556,
+     0.6666666666666666,
+     0.7777777777777778,
+     0.8888888888888888,
+     1.0
+    ],
+    "cpts": [
+     [
+      0.0,
+      -0.0,
+      1.0,
+      1.0
+     ],
+     [
+      0.5,
+      -0.25,
+      1.1428571428571428,
+      1.125
+     ],
+     [
+      1.0,
+      -0.5,
+      1.2857142857142856,
+      1.25
+     ],
+     [
+      1.5,
+      -0.75,
+      1.4285714285714286,
+      1.0
+     ],
+     [
+      2.0,
+      -1.0,
+      1.5714285714285714,
+      1.125
+     ],
+     [
+      2.5,
+      -1.25,
+      1.7142857142857144,
+      1.25
+     ],
+     [
+      3.0,
+      -1.5,
+      1.8571428571428572,
+      1.0
+     ],
+     [
+      3.5,
+      -1.75,
+      2.0,
+      1.125
+     ],
+     [
+      4.0,
+      -2.0,
+      2.142857142857143,
+      1.25
+     ],
+     [
+      4.5,
+      -2.25,
+      2.2857142857142856,
+      1.0
+     ],
+     [
+      5.0,
+      -2.5,
+      2.428571428571429,
+      1.125
+     ],
+     [
+      5.5,
+      -2.75,
+      2.571428571428571,
+      1.25
+     ],
+     [
+      6.0,
+      -3.0,
+      2.7142857142857144,
+      1.0
+     ],
+     [
+      6.5,
+      -3.25,
+      2.857142857142857,
+      1.125
+     ],
+     [
+      7.0,
+      -3.5,
+      3.0,
+      1.25
+     ],
+     [
+      7.5,
+      -3.75,
+      3.142857142857143,
+      1.0
+     ],
+     [
+      8.0,
+      -4.0,
+      3.2857142857142856,
+      1.125
+     ],
+     [
+      8.5,
+      -4.25,
+      3.4285714285714284,
+      1.25
+     ],
+     [
+      9.0,
+      -4.5,
+      3.5714285714285716,
+      1.0
+     ],
+     [
+      9.5,
+      -4.75,
+      3.7142857142857144,
+      1.125
+     ],
+     [
+      10.0,
+      -5.0,
+      3.857142857142857,
+      1.25
+     ],
+     [
+      10.5,
+      -5.25,
+      4.0,
+      1.0
+     ],
+     [
+      11.0,
+      -5.5,
+      4.142857142857142,
+      1.125
+     ],
+     [
+      11.5,
+      -5.75,
+      4.285714285714286,
+      1.25
+     ],
+     [
+      12.0,
+      -6.0,
+      4.428571428571429,
+      1.0
+     ],
+     [
+      12.5,
+      -6.25,
+      4.571428571428571,
+      1.125
+     ],
+     [
+      13.0,
+      -6.5,
+      4.714285714285714,
+      1.25
+     ],
+     [
+      13.5,
+      -6.75,
+      4.857142857142858,
+      1.0
+     ],
+     [
+      14.0,
+      -7.0,
+      5.0,
+      1.125
+     ],
+     [
+      14.5,
+      -7.25,
+      5.142857142857143,
+      1.25
+     ],
+     [
+      15.0,
+      -7.5,
+      5.285714285714286,
+      1.0
+     ],
+     [
+      15.5,
+      -7.75,
+      5.428571428571429,
+      1.125
+     ],
+     [
+      16.0,
+      -8.0,
+      5.571428571428571,
+      1.25
+     ],
+     [
+      16.5,
+      -8.25,
+      5.714285714285714,
+      1.0
+     ],
+     [
+      17.0,
+      -8.5,
+      5.857142857142857,
+      1.125
+     ],
+     [
+      17.5,
+      -8.75,
+      6.0,
+      1.25
+     ],
+     [
+      18.0,
+      -9.0,
+      6.142857142857143,
+      1.0
+     ],
+     [
+      18.5,
+      -9.25,
+      6.285714285714286,
+      1.125
+     ],
+     [
+      19.0,
+      -9.5,
+      6.428571428571429,
+      1.25
+     ],
+     [
+      19.5,
+      -9.75,
+      6.571428571428571,
+      1.0
+     ],
+     [
+      20.0,
+      -10.0,
+      6.714285714285714,
+      1.125
+     ],
+     [
+      20.5,
+      -10.25,
+      6.857142857142857,
+      1.25
+     ],
+     [
+      21.0,
+      -10.5,
+      7.0,
+      1.0
+     ],
+     [
+      21.5,
+      -10.75,
+      7.142857142857143,
+      1.125
+     ],
+     [
+      22.0,
+      -11.0,
+      7.285714285714286,
+      1.25
+     ],
+     [
+      22.5,
+      -11.25,
+      7.428571428571429,
+      1.0
+     ],
+     [
+      23.0,
+      -11.5,
+      7.571428571428571,
+      1.125
+     ],
+     [
+      23.5,
+      -11.75,
+      7.714285714285714,
+      1.25
+     ],
+     [
+      24.0,
+      -12.0,
+      7.857142857142857,
+      1.0
+     ],
+     [
+      24.5,
+      -12.25,
+      8.0,
+      1.125
+     ],
+     [
+      25.0,
+      -12.5,
+      8.142857142857142,
+      1.25
+     ],
+     [
+      25.5,
+      -12.75,
+      8.285714285714285,
+      1.0
+     ],
+     [
+      26.0,
+      -13.0,
+      8.428571428571429,
+      1.125
+     ],
+     [
+      26.5,
+      -13.25,
+      8.571428571428571,
+      1.25
+     ],
+     [
+      27.0,
+      -13.5,
+      8.714285714285715,
+      1.0
+     ],
+     [
+      27.5,
+      -13.75,
+      8.857142857142858,
+      1.125
+     ],
+     [
+      28.0,
+      -14.0,
+      9.0,
+      1.25
+     ],
+     [
+      28.5,
+      -14.25,
+      9.142857142857142,
+      1.0
+     ],
+     [
+      29.0,
+      -14.5,
+      9.285714285714286,
+      1.125
+     ],
+     [
+      29.5,
+      -14.75,
+      9.428571428571429,
+      1.25
+     ],
+     [
+      30.0,
+      -15.0,
+      9.571428571428571,
+      1.0
+     ],
+     [
+      30.5,
+      -15.25,
+      9.714285714285714,
+      1.125
+     ],
+     [
+      31.0,
+      -15.5,
+      9.857142857142858,
+      1.25
+     ],
+     [
+      31.5,
+      -15.75,
+      10.0,
+      1.0
+     ],
+     [
+      32.0,
+      -16.0,
+      10.142857142857142,
+      1.125
+     ],
+     [
+      32.5,
+      -16.25,
+      10.285714285714286,
+      1.25
+     ],
+     [
+      33.0,
+      -16.5,
+      10.428571428571429,
+      1.0
+     ],
+     [
+      33.5,
+      -16.75,
+      10.571428571428571,
+      1.125
+     ],
+     [
+      34.0,
+      -17.0,
+      10.714285714285714,
+      1.25
+     ],
+     [
+      34.5,
+      -17.25,
+      10.857142857142858,
+      1.0
+     ],
+     [
+      35.0,
+      -17.5,
+      11.0,
+      1.125
+     ],
+     [
+      35.5,
+      -17.75,
+      11.142857142857142,
+      1.25
+     ],
+     [
+      36.0,
+      -18.0,
+      11.285714285714286,
+      1.0
+     ],
+     [
+      36.5,
+      -18.25,
+      11.428571428571429,
+      1.125
+     ],
+     [
+      37.0,
+      -18.5,
+      11.571428571428571,
+      1.25
+     ],
+     [
+      37.5,
+      -18.75,
+      11.714285714285714,
+      1.0
+     ],
+     [
+      38.0,
+      -19.0,
+      11.857142857142858,
+      1.125
+     ],
+     [
+      38.5,
+      -19.25,
+      12.0,
+      1.25
+     ],
+     [
+      39.0,
+      -19.5,
+      12.142857142857142,
+      1.0
+     ],
+     [
+      39.5,
+      -19.75,
+      12.285714285714286,
+      1.125
+     ],
+     [
+      40.0,
+      -20.0,
+      12.428571428571429,
+      1.25
+     ],
+     [
+      40.5,
+      -20.25,
+      12.571428571428571,
+      1.0
+     ],
+     [
+      41.0,
+      -20.5,
+      12.714285714285714,
+      1.125
+     ],
+     [
+      41.5,
+      -20.75,
+      12.857142857142858,
+      1.25
+     ],
+     [
+      42.0,
+      -21.0,
+      13.0,
+      1.0
+     ],
+     [
+      42.5,
+      -21.25,
+      13.142857142857142,
+      1.125
+     ],
+     [
+      43.0,
+      -21.5,
+      13.285714285714286,
+      1.25
+     ],
+     [
+      43.5,
+      -21.75,
+      13.428571428571429,
+      1.0
+     ],
+     [
+      44.0,
+      -22.0,
+      13.571428571428571,
+      1.125
+     ],
+     [
+      44.5,
+      -22.25,
+      13.714285714285714,
+      1.25
+     ],
+     [
+      45.0,
+      -22.5,
+      13.857142857142858,
+      1.0
+     ],
+     [
+      45.5,
+      -22.75,
+      14.0,
+      1.125
+     ],
+     [
+      46.0,
+      -23.0,
+      14.142857142857142,
+      1.25
+     ],
+     [
+      46.5,
+      -23.25,
+      14.285714285714286,
+      1.0
+     ],
+     [
+      47.0,
+      -23.5,
+      14.428571428571429,
+      1.125
+     ],
+     [
+      47.5,
+      -23.75,
+      14.571428571428571,
+      1.25
+     ],
+     [
+      48.0,
+      -24.0,
+      14.714285714285714,
+      1.0
+     ],
+     [
+      48.5,
+      -24.25,
+      14.857142857142858,
+      1.125
+     ],
+     [
+      49.0,
+      -24.5,
+      15.0,
+      1.25
+     ],
+     [
+      49.5,
+      -24.75,
+      15.142857142857142,
+      1.0
+     ],
+     [
+      50.0,
+      -25.0,
+      15.285714285714286,
+      1.125
+     ],
+     [
+      50.5,
+      -25.25,
+      15.428571428571429,
+      1.25
+     ],
+     [
+      51.0,
+      -25.5,
+      15.571428571428571,
+      1.0
+     ],
+     [
+      51.5,
+      -25.75,
+      15.714285714285714,
+      1.125
+     ],
+     [
+      52.0,
+      -26.0,
+      15.857142857142858,
+      1.25
+     ],
+     [
+      52.5,
+      -26.25,
+      16.0,
+      1.0
+     ],
+     [
+      53.0,
+      -26.5,
+      16.142857142857142,
+      1.125
+     ],
+     [
+      53.5,
+      -26.75,
+      16.285714285714285,
+      1.25
+     ],
+     [
+      54.0,
+      -27.0,
+      16.42857142857143,
+      1.0
+     ],
+     [
+      54.5,
+      -27.25,
+      16.57142857142857,
+      1.125
+     ],
+     [
+      55.0,
+      -27.5,
+      16.714285714285715,
+      1.25
+     ],
+     [
+      55.5,
+      -27.75,
+      16.857142857142858,
+      1.0
+     ],
+     [
+      56.0,
+      -28.0,
+      17.0,
+      1.125
+     ],
+     [
+      56.5,
+      -28.25,
+      17.142857142857142,
+      1.25
+     ],
+     [
+      57.0,
+      -28.5,
+      17.285714285714285,
+      1.0
+     ],
+     [
+      57.5,
+      -28.75,
+      17.428571428571427,
+      1.125
+     ],
+     [
+      58.0,
+      -29.0,
+      17.571428571428573,
+      1.25
+     ],
+     [
+      58.5,
+      -29.25,
+      17.714285714285715,
+      1.0
+     ],
+     [
+      59.0,
+      -29.5,
+      17.857142857142858,
+      1.125
+     ],
+     [
+      59.5,
+      -29.75,
+      18.0,
+      1.25
+     ]
+    ]
+   }
+  },
+  {
+   "name": "volume_single_point",
+   "upstream_ref": "source/SMLib/src/SmBSplineVolume.cpp:153 (sm_AllocateNurbVolume) / :268 (sm_AllocateAndCopyNurbVolume)",
+   "inputs": {
+    "op": "volume",
+    "cp_hi": [
+     0,
+     0,
+     0
+    ],
+    "degree": [
+     0,
+     0,
+     0
+    ],
+    "knot_hi": [
+     0,
+     0,
+     0
+    ],
+    "knots": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "cpts": [
+     [
+      0.0,
+      -0.0,
+      1.0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "volume_mixed",
+   "upstream_ref": "source/SMLib/src/SmBSplineVolume.cpp:153 (sm_AllocateNurbVolume) / :268 (sm_AllocateAndCopyNurbVolume)",
+   "inputs": {
+    "op": "volume",
+    "cp_hi": [
+     2,
+     0,
+     4
+    ],
+    "degree": [
+     2,
+     0,
+     1
+    ],
+    "knot_hi": [
+     5,
+     1,
+     6
+    ],
+    "knots": [
+     0.0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0,
+     0.0,
+     1.0,
+     0.0,
+     0.16666666666666666,
+     0.3333333333333333,
+     0.5,
+     0.6666666666666666,
+     0.8333333333333334,
+     1.0
+    ],
+    "cpts": [
+     [
+      0.0,
+      -0.0,
+      1.0,
+      1.0
+     ],
+     [
+      0.5,
+      -0.25,
+      1.1428571428571428,
+      1.125
+     ],
+     [
+      1.0,
+      -0.5,
+      1.2857142857142856,
+      1.25
+     ],
+     [
+      1.5,
+      -0.75,
+      1.4285714285714286,
+      1.0
+     ],
+     [
+      2.0,
+      -1.0,
+      1.5714285714285714,
+      1.125
+     ],
+     [
+      2.5,
+      -1.25,
+      1.7142857142857144,
+      1.25
+     ],
+     [
+      3.0,
+      -1.5,
+      1.8571428571428572,
+      1.0
+     ],
+     [
+      3.5,
+      -1.75,
+      2.0,
+      1.125
+     ],
+     [
+      4.0,
+      -2.0,
+      2.142857142857143,
+      1.25
+     ],
+     [
+      4.5,
+      -2.25,
+      2.2857142857142856,
+      1.0
+     ],
+     [
+      5.0,
+      -2.5,
+      2.428571428571429,
+      1.125
+     ],
+     [
+      5.5,
+      -2.75,
+      2.571428571428571,
+      1.25
+     ],
+     [
+      6.0,
+      -3.0,
+      2.7142857142857144,
+      1.0
+     ],
+     [
+      6.5,
+      -3.25,
+      2.857142857142857,
+      1.125
+     ],
+     [
+      7.0,
+      -3.5,
+      3.0,
+      1.25
+     ]
+    ]
+   }
+  }
+ ]
+}

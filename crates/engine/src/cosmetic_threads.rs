@@ -338,10 +338,10 @@ mod tests {
                 }
             }
             assert_eq!(s.doc.to_json(), saved);
-            let scene = crate::view::scene(&s, &crate::render::Camera::default()).unwrap();
+            let scene = crate::view::scene(&s, &solidcraft_viewport::Camera::default()).unwrap();
             assert!(!scene.lines.iter().any(|l| l.width == 0.85), "ordinary snapshots preserve the default-off behavior");
             for distance in [25.0, 60.0] {
-                let cam = crate::render::Camera {
+                let cam = solidcraft_viewport::Camera {
                     target: if internal { Vec3::new(10., 10., 5.) } else { Vec3::new(0., 0., 5.) },
                     distance,
                     ..Default::default()
@@ -358,9 +358,9 @@ mod tests {
                     )
                     .unwrap();
                     assert!(scene.lines.iter().any(|l| l.width == 0.85 && !l.on_top));
-                    let marked = crate::render::render(&scene, &cam, 320, 240).rgba;
+                    let marked = solidcraft_viewport::render(&scene, &cam, 320, 240).rgba;
                     scene.lines.retain(|l| l.width != 0.85);
-                    let plain = crate::render::render(&scene, &cam, 320, 240).rgba;
+                    let plain = solidcraft_viewport::render(&scene, &cam, 320, 240).rgba;
                     let changed = marked.as_chunks::<4>().0.iter().zip(plain.as_chunks::<4>().0.iter()).filter(|(a, b)| a != b).count();
                     assert!(changed > 15, "internal={internal}, distance={distance}, section={section:?}: {changed}");
                 }

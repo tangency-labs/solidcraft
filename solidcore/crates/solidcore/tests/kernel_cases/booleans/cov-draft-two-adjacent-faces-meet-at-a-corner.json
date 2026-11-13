@@ -1,0 +1,160 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "draft",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "angle": 0.17453292519943295,
+        "faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 3
+            },
+            {
+              "at": [],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              3.333333333333333,
+              0.0,
+              13.333333333333332
+            ],
+            [
+              40.0,
+              3.333333333333333,
+              13.333333333333332
+            ]
+          ],
+          "tolerance": 0.053852648071345044
+        },
+        "neutral_normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "neutral_origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "pull": [
+          0.0,
+          0.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-draft-two-adjacent-faces-meet-at-a-corner",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        30,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 6,
+    "method": "the section at height z is (40 - z tan10)(30 - z tan10); V = int_0^20 = 24000 - 70 tan10 * 200 + tan10^2 * 8000/3; still 6 faces",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 21614.332147750192,
+    "what": "two adjacent sides of a block (front and right) drafted 10 deg from the base: the drafted faces meet along a new slanted edge"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "records": "cov-draft-two-adjacent-faces-meet-at-a-corner.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4845.026329573175,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 21614.332147750196
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "draft"
+  ],
+  "ungraded": [],
+  "what": "two adjacent sides of a block (front and right) drafted 10 deg from the base: the drafted faces meet along a new slanted edge",
+  "why_not": []
+}

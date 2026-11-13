@@ -8,13 +8,20 @@ use solidcore_record::Seg2;
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
-        FeatureKind::Patch { sketch, profiles, body, edges, crown, continuity, points } => {
+        FeatureKind::Patch { sketch, profiles, profiles_3d, body, edges, crown, continuity, points } => {
             let mut made = Vec::new();
             if let Some(sk) = sketch {
                 let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
-                let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
-                for r in &regions {
-                    made.push(kernel::patch_region(&ss.plane, r)?);
+                // An empty index list means the caller asked only for 3D loops (#741).
+                if !matches!(profiles, ProfileSel::Indices { indices } if indices.is_empty()) {
+                    let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
+                    for r in &regions {
+                        made.push(kernel::patch_region(&ss.plane, r)?);
+                    }
+                }
+                for &i in profiles_3d {
+                    let p = ss.profiles_3d.get(i).ok_or_else(|| DocError::Invalid(format!("sketch {sk} has no 3D profile {i}")))?;
+                    made.push(kernel::patch_region(&p.plane, &p.region)?);
                 }
             }
             if !edges.is_empty() {
@@ -33,7 +40,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 made.push(kernel::patch_edges_with(&b.body, &crate::plain(edges), &spec)?);
             }
             if made.is_empty() {
-                return Err(DocError::Invalid("a patch needs a sketch region or a loop of edges".into()));
+                return Err(DocError::Invalid("a patch needs a sketch region, a 3D sketch loop, or a loop of edges".into()));
             }
             for (k, b) in made.into_iter().enumerate() {
                 let name = new_name(st, f, k);
@@ -63,13 +70,16 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let t = val(vals, thickness, Kind::Length)?;
             let mut tools = Vec::new();
             for n in bodies {
-                let b = st.body(n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-                tools.push(kernel::thicken(&b.body, t, *symmetric)?);
+                let b = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+                // Kept face, offset and edge walls. Carry that history so a sketch can attach
+                // to the solid's faces and follow the thickness (#7641).
+                let thickened = kernel::thicken(&b.body, t, *symmetric)?;
+                tools.push(Traced::step(thickened, &[&b.traced()]));
             }
             if tools.is_empty() {
                 return Err(DocError::Invalid("pick the surfaces to thicken".into()));
             }
-            apply_op(doc, st, f, tools, *operation, &crate::plain(targets))
+            apply_traced(doc, st, f, tools, *operation, &crate::plain(targets))
         }
         FeatureKind::SurfaceTrim { body, plane, tool, keep, keep_more, curves, with, keep_with, stitch, extend } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
@@ -106,11 +116,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                         keeps,
                     )?
                 }
-                (None, None) => kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, Some(st))?), keeps)?,
+                (None, None) => {
+                    kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?), keeps)?
+                }
             };
             let made = Traced::step(trimmed, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, made, mb.feature);
+                *slot = mb.remade(made);
             }
             Ok(())
         }
@@ -129,7 +141,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
                 Some(crate::ExtendTo::Bounds) => kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::Bounds))?,
                 Some(crate::ExtendTo::Plane(plane)) => {
-                    let tool = kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, Some(st))?);
+                    let tool = kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?);
                     kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpTo(&tool)))?
                 }
                 Some(crate::ExtendTo::Face(t)) => {
@@ -308,9 +320,20 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f.component,
             )?;
-            let (o, d) = revolve_axis(&ss, axis, &*super::axis_state(doc, st, f.component, axis)?, &|name| {
-                construction_axis_in(Some(doc), st, name, f.component)
-            })?;
+            let (o, d) = revolve_axis(
+                Some(doc),
+                f.component,
+                vals,
+                &ss,
+                axis,
+                &*super::axis_state(doc, st, f.component, axis)?,
+                &|name| construction_axis_in(Some(doc), st, name, f.component),
+                &|owner, curve| {
+                    let solved =
+                        st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
+                    sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
+                },
+            )?;
             let a = val(vals, angle, Kind::Angle)?;
             let (start, sweep) = match (angle2, symmetric) {
                 (Some(a2), _) => {
@@ -334,7 +357,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             match rest {
                 Some(rest) => {
                     if let Some(slot) = st.bodies.get_mut(i) {
-                        *slot = ModelBody::traced_new(mb.name.clone(), source.then(rest), mb.feature);
+                        *slot = mb.remade(source.then(rest));
                     }
                 }
                 None => {
@@ -352,12 +375,40 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let turned = mb.traced().then(kernel::reverse_faces(&mb.body, &crate::plain(faces))?);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, turned, mb.feature);
+                *slot = mb.remade(turned);
             }
             Ok(())
         }
-        FeatureKind::SurfaceSweep { sketch, profiles, curves, path_sketch, path, orientation, twist, scale, rails, rail_fit } => {
+        FeatureKind::SurfaceSweep {
+            sketch,
+            profiles,
+            curves,
+            path_sketch,
+            path,
+            path_body,
+            path_edges,
+            orientation,
+            twist,
+            scale,
+            rails,
+            rail_fit,
+        } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
+            // The path is a chain of a body's edges (#2216) or the curves of a sketch.
+            if let Some(body) = path_body {
+                let chains = sheet_chains(ss, profiles.as_ref(), curves)?;
+                // The path runs on from the end nearest the middle of the curves.
+                let pts: Vec<Vec2> = chains.iter().flatten().flat_map(|s| s.polyline(1e-2)).collect();
+                let start = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
+                let segs = crate::eval::edge_path_segments(st, body, path_edges, start, Some(&ss.plane))?;
+                let path_start = segs.first().map(kernel::PathSeg::start).unwrap_or(start);
+                let rails = crate::eval::rail_polylines(doc, st, rails, f.component, path_start)?;
+                let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
+                let body = kernel::sweep_sheet_with(&ss.plane, &chains, &segs, &ctl)?;
+                let traced = crate::lineage::ChainRoles { sketch: ss, chains: &chains }.tool(body);
+                push_sheet(st, f, traced);
+                return Ok(());
+            }
             let ps =
                 st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
             // As Sweep: a 3D path sketch is followed in the feature's frame, the curves with it.
@@ -500,7 +551,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let made = mb.traced().then(kernel::untrim(&mb.body, fi, which, *outer, replace)?);
             if replace {
                 if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = ModelBody::traced_new(mb.name, made, mb.feature);
+                    *slot = mb.remade(made);
                 }
             } else {
                 let name = new_name(st, f, 0);
@@ -773,7 +824,7 @@ const BLEND_STATIONS: usize = 41;
 /// The sketch curves `ids` (free-form ones exactly where they can be) grouped into chains of segments that meet end to end, each oriented
 /// to run one way. Curves are joined greedily at their free ends: where three meet, one of them
 /// starts a chain of its own.
-fn curve_chains(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<Seg2>>> {
+pub(super) fn curve_chains(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<Seg2>>> {
     if ids.len() > MAX_CHAIN_CURVES {
         return Err(DocError::Invalid(format!("at most {MAX_CHAIN_CURVES} curves")));
     }

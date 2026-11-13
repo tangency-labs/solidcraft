@@ -26,7 +26,7 @@ use solidcraft_engine::kernel::history::Change;
 
 use crate::SolveApp;
 use crate::gpu::{GpuScene, SceneSlot};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// Colours a preview is drawn with (straight sRGBA).
 #[derive(Clone, Copy, Debug)]
@@ -68,7 +68,7 @@ impl Colors {
 
     fn for_tool(t: &Tokens, tab: &str, active: bool) -> Colors {
         let mut colors = Self::from_tokens(t);
-        let accent = crate::theme::TabAccent::for_tab(t, tab);
+        let accent = crate::workspace::tab_accent(t, tab);
         if active && accent.color != t.accent {
             colors.added = accent.color.to_srgba_unmultiplied();
             colors.new_body = t.body.lerp_to_gamma(accent.color, 0.45).to_srgba_unmultiplied();
@@ -101,6 +101,9 @@ pub struct Built {
     /// The reply of a previewed drive that stopped short of the asked values (the dialog says
     /// where and why, in the UI's language).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
+    /// how free the part is with the constraint it shows.
+    pub placed: Option<serde_json::Value>,
 }
 
 type Job = Result<Built, String>;
@@ -109,6 +112,10 @@ type Job = Result<Built, String>;
 /// them, a new job waits for the running one as before, so a quick series of picks keeps at
 /// most this many kernel computations going beside the current one.
 const DETACHED: usize = 2;
+
+/// How long a joint pose for a slider value since moved past may keep computing (#14264). Past
+/// it, the pose is cancelled and the latest value starts, so only the latest keeps solving.
+const STALE_MOTION_MS: f64 = 500.0;
 
 #[derive(Default)]
 pub struct PreviewState {
@@ -125,6 +132,9 @@ pub struct PreviewState {
     running_tool: bool,
     /// Inputs of a joint or distance preview, excluding only its driven values.
     running_stream_key: Option<u64>,
+    /// The running job is a joint pose (see [`motion_key`]): once obsolete, it gets
+    /// [`STALE_MOTION_MS`].
+    running_motion: bool,
     /// Bodies the preview stands in for (hidden in the model scene).
     pub replaced: Vec<String>,
     /// The preview scene for the GPU and its key (changes whenever the scene does).
@@ -146,6 +156,8 @@ pub struct PreviewState {
     pub applied: Option<(f64, f64)>,
     /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (see [`Built::placed`]).
+    pub placed: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     straight: crate::extrude_preview::StraightPreview,
@@ -180,6 +192,7 @@ impl PreviewState {
         self.error = None;
         self.applied = None;
         self.stopped = None;
+        self.placed = None;
         self.tapered.clear();
         self.sketches.clear();
         self.busy = false;
@@ -216,6 +229,7 @@ impl PreviewState {
                 self.error = b.error;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
+                self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.set_scene(b.scene);
             }
@@ -227,6 +241,7 @@ impl PreviewState {
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
+                self.placed = None;
                 self.tapered.clear();
             }
         }
@@ -235,9 +250,16 @@ impl PreviewState {
     /// Errors validate only the current inputs. Keep the last good geometry while
     /// computing new inputs, but never let an obsolete result block their Apply.
     fn poll(&mut self, key: u64, stream_key: Option<u64>) {
+        self.poll_at(key, stream_key, crate::now_ms());
+    }
+
+    fn poll_at(&mut self, key: u64, stream_key: Option<u64>, now: f64) {
         if self.shown_key != Some(key) {
             self.sketches.clear();
             self.error = None;
+            // A constraint's reply says how free its part is with the inputs it was for: with other
+            // picks it would describe the wrong rule, so the dialog falls back to the saved design.
+            self.placed = None;
         }
         if let Some((k, rx)) = &self.running {
             let k = *k;
@@ -252,6 +274,7 @@ impl PreviewState {
                 let intermediate = good && (self.running_tool || stream_key.is_some() && self.running_stream_key == stream_key);
                 self.running_stream_key = None;
                 self.running_tool = false;
+                self.running_motion = false;
                 // A held slider, a dragged arrow or an animation may advance faster than the
                 // worker. Show completed joint/distance results from the same setup, and tools built for
                 // inputs since changed, then compute the latest. Errors still require an exact
@@ -270,7 +293,10 @@ impl PreviewState {
         // wait as before. At most `DETACHED` jobs are left behind; while they run, the next
         // obsolete one is waited for as before.
         let other_setup = !self.running_tool && stream_key.is_some() && self.running_stream_key.is_some() && self.running_stream_key != stream_key;
-        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && other_setup && self.detached.len() < DETACHED {
+        // A joint pose for a value the slider has left, still running after `STALE_MOTION_MS`:
+        // stop it and start the latest value (#14264).
+        let stale_motion = self.running_motion && stream_key.is_some() && now - self.started >= STALE_MOTION_MS;
+        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && (other_setup || stale_motion) && self.detached.len() < DETACHED {
             self.detach();
         }
     }
@@ -287,6 +313,7 @@ impl PreviewState {
         }
         self.running_tool = false;
         self.running_stream_key = None;
+        self.running_motion = false;
     }
 }
 
@@ -307,6 +334,8 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.rack_pinion"
                     | "joint.screw"
                     | "joint.cam"
+                    | "assembly.constraint.create"
+                    | "assembly.constraint.edit"
             )
         })
     {
@@ -399,6 +428,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     if pv.running.is_none() && pv.shown_key != Some(key) {
         pv.started = crate::now_ms();
         pv.running_stream_key = stream_key;
+        pv.running_motion = motion_key(&cmds, app.session.revision, colors).is_some();
         let mut straight = std::mem::take(&mut app.preview.straight);
         let mut job = straight.compute(app, &cmds, colors);
         app.preview.straight = straight;
@@ -475,6 +505,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
                 | "sketch.pattern.rectangular"
                 | "sketch.pattern.circular"
                 | "sketch.offset"
+                | "sketch.point.divide"
                 | "sketch.fillet"
                 | "sketch.chamfer.equal_distance"
                 | "sketch.chamfer.two_distance"
@@ -629,6 +660,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        placed: None,
     }
 }
 
@@ -777,7 +809,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
     }
     let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
-    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None, placed: None }
 }
 
 /// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
@@ -863,6 +895,14 @@ fn new_faces(m: &Mesh, nf: usize, old: &Mesh) -> Vec<bool> {
         .collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The triangles [`SurfaceIndex::contains`] measured a point against, on this thread: the
+    /// work classifying each face against every triangle made quadratic, counted for the test that
+    /// checks it stays near linear, whatever else the machine is doing (#9901).
+    static TRIANGLES_MEASURED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The triangles of a mesh in a uniform grid, to ask whether a point lies on the surface (within
 /// its tessellation tolerance) by looking only at the triangles near it.
 struct SurfaceIndex {
@@ -939,7 +979,11 @@ impl SurfaceIndex {
     fn contains(&self, p: Vec3) -> bool {
         let (x, y, z) = (self.cell_of(p.x, 0), self.cell_of(p.y, 1), self.cell_of(p.z, 2));
         let Some(cell) = self.cells.get((x * self.res + y) * self.res + z) else { return false };
-        cell.iter().filter_map(|i| self.tris.get(*i as usize)).any(|[a, b, c]| point_triangle_dist(p, *a, *b, *c) < self.tol)
+        cell.iter().filter_map(|i| self.tris.get(*i as usize)).any(|[a, b, c]| {
+            #[cfg(test)]
+            TRIANGLES_MEASURED.with(|n| n.set(n.get() + 1));
+            point_triangle_dist(p, *a, *b, *c) < self.tol
+        })
     }
 }
 
@@ -998,7 +1042,7 @@ mod tests {
     #[test]
     fn tool_preview_follows_tab_without_recolouring_removal_or_idle_previews() {
         for dark in [false, true] {
-            for vision in crate::theme::ColorVision::ALL {
+            for vision in solidcraft_theme::ColorVision::ALL {
                 let t = Tokens::themed(dark, vision);
                 let base = Colors::from_tokens(&t);
                 for tab in ["MODEL", "SKETCH", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW", "SHEET METAL", "RENDER"] {
@@ -1007,11 +1051,11 @@ mod tests {
                         assert_eq!(colors.removed, base.removed);
                         assert_eq!(colors.body, base.body);
                         assert_eq!(colors.edge, base.edge);
-                        if !active || crate::theme::TabAccent::for_tab(&t, tab).color == t.accent {
+                        if !active || crate::workspace::tab_accent(&t, tab).color == t.accent {
                             assert_eq!(colors.added, base.added);
                             assert_eq!(colors.new_body, base.new_body);
                         } else {
-                            let accent = crate::theme::TabAccent::for_tab(&t, tab);
+                            let accent = crate::workspace::tab_accent(&t, tab);
                             assert_eq!(colors.added, accent.color.to_srgba_unmultiplied());
                             assert_ne!(colors.new_body, colors.added);
                         }
@@ -1081,6 +1125,7 @@ mod tests {
             applied: None,
             tapered: Vec::new(),
             stopped: None,
+            placed: None,
         }
     }
 
@@ -1111,6 +1156,55 @@ mod tests {
         pv.poll(4, Some(42));
         assert_eq!(pv.shown_key, Some(4), "release catches up to the exact final pose");
         assert!(pv.running.is_none());
+    }
+
+    /// A constraint's reply belongs to the inputs it was computed for: when they change (other picks
+    /// in the Constrain dialog), it goes with the old error, and is kept while they stand.
+    #[test]
+    fn a_constraint_reply_goes_when_the_inputs_change() {
+        let mut pv = PreviewState { shown_key: Some(1), placed: Some(serde_json::json!({"dof": []})), ..PreviewState::default() };
+        pv.poll_at(1, None, 0.0);
+        assert!(pv.placed.is_some(), "the same inputs keep their reply");
+        pv.poll_at(2, None, 0.0);
+        assert!(pv.placed.is_none(), "other inputs drop the old reply");
+    }
+
+    /// A pose for a value the slider has left gets 500 ms (#14264): before that it keeps running
+    /// (and shows when done); past it, it is cancelled and the latest value may start.
+    #[test]
+    fn a_stale_joint_pose_is_cancelled_after_its_budget() {
+        let start = |pv: &mut PreviewState| {
+            let (tx, rx) = std::sync::mpsc::channel::<Job>();
+            let progress = Arc::new(Progress::default());
+            pv.running = Some((1, rx));
+            pv.running_progress = Some(progress.clone());
+            pv.running_stream_key = Some(42);
+            pv.running_motion = true;
+            pv.started = 1000.0;
+            (tx, progress)
+        };
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.poll_at(2, Some(42), 1000.0 + STALE_MOTION_MS - 1.0);
+        assert!(pv.running.is_some(), "within the budget the pose keeps running");
+        assert!(!progress.is_cancelled());
+        pv.poll_at(2, Some(42), 1000.0 + STALE_MOTION_MS);
+        assert!(pv.running.is_none(), "past the budget the latest value can start");
+        assert!(progress.is_cancelled(), "the stale pose is asked to stop");
+        assert_eq!(pv.detached.len(), 1);
+
+        // The latest value itself is never cancelled, however long it takes.
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.poll_at(1, Some(42), 1000.0 + 10.0 * STALE_MOTION_MS);
+        assert!(pv.running.is_some() && !progress.is_cancelled());
+
+        // Other streamed previews (a fillet radius) keep waiting for their running job.
+        let mut pv = PreviewState::default();
+        let (_tx, progress) = start(&mut pv);
+        pv.running_motion = false;
+        pv.poll_at(2, Some(42), 1000.0 + 10.0 * STALE_MOTION_MS);
+        assert!(pv.running.is_some() && !progress.is_cancelled());
     }
 
     #[test]
@@ -1397,75 +1491,31 @@ mod tests {
         assert!(SurfaceIndex::new(&Mesh::default()).is_none());
     }
 
-    /// How long the faces of a sheet of `n × n` squares take to classify against an old sheet of
-    /// the same size. The meshes are built before the clock starts and the faces are collected
-    /// before it stops: only the classification, the work that used to freeze the app, is measured.
-    fn classify_sheet(n: usize) -> std::time::Duration {
+    /// How many triangles classifying the faces of a sheet of `n × n` squares, against an old
+    /// sheet of the same size, measured points against ([`TRIANGLES_MEASURED`]): the work that
+    /// used to freeze the app.
+    fn classify_sheet(n: usize) -> usize {
         let (old, same, lifted) = (sheet(n, 0.0), sheet(n, 0.0), sheet(n, 5.0));
         let nf = n * n;
-        let started = std::time::Instant::now();
+        let before = TRIANGLES_MEASURED.with(std::cell::Cell::get);
         let on = new_faces(&same, nf, &old);
         let off = new_faces(&lifted, nf, &old);
-        let took = started.elapsed();
+        let measured = TRIANGLES_MEASURED.with(std::cell::Cell::get) - before;
         assert!(on.iter().all(|new| !new), "faces on the old surface are not new");
         assert!(off.iter().all(|new| *new), "faces off the old surface are new");
-        took
-    }
-
-    /// Whether a job four times the size took at most about twice linear: `pair` times the small job,
-    /// then the big one. Linear is 4x, the quadratic that the bug cost 16x or more, so eight times the
-    /// small time is the limit. The load of the other test binaries can rise between the two runs, so a
-    /// pair that misses is measured again, up to three times. Load only ever slows a run, so each size
-    /// keeps its fastest time and the ratio is taken of those: a retry cannot pass a regression on a
-    /// small run that a spike happened to slow, once an earlier small run was fast.
-    ///
-    /// `slack` is the room the noise of a busy machine gets, on top of the ratio.
-    fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration), slack: std::time::Duration) -> Result<(), String> {
-        let limit = |small: f64| 8.0 * small + slack.as_secs_f64();
-        let (mut small, mut big) = (f64::INFINITY, f64::INFINITY);
-        let mut runs = Vec::new();
-        for _ in 0..3 {
-            let (s, b) = pair();
-            small = small.min(s.as_secs_f64());
-            big = big.min(b.as_secs_f64());
-            runs.push(format!("{s:?} then {b:?}"));
-            if big < limit(small) {
-                return Ok(());
-            }
-        }
-        Err(format!("{}; fastest {small:.3} s and {big:.3} s, limit {:.3} s", runs.join(", "), limit(small)))
-    }
-
-    #[test]
-    fn scales_linearly_keeps_each_sizes_fastest_run() {
-        let pairs = |p: Vec<(u64, u64)>| {
-            let mut p = p.into_iter().map(|(s, b)| (std::time::Duration::from_millis(s), std::time::Duration::from_millis(b)));
-            move || p.next().unwrap_or((std::time::Duration::from_secs(1), std::time::Duration::from_secs(1)))
-        };
-        let slack = std::time::Duration::from_millis(0);
-        // Linear: four times the work, four times the time.
-        assert!(scales_linearly(pairs(vec![(5, 20)]), slack).is_ok());
-        // A big run slowed by load, then a quiet pair.
-        assert!(scales_linearly(pairs(vec![(5, 80), (5, 20)]), slack).is_ok());
-        // A quadratic cost (16x) whose later small runs a spike slowed: the fast first one still counts.
-        let r = scales_linearly(pairs(vec![(5, 80), (15, 80), (15, 80)]), slack);
-        assert!(r.as_ref().is_err_and(|e| e.contains("fastest 0.005 s and 0.080 s, limit 0.040 s")), "{r:?}");
+        measured
     }
 
     /// Thousands of faces (a modeled thread's) are classified at once, not face by face against
     /// every triangle: filleting beside a thread froze the app for minutes.
     ///
-    /// A ratio and not a limit: a test must not depend on wall-clock timing (CONTRIBUTING.md), the
-    /// machine is busy. 900 faces are classified, then 3 600, four times as many: linear is 4x, the
-    /// face-against-triangle cost 16x or more.
+    /// The triangles measured are counted, not the time taken, so a busy machine can't fail it
+    /// (#9901). 900 faces are classified, then 3 600, four times as many: linear is 4x, the
+    /// face-against-triangle cost 16x or more; at most eight.
     #[test]
     fn many_faces_are_classified_quickly() {
-        /// The room the noise of a run on a busy machine gets, on top of the ratio: the 900 faces
-        /// take a fraction of a second, so this is the noise of one run and not a change of scale.
-        const SLACK: std::time::Duration = std::time::Duration::from_millis(20);
-        if let Err(missed) = scales_linearly(|| (classify_sheet(30), classify_sheet(60)), SLACK) {
-            panic!("the faces do not scale linearly: {missed}");
-        }
+        let (small, big) = (classify_sheet(30), classify_sheet(60));
+        assert!(small > 0 && big <= 8 * small, "900 faces measured {small} triangles, 3 600 measured {big}");
     }
 
     /// A fillet preview stands in for the body: the round face is new, the rest is kept, and the

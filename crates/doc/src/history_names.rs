@@ -191,7 +191,7 @@ impl<'a> OperandNames<'a> {
                 }
             }),
             Operand::Inner(_) => {
-                given(&self.names).map(|n| Named { name: format!("F{fid}:inner:{}", n.name), verified: n.verified, ..Named::default() })
+                given(&self.names).map(|n| Named { name: format!("F{fid}:inner({})", n.name), verified: n.verified, ..Named::default() })
             }
             Operand::Made(roles) => {
                 let (first, rest) = roles.get(face)?.split_first()?;
@@ -216,8 +216,11 @@ impl<'a> OperandNames<'a> {
             Operand::Body(_) | Operand::Stage(_) => {
                 let body = self.body.as_ref()?;
                 let names = self.edges.get_or_init(|| crate::naming::edge_names(body));
-                let faces = body.mesh().edge_faces.get(edge).cloned().unwrap_or_default();
-                let verified = faces.iter().all(|f| self.names.verified(*f as usize));
+                let verified = if body.body.is_mesh() {
+                    false
+                } else {
+                    body.body.record().edges.get(edge).map(|e| e.uses.iter().all(|u| self.names.verified(u.face as usize))).unwrap_or(false)
+                };
                 Some((names.get(edge)?.clone(), verified))
             }
             Operand::Copy { .. } | Operand::Inner(_) | Operand::Made(_) | Operand::CopiedTool { .. } => None,
@@ -235,11 +238,11 @@ fn from_origins(face: &FaceProv, operands: &[OperandNames], fid: u64) -> Option<
             FaceOrigin::Face { operand, face } => operands.get(operand)?.face(face, fid)?,
             FaceOrigin::Edge { operand, edge } => {
                 let (edge, verified) = operands.get(operand)?.edge(edge)?;
-                Named { name: format!("F{fid}:blend:{edge}"), verified, ..Named::default() }
+                Named { name: format!("F{fid}:blend({edge})"), verified, ..Named::default() }
             }
             FaceOrigin::Offset { operand, face } => {
                 let source = operands.get(operand)?.face(face, fid)?;
-                Named { name: format!("F{fid}:inner:{}", source.name), verified: source.verified, ..Named::default() }
+                Named { name: format!("F{fid}:inner({})", source.name), verified: source.verified, ..Named::default() }
             }
             // A profile or cap of a body made from nothing: only a built body's own roles name
             // these, and those come in as `Made` operands.
@@ -534,7 +537,7 @@ fn without_index(origin: FaceOrigin) -> FaceOrigin {
     }
 }
 
-/// How a stored face name matches a current face.
+/// How the stored face name matches a current face.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Match {
     /// Only its root stem is the same: some piece of the same face (the caller picks by point).
@@ -549,11 +552,24 @@ pub(crate) enum Match {
 
 /// How the stored name `name` matches face `index` (`None`: not at all).
 pub(crate) fn matches(names: &Names, index: usize, name: &str) -> Option<Match> {
-    let current = names.faces.get(index)?;
+    matches_read(names, index, name, crate::persistent_name::FaceName::parse(name).ok())
+}
+
+/// [`matches`], with the wanted name already read: a name of many faces is compared with each of
+/// them, and reading it once keeps that cheap.
+pub(crate) fn matches_read(names: &Names, index: usize, name: &str, wanted: Option<crate::persistent_name::FaceName>) -> Option<Match> {
+    let face = names.faces.get(index)?;
     let info = names.info.get(index);
-    if current == name {
+    if face == name || wanted.as_ref().is_some_and(|w| crate::persistent_name::same_face_read(face, w)) {
         return Some(Match::Exact);
     }
+    // A name in the older form reads as the name it was, and is compared in today's form: the
+    // checks below compare names as they are written now. The face's own name is written in
+    // today's form too, unless it too was written in the older one.
+    let canonical = wanted.as_ref().filter(|_| crate::persistent_name::in_old_form(name)).map(|w| w.to_string());
+    let name = canonical.as_deref().unwrap_or(name);
+    let today = crate::persistent_name::written_now(face);
+    let current: &str = &today;
     // Another name of this very face; of a piece of it, when the face was split since.
     if info.is_some_and(|i| i.synonyms.iter().any(|a| a == name)) {
         return Some(if crate::naming::strip_piece(current) == current { Match::Exact } else { Match::Piece });
@@ -571,15 +587,58 @@ pub(crate) fn matches(names: &Names, index: usize, name: &str) -> Option<Match> 
     if descends(current, name) {
         return Some(Match::Piece);
     }
-    // The named piece, told apart by the faces around it: they still bound this piece.
+    // The named piece, told apart by the faces around it: they still bound this piece, directly or
+    // through a blend that replaced the edge it shared with them (`F4:blend:A|B` rounds the edge
+    // between A and B, and is named after it, so it still tells them apart). Or the face it was a
+    // piece of, whole again since, which they still bound: the piece is all of it (#11731). Only a
+    // piece told apart by faces: a numbered one (`#2`, nothing told it apart) says nothing about
+    // which part of the whole face it was.
     if let Some((stem, around)) = crate::piece_names::piece_parts(name)
-        && crate::naming::parent_piece(current) == Some(stem)
-        && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f)))
+        && (crate::naming::parent_piece(current) == Some(stem) || (current == stem && !around.is_empty() && name.ends_with(']')))
+        && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f) || i.bounds.iter().any(|bound| rounds_the_edge(bound, current, f))))
+    {
+        return Some(Match::Piece);
+    }
+    // A piece of a blend face: a blend is named after the edge it replaced, so the qualifier that
+    // tells its pieces apart sits *inside* that name, on one of the edge's sides
+    // (`F4:blend(F2:side:c1#[F2:side:l3]|F2:side:l3)`), and the face whole again since is the blend
+    // of the sides without their qualifiers (#4325).
+    if let Some((stem, around)) = blend_piece(name)
+        && (current == stem || crate::naming::parent_piece(current) == Some(stem.as_str()))
+        && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f) || i.bounds.iter().any(|bound| rounds_the_edge(bound, &stem, f))))
     {
         return Some(Match::Piece);
     }
     let root = crate::naming::strip_piece(name);
     (crate::naming::strip_piece(current) == root).then_some(Match::Stem)
+}
+
+/// A piece of a blend face, read out of its name: the blend of the edge's sides without their
+/// qualifiers (the face whole again since), and the faces that told the piece apart. `None` when no
+/// side of the edge holds a qualifier, or the name is not a blend's.
+fn blend_piece(name: &str) -> Option<(String, Vec<&str>)> {
+    let (a, b) = crate::naming::blend_sides(name)?;
+    let mut around = Vec::new();
+    for side in [a, b] {
+        if let Some((_, faces)) = crate::piece_names::piece_parts(side) {
+            around.extend(faces);
+        }
+    }
+    if around.is_empty() {
+        return None;
+    }
+    Some((crate::naming::blend_stem(name)?, around))
+}
+
+/// Whether the face named `bound` (one of the faces around face `here`) is a blend that rounds the
+/// edge `here` shared with face `face`: a fillet or chamfer sits between the two, so they no longer
+/// touch, and the blend's name — the edge it replaced, `F4:blend:<here>|<face>` — is what tells them
+/// apart now.
+fn rounds_the_edge(bound: &str, here: &str, face: &str) -> bool {
+    let here = crate::naming::strip_piece(here);
+    let face = crate::naming::strip_piece(face);
+    let sides = |n: &str| crate::naming::strip_piece(n).to_string();
+    crate::naming::blend_sides(bound).is_some_and(|(a, b)| (sides(a) == here && sides(b) == face) || (sides(a) == face && sides(b) == here))
 }
 
 /// A name and the pattern instances after it (`F3:top#[F4:side]@F9.1` is `F3:top#[F4:side]` and

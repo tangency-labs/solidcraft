@@ -3,8 +3,13 @@
 //!
 //! - **Panics** are caught by a hook. One inside a command becomes a report with the design as
 //!   it was before the command and the command itself, so `solidcraft-cli run replay.json --in
-//!   design.sc` reproduces it. Panics the third-party kernel raises (and
+//!   design.sc` reproduces it. Panics the vendored kernel raises (and
 //!   `solidcraft_kernel::guard` turns into errors) are reported the same way, marked recovered.
+//!   A panic on a Rayon worker does not see this thread's command scope. While a command is
+//!   running it is held and reported with that command when the command ends. It is marked
+//!   recovered when that worker was inside `guard`, or when the command failed with a kernel
+//!   error because the guard on the calling thread caught the panic. Outside any command it is
+//!   written at once, as before.
 //! - **Crashes no hook sees** (an abort, a stack overflow, a segfault, the process being killed)
 //!   are found at the next start: every running app keeps a small, locked command journal; a
 //!   journal nobody holds any more belongs to an app that died. Its report carries the design
@@ -122,6 +127,40 @@ thread_local! {
     static IN_COMMAND: Cell<u32> = const { Cell::new(0) };
     /// Panics caught inside the running command, waiting for it to end.
     static PENDING: RefCell<Vec<Panic>> = const { RefCell::new(Vec::new()) };
+    /// The running command, or one it ran, failed with an internal error the kernel caught.
+    static KERNEL_CAUGHT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// A command on this thread failed with an internal error the kernel caught (`guard`, or a
+/// solidcore call): a panic a Rayon worker raised for it was caught too ([`command_done`]).
+pub(crate) fn kernel_caught() {
+    if enabled() {
+        KERNEL_CAUGHT.with(|c| c.set(true));
+    }
+}
+
+/// Command scopes open on any thread, and panics from Rayon workers while one is open.
+///
+/// The count and the queue share one lock: a worker's hook either queues the panic or sees that
+/// the command has already ended, and [`command_done`] cannot take the queue in between.
+struct PoolPanics {
+    /// Command scopes ([`Scope`]) open on any thread.
+    commands: u32,
+    /// Pool-worker panics held for the command that ends last (at most 8).
+    pending: Vec<Panic>,
+}
+
+/// The one [`PoolPanics`] for the process.
+static POOL_PANICS: Mutex<PoolPanics> = Mutex::new(PoolPanics { commands: 0, pending: Vec::new() });
+
+/// Run `f` with [`POOL_PANICS`] locked. A poisoned lock is used as it is: this runs inside the
+/// panic hook, which must not panic again.
+fn with_pool_panics<T>(f: impl FnOnce(&mut PoolPanics) -> T) -> T {
+    let mut gate = match POOL_PANICS.lock() {
+        Ok(gate) => gate,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    f(&mut gate)
 }
 
 /// Crash reporting is on in this process.
@@ -250,6 +289,9 @@ struct Panic {
     thread: String,
     backtrace: Vec<String>,
     recovered: bool,
+    /// The panic ran on a Rayon worker. That thread is not inside [`solidcraft_kernel::guard`],
+    /// so `recovered` is decided when the command ends.
+    on_pool: bool,
     signature: u64,
 }
 
@@ -318,25 +360,34 @@ pub fn install(dir: PathBuf, build: Build) -> Vec<Summary> {
     let _ = fs::write(&seen_file, all.iter().map(|s| s.id.as_str()).collect::<Vec<_>>().join("\n"));
     let known = all.into_iter().filter_map(|s| sig_of(&s.id).map(|sig| (sig, (0, s.id)))).collect();
     let journal = Journal::open(&dir, &build, started);
-    if STATE
-        .set(State {
-            dir,
-            build,
-            environment: Mutex::new(String::new()),
-            journal: Mutex::new(journal),
-            known: Mutex::new(known),
-            written: AtomicUsize::new(0),
-            started,
-            started_ms,
-        })
-        .is_ok()
-    {
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            if !hook(info) {
-                previous(info);
+    match STATE.set(State {
+        dir,
+        build,
+        environment: Mutex::new(String::new()),
+        journal: Mutex::new(journal),
+        known: Mutex::new(known),
+        written: AtomicUsize::new(0),
+        started,
+        started_ms,
+    }) {
+        Ok(()) => {
+            let previous = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                if !hook(info) {
+                    previous(info);
+                }
+            }));
+        }
+        Err(state) => {
+            // The journal was already installed in this process: the one just opened is an
+            // orphan nobody holds, and the next start must not call it an unclean exit.
+            if let Ok(mut j) = state.journal.lock()
+                && let Some(path) = j.path.take()
+            {
+                j.file = None;
+                let _ = fs::remove_file(path);
             }
-        }));
+        }
     }
     fresh
 }
@@ -414,11 +465,16 @@ fn remove_stray_native_files(dir: &Path) {
 /// The app is closing normally: its journal goes, and repeat counts are written.
 pub fn end_session() {
     let Some(s) = STATE.get() else { return };
-    if let Ok(mut j) = s.journal.lock()
-        && let Some(path) = j.path.take()
-    {
-        j.file = None;
-        let _ = fs::remove_file(path);
+    if let Ok(mut j) = s.journal.lock() {
+        // The session ended cleanly: the journal says so before it goes. A journal that stays
+        // (the removal failed, the machine stopped in between) is then not an unclean exit at
+        // the next start: the `reported` flag says there is nothing left to report.
+        j.record(&json!({ "reported": "clean" }));
+        if let Some(path) = j.path.take() {
+            j.file = None;
+            // Best-effort: a journal that cannot go is not an unclean exit (it says so).
+            let _ = fs::remove_file(path);
+        }
     }
     let counts: Vec<(u64, String)> = s.known.lock().map(|k| k.values().filter(|(n, _)| *n > 0).cloned().collect()).unwrap_or_default();
     for (n, id) in counts {
@@ -445,7 +501,10 @@ fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
     let sig = signature(&location, &message);
     let recovered = solidcraft_kernel::guarded();
     let in_command = IN_COMMAND.with(Cell::get) > 0;
-    let quiet = recovered || in_command;
+    // A pool worker does not inherit this thread's command scope or guard flag.
+    let on_pool = !in_command && solidcraft_kernel::on_pool_thread();
+    let command_open = on_pool && with_pool_panics(|g| g.commands > 0);
+    let quiet = recovered || in_command || command_open;
     // Already reported (this run or before): count it, nothing else. A panic outside commands
     // can end the app before `end_session` writes the counts, so its count goes to the report
     // now, and the journal says it was reported (or the next start reports an unclean exit).
@@ -476,8 +535,8 @@ fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
     }
     let thread = std::thread::current().name().unwrap_or("(unnamed)").to_string();
     let backtrace = frames(&Backtrace::force_capture().to_string());
-    let p = Panic { message, location, thread, backtrace, recovered, signature: sig };
-    if in_command {
+    let p = Panic { message, location, thread, backtrace, recovered, on_pool, signature: sig };
+    let suppress = if in_command {
         // Reported with the design and the command when the outermost command ends.
         PENDING.with(|q| {
             let mut q = q.borrow_mut();
@@ -485,19 +544,62 @@ fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
                 q.push(p);
             }
         });
-        eprintln!("SolidCraft: internal error caught in a command; a crash report will be written");
-    } else {
-        // Outside any command: what the journal knows has to do.
-        let kind = if recovered { "kernel_panic_recovered" } else { "panic" };
-        if let Some(id) = write_from_journal(state, kind, Some(&p)) {
-            eprintln!("SolidCraft: internal error; crash report {}", state.dir.join(&id).display());
-            if !recovered && let Ok(mut j) = state.journal.try_lock() {
-                j.record(&json!({ "reported": id }));
+        solidcraft_geom::note!("SolidCraft: internal error caught in a command; a crash report will be written");
+        true
+    } else if on_pool {
+        match hold_pool_panic(p) {
+            PoolHold::Kept => {
+                solidcraft_geom::note!("SolidCraft: internal error caught in a command; a crash report will be written");
+                true
+            }
+            PoolHold::Now(p) => {
+                let suppress = p.recovered;
+                write_panic_now(state, &p);
+                suppress
             }
         }
-    }
+    } else {
+        let suppress = p.recovered;
+        write_panic_now(state, &p);
+        suppress
+    };
     IN_HOOK.store(false, Ordering::SeqCst);
-    quiet
+    suppress
+}
+
+/// Queue a pool-worker panic when a command is still open. The check and the push share the
+/// lock with [`Scope`], so the panic cannot land in the queue after [`command_done`] drained it.
+fn hold_pool_panic(p: Panic) -> PoolHold {
+    with_pool_panics(|g| {
+        if g.commands == 0 {
+            return PoolHold::Now(p);
+        }
+        if g.pending.len() < 8 {
+            g.pending.push(p);
+        }
+        PoolHold::Kept
+    })
+}
+
+/// What [`hold_pool_panic`] did with a pool-worker panic.
+enum PoolHold {
+    /// Queued; [`command_done`] reports it with the command.
+    Kept,
+    /// No command was open: the caller writes it at once.
+    Now(Panic),
+}
+
+/// A panic outside any command: what the journal knows has to do.
+fn write_panic_now(state: &State, p: &Panic) {
+    let kind = if p.recovered { "kernel_panic_recovered" } else { "panic" };
+    if let Some(id) = write_from_journal(state, kind, Some(p)) {
+        solidcraft_geom::note!("SolidCraft: internal error; crash report {}", state.dir.join(&id).display());
+        if !p.recovered
+            && let Ok(mut j) = state.journal.try_lock()
+        {
+            j.record(&json!({ "reported": id }));
+        }
+    }
 }
 
 /// A panic inside wgpu that unwraps the driver's `Lost`: a graphics device reset (Windows' TDR)
@@ -511,19 +613,24 @@ fn graphics_device_lost(message: &str, location: &str) -> bool {
 pub(crate) struct Scope(bool);
 
 impl Scope {
+    /// Open a command scope on this thread, and count it in [`POOL_PANICS`] so pool-worker panics
+    /// are held until it ends. Does nothing when crash reporting is off.
     pub(crate) fn enter() -> Scope {
         if !enabled() {
             return Scope(false);
         }
         IN_COMMAND.with(|c| c.set(c.get() + 1));
+        with_pool_panics(|g| g.commands = g.commands.saturating_add(1));
         Scope(true)
     }
 }
 
 impl Drop for Scope {
+    /// Close the scope [`Scope::enter`] opened, on this thread and in [`POOL_PANICS`].
     fn drop(&mut self) {
         if self.0 {
             IN_COMMAND.with(|c| c.set(c.get().saturating_sub(1)));
+            with_pool_panics(|g| g.commands = g.commands.saturating_sub(1));
         }
     }
 }
@@ -599,8 +706,17 @@ pub(crate) fn command_done(
     if IN_COMMAND.with(Cell::get) > 0 {
         return;
     }
-    let pending: Vec<Panic> = PENDING.with(|q| std::mem::take(&mut *q.borrow_mut()));
-    for p in pending {
+    let mut pending: Vec<Panic> = PENDING.with(|q| std::mem::take(&mut *q.borrow_mut()));
+    // Scope has already ended. Pool panics stay queued while another command is still open;
+    // otherwise they belong to the command that just finished.
+    pending.extend(with_pool_panics(|g| if g.commands == 0 { std::mem::take(&mut g.pending) } else { Vec::new() }));
+    // A worker is not inside `guard`. When the kernel caught an internal error for this command
+    // ([`kernel_caught`]), that catch was the worker's panic, resumed on the calling thread.
+    let kernel_error = KERNEL_CAUGHT.with(|c| c.replace(false));
+    for mut p in pending {
+        if p.on_pool && kernel_error {
+            p.recovered = true;
+        }
         let kind = if p.recovered { "kernel_panic_recovered" } else { "command_panic" };
         let design = solidcraft_io::write_design(before);
         let replay = json!({ "commands": [{ "command": id, "params": params }] });
@@ -849,6 +965,10 @@ fn dead_journals(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Report the app that held `journal` and died without a clean exit (an abort, a native crash,
+/// the process being killed), with what the journal knows. Nothing when the journal says the
+/// crash was reported; a crash already on file only has its count raised. The native crash
+/// record and minidump next to the journal are attached when the crash handler left them.
 fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
     let j = read_journal(journal);
     let (native_file, dump_file) = native_paths_for(journal);
@@ -936,6 +1056,7 @@ fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
         thread: "(unknown)".into(),
         backtrace,
         recovered: false,
+        on_pool: false,
         signature: signature(if native.is_some() { "native exception" } else { "unclean exit" }, &signature_text),
     };
     if let Ok(mut k) = state.known.lock()

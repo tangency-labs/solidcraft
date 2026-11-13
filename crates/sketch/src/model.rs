@@ -1,17 +1,23 @@
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Seg2, Vec2, Vec3};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
+use std::collections::{BTreeMap, HashSet};
 
+use crate::link::{LinkGeom, LinkKind, LinkSource, sketch_axis_geom};
 use crate::union_find::{find, union};
 
-/// Hard caps that keep hostile input from exhausting memory or time.
-pub const MAX_POINTS: usize = 20_000;
-pub const MAX_CONSTRAINTS: usize = 40_000;
+/// The default caps on what a sketch builds; [`crate::limits`] says the caps in force, which the
+/// app may raise up to the ceilings below.
+pub const MAX_POINTS: usize = crate::limits::DEFAULT_POINTS;
+pub const MAX_CONSTRAINTS: usize = 2 * MAX_POINTS;
 /// Curves need points, so this follows the point cap.
 pub const MAX_CURVES: usize = MAX_POINTS;
-// [`SketchError::TooLarge`]'s message names this number; keep them matched (#10874).
-const _: () = assert!(MAX_POINTS == 20_000);
+/// Hard caps that keep hostile input from exhausting memory or time: the most a sketch read from
+/// a design may hold, whatever limit the app that made it had (#10874).
+pub const CEILING_POINTS: usize = crate::limits::CEILING_POINTS;
+pub const CEILING_CONSTRAINTS: usize = 2 * CEILING_POINTS;
+pub const CEILING_CURVES: usize = CEILING_POINTS;
 
 /// Largest coordinate or dimension value (mm) a sketch accepts.
 pub const MAX_COORD: f64 = 1e9;
@@ -41,16 +47,55 @@ pub enum SketchError {
     Duplicate(String),
     #[error("invalid value: {0}")]
     Invalid(String),
-    /// Cap hit on points, curves or constraints ([`MAX_POINTS`], [`MAX_CURVES`],
-    /// [`MAX_CONSTRAINTS`]). Insert SVG/DXF of a dense drawing (a floorplan) often hits this;
-    /// scale alone does not reduce how many curves the file has (#10874).
+    /// Cap hit on points, curves or constraints ([`crate::limits::max_points`] and the others).
+    /// Insert SVG/DXF of a dense drawing (a floorplan) often hits this; scale alone does not
+    /// reduce how many curves the file has, and the limit can be raised (#10874).
     #[error(
-        "sketch is too large (at most 20000 points or curves); simplify the drawing or split it across sketches — changing scale does not reduce how many curves it has"
+        "sketch is too large (at most {} points or curves); simplify the drawing, split it across sketches or raise Preferences > Sketch > Largest sketch (up to {}) — changing scale does not reduce how many curves it has",
+        crate::limits::max_points(),
+        crate::limits::CEILING_POINTS
     )]
     TooLarge,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, SketchError>;
+
+/// Adds many points and curves to a sketch at once ([`Sketch::batch`]), for an import of a dense
+/// drawing. It keeps every id the sketch holds in a set, so a new id costs one lookup instead of a
+/// search of the whole sketch, and makes the same ids and checks as [`Sketch::add_point`] and
+/// [`Sketch::add_curve`]. It borrows the sketch for its whole life, so nothing else can change
+/// the ids it keeps.
+pub struct SketchBatch<'a> {
+    sketch: &'a mut Sketch,
+    taken: HashSet<String>,
+}
+
+impl SketchBatch<'_> {
+    /// [`Sketch::add_point`].
+    pub fn add_point(&mut self, p: Vec2, id: Option<&str>) -> Result<usize> {
+        let i = self.sketch.add_point_with(p, id, Some(&self.taken))?;
+        self.keep(|sk| sk.points.get(i).map(|p| p.id.clone()));
+        Ok(i)
+    }
+
+    /// [`Sketch::add_curve`].
+    pub fn add_curve(&mut self, kind: CurveKind, id: Option<&str>) -> Result<usize> {
+        let i = self.sketch.add_curve_with(kind, id, Some(&self.taken))?;
+        self.keep(|sk| sk.curves.get(i).map(|c| c.id.clone()));
+        Ok(i)
+    }
+
+    /// The sketch as the batch has left it so far.
+    pub fn sketch(&self) -> &Sketch {
+        self.sketch
+    }
+
+    fn keep(&mut self, id: impl FnOnce(&Sketch) -> Option<String>) {
+        if let Some(id) = id(self.sketch) {
+            self.taken.insert(id);
+        }
+    }
+}
 
 /// A sketch point. `fixed` points are constants for the solver.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -117,6 +162,10 @@ pub enum CurveKind {
         /// curve it is); none: the clamped uniform B-spline over its points, all weights 1.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         nurbs: Option<crate::Nurbs>,
+        /// Editable control points for fit-spline tangent handles. Empty retains legacy
+        /// natural interpolation.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        handles: Vec<usize>,
     },
     /// Conic from `a` to `b` shaped by the `apex` point and `rho` in (0, 1) (0.5 parabola,
     /// less elliptical, more hyperbolic).
@@ -135,7 +184,7 @@ impl CurveKind {
             CurveKind::Circle { c, .. } => vec![*c],
             CurveKind::Arc { c, a, b } => vec![*c, *a, *b],
             CurveKind::Ellipse { c, m, .. } => vec![*c, *m],
-            CurveKind::Spline { pts, .. } => pts.clone(),
+            CurveKind::Spline { pts, handles, .. } => pts.iter().chain(handles).copied().collect(),
             CurveKind::Conic { a, b, apex, .. } => vec![*a, *b, *apex],
         }
     }
@@ -159,8 +208,11 @@ impl CurveKind {
                 *c = f(*c);
                 *m = f(*m);
             }
-            CurveKind::Spline { pts, .. } => {
+            CurveKind::Spline { pts, handles, .. } => {
                 for q in pts.iter_mut() {
+                    *q = f(*q);
+                }
+                for q in handles.iter_mut() {
                     *q = f(*q);
                 }
             }
@@ -213,6 +265,9 @@ pub struct Curve {
     /// a profile (it is construction too).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub infinite: bool,
+    /// The spline id owning a construction line used as one of its tangent handles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spline_handle_of: Option<String>,
 }
 
 /// How two circles lie, for a [`ConstraintKind::CircleCircleDistance`]: which gap between their
@@ -294,6 +349,16 @@ pub enum ConstraintKind {
         p: usize,
         c: usize,
     },
+    /// Point `p` on curve `c` at `at`, its share (0 to 1) of the curve's length from the curve's
+    /// start: a line's first point, an arc's start (counter-clockwise), a circle's point on sketch
+    /// +X (counter-clockwise), an ellipse's major-axis end (counter-clockwise), a spline's or a
+    /// conic's first point. Divide Curve places its points with it, so they keep equal shares of
+    /// the curve's length as the curve changes. The length is measured along the exact curve.
+    PointAlong {
+        p: usize,
+        c: usize,
+        at: f64,
+    },
     Horizontal {
         l: usize,
     },
@@ -343,6 +408,21 @@ pub enum ConstraintKind {
     },
     Fix {
         p: usize,
+    },
+    /// A pierce (#3599): the point `p` of this sketch is held where the curve `curve` of the
+    /// sketch `sketch` crosses the plane of this sketch.
+    Pierce {
+        /// The point of this sketch the pierce holds.
+        p: usize,
+        /// The sketch the pierced curve belongs to.
+        sketch: u64,
+        /// The id of the pierced curve in that sketch.
+        curve: String,
+        /// The plane of this sketch, in world coordinates: the curve is cut against it.
+        plane: Plane,
+        /// The pierced curve, in world coordinates: it crosses the plane where it changes
+        /// side.
+        world: Vec<Vec3>,
     },
     // Dimensions (driving).
     Distance {
@@ -523,6 +603,7 @@ impl ConstraintKind {
         match self {
             PatternPoint { .. } | PatternRadius { .. } => "Pattern",
             Coincident { .. } | PointOnCurve { .. } => "Coincident",
+            PointAlong { .. } => "PointAlong",
             Horizontal { .. } | HorizontalPoints { .. } => "Horizontal",
             Vertical { .. } | VerticalPoints { .. } => "Vertical",
             Parallel { .. } => "Parallel",
@@ -534,6 +615,7 @@ impl ConstraintKind {
             Midpoint { .. } => "MidPoint",
             Symmetric { .. } => "Symmetry",
             Fix { .. } => "Fix",
+            Pierce { .. } => "Pierce",
             Distance { .. }
             | DistanceX { .. }
             | DistanceY { .. }
@@ -566,7 +648,7 @@ impl ConstraintKind {
             PatternRadius { a, b } => (vec![], vec![a, b]),
             Coincident { p, q } | HorizontalPoints { p, q } | VerticalPoints { p, q } => (vec![p, q], vec![]),
             Distance { p, q, .. } | DistanceX { p, q, .. } | DistanceY { p, q, .. } => (vec![p, q], vec![]),
-            PointOnCurve { p, c } => (vec![p], vec![c]),
+            PointOnCurve { p, c } | PointAlong { p, c, .. } => (vec![p], vec![c]),
             Horizontal { l } | Vertical { l } | Length { l, .. } | LineAngle { l, .. } => (vec![], vec![l]),
             Radius { c, .. } | Diameter { c, .. } | ArcSweep { c, .. } => (vec![], vec![c]),
             Parallel { a, b } | Perpendicular { a, b } | Collinear { a, b } | Tangent { a, b } | Equal { a, b } | Concentric { a, b } => {
@@ -579,6 +661,8 @@ impl ConstraintKind {
             CircleCircleDistance { a, b, .. } => (vec![], vec![a, b]),
             Symmetric { p, q, l } => (vec![p, q], vec![l]),
             Fix { p } => (vec![p], vec![]),
+            // The pierced curve belongs to another sketch: it has no index here.
+            Pierce { p, .. } => (vec![p], vec![]),
             Smooth { a, b } => (vec![], vec![a, b]),
             ArcLength { c, .. } => (vec![], vec![c]),
             LinearDiameter { p, l, .. } => (vec![p], vec![l]),
@@ -622,7 +706,7 @@ impl ConstraintKind {
                 fp(p);
                 fp(q);
             }
-            PointOnCurve { p, c } => {
+            PointOnCurve { p, c } | PointAlong { p, c, .. } => {
                 fp(p);
                 fc(c);
             }
@@ -658,6 +742,9 @@ impl ConstraintKind {
                 fc(l);
             }
             Fix { p } => fp(p),
+            // Only the point of this sketch is renumbered; the pierced curve is another
+            // sketch's, named by id.
+            Pierce { p, .. } => fp(p),
             Smooth { a, b } => {
                 fc(a);
                 fc(b);
@@ -781,12 +868,26 @@ impl Sketch {
         }
     }
 
+    /// Forget the id counters a fingerprint must not see: they advance with every id made,
+    /// including ones since deleted. The document keeps them; only a copy about to be hashed
+    /// calls this. The display options stay, because `three_d` and the `hide_*` flags change
+    /// what the evaluated sketch does.
+    pub fn clear_id_counters(&mut self) {
+        self.counters.clear();
+    }
+
     /// A new unused id with the given prefix (`l` → `l3`).
     pub fn fresh(&mut self, prefix: &str) -> Result<String> {
+        self.next_id(prefix, None)
+    }
+
+    /// [`Sketch::fresh`], asking `taken` (every id the sketch holds, kept by a [`SketchBatch`])
+    /// instead of searching the sketch when given: the same id either way.
+    fn next_id(&mut self, prefix: &str, taken: Option<&HashSet<String>>) -> Result<String> {
         let mut n = self.counters.get(prefix).copied().unwrap_or(0);
         n = n.checked_add(1).ok_or_else(|| SketchError::Invalid("sketch identity counter exhausted".into()))?;
         let first = format!("{prefix}{n}");
-        if !self.id_taken(&first) {
+        if !taken.map_or_else(|| self.id_taken(&first), |t| t.contains(&first)) {
             self.counters.insert(prefix.to_string(), n);
             return Ok(first);
         }
@@ -805,8 +906,29 @@ impl Sketch {
         // A damaged counter may start before a long occupied prefix. Index
         // reservations once so probing that prefix cannot rescan all geometry
         // for each candidate ID.
-        let mut taken: std::collections::BTreeSet<&str> = self
-            .points
+        let indexed;
+        let taken = match taken {
+            Some(t) => t,
+            None => {
+                indexed = self.all_ids().map(str::to_owned).collect::<HashSet<String>>();
+                &indexed
+            }
+        };
+        for _ in 0..budget.saturating_sub(1) {
+            n = n.checked_add(1).ok_or_else(|| SketchError::Invalid("sketch identity counter exhausted".into()))?;
+            let id = format!("{prefix}{n}");
+            if !taken.contains(&id) {
+                self.counters.insert(prefix.to_string(), n);
+                return Ok(id);
+            }
+        }
+        Err(SketchError::TooLarge)
+    }
+
+    /// Every id the sketch holds: its points, curves, constraints, patterns, links, wires and
+    /// offset topologies with their outputs (what [`Sketch::id_taken`] searches).
+    fn all_ids(&self) -> impl Iterator<Item = &str> {
+        self.points
             .iter()
             .map(|p| p.id.as_str())
             .chain(self.curves.iter().map(|c| c.id.as_str()))
@@ -814,22 +936,23 @@ impl Sketch {
             .chain(self.patterns.iter().map(|p| p.id.as_str()))
             .chain(self.links.iter().map(|l| l.id.as_str()))
             .chain(self.wires.iter().map(|w| w.id.as_str()))
-            .collect();
-        for topology in self.offsets.iter().filter_map(|r| r.topology.as_ref()) {
-            taken.insert(topology.id.as_str());
-            taken.extend(topology.roles.iter().map(|r| r.output.as_str()));
-        }
-        for _ in 0..budget.saturating_sub(1) {
-            n = n.checked_add(1).ok_or_else(|| SketchError::Invalid("sketch identity counter exhausted".into()))?;
-            let id = format!("{prefix}{n}");
-            if !taken.contains(id.as_str()) {
-                self.counters.insert(prefix.to_string(), n);
-                return Ok(id);
-            }
-        }
-        Err(SketchError::TooLarge)
+            .chain(
+                self.offsets
+                    .iter()
+                    .filter_map(|r| r.topology.as_ref())
+                    .flat_map(|t| std::iter::once(t.id.as_str()).chain(t.roles.iter().map(|r| r.output.as_str()))),
+            )
+    }
+
+    /// Adds many points and curves without searching the sketch for each new id: see
+    /// [`SketchBatch`].
+    pub fn batch(&mut self) -> SketchBatch<'_> {
+        let taken = self.all_ids().map(str::to_owned).collect();
+        SketchBatch { sketch: self, taken }
     }
     pub(crate) fn id_taken(&self, id: &str) -> bool {
+        #[cfg(test)]
+        crate::tests::count_id_scan();
         self.points.iter().any(|p| p.id == id)
             || self.curves.iter().any(|c| c.id == id)
             || self.constraints.iter().any(|c| c.id == id)
@@ -859,26 +982,32 @@ impl Sketch {
 
     /// Add a free point (or reuse an existing one within `merge_tol` of `p` when `merge_tol > 0`).
     pub fn add_point(&mut self, p: Vec2, id: Option<&str>) -> Result<usize> {
+        self.add_point_with(p, id, None)
+    }
+
+    /// [`Sketch::add_point`], with the ids a [`SketchBatch`] keeps when given.
+    fn add_point_with(&mut self, p: Vec2, id: Option<&str>, taken: Option<&HashSet<String>>) -> Result<usize> {
         let p = Self::check_pos(p)?;
-        if self.points.len() >= MAX_POINTS {
+        if self.points.len() >= crate::limits::max_points() {
             return Err(SketchError::TooLarge);
         }
-        let id = match id {
-            Some(i) if self.id_taken(i) => return Err(SketchError::Duplicate(i.into())),
-            Some("") => return Err(SketchError::Invalid("empty id".into())),
-            Some(i) => i.to_string(),
-            None => self.fresh("p")?,
-        };
+        let id = self.new_id(id, "p", taken)?;
         self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None });
         Ok(self.points.len() - 1)
     }
 
     pub(crate) fn curve_id(&mut self, id: Option<&str>, prefix: &str) -> Result<String> {
+        self.new_id(id, prefix, None)
+    }
+
+    /// The id a new entity gets: `id` if it is free, else a fresh one with `prefix`. `taken`, when
+    /// given, holds every id the sketch has (a [`SketchBatch`]'s).
+    fn new_id(&mut self, id: Option<&str>, prefix: &str, taken: Option<&HashSet<String>>) -> Result<String> {
         match id {
-            Some(i) if self.id_taken(i) => Err(SketchError::Duplicate(i.into())),
+            Some(i) if taken.map_or_else(|| self.id_taken(i), |t| t.contains(i)) => Err(SketchError::Duplicate(i.into())),
             Some("") => Err(SketchError::Invalid("empty id".into())),
             Some(i) => Ok(i.into()),
-            None => self.fresh(prefix),
+            None => self.next_id(prefix, taken),
         }
     }
 
@@ -906,6 +1035,7 @@ impl Sketch {
             centerline: false,
             fixed: false,
             infinite: false,
+            spline_handle_of: None,
         });
         Ok(self.curves.len() - 1)
     }
@@ -944,6 +1074,7 @@ impl Sketch {
             centerline: false,
             fixed: false,
             infinite: false,
+            spline_handle_of: None,
         });
         Ok(self.curves.len() - 1)
     }
@@ -979,6 +1110,7 @@ impl Sketch {
             centerline: false,
             fixed: false,
             infinite: false,
+            spline_handle_of: None,
         });
         Ok(self.curves.len() - 1)
     }
@@ -988,7 +1120,7 @@ impl Sketch {
         if let Some(same) = self.same_constraint(&kind) {
             return Ok(same.to_string());
         }
-        if self.constraints.len() >= MAX_CONSTRAINTS {
+        if self.constraints.len() >= crate::limits::max_constraints() {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("k")?;
@@ -1000,6 +1132,15 @@ impl Sketch {
     /// same kind on the same entities, in either order where the order doesn't matter.
     pub fn same_constraint(&self, kind: &ConstraintKind) -> Option<&str> {
         use ConstraintKind::*;
+        // A pierce names a curve of another sketch by id, so its identity is not a pair of
+        // indices: the same point pierced by the same curve of the same sketch.
+        if let Pierce { p, sketch, curve, .. } = kind {
+            return self
+                .constraints
+                .iter()
+                .find(|c| matches!(&c.kind, Pierce { p: q, sketch: s, curve: k, .. } if q == p && s == sketch && k == curve))
+                .map(|c| c.id.as_str());
+        }
         let pair = |x: usize, y: usize| if x <= y { (x, y) } else { (y, x) };
         let key = |k: &ConstraintKind| -> Option<(u8, usize, usize, usize)> {
             Some(match *k {
@@ -1096,6 +1237,14 @@ impl Sketch {
                 need_line(a)?;
                 need_line(b)?;
             }
+            PointAlong { p, c, at } => {
+                if !(at.is_finite() && (0.0..=1.0).contains(&at)) {
+                    return Err(SketchError::Invalid("a point along a curve needs a share of its length from 0 to 1".into()));
+                }
+                if self.curves.get(c).is_some_and(|x| x.kind.uses(p)) {
+                    return Err(SketchError::Invalid("a curve's own point cannot be placed along it".into()));
+                }
+            }
             // On an ellipse, a radius dimension holds its minor radius.
             Radius { c, .. } if matches!(self.curves.get(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {}
             Radius { c, .. } | Diameter { c, .. } => need_round(c)?,
@@ -1172,40 +1321,68 @@ impl Sketch {
         {
             return Err(SketchError::Invalid("arc sweep must be nonzero and less than a full turn".into()));
         }
+        if let Pierce { plane, world, .. } = k
+            && crate::pierce::pierce_point_world(plane, world).is_none()
+        {
+            return Err(SketchError::Invalid("the pierced curve does not cross this sketch's plane".into()));
+        }
         Ok(())
     }
 
-    /// The sketch scaled by `factor` about its origin, for its first dimension (#1365): drawn
+    /// The sketch scaled by `factor`, for its first dimension (#1365): drawn
     /// geometry has no size of its own until a dimension gives it one, so the first length
     /// dimension scales the whole sketch to its value instead of distorting it. Only a sketch
     /// with nothing that fixes a size: no other driving length dimension, nothing fixed,
-    /// projected or patterned, no offsets and no 3D curves. Every geometric constraint
-    /// (coincident, horizontal, parallel, tangent, equal, symmetric, …) and every angle holds
-    /// on the scaled sketch as it held before. `None` when the sketch does not qualify, also
-    /// when its curves form several separate chains (#3786): the dimension sizes only its own.
-    pub fn scaled_for_first_dimension(&self, factor: f64) -> Option<Sketch> {
+    /// projected or patterned, no offsets and no 3D curves. A linked sketch axis can give a
+    /// direction or symmetry line through the origin without giving the drawing a size. Every
+    /// geometric constraint and angle holds on the scaled sketch as it held before.
+    /// `None` when the sketch does not qualify, also when its curves form several separate
+    /// chains (#3786): the dimension sizes only its own, and when `dimension` is a radius or
+    /// diameter and the sketch's only drawn curve is a circle (#11438): a radius or diameter
+    /// cannot distort a circle, so scaling would only move its centre. Any other first
+    /// dimension on a lone circle scales it as before.
+    /// A drawing tied to the origin scales about the origin; one drawn away from it scales about
+    /// its own middle and stays where it was drawn (#11043), unless `about_origin` asks for the
+    /// origin anyway (the behaviour before #11043).
+    pub fn scaled_for_first_dimension(&self, factor: f64, dimension: &ConstraintKind, about_origin: bool) -> Option<Sketch> {
         if !(factor.is_finite() && (1e-6..=1e6).contains(&factor)) {
             return None;
         }
-        let sizes = self.constraints.iter().any(|c| match c.kind {
-            ConstraintKind::Fix { .. } | ConstraintKind::PatternPoint { .. } | ConstraintKind::PatternRadius { .. } => true,
-            ref k => k.is_dimension() && !k.is_angle() && !c.driven,
-        });
-        if sizes
-            || !self.links.is_empty()
-            || !self.patterns.is_empty()
-            || !self.offsets.is_empty()
-            || !self.freeform_offsets.is_empty()
-            || !self.wires.is_empty()
-            || self.curves.iter().any(|c| c.fixed || c.link.is_some())
-            || self.points.iter().enumerate().any(|(i, p)| (p.fixed || p.link.is_some()) && (i != 0 || p.pos != Vec2::ZERO))
-        {
+        if self.lone_circle_for(dimension).is_some() || self.has_size() {
             return None;
         }
+        let mut axes = BTreeMap::new();
+        for link in &self.links {
+            let LinkSource::SketchAxis { name } = &link.source else { return None };
+            let LinkGeom::Line(a, b) = sketch_axis_geom(name)? else { return None };
+            if link.kind != LinkKind::Project || link.lost {
+                return None;
+            }
+            axes.insert(link.id.as_str(), [a, b]);
+        }
+        let axis_point = |i: usize| self.points.get(i).is_some_and(|p| p.link.as_deref().is_some_and(|id| axes.contains_key(id)));
+        if self.points.iter().enumerate().any(|(i, p)| (p.fixed || p.link.is_some()) && (i != 0 || p.pos != Vec2::ZERO) && !axis_point(i)) {
+            return None;
+        }
+        let drawn_curves = || self.curves.iter().filter(|c| c.link.is_none());
+        for curve in &self.curves {
+            if let Some(link) = curve.link.as_deref() {
+                let &[from, to] = axes.get(link)?;
+                let CurveKind::Line { a, b } = curve.kind else { return None };
+                let endpoint = |i: usize| self.points.get(i).filter(|p| p.link.as_deref() == Some(link)).map(|p| p.pos);
+                let ends = [endpoint(a)?, endpoint(b)?];
+                if ends != [from, to] && ends != [to, from] {
+                    return None;
+                }
+            } else if curve.fixed || !axes.is_empty() && curve.kind.point_ids().into_iter().any(axis_point) {
+                return None;
+            }
+        }
         // Shapes nothing joins (#3786) are not one drawing: only one connected chain of curves
-        // scales. Curves and driving constraints join their points; the origin is a point too.
+        // scales. A sketch axis is shared by references to its direction, and does not by
+        // itself connect separate drawings.
         let mut parent: Vec<usize> = (0..self.points.len()).collect();
-        for c in &self.curves {
+        for c in drawn_curves() {
             let ids = c.kind.point_ids();
             for w in ids.windows(2) {
                 if let [a, b] = *w {
@@ -1214,22 +1391,49 @@ impl Sketch {
             }
         }
         for c in self.constraints.iter().filter(|c| !c.driven) {
-            let ids = self.constraint_points(&c.kind);
-            for w in ids.windows(2) {
+            let (mut points, curves) = c.kind.indices();
+            // An explicit endpoint or the length of the axis segment does give a size.
+            if !axes.is_empty()
+                && (points.iter().copied().any(axis_point)
+                    || matches!(c.kind, ConstraintKind::Equal { .. }) && curves.iter().any(|&i| self.curves.get(i).is_some_and(|c| c.link.is_some())))
+            {
+                return None;
+            }
+            points.extend(curves.into_iter().filter_map(|i| self.curves.get(i)).filter(|c| c.link.is_none()).flat_map(|c| c.kind.point_ids()));
+            for w in points.windows(2) {
                 if let [a, b] = *w {
                     union(&mut parent, a, b);
                 }
             }
         }
-        let mut roots = self.curves.iter().filter_map(|c| c.kind.point_ids().first().map(|&p| find(&mut parent, p)));
-        if let Some(first) = roots.next()
-            && roots.any(|r| r != first)
-        {
+        let roots: Vec<usize> = drawn_curves().filter_map(|c| c.kind.point_ids().first().copied()).map(|p| find(&mut parent, p)).collect();
+        let first = roots.first().copied();
+        if roots.iter().any(|&r| Some(r) != first) {
             return None;
         }
+        // The fixed point the drawing grows or shrinks about (#11043): the sketch origin when
+        // asked, or when the drawing is tied to it (joined to the origin, or held by a constraint
+        // to a sketch axis); otherwise the middle of the drawing, so a shape drawn away from the
+        // origin keeps its place and only changes size.
+        let anchor = match first {
+            Some(root) if !about_origin && find(&mut parent, 0) != root && !self.tied_to_axes() => {
+                let mut lo = Vec2::new(f64::INFINITY, f64::INFINITY);
+                let mut hi = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+                for (i, p) in self.points.iter().enumerate() {
+                    if find(&mut parent, i) == root && !p.fixed && p.link.is_none() {
+                        lo = Vec2::new(lo.x.min(p.pos.x), lo.y.min(p.pos.y));
+                        hi = Vec2::new(hi.x.max(p.pos.x), hi.y.max(p.pos.y));
+                    }
+                }
+                let mid = (lo + hi) * 0.5;
+                if in_range(mid) { mid } else { Vec2::ZERO }
+            }
+            _ => Vec2::ZERO,
+        };
+        let scale = |p: Vec2| anchor + (p - anchor) * factor;
         let mut out = self.clone();
-        for p in out.points.iter_mut().filter(|p| !p.fixed) {
-            p.pos = p.pos * factor;
+        for p in out.points.iter_mut().filter(|p| !p.fixed && p.link.is_none()) {
+            p.pos = scale(p.pos);
             if !in_range(p.pos) {
                 return None;
             }
@@ -1244,16 +1448,83 @@ impl Sketch {
         }
         // Dimension texts keep their places relative to what they measure.
         for t in out.constraints.iter_mut().filter_map(|c| c.text.as_mut()) {
-            *t = *t * factor;
+            *t = scale(*t);
         }
         Some(out)
     }
 
+    /// Does a driving constraint hold drawn geometry to a projected sketch axis or the origin
+    /// point: the drawing then has a place relative to the origin, and scales about it.
+    fn tied_to_axes(&self) -> bool {
+        let held_point = |i: usize| i == 0 || self.points.get(i).is_some_and(|p| p.link.is_some());
+        let held_curve = |i: usize| self.curves.get(i).is_some_and(|c| c.link.is_some());
+        self.constraints.iter().filter(|c| !c.driven).any(|c| {
+            let (points, curves) = c.kind.indices();
+            points.into_iter().any(held_point) || curves.into_iter().any(held_curve)
+        })
+    }
+
+    /// The sketch with its lone circle's radius scaled by `factor` and its centre where it is,
+    /// for a first radius or diameter `dimension` that [`Sketch::scaled_for_first_dimension`]
+    /// leaves to the solver (#11438). The solve then starts at the requested size, however far
+    /// it is from the drawn one, instead of squeezing the circle there. `None` when the sketch
+    /// is not one lone circle sized by nothing else, when anything is fixed or projected (a
+    /// sketch axis too: the solver then sizes the circle against it), or the new radius is out
+    /// of range.
+    pub fn lone_circle_sized_for_first_dimension(&self, factor: f64, dimension: &ConstraintKind) -> Option<Sketch> {
+        if !(factor.is_finite() && (1e-6..=1e6).contains(&factor))
+            || self.has_size()
+            || !self.links.is_empty()
+            || self.curves.iter().any(|c| c.fixed || c.link.is_some())
+            || self.points.iter().enumerate().any(|(i, p)| (p.fixed || p.link.is_some()) && (i != 0 || p.pos != Vec2::ZERO))
+        {
+            return None;
+        }
+        let i = self.lone_circle_for(dimension)?;
+        let mut out = self.clone();
+        if let Some(CurveKind::Circle { r, .. }) = out.curves.get_mut(i).map(|c| &mut c.kind) {
+            *r *= factor;
+            if !radius_in_range(*r) {
+                return None;
+            }
+        }
+        Some(out)
+    }
+
+    /// The index of the sketch's only drawn curve when it is a circle and `dimension` is a
+    /// radius or diameter: one that cannot distort the circle. A projected sketch axis is not
+    /// drawn and does not count.
+    fn lone_circle_for(&self, dimension: &ConstraintKind) -> Option<usize> {
+        if !matches!(dimension, ConstraintKind::Radius { .. } | ConstraintKind::Diameter { .. }) {
+            return None;
+        }
+        let mut drawn = self.curves.iter().enumerate().filter(|(_, c)| c.link.is_none());
+        match (drawn.next(), drawn.next()) {
+            (Some((i, c)), None) if matches!(c.kind, CurveKind::Circle { .. }) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// Does something already fix a size of the sketch: a driving length dimension, a fix,
+    /// pattern or pierce constraint, a pattern, an offset or a 3D curve? Fixed and projected
+    /// geometry is left to the callers, since a linked sketch axis gives no size.
+    fn has_size(&self) -> bool {
+        let sizes = self.constraints.iter().any(|c| match c.kind {
+            ConstraintKind::Fix { .. } | ConstraintKind::PatternPoint { .. } | ConstraintKind::PatternRadius { .. } => true,
+            // A pierce holds its point where another sketch's curve crosses this plane:
+            // scaling the sketch would move it off the crossing.
+            ConstraintKind::Pierce { .. } => true,
+            ref k => k.is_dimension() && !k.is_angle() && !c.driven,
+        });
+        sizes || !self.patterns.is_empty() || !self.offsets.is_empty() || !self.freeform_offsets.is_empty() || !self.wires.is_empty()
+    }
+
     /// Is point `i` held in place: fixed, projected (linked), fixed by a Fix constraint or a
-    /// point of a fixed curve.
+    /// point of a fixed curve, or held there by a pierce.
     pub fn point_locked(&self, i: usize) -> bool {
         self.points.get(i).is_some_and(|p| p.fixed || p.link.is_some())
             || self.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: i })
+            || self.constraints.iter().any(|c| matches!(&c.kind, ConstraintKind::Pierce { p, .. } if *p == i))
             || self.curves.iter().any(|c| c.fixed && c.kind.uses(i))
     }
 
@@ -1267,6 +1538,9 @@ impl Sketch {
         };
         for c in &self.constraints {
             if let ConstraintKind::Fix { p } = c.kind {
+                set(p);
+            }
+            if let ConstraintKind::Pierce { p, .. } = c.kind {
                 set(p);
             }
         }
@@ -1418,7 +1692,7 @@ impl Sketch {
     /// drawing.
     pub fn virtual_corners(&self) -> Vec<(usize, Vec<(Vec2, Vec2)>)> {
         const MAX_POINT_REFERENCES: usize = 1_000_000;
-        if self.points.len() > MAX_POINTS || self.constraints.len() > MAX_CONSTRAINTS || self.curves.len() > MAX_POINT_REFERENCES {
+        if self.points.len() > CEILING_POINTS || self.constraints.len() > CEILING_CONSTRAINTS || self.curves.len() > MAX_POINT_REFERENCES {
             return Vec::new();
         }
         let mut remaining = MAX_POINT_REFERENCES;
@@ -1427,7 +1701,7 @@ impl Sketch {
                 CurveKind::Line { .. } | CurveKind::Ellipse { .. } => 2,
                 CurveKind::Circle { .. } => 1,
                 CurveKind::Arc { .. } | CurveKind::Conic { .. } => 3,
-                CurveKind::Spline { pts, .. } => pts.len(),
+                CurveKind::Spline { pts, handles, .. } => pts.len().saturating_add(handles.len()),
             };
             let Some(left) = remaining.checked_sub(count) else { return Vec::new() };
             remaining = left;
@@ -1632,10 +1906,15 @@ impl Sketch {
                 )
             }
             CurveKind::Conic { a, b, apex, rho } => Some(vec![Seg2::Conic { a: pt(a)?, apex: pt(apex)?, b: pt(b)?, w: rho / (1.0 - rho).max(1e-9) }]),
-            CurveKind::Spline { pts, control: false, periodic, .. } => {
+            CurveKind::Spline { pts, control: false, periodic, handles, .. } => {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
+                let handles: Vec<Vec2> = handles.iter().map(pt).collect::<Option<_>>()?;
                 Some(
-                    crate::curves::fit_beziers_mode(&p, *periodic).ok()?.into_iter().map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 }).collect(),
+                    crate::curves::fit_beziers_with_handles(&p, &handles, *periodic)
+                        .ok()?
+                        .into_iter()
+                        .map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 })
+                        .collect(),
                 )
             }
             CurveKind::Spline { pts, control: true, degree, nurbs: Some(nurbs), .. } => {
@@ -1672,9 +1951,14 @@ impl Sketch {
                 (Some(c), Some(m)) => crate::curves::ellipse_polyline(c, m, *r),
                 _ => Vec::new(),
             },
-            CurveKind::Spline { pts, control, degree, periodic, nurbs } => {
+            CurveKind::Spline { pts, control, degree, periodic, nurbs, handles } => {
                 let p: Option<Vec<Vec2>> = pts.iter().map(pt).collect();
-                p.map(|p| crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())).unwrap_or_default()
+                let handles: Option<Vec<Vec2>> = handles.iter().map(pt).collect();
+                match (p, handles) {
+                    (Some(p), Some(handles)) if !control => crate::curves::spline_polyline_with_handles(&p, &handles, *periodic),
+                    (Some(p), Some(_)) | (Some(p), None) => crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref()),
+                    _ => Vec::new(),
+                }
             }
             CurveKind::Conic { a, b, apex, rho } => match (pt(a), pt(apex), pt(b)) {
                 (Some(a), Some(x), Some(b)) => crate::curves::conic_polyline(a, x, b, *rho),
@@ -1696,6 +1980,11 @@ impl Sketch {
 
     /// Add a curve of any kind over existing points.
     pub fn add_curve(&mut self, kind: CurveKind, id: Option<&str>) -> Result<usize> {
+        self.add_curve_with(kind, id, None)
+    }
+
+    /// [`Sketch::add_curve`], with the ids a [`SketchBatch`] keeps when given.
+    fn add_curve_with(&mut self, kind: CurveKind, id: Option<&str>, taken: Option<&HashSet<String>>) -> Result<usize> {
         let ids = kind.point_ids();
         if ids.iter().any(|p| *p >= self.points.len()) {
             return Err(SketchError::Invalid("curve point out of range".into()));
@@ -1710,7 +1999,7 @@ impl Sketch {
                 }
                 "e"
             }
-            CurveKind::Spline { pts, control, degree, periodic, nurbs } => {
+            CurveKind::Spline { pts, control, degree, periodic, nurbs, handles } => {
                 if let Some(nurbs) = nurbs {
                     if !*control || *periodic {
                         return Err(SketchError::Invalid("only an open control spline has its own knots".into()));
@@ -1734,6 +2023,26 @@ impl Sketch {
                         .collect::<Result<Vec<_>>>()?;
                     crate::periodic_beziers(&p)?;
                 }
+                if !handles.is_empty() {
+                    let expected = if *periodic { pts.len().saturating_sub(1) } else { pts.len() };
+                    if *control
+                        || handles.len() != expected
+                        || handles.iter().any(|point| *point >= self.points.len())
+                        || handles.iter().any(|point| pts.contains(point))
+                        || handles.iter().copied().collect::<std::collections::BTreeSet<_>>().len() != handles.len()
+                    {
+                        return Err(SketchError::Invalid("invalid spline tangent handles".into()));
+                    }
+                    let fit: Vec<Vec2> = pts
+                        .iter()
+                        .map(|point| self.point(*point).ok_or_else(|| SketchError::Invalid("missing spline point".into())))
+                        .collect::<Result<_>>()?;
+                    let tangent: Vec<Vec2> = handles
+                        .iter()
+                        .map(|point| self.point(*point).ok_or_else(|| SketchError::Invalid("missing spline handle".into())))
+                        .collect::<Result<_>>()?;
+                    crate::curves::fit_beziers_with_handles(&fit, &tangent, *periodic)?;
+                }
                 "s"
             }
             CurveKind::Conic { rho, .. } => {
@@ -1743,15 +2052,279 @@ impl Sketch {
                 "n"
             }
         };
-        let id = self.curve_id(id, prefix)?;
-        self.curves.push(Curve { id, kind, construction: false, reversed: false, link: None, centerline: false, fixed: false, infinite: false });
+        let id = self.new_id(id, prefix, taken)?;
+        self.curves.push(Curve {
+            id,
+            kind,
+            construction: false,
+            reversed: false,
+            link: None,
+            centerline: false,
+            fixed: false,
+            infinite: false,
+            spline_handle_of: None,
+        });
         Ok(self.curves.len() - 1)
+    }
+
+    /// Give a fit spline one editable tangent handle at each fit point. The handles begin at the
+    /// natural cubic control offsets, preserving its exact curve.
+    pub fn add_spline_handles(&mut self, curve: usize) -> Result<()> {
+        let mut candidate = self.clone();
+        candidate.add_spline_handles_in_place(curve)?;
+        candidate.validate_spline_handles()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    /// The fit splines whose tangent handles all still lie where a fresh spline through their fit
+    /// points puts them: nobody has turned one, so the curve is the natural interpolant.
+    pub fn natural_handle_splines(&self) -> Vec<usize> {
+        (0..self.curves.len())
+            .filter(|&curve| {
+                self.natural_handles(curve).is_some_and(|(ids, natural)| {
+                    ids.iter().zip(&natural).all(|(id, b)| self.point(*id).is_some_and(|a| a.dist(*b) <= 1e-6 * (1.0 + b.len())))
+                })
+            })
+            .collect()
+    }
+
+    /// Put the handles of `curves` back where their fit points now put them, so that moving a fit
+    /// point of a spline whose handles nobody turned keeps it the natural interpolant (#6502).
+    pub fn renew_natural_handles(&mut self, curves: &[usize]) {
+        // A handle held in place (fixed, or by a Fix constraint) stays where it is.
+        let locked = self.locked_points();
+        for &curve in curves {
+            let Some((ids, natural)) = self.natural_handles(curve) else { continue };
+            for (id, at) in ids.iter().zip(natural) {
+                if locked.get(*id).copied() == Some(false)
+                    && let Some(point) = self.points.get_mut(*id)
+                {
+                    point.pos = at;
+                }
+            }
+        }
+    }
+
+    /// A fit spline's handle points, and where its fit points would put them.
+    fn natural_handles(&self, curve: usize) -> Option<(Vec<usize>, Vec<Vec2>)> {
+        let CurveKind::Spline { pts, control: false, periodic, handles, .. } = &self.curves.get(curve)?.kind else {
+            return None;
+        };
+        if handles.is_empty() {
+            return None;
+        }
+        let fit: Vec<Vec2> = pts.iter().map(|i| self.point(*i)).collect::<Option<_>>()?;
+        let natural = crate::curves::fit_tangent_handles(&fit, *periodic).ok()?;
+        (natural.len() == handles.len()).then(|| (handles.clone(), natural))
+    }
+
+    /// Add tangent handles to every fit spline that does not have them yet.
+    pub fn add_missing_spline_handles(&mut self) -> Result<()> {
+        let missing: Vec<usize> = self
+            .curves
+            .iter()
+            .enumerate()
+            .filter_map(|(index, curve)| match curve.kind {
+                CurveKind::Spline { control: false, ref handles, .. }
+                    if handles.is_empty()
+                        && curve.link.is_none()
+                        && !self.freeform_offsets.iter().any(|offset| offset.output == curve.id)
+                        && !self.offsets.iter().any(|offset| offset.owns_output(&curve.id)) =>
+                {
+                    Some(index)
+                }
+                _ => None,
+            })
+            .collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let mut candidate = self.clone();
+        for index in missing {
+            candidate.add_spline_handles_in_place(index)?;
+        }
+        candidate.validate_spline_handles()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    /// Why the spline `spline_id` may not take tangent handles, if it may not. An equation places
+    /// its fit points, a pattern moves its copies' points, an offset rebuilds its output: none of
+    /// them would carry free handles along.
+    fn spline_handles_allowed(&self, spline_id: &str) -> Result<()> {
+        if self.equations.iter().any(|equation| equation.curve == spline_id) {
+            return Err(SketchError::Invalid("an equation curve's shape comes from its formula; it has no tangent handles".into()));
+        }
+        if self
+            .patterns
+            .iter()
+            .any(|pattern| pattern.contains(spline_id) || pattern.instances.iter().any(|i| i.curves.iter().any(|c| c == spline_id)))
+        {
+            return Err(SketchError::Invalid("a patterned spline has no tangent handles".into()));
+        }
+        if self.freeform_offsets.iter().any(|offset| offset.output == spline_id) || self.offsets.iter().any(|offset| offset.owns_output(spline_id)) {
+            return Err(SketchError::Invalid("an offset's spline follows its source; it has no tangent handles".into()));
+        }
+        Ok(())
+    }
+
+    /// Where the tangent handles of fit spline `curve` start, one per fit point (as
+    /// [`Sketch::add_spline_handles`] would place them: on the curve's own tangents), while it has
+    /// none stored. `None` for a spline that has handles already or cannot take them (a control
+    /// point, projected, equation, patterned or offset spline). A selected spline shows these, and
+    /// the first drag of one stores them (#6502).
+    pub fn spline_handle_preview(&self, curve: usize) -> Option<Vec<Vec2>> {
+        let Curve { id, link: None, kind: CurveKind::Spline { pts, control: false, periodic, handles, .. }, .. } = self.curves.get(curve)? else {
+            return None;
+        };
+        if !handles.is_empty() || self.spline_handles_allowed(id).is_err() {
+            return None;
+        }
+        let fit: Vec<Vec2> = pts.iter().map(|point| self.point(*point)).collect::<Option<_>>()?;
+        crate::curves::fit_tangent_handles(&fit, *periodic).ok()
+    }
+
+    fn add_spline_handles_in_place(&mut self, curve: usize) -> Result<()> {
+        let (points, periodic, existing, spline_id) = match self.curves.get(curve) {
+            Some(Curve { id, link: None, kind: CurveKind::Spline { pts, control: false, periodic, handles, .. }, .. }) => {
+                (pts.clone(), *periodic, handles.clone(), id.clone())
+            }
+            Some(_) => return Err(SketchError::Invalid("tangent handles require a fit spline".into())),
+            None => return Err(SketchError::Invalid("unknown spline".into())),
+        };
+        if !existing.is_empty() {
+            return Ok(());
+        }
+        self.spline_handles_allowed(&spline_id)?;
+        let count = if periodic { points.len().saturating_sub(1) } else { points.len() };
+        if self.points.len().saturating_add(count) > crate::limits::max_points()
+            || self.curves.len().saturating_add(count) > crate::limits::max_curves()
+        {
+            return Err(SketchError::TooLarge);
+        }
+        let fit_points: Vec<Vec2> = points
+            .iter()
+            .map(|point| self.point(*point).ok_or_else(|| SketchError::Invalid("missing spline point".into())))
+            .collect::<Result<_>>()?;
+        let handle_positions = crate::curves::fit_tangent_handles(&fit_points, periodic)?;
+        let mut handles = Vec::with_capacity(count);
+        for position in handle_positions {
+            handles.push(self.add_point(position, None)?);
+        }
+        if let Some(CurveKind::Spline { handles: target, .. }) = self.curves.get_mut(curve).map(|curve| &mut curve.kind) {
+            *target = handles.clone();
+        }
+        for (index, (point, handle)) in points.iter().take(count).zip(handles).enumerate() {
+            let (start, end) = if !periodic && index + 1 == points.len() { (handle, *point) } else { (*point, handle) };
+            let id = self.fresh("h")?;
+            let line = self.add_line_pts(start, end, Some(&id))?;
+            if let Some(curve) = self.curves.get_mut(line) {
+                curve.construction = true;
+                curve.spline_handle_of = Some(spline_id.clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// Refuse malformed persisted tangent handles before they reach sketch evaluation.
+    pub fn validate_spline_handles(&self) -> Result<()> {
+        let mut work = 0usize;
+        let mut helper_lines_by_parent = std::collections::BTreeMap::<&str, Vec<&Curve>>::new();
+        let mut spline_ids = std::collections::BTreeSet::<&str>::new();
+        for curve in &self.curves {
+            if let Some(parent) = curve.spline_handle_of.as_deref() {
+                helper_lines_by_parent.entry(parent).or_default().push(curve);
+            }
+            if matches!(curve.kind, CurveKind::Spline { .. }) {
+                spline_ids.insert(curve.id.as_str());
+            }
+        }
+        for spline in &self.curves {
+            let CurveKind::Spline { pts, control, periodic, handles, .. } = &spline.kind else { continue };
+            let helper_lines = helper_lines_by_parent.get(spline.id.as_str()).map_or(&[][..], Vec::as_slice);
+            if handles.is_empty() {
+                if !helper_lines.is_empty() {
+                    return Err(SketchError::Invalid("spline has tangent lines without handle points".into()));
+                }
+                continue;
+            }
+            let count = if *periodic { pts.len().saturating_sub(1) } else { pts.len() };
+            work = work.saturating_add(count).saturating_add(pts.len());
+            if work > 1_000_000 || *control || handles.len() != count || helper_lines.len() != count {
+                return Err(SketchError::Invalid("invalid spline tangent handle count".into()));
+            }
+            let helper_points: std::collections::BTreeSet<(usize, usize)> = helper_lines
+                .iter()
+                .filter(|line| line.construction)
+                .filter_map(|line| match line.kind {
+                    CurveKind::Line { a, b } => Some((a.min(b), a.max(b))),
+                    _ => None,
+                })
+                .collect();
+            let unique: std::collections::BTreeSet<usize> = handles.iter().copied().collect();
+            if unique.len() != handles.len() || handles.iter().any(|handle| pts.contains(handle)) {
+                return Err(SketchError::Invalid("invalid spline tangent handle points".into()));
+            }
+            let fit: Vec<Vec2> = pts
+                .iter()
+                .map(|point| self.point(*point).ok_or_else(|| SketchError::Invalid("missing spline point".into())))
+                .collect::<Result<_>>()?;
+            let tangent: Vec<Vec2> = handles
+                .iter()
+                .map(|point| self.point(*point).ok_or_else(|| SketchError::Invalid("missing spline handle".into())))
+                .collect::<Result<_>>()?;
+            crate::curves::fit_beziers_with_handles(&fit, &tangent, *periodic)?;
+            for (point, handle) in pts.iter().take(count).zip(handles) {
+                if !helper_points.contains(&((*point).min(*handle), (*point).max(*handle))) {
+                    return Err(SketchError::Invalid("missing spline tangent construction line".into()));
+                }
+            }
+        }
+        for curve in &self.curves {
+            if let Some(parent) = &curve.spline_handle_of
+                && (!spline_ids.contains(parent.as_str()) || !matches!(curve.kind, CurveKind::Line { .. }) || !curve.construction)
+            {
+                return Err(SketchError::Invalid("invalid spline tangent construction line".into()));
+            }
+        }
+        Ok(())
     }
 
     /// Remove curves (by index) and then any points no longer used by a curve (except the
     /// origin and free points, and a removed ellipse's centre while one of its axes stays, as a
     /// Center Rectangle's centre stays), and constraints that referred to removed entities.
     pub fn remove_curves(&mut self, which: &[usize]) {
+        let mut which = which.to_vec();
+        let removed_ids: std::collections::BTreeSet<String> = which
+            .iter()
+            .filter_map(|index| self.curves.get(*index))
+            .filter(|curve| matches!(curve.kind, CurveKind::Spline { .. }))
+            .map(|curve| curve.id.clone())
+            .collect();
+        for (index, curve) in self.curves.iter().enumerate() {
+            if curve.spline_handle_of.as_ref().is_some_and(|parent| removed_ids.contains(parent)) {
+                which.push(index);
+            }
+        }
+        let removed_handles: std::collections::BTreeSet<String> =
+            which.iter().filter_map(|index| self.curves.get(*index)).filter_map(|curve| curve.spline_handle_of.clone()).collect();
+        if !removed_handles.is_empty() {
+            for curve in &mut self.curves {
+                if removed_handles.contains(&curve.id)
+                    && let CurveKind::Spline { handles, .. } = &mut curve.kind
+                {
+                    handles.clear();
+                }
+            }
+            for (index, curve) in self.curves.iter().enumerate() {
+                if curve.spline_handle_of.as_ref().is_some_and(|parent| removed_handles.contains(parent)) {
+                    which.push(index);
+                }
+            }
+        }
+        which.sort_unstable();
+        which.dedup();
         let mut owned: Vec<usize> = Vec::new();
         for (i, c) in self.curves.iter().enumerate() {
             if which.contains(&i) {
@@ -1769,8 +2342,8 @@ impl Sketch {
             })
             .collect();
         owned.retain(|p| !centres.contains(p));
-        let on_ends = self.points_on_ends_of(which);
-        self.drop_curves(which);
+        let on_ends = self.points_on_ends_of(&which);
+        self.drop_curves(&which);
         for (p, q) in on_ends {
             // Only a full sketch refuses one more; the point then comes loose as before.
             let _ = self.add_constraint(ConstraintKind::Coincident { p, q }, None);
@@ -1859,7 +2432,7 @@ impl Sketch {
     }
 
     /// Remove curves only (points stay), remapping constraints.
-    fn drop_curves(&mut self, which: &[usize]) {
+    pub(crate) fn drop_curves(&mut self, which: &[usize]) {
         self.prune_offsets_for_removed_curves(which);
         let removed: std::collections::BTreeSet<String> = which.iter().filter_map(|i| self.curves.get(*i).map(|c| c.id.clone())).collect();
         self.prune_equations(&removed);
@@ -1888,13 +2461,31 @@ impl Sketch {
             return;
         }
         let gone = |p: usize| p != 0 && which.contains(&p);
-        let dead_curves: Vec<usize> =
+        let mut dead_curves: Vec<usize> =
             self.curves.iter().enumerate().filter(|(_, c)| c.kind.point_ids().into_iter().any(gone)).map(|(i, _)| i).collect();
+        // A spline that goes takes its tangent lines (#6502): none is left without its spline.
+        let dead_splines: std::collections::BTreeSet<String> = dead_curves
+            .iter()
+            .filter_map(|i| self.curves.get(*i))
+            .filter(|c| matches!(&c.kind, CurveKind::Spline { handles, .. } if !handles.is_empty()))
+            .map(|c| c.id.clone())
+            .collect();
+        for (i, c) in self.curves.iter().enumerate() {
+            if c.spline_handle_of.as_ref().is_some_and(|parent| dead_splines.contains(parent)) && !dead_curves.contains(&i) {
+                dead_curves.push(i);
+            }
+        }
+        dead_curves.sort_unstable();
+        // Points only a removed curve owned go too when nothing else uses them: an offset's
+        // generated points, and a removed spline's handle points.
         let private = dead_curves
             .iter()
             .filter_map(|i| self.curves.get(*i))
-            .filter(|c| self.freeform_offsets.iter().any(|r| r.output == c.id))
-            .flat_map(|c| c.kind.point_ids())
+            .flat_map(|c| match &c.kind {
+                _ if self.freeform_offsets.iter().any(|r| r.output == c.id) => c.kind.point_ids(),
+                CurveKind::Spline { handles, .. } => handles.clone(),
+                _ => Vec::new(),
+            })
             .collect::<std::collections::BTreeSet<_>>();
         self.drop_curves(&dead_curves);
         let mut removed = which.iter().copied().filter(|i| *i != 0).collect::<std::collections::BTreeSet<_>>();

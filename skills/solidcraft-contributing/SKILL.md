@@ -46,15 +46,24 @@ not modelling a part through MCP.
 - **One topic and one issue per PR.** Never commit `plan/`, build directories (`target*/`) or generated
   reference data; check `git ls-files` before pushing. Run `cargo xtask ci` before every commit.
   Commit after every feature arc that builds.
-- **Merge flow.** The heavy CI jobs start when a maintainer adds `approved-for-ci`; approved PRs go
-  through the merge queue (`gh pr merge N -R tangency-labs/solidcraft --squash --auto`), which runs the
+- **Merge flow.** The heavy CI jobs start when a maintainer adds `approved-for-ci`. Contributors don't
+  queue or merge their own PRs: a maintainer or steward adds `ready to merge` (and `approved-for-ci` for
+  a fork), and the merge shepherd enqueues the PR once it is green and passes the review gates
+  (CodeRabbit threads resolved; CI or workflow changes need the owner's approval). The queue runs the
   full suite on each group before it lands on `main`. Never force-push `main`.
-- **Do not push only to catch up with `main`** (no merge of `main`, no Update branch, no rebase for
-  that alone): every push restarts the whole CI run, and `main`'s own run catches what lands in between.
-  When you push anyway, or GitHub reports a conflict, rebase onto the latest `main` and push your own
-  branch with `--force-with-lease`; never merge `main` into a PR. Resolve conflicts without discarding
-  others' work. Do not re-run CI on an unchanged commit: re-run only a job that runner trouble
-  cancelled, with "Re-run failed jobs".
+- **Do not push only to catch up with `main`:** every push restarts the whole CI run, and `main`'s own
+  run catches what lands in between. When you push anyway, or GitHub reports a conflict, rebase onto
+  the latest `main` (preferred for your own branch; push it with `--force-with-lease`) or merge `main`
+  in; both are fine. Never force-push a branch someone else works on. Automation that updates your PR
+  merges `main` into your branch and never force-pushes over your history. Resolve conflicts without
+  discarding others' work. Do not re-run CI on an unchanged commit: re-run only a job that runner
+  trouble cancelled, with "Re-run failed jobs".
+- **Kernel, series and drawings.** Kernel work goes in `solidcore/` on `main` (there is no kernel
+  branch) and follows `solidcore/docs/layers.md` and §7 of
+  `solidcore/docs/definitions-and-certificates.md`. The first PR of a series that sets a shape (a type,
+  error shape, API, format or schema) gets a design review before later parts are accepted. Drawings
+  work targets the `drawings` branch. A UI addition needs full-flow 1280×720 screenshots and a
+  small-window check.
 - **Evidence.** For observable CAD, UI or model behaviour (kernel, geometry, assembly and backend
   changes included), the issue or PR carries real screenshots or a short recording from a small
   reproduction, preferably before and after, with steps and expected/actual behaviour. Capture it
@@ -72,9 +81,34 @@ not modelling a part through MCP.
   operation protocol in `plan/execution-plan.md` section 6; do not stop to ask unless it lists the decision
   as the owner's. Contributors without `plan/` can ignore this.
 - **Update the roadmap** when a milestone task lands: `docs/roadmap-detail.md` tracks status, milestones and estimates; `ROADMAP.md` is the short user-facing roadmap.
-- **Start here.** What to work on: `ROADMAP.md`, "Where help is wanted most" in CONTRIBUTING.md and the open issues labelled `help wanted`, `good first issue`, `needs-triage`; check what is already open first. Architecture: `docs/architecture.md` and "How the code is laid out" in CONTRIBUTING.md; kernel work is paused ("Kernel work is paused" in CONTRIBUTING.md). Licence rules: `deny.toml` and `cargo xtask licences --check`; only `crates/kernel` may use `truck`. When the code, docs and rules settle a question, act; ask on the issue or PR only when the answer changes what users see or what the change covers.
+- **Start here.** What to work on: `ROADMAP.md`, "Where help is wanted most" in CONTRIBUTING.md and the open issues labelled `help wanted`, `good first issue`, `needs-triage`; check what is already open first. Architecture: `docs/architecture.md` and "How the code is laid out" in CONTRIBUTING.md; kernel work goes in `solidcore/` ("Kernel work goes in solidcore/" in CONTRIBUTING.md). Licence rules: `deny.toml` and `cargo xtask licences --check`; only `crates/smlib` may use `solidcore`. When the code, docs and rules settle a question, act; ask on the issue or PR only when the answer changes what users see or what the change covers.
 - **Do not open a second PR** for an issue a lower-numbered open PR already closes, and keep the `Changes a default:` line filled in: `pr-checks.yml` fails both.
 - **The gate reads the working tree.** Do not switch branches while `cargo xtask ci` runs: it compiles the other branch's code and fails on a change not in the PR. Run it in the background and wait for its log.
+
+## Working as an agent
+
+- **The code is English. The comments are English. Always.** Identifiers, doc comments,
+  inline comments, commit messages, branch names, test names, error messages and
+  documentation are all in English. This is not a preference: a comment in another
+  language is a defect, it is not reviewable by the people who maintain this code, and a
+  reviewer rejects it. If something is not obvious, write it in English and keep it
+  short. A user-visible string is not inline in the code: it goes to the message
+  catalogs in `assets/locales/` (a new one to `assets/locales/pending/<slug>.json`),
+  and `skills/solidcraft-ui-text/SKILL.md` says how to name and translate it.
+- **Parallel work runs in parallel.** When a task splits into independent parts (several
+  files, several areas, several checks that do not depend on each other), dispatch one
+  subagent per part and let them run concurrently instead of walking the list one item at
+  a time. Give every subagent a self-contained brief: what to change, what not to touch,
+  and what to report back. Read the answers before you continue; a subagent's report is
+  not a result you can assume.
+- **Do not parallelize what depends on itself.** A fix and the test that proves it, a
+  refactor and the callers it breaks, two edits to the same file: those stay sequential.
+  One subagent per independent unit of work, and no two units may write the same file.
+- **Keep the cost down.** Keep one long-running agent session instead of restarting it.
+  Don't `--resume` a session after its prompt cache has gone cold: a cold resume re-reads the
+  whole history at full price. Act on CodeRabbit comments only when they're about crashes,
+  wrong results, data loss or security, and ignore style nitpicks. Don't push just to
+  re-trigger a review.
 
 ## 1. Check the environment
 
@@ -133,15 +167,14 @@ fails, inspect the divergence and preserve existing work; do not reset it away.
 ## 3. Choose an unclaimed task together
 
 Ask about their interests and show a few issues that fit the available resources.
-Read the current kernel-pause notice in CONTRIBUTING.md and skip kernel work
-while paused, including tasks outside `crates/kernel/` that change kernel behaviour.
+Kernel and geometry tasks are fine: they go in `solidcore/` (CONTRIBUTING.md, "Kernel work goes in solidcore/").
 Fetch the whole open list, including drafts, before narrowing it:
 
 ```sh
 gh issue list -R tangency-labs/solidcraft --state open --limit 500
 gh pr list -R tangency-labs/solidcraft --state open --limit 500 --json number,title,files
-gh issue list -R tangency-labs/solidcraft --state open --label 'good first issue' --search '-label:kernel-paused -label:"in progress"' --limit 100
-gh issue list -R tangency-labs/solidcraft --state open --label 'help wanted' --search '-label:kernel-paused -label:"in progress"' --limit 100
+gh issue list -R tangency-labs/solidcraft --state open --label 'good first issue' --search '-label:"in progress"' --limit 100
+gh issue list -R tangency-labs/solidcraft --state open --label 'help wanted' --search '-label:"in progress"' --limit 100
 ```
 
 Let the person choose. Set `N` to that issue's number, then inspect its discussion,
@@ -186,7 +219,7 @@ Use the affected crate and test module in commands such as:
 ```sh
 cargo test --profile ci -p solidcraft-engine --lib -- tests::feature_inputs_are_parameters
 cargo clippy -p solidcraft-engine --all-targets -- -D warnings
-cargo fmt --all -- --check
+cargo xtask fmt --check
 cargo xtask ci
 ```
 

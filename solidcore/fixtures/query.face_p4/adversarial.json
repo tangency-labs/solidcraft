@@ -1,0 +1,1961 @@
+{
+ "cases": [
+  {
+   "name": "adv_torus_wind_u2_v1_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0.5,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.5,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_torus_wind_u1_v2_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 0.5,
+        "d": 1,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 0,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_torus_two_diagonals_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 0,
+        "c": 1,
+        "d": 0.5,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.5,
+        "c": 0.5,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_both_pole_vertices_band_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.7,
+        "c": 0,
+        "d": 0.7,
+        "rev": false
+       }
+      ]
+     ],
+     "points": [
+      [
+       0.5,
+       0.0
+      ],
+      [
+       0.5,
+       1.0
+      ]
+     ]
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_both_pole_vertices_cap_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.4,
+        "c": 1,
+        "d": 0.4,
+        "rev": false
+       }
+      ]
+     ],
+     "points": [
+      [
+       0.5,
+       0.0
+      ],
+      [
+       0.5,
+       1.0
+      ]
+     ]
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_three_spans_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.2,
+        "c": 1,
+        "d": 0.2,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.5,
+        "c": 0,
+        "d": 0.5,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.8,
+        "c": 1,
+        "d": 0.8,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_five_spans_rev_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.1,
+        "c": 1,
+        "d": 0.1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.3,
+        "c": 0,
+        "d": 0.3,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.5,
+        "c": 1,
+        "d": 0.5,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.7,
+        "c": 0,
+        "d": 0.7,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.9,
+        "c": 1,
+        "d": 0.9,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 2
+   }
+  },
+  {
+   "name": "adv_cylinder_eight_spans_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.05,
+        "c": 1,
+        "d": 0.05,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.15,
+        "c": 0,
+        "d": 0.15,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.45,
+        "c": 0,
+        "d": 0.45,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.55,
+        "c": 1,
+        "d": 0.55,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.7,
+        "c": 0,
+        "d": 0.7,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.85,
+        "c": 1,
+        "d": 0.85,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.95,
+        "c": 0,
+        "d": 0.95,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_cylinder_three_same_dir_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.2,
+        "c": 1,
+        "d": 0.2,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.5,
+        "c": 1,
+        "d": 0.5,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.8,
+        "c": 1,
+        "d": 0.8,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_cylinder_seven_spans_reversed_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.1,
+        "c": 0,
+        "d": 0.1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.2,
+        "c": 1,
+        "d": 0.2,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.3,
+        "c": 0,
+        "d": 0.3,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.4,
+        "c": 1,
+        "d": 0.4,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.5,
+        "c": 0,
+        "d": 0.5,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.6,
+        "c": 1,
+        "d": 0.6,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.7,
+        "c": 0,
+        "d": 0.7,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 2
+   }
+  },
+  {
+   "name": "adv_cone_three_spans_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cone",
+      "scale": 1.0,
+      "a": 2.0,
+      "b": 30.0,
+      "c": 1.5,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.1,
+        "c": 1,
+        "d": 0.1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.5,
+        "c": 0,
+        "d": 0.5,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.9,
+        "c": 1,
+        "d": 0.9,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_natural_cone_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "cone",
+      "scale": 1.0,
+      "a": 2.0,
+      "b": 30.0,
+      "c": 1.5,
+      "swap": false
+     }
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_pole_vertex_only_start_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.5,
+        "c": 0,
+        "d": 0.5,
+        "rev": false
+       }
+      ]
+     ],
+     "points": [
+      [
+       0.5,
+       0.0
+      ]
+     ]
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_near_both_poles_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1e-09,
+        "c": 1,
+        "d": 1e-09,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.999999999,
+        "c": 0,
+        "d": 0.999999999,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_torus_band_diag_reversed_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.6,
+        "c": 0,
+        "d": 0.6,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 2
+   }
+  },
+  {
+   "name": "adv_cylinder_two_copies_mode4_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 2,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.0,
+        "c": 1,
+        "d": 0.0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1.0,
+        "c": 0,
+        "d": 1.0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 4
+   }
+  },
+  {
+   "name": "adv_sphere_tiny_scale_three_swap0",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 0.001,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.25,
+        "c": 1,
+        "d": 0.25,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.5,
+        "c": 0,
+        "d": 0.5,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.75,
+        "c": 1,
+        "d": 0.75,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_torus_wind_u2_v1_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 0.5,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.5,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_torus_wind_u1_v2_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 0.5,
+        "d": 1,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 0,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_torus_two_diagonals_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 0,
+        "c": 1,
+        "d": 0.5,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.5,
+        "c": 0.5,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_both_pole_vertices_band_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0,
+        "c": 0.3,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 1,
+        "c": 0.7,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": [
+      [
+       0.0,
+       0.5
+      ],
+      [
+       1.0,
+       0.5
+      ]
+     ]
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_both_pole_vertices_cap_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.4,
+        "b": 0,
+        "c": 0.4,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": [
+      [
+       0.0,
+       0.5
+      ],
+      [
+       1.0,
+       0.5
+      ]
+     ]
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_three_spans_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.2,
+        "b": 0,
+        "c": 0.2,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 1,
+        "c": 0.5,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.8,
+        "b": 0,
+        "c": 0.8,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_five_spans_rev_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.1,
+        "b": 0,
+        "c": 0.1,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 1,
+        "c": 0.3,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 0,
+        "c": 0.5,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 1,
+        "c": 0.7,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.9,
+        "b": 0,
+        "c": 0.9,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 2
+   }
+  },
+  {
+   "name": "adv_cylinder_eight_spans_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.05,
+        "b": 0,
+        "c": 0.05,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.15,
+        "b": 1,
+        "c": 0.15,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 0,
+        "c": 0.3,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.45,
+        "b": 1,
+        "c": 0.45,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.55,
+        "b": 0,
+        "c": 0.55,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 1,
+        "c": 0.7,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.85,
+        "b": 0,
+        "c": 0.85,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.95,
+        "b": 1,
+        "c": 0.95,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_cylinder_three_same_dir_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.2,
+        "b": 0,
+        "c": 0.2,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 0,
+        "c": 0.5,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.8,
+        "b": 0,
+        "c": 0.8,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_cylinder_seven_spans_reversed_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.1,
+        "b": 1,
+        "c": 0.1,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.2,
+        "b": 0,
+        "c": 0.2,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.3,
+        "b": 1,
+        "c": 0.3,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.4,
+        "b": 0,
+        "c": 0.4,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 1,
+        "c": 0.5,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.6,
+        "b": 0,
+        "c": 0.6,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.7,
+        "b": 1,
+        "c": 0.7,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 2
+   }
+  },
+  {
+   "name": "adv_cone_three_spans_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cone",
+      "scale": 1.0,
+      "a": 2.0,
+      "b": 30.0,
+      "c": 1.5,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.1,
+        "b": 0,
+        "c": 0.1,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 1,
+        "c": 0.5,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.9,
+        "b": 0,
+        "c": 0.9,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_natural_cone_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "cone",
+      "scale": 1.0,
+      "a": 2.0,
+      "b": 30.0,
+      "c": 1.5,
+      "swap": true
+     }
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_pole_vertex_only_start_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 1,
+        "c": 0.5,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": [
+      [
+       0.0,
+       0.5
+      ]
+     ]
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_sphere_near_both_poles_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 1e-09,
+        "b": 0,
+        "c": 1e-09,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.999999999,
+        "b": 1,
+        "c": 0.999999999,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_torus_band_diag_reversed_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0,
+        "c": 1,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 0.3,
+        "c": 1,
+        "d": 0.3,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.6,
+        "c": 0,
+        "d": 0.6,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 2
+   }
+  },
+  {
+   "name": "adv_cylinder_two_copies_mode4_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 2,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.0,
+        "b": 0,
+        "c": 0.0,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1.0,
+        "b": 1,
+        "c": 1.0,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 4
+   }
+  },
+  {
+   "name": "adv_sphere_tiny_scale_three_swap1",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 0.001,
+      "a": 2.0,
+      "swap": true
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.25,
+        "b": 0,
+        "c": 0.25,
+        "d": 1,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.5,
+        "b": 1,
+        "c": 0.5,
+        "d": 0,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 0.75,
+        "b": 0,
+        "c": 0.75,
+        "d": 1,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 0
+   }
+  },
+  {
+   "name": "adv_face_without_loops_sm_err_fresh",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1e-09,
+        "c": 1,
+        "d": 1e-09,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.999999999,
+        "c": 0,
+        "d": 0.999999999,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 1
+   }
+  },
+  {
+   "name": "adv_face_without_loops_explicit_reversed",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1e-09,
+        "c": 1,
+        "d": 1e-09,
+        "rev": false
+       }
+      ],
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 0.999999999,
+        "c": 0,
+        "d": 0.999999999,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1,
+    "loops": 2
+   }
+  },
+  {
+   "name": "adv_natural_torus_reversed",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     }
+    },
+    "props": 1,
+    "loops": 2
+   }
+  },
+  {
+   "name": "adv_natural_sphere_drop_last",
+   "inputs": {
+    "brep": {
+     "kind": "natural",
+     "surface": {
+      "kind": "sphere",
+      "scale": 1.0,
+      "a": 2.0,
+      "swap": false
+     }
+    },
+    "props": 1,
+    "loops": 3
+   }
+  },
+  {
+   "name": "adv_cylinder_rect_only",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "cylinder",
+      "scale": 1.0,
+      "a": 1.0,
+      "c": 2.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0.2,
+        "b": 0.2,
+        "c": 0.4,
+        "d": 0.2,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.4,
+        "b": 0.2,
+        "c": 0.4,
+        "d": 0.4,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.4,
+        "b": 0.4,
+        "c": 0.2,
+        "d": 0.4,
+        "rev": false
+       },
+       {
+        "t": "line",
+        "a": 0.2,
+        "b": 0.4,
+        "c": 0.2,
+        "d": 0.2,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "adv_torus_diag_backwards",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 1,
+        "b": 1,
+        "c": 0,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  },
+  {
+   "name": "adv_torus_antidiag",
+   "inputs": {
+    "brep": {
+     "kind": "curves",
+     "copies": 1,
+     "surface": {
+      "kind": "torus",
+      "scale": 1.0,
+      "a": 3.0,
+      "b": 1.0,
+      "swap": false
+     },
+     "loops": [
+      [
+       {
+        "t": "line",
+        "a": 0,
+        "b": 1,
+        "c": 1,
+        "d": 0,
+        "rev": false
+       }
+      ]
+     ],
+     "points": []
+    },
+    "props": 1
+   }
+  }
+ ]
+}
