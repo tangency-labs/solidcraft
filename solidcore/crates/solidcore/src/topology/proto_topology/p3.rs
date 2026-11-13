@@ -75,6 +75,10 @@
 //!   allocated `rpNewPE` through the out-parameter; the port returns `None` there (the
 //!   failing paths are not reachable from the callers ported so far).
 //! - The `SM_DEBUG_CODE` blocks are not ported.
+//! - **Vertex identity** (not upstream): `FindOrCreateProtoVertex(PC, PC)` makes no proto
+//!   vertex for two classifications whose objects lie farther apart than the intersection
+//!   tolerance of the two (`sm_FindPositionFromPCs`' deviation, which upstream only reports
+//!   and then covers by the new proto vertex's tolerance).
 //! - **Recursion.** None.
 //! - **Upper split child's interval** (WR-101, opt-in
 //!   `Kernel::fixes.proto_edge_split_upper_keeps_the_old_max`): `SmProtoEdge::Split` sets
@@ -99,7 +103,7 @@ use crate::curve::curve::CurveKind;
 use crate::error::{passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
-use crate::geom::tol::{xsect_tol3d, zone_tol3d, USE_DEFAULT};
+use crate::geom::tol::{xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, USE_DEFAULT};
 use crate::intersect::curve_class::p5::ExtractOptions;
 use crate::intersect::curve_class::{ClassificationInit, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
@@ -295,11 +299,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// `SmProtoTopologyManager::FindOrCreateProtoVertex(rPC1, rPC2, rpNewPV,
     /// pbWasCreated)`: the proto vertex for a point two classifications agree on
     /// (found within the tolerance, else created) and whether it was created. `None`
-    /// when either classification cannot be imprinted.
+    /// when either classification cannot be imprinted, and (not upstream) when their
+    /// objects lie farther apart than the two objects' intersection tolerance.
     ///
     /// # Errors
     ///
-    /// Those of `FindProtoVertex` and `CreateProtoVertex`; [`SolidError::Unported`]
+    /// Those of `FindProtoVertex`, `CreateProtoVertex` and the objects' zone
+    /// tolerances; [`SolidError::Unported`]
     /// for the callees listed in the module header.
     pub fn find_or_create_proto_vertex_pcs(
         &mut self,
@@ -319,11 +325,28 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // sm_FindPositionFromPCs, status ignored; the position stays SM_UNDEF on failure
         // (passed on with `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
         let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
-        let position = ignore_soft(passed_on(
+        let found_pos = ignore_soft(passed_on(
             find_position_from_pcs(k, geometry, pc1, pc2),
             pass,
-        )?)?
-        .map_or(Vec3::UNDEF, |p| p.position);
+        )?)?;
+        // Not upstream: a proto vertex stands for one point, so it never relates two
+        // objects farther apart than their intersection tolerance (the bound upstream
+        // only reports). Each classification lies within its own band of the curve's end,
+        // so a crossing midway between two corners 2.8e-5 apart classifies onto both with
+        // a band of 2e-5; relating them would merge two vertices that are not one. The
+        // pair is not a common point: no proto vertex, as for a pair that cannot be
+        // imprinted, and each body keeps its own vertex.
+        if let Some(fp) = &found_pos {
+            let tol = xsect_tol_3d_from_zones(
+                k,
+                pc1.obj_zone_tol_3d(k, geometry)?,
+                pc2.obj_zone_tol_3d(k, geometry)?,
+            );
+            if fp.deviation.is_nan() || fp.deviation > tol {
+                return Ok((None, false));
+            }
+        }
+        let position = found_pos.map_or(Vec3::UNDEF, |p| p.position);
 
         // find closest ProtoVertex within m_dTol to sPt
         let (found, _dist) = self.find_proto_vertex(position)?;
@@ -2125,6 +2148,19 @@ mod tests {
         fn point(&self, _o: H) -> Option<Point3> {
             None
         }
+        /// Vertices 4.. lie on the x axis: 4 at x = 20, then 1.5e-5 and 2.8e-5 past it.
+        fn classification_vertex_point(&self, vertex: H) -> Option<Point3> {
+            let dx = match vertex.0 {
+                4 => 0.0,
+                5 => 1.5e-5,
+                6 => 2.8e-5,
+                _ => return None,
+            };
+            Some(Point3::new(20.0 + dx, 0.0, 0.0))
+        }
+        fn topology_zone_tol_3d(&self, object: H) -> Option<f64> {
+            (object.1 == ClassObjectKind::Vertex && object.0 >= 4).then_some(1e-5)
+        }
     }
 
     impl ProtoGeometry<H> for Pool {
@@ -2390,6 +2426,34 @@ mod tests {
         assert!(vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.9).unwrap());
         // a more grazing one than that does not
         assert!(!vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.5).unwrap());
+    }
+
+    /// A proto vertex relates two vertices within their intersection tolerance (two zones
+    /// of 1e-5: 2e-5), and none farther apart: vertices 1.5e-5 apart make one, vertices
+    /// 2.8e-5 apart (the corners of two pie slices whose arc centre misses the apex by
+    /// 4.85e-5, each within 1.41e-5 of the cylinders' crossing) make none, where upstream
+    /// made one of tolerance 2.8e-5 that merged the two corners.
+    #[test]
+    fn a_proto_vertex_never_relates_vertices_farther_apart_than_their_tolerance() {
+        let k = Kernel::default();
+        let pool = Pool::new();
+        let b = H(100, ClassObjectKind::Other);
+        let e = Brep::new();
+        let mut m = ProtoTopologyManager::new(&k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap();
+        let on = |v: usize| {
+            let mut pc = PointClassification::new(1e-5);
+            pc.set_class_object(PointClassType::Vertex, Some(vtx(v)));
+            pc
+        };
+        let (pv, created) = m
+            .find_or_create_proto_vertex_pcs(&k, &pool, &mut on(4), &mut on(6))
+            .unwrap();
+        assert_eq!((pv, created), (None, false));
+        assert!(m.proto_vertices().is_empty());
+        let (pv, created) = m
+            .find_or_create_proto_vertex_pcs(&k, &pool, &mut on(4), &mut on(5))
+            .unwrap();
+        assert!(pv.is_some() && created);
     }
 
     /// An `n`-sided prism of circumradius 30 from `z0` up `h`.
