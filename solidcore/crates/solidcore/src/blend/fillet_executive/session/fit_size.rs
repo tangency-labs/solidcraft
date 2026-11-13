@@ -1264,9 +1264,10 @@ fn arc_candidates(
 ///
 /// Every face must be a plane or a cylinder along the edge. Each edge then lies where its
 /// faces' surfaces meet, whatever its curve's representation: between two planes, or a
-/// plane along the axis and a cylinder, or two cylinders, a line, whose extremes are its
-/// ends; between a plane square to the axis and a cylinder, an arc of the cylinder's
-/// circle, whose extremes are its ends and its points where the chord through `A` is
+/// plane along the axis and a cylinder, or two cylinders (or two faces of one cylinder at a
+/// seam along its axis), a line, whose extremes are its ends; between a plane square to the
+/// axis and a cylinder, or two faces of one cylinder split across its axis, an arc of the
+/// cylinder's circle, whose extremes are its ends and its points where the chord through `A` is
 /// tangent to it. Any other plane, face or edge gives `None`, never a guess.
 ///
 /// The body must lie within the edge's length along it, on the material side of the plane,
@@ -1337,8 +1338,14 @@ pub fn knife_chamfer_keeps_nothing(k: &Kernel, target: &Brep, e: EdgeId) -> Resu
                         (w - frame.along * w.dot(frame.along)).length() <= tol
                     }
                 });
-                if same {
-                    // on one cylinder: an arc of its circle
+                // an edge whose three points share one profile point runs along the axis:
+                // a seam between two faces of one cylinder split along its length, a line
+                let along_axis = ends.iter().all(|&(_, x, y)| {
+                    let (dx, dy) = (x - ends[0].1, y - ends[0].2);
+                    (dx * dx + dy * dy).sqrt() <= tol
+                });
+                if same && !along_axis {
+                    // on one cylinder, across its axis: an arc of its circle
                     let (_, ox, oy) = frame.profile(a);
                     let arc = ends.map(|(_, x, y)| (x, y));
                     points.extend(
@@ -1347,7 +1354,8 @@ pub fn knife_chamfer_keeps_nothing(k: &Kernel, target: &Brep, e: EdgeId) -> Resu
                             .map(|(x, y)| (ends[0].0, x, y)),
                     );
                 } else {
-                    // two cylinders along the axis meet in lines along it
+                    // two cylinders along the axis meet in lines along it, and so do two
+                    // faces of one cylinder at a seam along it
                     segments.push(line());
                 }
             }

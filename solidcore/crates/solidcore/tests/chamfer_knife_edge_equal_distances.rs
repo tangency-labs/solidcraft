@@ -304,3 +304,30 @@ fn the_limit_is_read_off_the_geometry() {
         .expect("an edge between planes");
     assert_eq!(knife_chamfer_keeps_nothing(&k, &b, corner).unwrap(), None);
 }
+
+/// The wall split along its length into two faces of the same cylinder (its arc made of two
+/// arcs): the edge between them is a line along the axis, not an arc of the circle, and the
+/// split changes nothing about the chamfer, so the limit read off the geometry is still
+/// `TIP² / R`.
+#[test]
+fn the_limit_holds_with_the_wall_split_along_its_length() {
+    use solidcore::blend::fillet_executive::session::fit_size::knife_chamfer_keeps_nothing;
+    let mut k = all_fixes();
+    let curves = [
+        line((0.0, 0.0), (TIP, 0.0)),
+        Curve::from(create_arc(Vec3::new(TIP, -R, 0.0), R, 90.0, 135.0).unwrap()),
+        Curve::from(create_arc(Vec3::new(TIP, -R, 0.0), R, 135.0, 180.0).unwrap()),
+        line((TIP - R, -R), (0.0, -R)),
+        line((0.0, -R), (0.0, 0.0)),
+    ];
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let b = create_taper_extrude(&mut k, &refs, H, 0.0, 3, false).unwrap();
+    let e = knife_edge(&k, &b);
+    let limit = knife_chamfer_keeps_nothing(&k, &b, e)
+        .unwrap()
+        .expect("a limit");
+    assert!(
+        (limit - KEEPS_NOTHING).abs() <= 1e-9 * KEEPS_NOTHING,
+        "{limit} vs {KEEPS_NOTHING}"
+    );
+}
