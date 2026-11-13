@@ -1,6 +1,7 @@
 //! Opt-in common panel runtime and retained production content bindings.
 //! Model/commands, controller state, presentation and layout have separate owners.
 mod app;
+mod drag_paint;
 mod fixtures;
 mod host;
 mod interaction;

@@ -430,6 +430,38 @@ pub const ELEMENTS: &[Element] = &[
             },
         );
     }),
+    element!("browser", |ui, _| {
+        let mut state = browser::BrowserState::default();
+        let header = browser::Header { title: "Objects", count: "2 objects", collapsible: true, search: Some("Search objects") };
+        let _ = browser::Browser::new(&mut state, browser::Style::default(), 0).header(header).show(ui, |rows| {
+            rows.row(browser::Node {
+                id: 1,
+                key: "layer",
+                row: Row { fold: Some(true), eye: Some(true), icon: "folder", label: "Default", radio: Some(true), count: "2", ..Default::default() },
+                click_folds: true,
+                ..Default::default()
+            });
+            for (id, label, selected) in [(2, "Body 1", true), (3, "Body 2", false)] {
+                rows.row(browser::Node {
+                    id,
+                    key: label,
+                    row: Row {
+                        depth: 1,
+                        eye: Some(true),
+                        icon: "body",
+                        label,
+                        name: true,
+                        selected,
+                        mark: if selected { Mark::Here } else { Mark::None },
+                        ..Default::default()
+                    },
+                    select: browser::Selectable::Yes(0),
+                    rename: browser::Rename::Inline,
+                    ..Default::default()
+                });
+            }
+        });
+    }),
     element!("tree_row_disabled_actions", |ui, _| {
         let actions =
             [TreeAction { icon: "lookat", hover_only: true, label: "Solo", reason: Some("Not available yet"), target: "gallery:tree:solo" }];
@@ -1121,6 +1153,7 @@ pub const ELEMENTS: &[Element] = &[
                         workspace: "Design",
                         thumbnail: None,
                         thumbnail_failed: false,
+                        security: None,
                     },
                 );
             }
@@ -1137,6 +1170,7 @@ pub const ELEMENTS: &[Element] = &[
                 workspace: "Design",
                 thumbnail: None,
                 thumbnail_failed: false,
+                security: None,
             },
         );
     }),
@@ -1710,6 +1744,9 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
+    }),
+    element!("value_row", "dialog:row:Gallery", None, |ui, _| {
+        value_row(ui, "Gallery", "XY plane");
     }),
     element!("count_row", "dialog:row:Gallery", Some("dialog:Gallery up"), |ui, _| {
         let mut count = "6".to_owned();

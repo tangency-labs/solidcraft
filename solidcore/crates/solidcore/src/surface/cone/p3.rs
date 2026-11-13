@@ -33,8 +33,8 @@
 //! Conversion errors propagate; the original tolerance branches are kept.
 //! WR-510 (#1525): a plane parallel to a cylinder's axis is also tangent when it lies
 //! within the zone tolerance of a bounded face's wall along a line (the larger of the
-//! cone's and the plane's face tolerances, 0 without a face); bare surfaces keep
-//! upstream's test.
+//! cone's and the plane's face tolerances, 0 without a face) and that line lies in the
+//! face's sweep, else its crossings are tested; bare surfaces keep upstream's test.
 //! No input-driven recursion is introduced.
 
 use super::{Cone, ConeStepInversion};
@@ -391,15 +391,17 @@ impl Cone {
                 // other. WR-510 (#1525; tangency-labs/smlib#55, merged as bd20f6e): also
                 // tangent within the zone tolerance of a face either surface bounds, so a
                 // plane a hair off a face's wall is one line; bare surfaces (zone tolerance
-                // 0) keep their two lines.
+                // 0) keep their two lines. Only when that line lies in the face's sweep: a
+                // sweep ending between it and a crossing keeps the crossing.
                 let zone_tol = zone_tols[0].unwrap_or(0.0).max(zone_tols[1].unwrap_or(0.0));
+                let dir = if distance > 0.0 { -normal } else { normal };
+                let line_in_sweep = angle_in_sweep(self, axis, dir, ang_tol)?;
                 let tangent = distance.abs() >= bot_radius
                     || (distance.abs() > bot_radius - tol
                         && bot_radius * bot_radius - distance * distance < tol * tol)
-                    || distance.abs() > bot_radius - zone_tol;
+                    || (distance.abs() > bot_radius - zone_tol && line_in_sweep);
                 if tangent {
-                    let dir = if distance > 0.0 { -normal } else { normal };
-                    if angle_in_sweep(self, axis, dir, ang_tol)? {
+                    if line_in_sweep {
                         let start = bottom + bot_radius * dir;
                         let end = start + line_max * scale * axis;
                         add_plane_line(
@@ -1526,6 +1528,47 @@ mod tests {
         assert!(wall_section(&k, &c, 4.0, PlaneOwner::NoFace, bare)
             .curves_3d
             .is_empty());
+    }
+
+    /// WR-510 (#1525): a face swept over 0.04°..0.06° only, cut by the plane `x = 3 - 1e-6`.
+    /// The plane is within the zone tolerance (1e-5) of the wall, but the tangent line at 0°
+    /// is outside the face; the crossing at +0.0468° is inside it and stays.
+    #[test]
+    fn issue1525_tangent_line_outside_sweep_keeps_crossing() {
+        let k = Kernel::default();
+        let mut c = Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            3.0,
+            0.04,
+            0.06,
+            12.0,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(&k).unwrap();
+        let d = 3.0 - 1e-6;
+        let zone = Some(1e-5);
+        for (owner, zone_tols) in [
+            (PlaneOwner::NoFace, [None, None]),
+            (PlaneOwner::Face(zone), [None, zone]),
+            (PlaneOwner::NoFace, [zone, None]),
+        ] {
+            let out = wall_section(&k, &c, d, owner, zone_tols);
+            assert_eq!(
+                out.curve_types,
+                vec![TsectCurveType::Crossing],
+                "{owner:?} {zone_tols:?}"
+            );
+            let CurveKind::Line(line) = out.curves_3d[0].kind() else {
+                panic!("expected an analytic line");
+            };
+            let p = line.evaluate_point(line.natural_interval().min());
+            let y = (3.0 * 3.0 - d * d).sqrt();
+            assert!((p.x - d).abs() < 1e-9 && (p.y - y).abs() < 1e-9, "{p:?}");
+        }
     }
 
     #[test]

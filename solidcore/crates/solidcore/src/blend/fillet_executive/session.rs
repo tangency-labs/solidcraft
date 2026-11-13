@@ -3581,7 +3581,7 @@ impl crate::blend::fillet_executive::p1::SmoothSequenceAccess<FilletObject> for 
         self.edge_caches.remove(&edge);
         let serial = self.target_serial;
         let key_of = |entity| crate::topology::brep::p3::topology_ref(serial, entity);
-        crate::topology::brep::p3::seed_records(
+        crate::topology::brep::p3::seed_records_since(
             &mut self.notification_records,
             self.target,
             &key_of,

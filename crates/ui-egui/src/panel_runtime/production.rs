@@ -1351,7 +1351,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             return Err(error(Rule::Availability, "application panel content owner changed"));
         }
         match product {
-            Product::RenderLibrary | Product::RenderInspector | Product::RenderShots => {
+            Product::RenderLibrary | Product::RenderInspector | Product::RenderShots if !context.preview_geometry => {
                 let rect = super::workspace::egui_rect(context.outer);
                 let id = match product {
                     Product::RenderLibrary => "render:appearances",
@@ -1400,7 +1400,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             return Err(error(Rule::Availability, "application panel document changed while painting"));
         }
         let scope = LocalScope { workspace: context.workspace.clone(), document: context.document.clone(), viewport: context.viewport.clone() };
-        if let Some(capture) = capture {
+        if let Some(capture) = capture.filter(|_| !context.preview_geometry) {
             if let Some(mut extent) = capture.extent {
                 extent.width = context.outer.size.width;
                 extent.flow = context.flow;

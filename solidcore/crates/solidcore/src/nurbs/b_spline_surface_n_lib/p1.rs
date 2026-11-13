@@ -134,7 +134,7 @@ use crate::nurbs::srf_adv::p3::{
 };
 use crate::nurbs::srf_adv::p4::create_coons_srf as bilinear_coons_srf;
 use crate::nurbs::srf_adv::p6::{
-    create_sweep_scale_traced, fill_n_sided_hole_with, SweepScaleOptions, SweepTrace,
+    create_sweep_scale_traced, fill_n_sided_hole, SweepScaleOptions, SweepTrace,
 };
 use crate::nurbs::srf_basic::{size_arrays, Direction, Surface, SurfaceIndices};
 use crate::nurbs::srf_common::ruled_srf;
@@ -1338,7 +1338,9 @@ impl BSplineSurface {
     /// derivatives approximate them within `ang_tol_deg` degrees. With
     /// `opt_center` (point and normal of the tangent plane at the patch center) the
     /// center is given, else computed; the normal is unitized in place. The input
-    /// curves are changed in place as `N_FillNSidedHole` changes them.
+    /// curves are changed in place as `N_FillNSidedHole` changes them. The cross-boundary
+    /// derivatives across the inner curves are shortened where their blend would leave the
+    /// neighbour's tangent plane (WR-461, #1170).
     ///
     /// # Errors
     ///
@@ -1350,24 +1352,6 @@ impl BSplineSurface {
         deriv_crvs: &mut [Option<BSplineCurve>],
         ang_tol_deg: f64,
         opt_center: Option<(Point3, &mut Vec3)>,
-    ) -> Result<Vec<BSplineSurface>> {
-        Self::create_n_sided_patch_with(bdry_crvs, deriv_crvs, ang_tol_deg, opt_center, false)
-    }
-
-    /// [`BSplineSurface::create_n_sided_patch`] with the opt-in fix of WR-461 (#1170)
-    /// when `stay_inside`: the cross-boundary derivatives across the inner curves are
-    /// shortened where their blend would leave the neighbour's tangent plane
-    /// (`Kernel::fixes.corner_blend_stays_inside_neighbours`).
-    ///
-    /// # Errors
-    ///
-    /// As [`BSplineSurface::create_n_sided_patch`].
-    pub fn create_n_sided_patch_with(
-        bdry_crvs: &mut [BSplineCurve],
-        deriv_crvs: &mut [Option<BSplineCurve>],
-        ang_tol_deg: f64,
-        opt_center: Option<(Point3, &mut Vec3)>,
-        stay_inside: bool,
     ) -> Result<Vec<BSplineSurface>> {
         const OP: &str = OP_NSIDED;
         if deriv_crvs.len() < bdry_crvs.len() {
@@ -1392,13 +1376,7 @@ impl BSplineSurface {
         });
 
         // pass the call along to NLib
-        let res = fill_n_sided_hole_with(
-            &mut cur,
-            Some(der.as_mut_slice()),
-            ang_tol_deg,
-            center,
-            stay_inside,
-        );
+        let res = fill_n_sided_hole(&mut cur, Some(der.as_mut_slice()), ang_tol_deg, center);
         for (b, c) in bdry_crvs.iter_mut().zip(cur) {
             b.nurb = Some(c);
         }
@@ -1469,18 +1447,25 @@ impl BSplineSurface {
             do_translational_sweep,
             approx_tol_3d,
             None,
+            None,
         )
         .map(|(surface, _)| surface)
     }
 
     /// [`create_sweep_surface`](Self::create_sweep_surface) that also reports where the sweep
-    /// put its sections ([`SweepTrace`]; `None` for a translational sweep) and, when asked, the
-    /// placements of [`create_sweep_surface_with_placements`](Self::create_sweep_surface_with_placements)
-    /// (not upstream: the fork's #2572 definition of a general-path sweep reads them).
+    /// put its sections ([`SweepTrace`]; `None` for a translational sweep or one kept upright)
+    /// and, when asked, the placements of
+    /// [`create_sweep_surface_with_placements`](Self::create_sweep_surface_with_placements)
+    /// (not upstream: the fork's #2572 definition of a general-path sweep reads them). With
+    /// `up` (not upstream, the fork's upright sweep) the sections are kept upright: at each,
+    /// z is `up` made square to the trajectory's tangent ([`SweepScaleOptions::up`]), the
+    /// section as drawn at the start; a trajectory running along `up` is refused
+    /// (`Unsupported`). `up` is ignored by a translational sweep.
     ///
     /// # Errors
     ///
-    /// Those of [`create_sweep_surface`](Self::create_sweep_surface).
+    /// Those of [`create_sweep_surface`](Self::create_sweep_surface); `Unsupported` for a
+    /// trajectory kept upright that runs along `up`.
     pub fn create_sweep_surface_traced(
         section_curve: &BSplineCurve,
         trajectory_curve: &BSplineCurve,
@@ -1488,6 +1473,7 @@ impl BSplineSurface {
         do_translational_sweep: bool,
         approx_tol_3d: f64,
         placements: Option<&mut [Axis2Placement; 3]>,
+        up: Option<Vec3>,
     ) -> Result<(BSplineSurface, Option<SweepTrace>)> {
         Self::sweep_surface(
             section_curve,
@@ -1496,6 +1482,7 @@ impl BSplineSurface {
             do_translational_sweep,
             approx_tol_3d,
             placements,
+            up,
         )
     }
 
@@ -1527,6 +1514,7 @@ impl BSplineSurface {
             do_translational_sweep,
             approx_tol_3d,
             Some(&mut placements),
+            None,
         )?;
         Ok((surface, placements))
     }
@@ -1539,8 +1527,14 @@ impl BSplineSurface {
         do_translational_sweep: bool,
         approx_tol_3d: f64,
         opt_placements: Option<&mut [Axis2Placement; 3]>,
+        up: Option<Vec3>,
     ) -> Result<(BSplineSurface, Option<SweepTrace>)> {
         const OP: &str = OP_SWEEP;
+        // (not upstream) an upright sweep's refusal is its own, not a failed routine
+        let failed = |e: SolidError| match e {
+            SolidError::Unsupported { .. } if up.is_some() => e,
+            e => SolidError::nurbs_routine(OP)(e),
+        };
 
         // get NurbCurve pointers for Section and trajectory curves
         let nl_curv_s = curve_nurb(section_curve, OP)?;
@@ -1605,13 +1599,16 @@ impl BSplineSurface {
                 deg: nl_deg,
                 dir: Direction::U,
                 e: approx_tol_3d,
+                up,
             };
+            // an upright sweep's sections are not the projection normal frame's: no trace
+            let traced = |t: SweepTrace| up.is_none().then_some(t);
             match opt_placements {
                 None => {
                     let (surf, t) =
                         create_sweep_scale_traced(nl_curv_t, nl_curv_s, z_axis, &opt, None)
-                            .map_err(SolidError::nurbs_routine(OP))?;
-                    trace = Some(t);
+                            .map_err(failed)?;
+                    trace = traced(t);
                     surf
                 }
                 Some(placements) => {
@@ -1623,8 +1620,8 @@ impl BSplineSurface {
                         &opt,
                         Some(&mut placed),
                     )
-                    .map_err(SolidError::nurbs_routine(OP))?;
-                    trace = Some(t);
+                    .map_err(failed)?;
+                    trace = traced(t);
                     // SolidCraft fork (5d3939e): each instance is the section carried from
                     // the global system onto the local one (OL, XL, YL, ZL) it was placed on
                     for (placement, frame) in placements.iter_mut().zip(placed) {

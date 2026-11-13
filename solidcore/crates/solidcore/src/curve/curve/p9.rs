@@ -77,9 +77,9 @@
 //!   repeated here with the kind's own `EvaluatePoint` (upstream's virtual call) and
 //!   `IsKindOf(SmLine_TYPE)` test, the control polygon coming from the B-spline
 //!   part.
-//! - **Opt-in fix.** `CalculateTightBoundingBox` adds only the knots strictly inside
-//!   the interval with `Kernel::fixes.curve_tight_box_interval_knots` (WR-474, #1054);
-//!   off by default, as upstream.
+//! - **Interval knots.** `CalculateTightBoundingBox` adds only the tangent
+//!   discontinuous knots strictly inside the interval (WR-474, #1054); upstream adds
+//!   them all, and the last knot.
 //! - **Coordinate bound.** `GlobalCurveSolve` of a curve whose natural box reaches past
 //!   [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (`1e150`, below `sqrt(f64::MAX)`)
 //!   fails with `InvalidInput` before any cache is built (the curve cache is built over
@@ -1670,8 +1670,8 @@ impl Curve {
     /// from its end points, (for B-splines) its tangent discontinuous knots and last
     /// knot, and the points where its tangent is perpendicular to x, y and z. The
     /// line override is [`crate::curve::line::Line::calculate_tight_bounding_box`].
-    /// With [`crate::kernel::UpstreamFixes::curve_tight_box_interval_knots`] only the
-    /// tangent discontinuous knots strictly inside `interval` are added (WR-474, #1054).
+    /// Only the tangent discontinuous knots strictly inside `interval` are added
+    /// (WR-474, #1054).
     ///
     /// # Errors
     ///
@@ -1701,19 +1701,14 @@ impl Curve {
             let (knots, _) = self.knots(k, None)?;
             let (_, continuities) = self.calculate_continuities(k, 2.0)?;
 
-            let n = knots.len();
             for (i, &knot) in knots.iter().enumerate().skip(1) {
                 let low = continuities
                     .get(i)
                     .is_some_and(|&c| ord(c) <= ord(ContinuityType::C1));
-                let add = if k.fixes.curve_tight_box_interval_knots {
-                    // WR-474 (#1054): only the tangent discontinuous knots strictly inside
-                    // the interval; its ends are in the box already, and a knot outside it
-                    // is a point the curve never reaches over `interval`.
-                    low && knot > interval.min() && knot < interval.max()
-                } else {
-                    i == n - 1 || low
-                };
+                // WR-474 (#1054): only the tangent discontinuous knots strictly inside the
+                // interval; its ends are in the box already, and a knot outside it is a
+                // point the curve never reaches over `interval`.
+                let add = low && knot > interval.min() && knot < interval.max();
                 if add {
                     eval_keep(k, self, knot, &mut pt)?;
                     tight_box.add_point(pt);
@@ -2809,8 +2804,7 @@ mod tests {
         use crate::geom::axis2_placement::Axis2Placement;
         use crate::nurbs::b_spline_curve::NurbCircleParam;
 
-        let mut k = Kernel::default();
-        k.fixes.curve_tight_box_interval_knots = true;
+        let k = Kernel::default();
         let frame = Axis2Placement::new(
             Vec3::from_array([0.0, 0.0, 0.0]),
             Vec3::from_array([1.0, 0.0, 0.0]),
@@ -2830,11 +2824,6 @@ mod tests {
         let ivl = arc.natural_interval();
         // Half the arc: from its start to the midpoint of its interval (0 deg to 45 deg).
         let half = Extent1d::from_min_max(ivl.min(), 0.5 * (ivl.max() - ivl.min()) + ivl.min());
-        let pinned = arc
-            .calculate_tight_bounding_box(&Kernel::default(), &half)
-            .expect("upstream tight box over a sub-interval");
-        assert!(pinned.u_min().abs() < 1e-6);
-        assert!((pinned.v_max() - 50.0).abs() < 1e-6);
         let bx = arc
             .calculate_tight_bounding_box(&k, &half)
             .expect("tight box over a sub-interval");

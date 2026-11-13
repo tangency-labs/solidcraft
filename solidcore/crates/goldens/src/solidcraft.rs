@@ -1576,6 +1576,7 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 orient_profile_perpendicular_to_path: false,
                 move_to_profile: false,
                 profile_at_path_start: false,
+                up: None,
             };
             sweeps::create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
                 .map_err(|e| solid(&e))?
@@ -1765,7 +1766,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "revolve_nested_shells_as_cavities" => &mut k.fixes.revolve_nested_shells_as_cavities,
         "revolve_splits_curves_on_axis" => &mut k.fixes.revolve_splits_curves_on_axis,
         "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
-        "curve_tight_box_interval_knots" => &mut k.fixes.curve_tight_box_interval_knots,
         "fillet_rails_meet_at_one_end_point" => &mut k.fixes.fillet_rails_meet_at_one_end_point,
         "fillet_nx1_tangent_side_edge" => &mut k.fixes.fillet_nx1_tangent_side_edge,
         "fillet_nx1_tangent_corner_edge" => &mut k.fixes.fillet_nx1_tangent_corner_edge,
