@@ -176,7 +176,7 @@ pub fn create_offset_surface(k: &Kernel, surface: &Surface, distance: f64) -> Re
     let approx_tol = 0.001;
     surface
         .create_offset_surface(k, distance, approx_tol)?
-        .ok_or_else(|| SolidError::sm_err(OP_OFFSET))
+        .ok_or_else(|| SolidError::primitive_failed(OP_OFFSET, "the offset makes no surface"))
 }
 
 /// The results of [`drop_curve_to_srf`].

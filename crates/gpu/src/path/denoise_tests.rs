@@ -186,6 +186,35 @@ fn f64_atrous_preserves_body_normal_depth_and_albedo_edges() {
         assert!(filtered.iter().zip(&pixels).all(|(a, b)| (a[0] - b[0]).abs() < 1e-12), "edge {edge}");
     }
 }
+// Native compilers inline every call site, and their cost grows faster than the inlined size
+// (#14105). The camera ray and its optical continuations share one walk; the camera origin
+// query is the other.
+#[test]
+fn guides_inline_two_bvh_walks() {
+    fn walks(module: &naga::Module, block: &naga::Block) -> usize {
+        block
+            .iter()
+            .map(|statement| match statement {
+                naga::Statement::Call { function, .. } => {
+                    let callee = &module.functions[*function];
+                    let walk = matches!(callee.name.as_deref(), Some("trace_precise_within" | "trace_ordered_within" | "origin_boundary"));
+                    usize::from(walk) + walks(module, &callee.body)
+                }
+                naga::Statement::Block(inner) => walks(module, inner),
+                naga::Statement::If { accept, reject, .. } => walks(module, accept) + walks(module, reject),
+                naga::Statement::Switch { cases, .. } => cases.iter().map(|case| walks(module, &case.body)).sum(),
+                naga::Statement::Loop { body, continuing, .. } => walks(module, body) + walks(module, continuing),
+                _ => 0,
+            })
+            .sum()
+    }
+    let module = naga::front::wgsl::parse_str(&format!("{SHADER}\n{GUIDES}")).unwrap();
+    let guides = module.entry_points.iter().find(|entry| entry.name == "denoise_guides").unwrap();
+    let inlined = walks(&module, &guides.function.body);
+    // Exactly two, not at most two: if a walk function is renamed, the names above match nothing
+    // and an upper bound would pass on zero walks.
+    assert_eq!(inlined, 2, "BVH walks inlined into `denoise_guides`");
+}
 fn context() -> Option<Arc<Context>> {
     let (_, device, queue) = match open_headless() {
         Ok(v) => v,

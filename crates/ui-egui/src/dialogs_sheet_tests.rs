@@ -1365,20 +1365,631 @@ fn perforate_edit_restores_dimensions_pattern_and_target() {
 
 #[test]
 fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
-    let ctx = crate::fonts::test_context();
-    let mut app = flat_app("fusion", crate::ui_kit::LayoutMode::Floating);
-    app.preferences.navigation_bar = serde_json::from_value(json!({
+    let mut h = crate::scenario::Harness::new();
+    h.app = flat_app("fusion", crate::ui_kit::LayoutMode::Floating);
+    h.app.home.open = false;
+    h.app.preferences.navigation_bar = serde_json::from_value(json!({
         "slots":["orbit","spin","look_at","projection","visual_style","pan","zoom","fit","home","display"]
     }))
     .unwrap();
-    let mut time = 0.0;
-    crate::scenario::clear_handles();
-    frame(&mut app, &ctx, &mut time, egui::Modifiers::NONE, vec![]);
-    assert_eq!(crate::navigation_bar::canvas_caps(&app), crate::navigation::NavCaps { orbit: false, pick: false });
+    h.frames(3);
+    assert_eq!(crate::navigation_bar_view::canvas_caps(&h.app), crate::navigation::NavCaps { orbit: false, pick: false });
     for slot in ["orbit", "spin", "look_at", "projection", "visual_style"] {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_none(), "{slot}");
     }
     for slot in ["pan", "zoom", "fit", "home", "display"] {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_some(), "{slot}");
     }
+}
+
+/// A picked edge split into segments: the dialog sends equal stretches with the rows' angle,
+/// height and turns, and the part builds with two bends.
+#[test]
+fn an_edge_flange_can_be_split_into_segments() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let edge = edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap();
+    app.session.selection = vec![edge];
+    app.start("sheet.flange");
+    let mut d = app.dialog.clone().unwrap();
+    let p = edge_point_list(&d.inputs)[0];
+    if let Kind::Sheet(Sm::Flange { height, angle, segments, .. }) = &mut d.kind {
+        *height = "20 mm".into();
+        *angle = "90 deg".into();
+        let slot = segments_slot(segments, p);
+        let list = &mut segments[slot].1;
+        add_segment(list);
+        list[0].height = "20 mm".into();
+        add_segment(list);
+        list[1].height = "10 mm".into();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(
+        c[0].1["edges"][0]["segments"],
+        json!([{"from": 0.0, "to": 0.5, "height": "20 mm"}, {"from": 0.5, "to": 1.0, "height": "10 mm"}]),
+        "{:?}",
+        c[0].1
+    );
+    run_all(&mut app, c);
+    let bends = app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].clone();
+    assert_eq!(bends.as_array().map(Vec::len), Some(2), "{bends}");
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+}
+
+/// Edit Feature on a flange whose edges carry their own segments comes back as it was: the dialog
+/// holds every edge's list with its own fractions, angle, height and side, and OK emits the same
+/// `sheet.flange` parameters, byte for byte (an explicit `flip: false` under a flipped feature
+/// stays explicit, and neither edge takes the other's list).
+#[test]
+fn editing_a_flange_keeps_every_edges_segments() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let params = json!({
+        "type": "edge",
+        "edges": [
+            {"point": [50.0, 0.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.3, "angle": "90 deg", "height": "20 mm"},
+                {"from": 0.3, "to": 1.0, "angle": "45 deg", "height": "15 mm", "flip": false}
+            ]},
+            {"point": [50.0, 60.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.6, "height": "25 mm", "flip": true},
+                {"from": 0.6, "to": 1.0, "height": "10 mm"}
+            ]}
+        ],
+        "height": "20 mm",
+        "angle": "90 deg",
+        "position": "inside",
+        "flip": true
+    });
+    app.run("sheet.flange", params.clone()).unwrap();
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+    let f = app.session.doc.features.last().unwrap().clone();
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    assert_eq!(
+        serde_json::to_string(&c[0].1["params"]).unwrap(),
+        serde_json::to_string(&params).unwrap(),
+        "the edit sends the design back as it was: {}",
+        c[0].1["params"]
+    );
+}
+
+/// A two-stretch edge in the Flange dialog, restored from a design with a stretch boundary that is
+/// not the middle.
+fn two_stretch_flange(h: &mut crate::scenario::Harness) -> u64 {
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app
+        .run(
+            "sheet.flange",
+            json!({
+                "type": "edge",
+                "edges": [{"point": [50.0, 0.0, 2.5], "segments": [
+                    {"from": 0.0, "to": 0.3, "angle": "90 deg", "height": "20 mm"},
+                    {"from": 0.3, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+                ]}],
+                "height": "20 mm", "angle": "90 deg", "position": "inside", "flip": false
+            }),
+        )
+        .unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    h.app.session.doc.features.last().unwrap().id
+}
+
+/// The dialog's restored stretches, `from`…`to` as typed, per picked edge.
+fn restored_stretches(h: &crate::scenario::Harness) -> Vec<Vec<(String, String)>> {
+    match &h.app.dialog.as_ref().expect("a dialog").kind {
+        Kind::Sheet(Sm::Flange { segments, .. }) => {
+            segments.iter().map(|(_, list)| list.iter().map(|r| (r.from.clone(), r.to.clone())).collect()).collect()
+        }
+        other => panic!("not a flange dialog: {other:?}"),
+    }
+}
+
+/// Deleting a stretch in the Flange dialog keeps the edge a partition the command accepts: the
+/// stretch after the removed one reaches back to the edge's start, and the ends stay at 0 and 1. The
+/// emitted `sheet.flange` covers the whole edge with the surviving stretch's own values, and OK
+/// applies it (#5927, #5928).
+#[test]
+fn deleting_a_segment_in_the_flange_dialog_keeps_the_partition_whole() {
+    let mut h = crate::scenario::Harness::new();
+    let id = two_stretch_flange(&mut h);
+    let count = h.app.session.doc.features.len();
+    h.app.edit_feature(id);
+    h.frames(6);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![("0".to_string(), "0.3".to_string()), ("0.3".to_string(), "1".to_string())]],
+        "the design's own fractions come back"
+    );
+    // The first stretch's bin takes it out; the one after it reaches back to the edge's start.
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 1:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(restored_stretches(&h), vec![vec![("0".to_string(), "1".to_string())]], "the partition stays whole");
+    // The command the dialog would run is a valid partition of the whole edge, with the surviving
+    // stretch's angle and height.
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].0, "timeline.redefine");
+    assert_eq!(
+        c[0].1["params"]["edges"][0]["segments"],
+        json!([{"from": 0.0, "to": 1.0, "angle": "45 deg", "height": "15 mm"}]),
+        "{}",
+        c[0].1["params"]
+    );
+    // OK submits it: the feature is redefined in place and builds one bend over the whole edge.
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the repaired list");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::SheetFlange { edges, .. } = &f.kind else { panic!("not a flange feature") };
+    assert_eq!(edges.len(), 1);
+    let segs = &edges[0].segments;
+    assert_eq!(segs.len(), 1, "the surviving stretch is the whole edge: {segs:?}");
+    assert_eq!((segs[0].from, segs[0].to), (0.0, 1.0));
+    assert_eq!(segs[0].angle.as_ref().map(|a| a.as_str()), Some("45 deg"));
+    assert_eq!(segs[0].height.as_ref().map(|a| a.as_str()), Some("15 mm"));
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    let bends = h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].clone();
+    assert_eq!(bends.as_array().map(Vec::len), Some(1), "one bend over the whole edge: {bends}");
+}
+
+/// Deleting the last stretch reaches the one before it to the edge's end, and deleting the only
+/// stretch left leaves the whole edge (a plain edge point): deleting never leaves a list the
+/// command refuses.
+#[test]
+fn deleting_the_last_or_only_segment_leaves_the_whole_edge() {
+    let mut h = crate::scenario::Harness::new();
+    let id = two_stretch_flange(&mut h);
+    let count = h.app.session.doc.features.len();
+    // The last stretch: the one before it reaches to the edge's end with its own values.
+    h.app.edit_feature(id);
+    h.frames(6);
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 2:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(restored_stretches(&h), vec![vec![("0".to_string(), "1".to_string())]], "the partition stays whole");
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    assert_eq!(
+        apply_commands(&h.app, &d).unwrap()[0].1["params"]["edges"][0]["segments"],
+        json!([{"from": 0.0, "to": 1.0, "angle": "90 deg", "height": "20 mm"}]),
+        "the stretch before the removed one takes its place"
+    );
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the repaired list");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    // The only stretch left: removing it leaves the whole edge, a plain point with no segments.
+    h.app.edit_feature(id);
+    h.frames(6);
+    assert_eq!(restored_stretches(&h), vec![vec![("0".to_string(), "1".to_string())]], "one stretch comes back");
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 1:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(restored_stretches(&h), vec![Vec::new()], "no stretches: the whole edge");
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let params = apply_commands(&h.app, &d).unwrap()[0].1["params"].clone();
+    assert_eq!(params["edges"][0], json!([50.0, 0.0, 2.5]), "the whole edge, as an edge flange was before: {params}");
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the whole edge");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::SheetFlange { edges, .. } = &f.kind else { panic!("not a flange feature") };
+    assert_eq!(edges.len(), 1);
+    assert!(edges[0].segments.is_empty(), "no segments: the whole edge");
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    let bends = h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].clone();
+    assert_eq!(bends.as_array().map(Vec::len), Some(1), "one bend over the whole edge: {bends}");
+}
+
+/// A four-stretch edge in the Flange dialog, restored from a design whose boundaries are not equal
+/// (0, 0.1, 0.4, 0.8, 1), each stretch with its own angle and height.
+fn four_stretch_flange(h: &mut crate::scenario::Harness) -> u64 {
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app
+        .run(
+            "sheet.flange",
+            json!({
+                "type": "edge",
+                "edges": [{"point": [50.0, 0.0, 2.5], "segments": [
+                    {"from": 0.0, "to": 0.1, "angle": "90 deg", "height": "20 mm"},
+                    {"from": 0.1, "to": 0.4, "angle": "45 deg", "height": "15 mm"},
+                    {"from": 0.4, "to": 0.8, "angle": "90 deg", "height": "20 mm"},
+                    {"from": 0.8, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+                ]}],
+                "height": "20 mm", "angle": "90 deg", "position": "inside", "flip": false
+            }),
+        )
+        .unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    h.app.session.doc.features.last().unwrap().id
+}
+
+/// The stretches the dialog holds for the one edge, as `from`…`to` typed, from a design with the
+/// boundaries 0, 0.1, 0.4, 0.8, 1: deleting a stretch whose values are intact bridges the gap from
+/// the neighbours, so only the removed stretch's boundaries change and OK submits a partition the
+/// command accepts (#5927, #5928).
+#[test]
+fn deleting_a_segment_with_its_values_intact_keeps_every_other_boundary() {
+    let mut h = crate::scenario::Harness::new();
+    let id = four_stretch_flange(&mut h);
+    let count = h.app.session.doc.features.len();
+    h.app.edit_feature(id);
+    h.frames(6);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![
+            ("0".to_string(), "0.1".to_string()),
+            ("0.1".to_string(), "0.4".to_string()),
+            ("0.4".to_string(), "0.8".to_string()),
+            ("0.8".to_string(), "1".to_string())
+        ]],
+        "the design's own fractions come back"
+    );
+    // The second stretch's bin takes it out: the first reaches to where the third starts.
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 2:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![("0".to_string(), "0.4".to_string()), ("0.4".to_string(), "0.8".to_string()), ("0.8".to_string(), "1".to_string())]],
+        "the boundaries 0.4, 0.8 and 1 are where they were"
+    );
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(
+        c[0].1["params"]["edges"][0]["segments"],
+        json!([
+            {"from": 0.0, "to": 0.4, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.4, "to": 0.8, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.8, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+        ]),
+        "{}",
+        c[0].1["params"]
+    );
+    // OK submits it: the feature is redefined in place and builds.
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the repaired list");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::SheetFlange { edges, .. } = &f.kind else { panic!("not a flange feature") };
+    let segs: Vec<(f64, f64)> = edges[0].segments.iter().map(|s| (s.from, s.to)).collect();
+    assert_eq!(segs, vec![(0.0, 0.4), (0.4, 0.8), (0.8, 1.0)], "a partition of the edge");
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    assert_eq!(
+        h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].as_array().map(Vec::len),
+        Some(2),
+        "the two bends that are left"
+    );
+}
+
+/// The same delete with the removed stretch's `to` cleared, as a user leaves it mid-edit: the repair
+/// reads the neighbours, not the removed row, so the boundaries the user did not touch stay put
+/// (the untouched 0.8 does not become 2/3) and OK submits a valid partition (#5927, #5928).
+#[test]
+fn deleting_a_mid_edit_segment_keeps_the_boundaries_it_did_not_touch() {
+    let mut h = crate::scenario::Harness::new();
+    let id = four_stretch_flange(&mut h);
+    let count = h.app.session.doc.features.len();
+    h.app.edit_feature(id);
+    h.frames(6);
+    // The user clears the second stretch's `to` in its field.
+    h.step(&json!({"widget": "Segment 2 to"})).unwrap();
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"key": "Delete"})).unwrap();
+    h.frames(3);
+    assert_eq!(restored_stretches(&h)[0][1], ("0.1".to_string(), String::new()), "the removed stretch's `to` is empty, as while editing");
+    // Delete that stretch: the gap is bridged from the neighbours.
+    h.step(&json!({"click": {"handle": "dialog:button:Segment 2:Delete"}})).unwrap();
+    h.frames(3);
+    assert_eq!(
+        restored_stretches(&h),
+        vec![vec![("0".to_string(), "0.4".to_string()), ("0.4".to_string(), "0.8".to_string()), ("0.8".to_string(), "1".to_string())]],
+        "the untouched boundaries 0.8 and 1 did not move"
+    );
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(
+        c[0].1["params"]["edges"][0]["segments"],
+        json!([
+            {"from": 0.0, "to": 0.4, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.4, "to": 0.8, "angle": "90 deg", "height": "20 mm"},
+            {"from": 0.8, "to": 1.0, "angle": "45 deg", "height": "15 mm"}
+        ]),
+        "{}",
+        c[0].1["params"]
+    );
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the repaired list");
+    assert_eq!(h.app.session.doc.features.len(), count, "redefined in place");
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::SheetFlange { edges, .. } = &f.kind else { panic!("not a flange feature") };
+    let segs: Vec<(f64, f64)> = edges[0].segments.iter().map(|s| (s.from, s.to)).collect();
+    assert_eq!(segs, vec![(0.0, 0.4), (0.4, 0.8), (0.8, 1.0)], "a partition of the edge");
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+}
+
+/// `then` with a split edge is refused, not dropped: the message names the edge and says where the
+/// chain goes instead, and the guide carries the same words (#5927, #5928).
+#[test]
+fn then_with_segments_is_refused_with_a_message() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let edge = edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap();
+    app.session.selection = vec![edge];
+    app.start("sheet.flange");
+    let mut d = app.dialog.clone().unwrap();
+    let p = edge_point_list(&d.inputs)[0];
+    if let Kind::Sheet(Sm::Flange { height, angle, segments, then, .. }) = &mut d.kind {
+        *height = "20 mm".into();
+        *angle = "90 deg".into();
+        let slot = segments_slot(segments, p);
+        add_segment(&mut segments[slot].1);
+        add_segment(&mut segments[slot].1);
+        then.push(("45 deg".into(), "20 mm".into(), false));
+    }
+    let error = apply_commands(&app, &d).unwrap_err();
+    assert_eq!(
+        error, "edge 1 is split into segments: a split edge takes no `then`; bend each segment's far edge in its own feature",
+        "the refusal names the edge"
+    );
+    // The guide says the same, so an agent meets the words here and there.
+    assert!(
+        include_str!("../../../skills/solidcraft-sheetmetal/reference.md")
+            .contains("a split edge takes no `then`; bend each segment's far edge in its own feature"),
+        "the guide carries the refusal"
+    );
+    // Without segments the chain still goes.
+    let mut d = d.clone();
+    if let Kind::Sheet(Sm::Flange { segments, .. }) = &mut d.kind {
+        segments.clear();
+    }
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["then"], json!([{"height": "20 mm", "angle": "45 deg"}]));
+}
+
+/// A flange on the picked `edges`, each split into the same two stretches with heights and angles
+/// of its own: the dialog's per-edge rows then carry the same labels on every edge.
+fn multi_edge_flange(h: &mut crate::scenario::Harness, edges: &[[f64; 3]], heights: &[(&str, &str)], angles: &[(&str, &str)]) -> u64 {
+    // A window tall enough for every edge's rows: each picked edge adds six rows, and a dialog
+    // taller than the screen has rows below it.
+    h.call("ui.resize", json!({"width": 1600, "height": 2600}));
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let list: Vec<serde_json::Value> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            json!({"point": p, "segments": [
+                {"from": 0.0, "to": 0.5, "angle": angles[i].0, "height": heights[i].0},
+                {"from": 0.5, "to": 1.0, "angle": angles[i].1, "height": heights[i].1}
+            ]})
+        })
+        .collect();
+    h.app
+        .run("sheet.flange", json!({"type": "edge", "edges": list, "height": "20 mm", "angle": "90 deg", "position": "inside", "flip": false}))
+        .unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    h.app.session.doc.features.last().unwrap().id
+}
+
+/// The dialog's stretches, per picked edge, as `(from, to, angle, height)` typed.
+fn segment_rows(h: &crate::scenario::Harness) -> Vec<Vec<(String, String, String, String)>> {
+    match &h.app.dialog.as_ref().expect("a dialog").kind {
+        Kind::Sheet(Sm::Flange { segments, .. }) => segments
+            .iter()
+            .map(|(_, list)| list.iter().map(|r| (r.from.clone(), r.to.clone(), r.angle.clone(), r.height.clone())).collect())
+            .collect(),
+        other => panic!("not a flange dialog: {other:?}"),
+    }
+}
+
+/// The number a `height`/`angle` field holds, for comparing a drag's effect.
+fn field_number(text: &str) -> f64 {
+    let number: String = text.chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-').collect();
+    number.parse().unwrap_or_else(|e| panic!("`{text}` is not a number: {e}"))
+}
+
+/// Drag the label of the `k`th row named `text` sideways by `dx` points. Every picked edge's rows
+/// carry the same labels, and the label rects are published in draw order, one per edge, so the
+/// `k`th is the `k`th edge's row.
+fn drag_label(h: &mut crate::scenario::Harness, text: &str, k: usize, dx: f32) {
+    let rects: Vec<egui::Rect> = crate::scenario::rects(&format!("dialog:label:{text}")).into_iter().map(|(_, r)| r).collect();
+    assert!(rects.len() > k, "`{text}`: {} label rects drawn, want one per edge: {rects:?}", rects.len());
+    eprintln!("DEBUG `{text}`[{k}] rects={rects:?} window={:?} content={:?}", crate::scenario::rect_of("dialog:window"), h.ctx.content_rect());
+    let c = rects[k].center();
+    h.step(&json!({"drag": [[c.x, c.y], [c.x + dx, c.y]], "steps": 8})).unwrap();
+    h.frames(3);
+}
+
+/// Two picked edges, each split into two stretches: dragging one edge's label changes that edge's
+/// value alone. The labels repeat, so a row's scrub (label-drag) id must be scoped per edge; with
+/// one shared form scope the rows share the id, the last edge's row takes the drag and every
+/// edge's value moves with it (#5927, #5928).
+#[test]
+fn dragging_one_edges_segment_height_leaves_the_other_edge_alone() {
+    let mut h = crate::scenario::Harness::new();
+    let id = multi_edge_flange(
+        &mut h,
+        &[[50.0, 0.0, 2.5], [50.0, 60.0, 2.5]],
+        &[("20 mm", "15 mm"), ("25 mm", "10 mm")],
+        &[("90 deg", "45 deg"), ("60 deg", "30 deg")],
+    );
+    h.app.edit_feature(id);
+    h.frames(6);
+    let before = segment_rows(&h);
+    assert_eq!(before.len(), 2, "the dialog holds both edges: {before:?}");
+    assert_eq!(
+        before[0],
+        vec![("0".into(), "0.5".into(), "90 deg".into(), "20 mm".into()), ("0.5".into(), "1".into(), "45 deg".into(), "15 mm".into())],
+        "{before:?}"
+    );
+    assert_eq!(
+        before[1],
+        vec![("0".into(), "0.5".into(), "60 deg".into(), "25 mm".into()), ("0.5".into(), "1".into(), "30 deg".into(), "10 mm".into())],
+        "{before:?}"
+    );
+    // Drag edge 2's second stretch's angle label, the last edge in the form: with one shared
+    // scope this drag moved edge 1's angle too, because both rows held the same id.
+    drag_label(&mut h, "Segment 2 angle", 1, 40.0);
+    let after_last = segment_rows(&h);
+    assert_eq!(after_last[0], before[0], "edge 1 is untouched by edge 2's drag: {after_last:?}");
+    assert_ne!(after_last[1][1].2, before[1][1].2, "edge 2's dragged angle moved: {after_last:?}");
+    assert_eq!(after_last[1][0], before[1][0], "edge 2's other stretch stays");
+    // Drag edge 1's first stretch's height label; 40 points moves a 20 mm value by 4 mm.
+    drag_label(&mut h, "Segment 1 height", 0, 40.0);
+    let after = segment_rows(&h);
+    assert_ne!(field_number(&after[0][0].3), field_number(&before[0][0].3), "the dragged edge's height moved: {after:?}");
+    assert_eq!(after[0][0].0, before[0][0].0);
+    assert_eq!(after[0][0].1, before[0][0].1);
+    assert_eq!(after[0][0].2, before[0][0].2, "the dragged row's angle stays");
+    assert_eq!(after[0][1], before[0][1], "the dragged edge's other stretch stays");
+    assert_eq!(after[1], after_last[1], "edge 2's height and angle are untouched by edge 1's drag: {after:?}");
+    // The command the dialog would run carries each drag in its own edge only.
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    let params = &c[0].1["params"];
+    assert_eq!(params["edges"][1]["point"], json!([50.0, 60.0, 2.5]), "{}", params);
+    assert_eq!(params["edges"][1]["segments"][0], json!({"from": 0.0, "to": 0.5, "angle": "60 deg", "height": "25 mm"}), "{}", params);
+    assert_eq!(params["edges"][1]["segments"][1], json!({"from": 0.5, "to": 1.0, "angle": after[1][1].2, "height": "10 mm"}), "{}", params);
+    assert_eq!(params["edges"][0]["segments"][0]["height"], json!(after[0][0].3.clone()), "{}", params);
+    assert_eq!(params["edges"][0]["segments"][0]["angle"], json!("90 deg"), "{}", params);
+    assert_eq!(params["edges"][0]["segments"][1], json!({"from": 0.5, "to": 1.0, "angle": "45 deg", "height": "15 mm"}), "{}", params);
+}
+
+/// Three picked edges with the same two stretches each: dragging one field on each edge changes
+/// that edge's value alone, so every edge's rows hold ids of their own (#5927, #5928).
+#[test]
+fn dragging_each_of_three_edges_fields_changes_only_that_edge() {
+    let mut h = crate::scenario::Harness::new();
+    let id = multi_edge_flange(
+        &mut h,
+        &[[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5]],
+        &[("20 mm", "15 mm"), ("25 mm", "10 mm"), ("30 mm", "12 mm")],
+        &[("90 deg", "45 deg"), ("60 deg", "30 deg"), ("80 deg", "40 deg")],
+    );
+    h.app.edit_feature(id);
+    h.frames(6);
+    let mut before = segment_rows(&h);
+    assert_eq!(before.len(), 3, "the dialog holds all three edges: {before:?}");
+    for (edge, label) in [(0usize, "Segment 1 height"), (1, "Segment 2 angle"), (2, "Segment 1 angle")] {
+        drag_label(&mut h, label, edge, 40.0);
+        let after = segment_rows(&h);
+        for other in 0..3 {
+            if other == edge {
+                continue;
+            }
+            assert_eq!(after[other], before[other], "edge {} after dragging edge {}'s `{label}`: {after:?}", other + 1, edge + 1);
+        }
+        let moved = match label {
+            "Segment 1 height" => after[edge][0].3 != before[edge][0].3,
+            "Segment 2 angle" => after[edge][1].2 != before[edge][1].2,
+            _ => after[edge][0].2 != before[edge][0].2,
+        };
+        assert!(moved, "edge {}'s `{label}` moved: {after:?}", edge + 1);
+        before = after;
+    }
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let params = apply_commands(&h.app, &d).unwrap()[0].1["params"].clone();
+    let seg = |edge: usize, m: usize| params["edges"][edge]["segments"][m].clone();
+    assert_eq!(seg(0, 0)["height"], json!(before[0][0].3.clone()), "{params}");
+    assert_eq!(seg(1, 1)["angle"], json!(before[1][1].2.clone()), "{params}");
+    assert_eq!(seg(2, 0)["angle"], json!(before[2][0].2.clone()), "{params}");
+    // Every stretch the drags did not touch is the design's.
+    assert_eq!(seg(0, 1), json!({"from": 0.5, "to": 1.0, "angle": "45 deg", "height": "15 mm"}), "{params}");
+    assert_eq!(seg(1, 0), json!({"from": 0.0, "to": 0.5, "angle": "60 deg", "height": "25 mm"}), "{params}");
+    assert_eq!(seg(2, 1), json!({"from": 0.5, "to": 1.0, "angle": "40 deg", "height": "12 mm"}), "{params}");
+    assert_eq!(seg(0, 0)["from"], json!(0.0), "{params}");
+    assert_eq!(seg(0, 0)["to"], json!(0.5), "{params}");
+    assert_eq!(seg(1, 1)["height"], json!("10 mm"), "{params}");
+    assert_eq!(seg(2, 0)["height"], json!("30 mm"), "{params}");
+}
+
+/// The byte-identical per-edge round-trip after a label drag: the drag changes the dragged
+/// stretch's height only, the other edge's list comes back byte for byte as the design wrote it,
+/// and Edit Feature on the redefined feature sends the same bytes back (#5927, #5928).
+#[test]
+fn a_dragged_segment_round_trip_keeps_every_other_edge_byte_identical() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width": 1600, "height": 2000}));
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let design = json!({
+        "type": "edge",
+        "edges": [
+            {"point": [50.0, 0.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.3, "angle": "90 deg", "height": "20 mm"},
+                {"from": 0.3, "to": 1.0, "angle": "45 deg", "height": "15 mm", "flip": false}
+            ]},
+            {"point": [50.0, 60.0, 2.5], "segments": [
+                {"from": 0.0, "to": 0.6, "height": "25 mm", "flip": true},
+                {"from": 0.6, "to": 1.0, "height": "10 mm"}
+            ]}
+        ],
+        "height": "20 mm",
+        "angle": "90 deg",
+        "position": "inside",
+        "flip": true
+    });
+    h.app.run("sheet.flange", design.clone()).unwrap();
+    assert!(h.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", h.app.session.model.results);
+    let id = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(id);
+    h.frames(6);
+    let before = segment_rows(&h);
+    assert_eq!(before.len(), 2, "{before:?}");
+    // Drag edge 1's first stretch's height: 20 mm moves by 4 mm at 40 points.
+    drag_label(&mut h, "Segment 1 height", 0, 40.0);
+    let after = segment_rows(&h);
+    assert_eq!(after[1], before[1], "edge 2's list is untouched: {after:?}");
+    assert_ne!(after[0][0].3, before[0][0].3, "edge 1's dragged height moved: {after:?}");
+    assert_eq!(
+        (after[0][0].0.as_str(), after[0][0].1.as_str(), after[0][0].2.as_str()),
+        ("0", "0.3", "90 deg"),
+        "the dragged stretch keeps its bounds and angle"
+    );
+    let d = h.app.dialog.clone().expect("the dialog is open");
+    let c = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    let params = c[0].1["params"].clone();
+    assert_eq!(
+        serde_json::to_string(&params["edges"][1]).unwrap(),
+        serde_json::to_string(&design["edges"][1]).unwrap(),
+        "the edge the drag did not touch goes back as the design wrote it: {params}"
+    );
+    let mut expected = design.clone();
+    expected["edges"][0]["segments"][0]["height"] = json!(after[0][0].3.clone());
+    assert_eq!(serde_json::to_string(&params).unwrap(), serde_json::to_string(&expected).unwrap(), "only the dragged height differs: {params}");
+    // OK applies it; Edit Feature sends the same parameters back, byte for byte.
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "OK applies the dragged value");
+    let f = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(f);
+    h.frames(6);
+    let d = h.app.dialog.clone().expect("the dialog is open again");
+    let again = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(
+        serde_json::to_string(&again[0].1["params"]).unwrap(),
+        serde_json::to_string(&params).unwrap(),
+        "the edit after the drag is byte-identical: {}",
+        again[0].1["params"]
+    );
+    assert_eq!(segment_rows(&h)[1], before[1], "edge 2 still comes back as it was");
 }

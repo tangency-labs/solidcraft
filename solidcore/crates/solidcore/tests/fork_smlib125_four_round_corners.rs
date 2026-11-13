@@ -16,9 +16,9 @@
 //! - Each of the n - 2 patches lies on the sphere, along its edges too, with a radial normal.
 //! - Every patch is G1 to its neighbours along its edges.
 //!
-//! The square pyramid of WR-502 (`fillet_corner_sphere_from_four_arcs`, 40 across the base
-//! and 30 high, every edge R 2) is a regular apex of four. Its apex is the Ball: two patches on the ball touching the four faces (centre
-//! `z = (600 - 2 sqrt 1300) / 20`), G1 to the rounds, with or without the WR-502 flag.
+//! The square pyramid of WR-502 (40 across the base and 30 high, every edge R 2) is a regular
+//! apex of four. Its apex is the Ball: two patches on the ball touching the four faces (centre
+//! `z = (600 - 2 sqrt 1300) / 20`), G1 to the rounds.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -406,9 +406,8 @@ fn four_face_pocket_floor_is_the_concave_setback() {
 
 /// WR-502's pyramid: the worst deviation of its apex's patches from the ball touching the
 /// four faces (and their count), whether the apex is the Ball.
-fn rounded_pyramid(four_arcs: bool) -> (f64, usize, Option<BlendCornerEvent>) {
+fn rounded_pyramid() -> (f64, usize, Option<BlendCornerEvent>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_corner_sphere_from_four_arcs = four_arcs;
     let mut b = create_pyramid(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0).unwrap();
     let edges = b.edge_list().to_vec();
     let (event, lines) = round(&mut k, &mut b, &edges, 2.0, Point3::new(0.0, 0.0, 30.0));
@@ -424,11 +423,9 @@ fn rounded_pyramid(four_arcs: bool) -> (f64, usize, Option<BlendCornerEvent>) {
 }
 
 #[test]
-fn pyramid_apex_is_the_ball_with_or_without_the_four_arc_sphere() {
-    for four_arcs in [false, true] {
-        let (off, patches, event) = rounded_pyramid(four_arcs);
-        assert_eq!(event, Some(BlendCornerEvent::Ball));
-        assert_eq!(patches, 2);
-        assert!(off <= 1e-9, "{off}");
-    }
+fn pyramid_apex_is_the_ball() {
+    let (off, patches, event) = rounded_pyramid();
+    assert_eq!(event, Some(BlendCornerEvent::Ball));
+    assert_eq!(patches, 2);
+    assert!(off <= 1e-9, "{off}");
 }

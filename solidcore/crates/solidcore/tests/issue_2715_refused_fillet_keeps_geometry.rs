@@ -20,16 +20,13 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::boolean::api_brep::boolean_union;
-use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::brep_volume_default;
-use solidcore::math::{Point3, Vec3};
-use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cone};
 use solidcore::query::api_queries::edge_closest_point;
-use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::api_files::{read_brep_from_file, write_brep_to_file};
 use solidcore::topology::brep::p1::surfaces;
 use solidcore::topology::brep::p10::TopologyEnv;
@@ -188,51 +185,36 @@ fn a_refused_cliff_subtraction_leaves_a_body_that_saves_its_surfaces() {
     assert!(seen > 0, "neither radius is refused by the subtraction");
 }
 
-/// The stepped bar of `wr695_overflow_trim_at_creases`: its profile
-/// `(0,0) (10,0) (10,5) (7,5) (7,10) (0,10)` swept 20 along z.
-fn stepped_bar(k: &mut Kernel) -> Brep {
-    const PROFILE: [[f64; 2]; 6] = [
-        [0.0, 0.0],
-        [10.0, 0.0],
-        [10.0, 5.0],
-        [7.0, 5.0],
-        [7.0, 10.0],
-        [0.0, 10.0],
-    ];
-    let cs: Vec<Curve> = PROFILE
-        .iter()
-        .zip(PROFILE.iter().cycle().skip(1))
-        .map(|(a, b)| {
-            Curve::from(
-                create_line_segment(Vec3::new(a[0], a[1], 0.0), Vec3::new(b[0], b[1], 0.0))
-                    .unwrap(),
-            )
-        })
-        .collect();
-    let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
-    create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 20.0, true).unwrap()
-}
-
-/// `trim_at_creases` refused (the stepped bar's inner step edge chamfered 4, which reaches
-/// every face, as `wr695_overflow_trim_at_creases`): the target is put back from the copy
-/// taken before the trim.
+/// `trim_at_creases` refused (`wr696_fit_sizes`'s backed block: a 20 x 10 x 10 block whose
+/// back top edge carries a round of 3, then its front top edge a round of 9, whose rail runs across the
+/// tangent edge onto the back round: `CreaseAcrossTangentEdge`): the target is put back from
+/// the copy taken before the trim, the block with its back round, 2000 - 20 (1 - pi/4) 9.
 #[test]
 fn a_refused_trim_at_creases_leaves_a_body_that_saves_its_surfaces() {
     let mut k = cliff_kernel(true);
-    let mut body = stepped_bar(&mut k);
-    let e = edge_between(
+    let mut body = create_box(&mut k, Point3::ZERO, 20.0, 10.0, 10.0).unwrap();
+    let back = edge_between(
         &k,
         &body,
-        Point3::new(10.0, 5.0, 0.0),
-        Point3::new(10.0, 5.0, 20.0),
+        Point3::new(0.0, 10.0, 10.0),
+        Point3::new(20.0, 10.0, 10.0),
     );
-    let (code, comment) = refused(&mut k, &mut body, e, 4.0, true);
-    assert_eq!(code, FilletErrorType::BadMerge as i32);
-    assert!(
-        comment.contains("reaches every face of the body"),
-        "{comment}"
+    let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[back], 3.0, 1, 1, 1.0)
+        .unwrap();
+    session.do_fillet(&mut k).unwrap();
+    drop(session);
+    let front = edge_between(
+        &k,
+        &body,
+        Point3::new(0.0, 0.0, 10.0),
+        Point3::new(20.0, 0.0, 10.0),
     );
-    assert_left_whole(&mut k, &mut body, 1700.0, "trim at creases");
+    let (code, _) = refused(&mut k, &mut body, front, 9.0, false);
+    assert_eq!(code, FilletErrorType::NoRoom as i32);
+    let backed = 2000.0 - 20.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 9.0;
+    assert_left_whole(&mut k, &mut body, backed, "trim at creases");
 }
 
 /// The fork's opt-ins `fork_eb883ad_keep_features` runs the kept features under.
@@ -243,7 +225,6 @@ fn keep_kernel() -> Kernel {
     fixes.fillet_cliff_overflow = true;
     fixes.fillet_overflow_trim_at_creases = true;
     fixes.linear_sweep_arc_is_cylinder = true;
-    fixes.precise_properties_body_length_scale = true;
     k.fixes = fixes;
     k
 }

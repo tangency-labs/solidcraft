@@ -117,3 +117,61 @@ fn moved_sphere_pole_reports_upstream_lines() {
     assert!(!c.is_valid());
     assert!((b.vertex(pole).unwrap().tolerance - 1e-5).abs() < 1e-12);
 }
+
+/// A planar sheet, the square 0..4 in z = 0 (`create_planar_faces`), and its face.
+fn square(k: &mut Kernel) -> (Brep, solidcore::topology::FaceId) {
+    use solidcore::curve::curve::Curve;
+    use solidcore::curve::line::Line;
+    let corners = [
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(4.0, 0.0, 0.0),
+        Vec3::new(4.0, 4.0, 0.0),
+        Vec3::new(0.0, 4.0, 0.0),
+    ];
+    let sides: Vec<Curve> = (0..4)
+        .map(|i| {
+            Curve::from(
+                Line::create_line_segment(3, corners[i], corners[(i + 1) % 4], None).unwrap(),
+            )
+        })
+        .collect();
+    let b = solidcore::primitive::api_trim_ops::create_planar_faces(k, &sides).unwrap();
+    let f = b.face_list()[0];
+    (b, f)
+}
+
+/// #15040: a face whose edge uses have no UV trim curves is checked like any other, not
+/// passed unchecked. A sound one passes; one whose outer loop runs backwards fails Loop
+/// Orientation as it does with its trims.
+#[test]
+fn a_face_without_uv_trims_is_checked_like_one_with_them() {
+    use solidcore::topology::face::p2 as fp2;
+    use solidcore::topology::trimming_tools::{clear_uv_trim_curves, face_uv_curves_present};
+    let mut k = Kernel::default();
+
+    let (mut b, f) = square(&mut k);
+    let with_trims = check(&mut k, &mut b);
+    clear_uv_trim_curves(&mut b, f).unwrap();
+    assert!(!face_uv_curves_present(&b, f).unwrap());
+    let without = check(&mut k, &mut b);
+    assert_eq!(without.lines(), with_trims.lines());
+    assert!(without.is_valid(), "{:?}", without.lines());
+
+    let (mut b, f) = square(&mut k);
+    let outer = fp2::loops(&b, f, false, None).unwrap()[0];
+    solidcore::topology::loopuse::flip_loop_orientation(&mut b, outer).unwrap();
+    assert!(face_uv_curves_present(&b, f).unwrap());
+    let with_trims = check(&mut k, &mut b);
+    assert!(
+        with_trims
+            .lines()
+            .iter()
+            .any(|l| l.contains("Loop Orientation")),
+        "{:?}",
+        with_trims.lines()
+    );
+    clear_uv_trim_curves(&mut b, f).unwrap();
+    let without = check(&mut k, &mut b);
+    assert_eq!(without.lines(), with_trims.lines());
+    assert!(!without.is_valid());
+}

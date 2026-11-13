@@ -6,6 +6,7 @@
 
 #![allow(
     clippy::unwrap_used,
+    clippy::panic,
     clippy::indexing_slicing,
     clippy::disallowed_methods
 )] // test: the closed form uses pi
@@ -16,7 +17,9 @@ use common::{all_fixes, built, edge_at, kernel_copy, volume};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::kernel::Kernel;
 use solidcore_ops::boolean::boolean;
-use solidcore_ops::{blend, make_box, Blend, Body, BooleanOp, CheckLevel, Corners};
+use solidcore_ops::{blend, make_box, session, Blend, Body, BooleanOp, CheckLevel, Corners};
+use solidcore_record::brep::Brep as Record;
+use std::io::Read as _;
 
 const WALL: [f64; 3] = [20.0, 20.0, -19.0];
 const LEDGE: [f64; 3] = [23.0, 20.0, -45.0];
@@ -80,5 +83,58 @@ fn the_same_on_the_default_kernel() {
         fillet_edges(&mut Kernel::default(), &mut b, &ids, r, 1, 1, 1.0).unwrap();
         let v = volume(&built(|_| Ok(b)));
         assert!((v - closed_form(r)).abs() <= 1e-9 * v, "r {r}: {v}");
+    }
+}
+
+/// The case's record body (`fillets/12342-*`): the same L, each face's plane bounded to its
+/// face (x 16..23 for the back face), as SolidCraft writes it; on the kernel rig's fix set.
+fn recorded_stepped_wall() -> Body {
+    let fixes: Vec<String> = serde_json::from_str(include_str!(
+        "../../solidcore/tests/kernel_cases/fixes.json"
+    ))
+    .unwrap();
+    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    let path = format!(
+        "{}/../solidcore/tests/kernel_cases/fillets/12342-round-wall-edge-r5-past-the-wall-refused.bodies.json.gz",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// The overflow trimmed at its crease (docs/generic-blend.md section 3.4), without the
+/// outline's opt-in fix: the round on the continued faces, centred on x = y = 20 - r, is
+/// trimmed at its crease with the wall's inner face x = 16. Each section z in (-40, 2) loses
+/// the square [16, 20] x [20 - r, 20] less the disc's part in it,
+/// A(r) = 4 r - int_{r - 4}^{r} sqrt(r^2 - t^2) dt, over the wall's 42.
+fn trimmed_at_its_crease(r: f64) -> f64 {
+    let under = |u: f64| u / 2.0 * (r * r - u * u).max(0.0).sqrt() + r * r / 2.0 * (u / r).asin();
+    9520.0 - 42.0 * (4.0 * r - (under(r) - under(r - 4.0)))
+}
+
+/// Past the wall's width on the record body: the round's End on the ledge's top caps along
+/// the back face's bottom edge, past that edge's end to the rail at x = 20 - r. That cap edge
+/// is where the ledge top's extension meets the back face continued as itself. The back
+/// face's plane, bounded to its face, did not reach x < 16, so the intersection failed and
+/// the round failed with status 1001.
+#[test]
+fn the_recorded_wall_s_round_past_the_wall_overflows() {
+    for r in [4.5, 5.0, 6.0] {
+        let b = recorded_stepped_wall();
+        let e = edge_at(&b, WALL);
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("r {r}: {e}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "r {r}: {report}");
+        let v = volume(&b);
+        assert!(
+            (v - trimmed_at_its_crease(r)).abs() <= 1e-9 * v,
+            "r {r}: {v}"
+        );
     }
 }

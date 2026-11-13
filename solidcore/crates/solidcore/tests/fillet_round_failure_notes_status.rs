@@ -11,6 +11,9 @@
 //! round builds), the arc's round followed by the front edge's fails in the rollover
 //! (`SM_ERR_NULL_POINTER` from `blend::fillet_solver::p5`) and noted nothing: code 0 and no
 //! comment. It now notes `SM_FILERR_EDGE_PROBLEM` (4) with what failed.
+//!
+//! A round that fails after it has edited the body puts the body back as it came in: two of the
+//! three join edges of two cylinders joined at an angle.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -19,15 +22,19 @@
     clippy::cast_precision_loss
 )] // test helpers
 
+use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::math::{Point3, Vec3, BIG_DOUBLE};
 use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
+use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::query::api_queries::{get_edges, surface_closest_point};
 use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p2 as face;
@@ -317,4 +324,92 @@ fn the_rollover_failure_notes_its_status() {
         comment.starts_with("Fillet Surface Computation Failure: "),
         "{comment}"
     );
+}
+
+/// Every vertex's point and tolerance; every edge's tolerance, its curve's points at the start,
+/// middle and end of its interval, and which of its edge uses have a UV trim curve; as bits,
+/// after the face count.
+fn shape(k: &Kernel, b: &Brep) -> Vec<u64> {
+    let mut bits = vec![u64::try_from(b.face_list().len()).unwrap()];
+    for (_, v) in b.vertices().iter() {
+        bits.extend([v.point.x, v.point.y, v.point.z, v.tolerance].map(f64::to_bits));
+    }
+    for &e in b.edge_list() {
+        let r = b.edge(e).unwrap();
+        bits.push(r.tolerance.to_bits());
+        if let Some(curve) = r.curve.as_ref() {
+            for t in [0.0, 0.5, 1.0] {
+                let p = curve.evaluate_point(k, r.interval.evaluate(t)).unwrap();
+                bits.extend([p.x, p.y, p.z].map(f64::to_bits));
+            }
+        }
+        for &eu in &r.edgeuses {
+            bits.push(u64::from(b.edgeuse(eu).unwrap().uv_trim_curve.is_some()));
+        }
+    }
+    bits
+}
+
+/// A round that fails after it has edited the body puts the body back as it came in. The part
+/// is two cylinders joined at an angle: A (r 20, z -50..50) turned 10 degrees about z, and B
+/// (r 18.9, h 50) turned -115 degrees about y and moved to (24, 0, 8). Their join is three
+/// edges. Rounding only the two that start at B's seam vertex, (20, 0, 26.99), with r 2 fails
+/// with status 1001 in the session's finish. The body used to keep the edits made before that
+/// failure, and two of its edges then failed the Level 2 check (Bad Edge, `ValidateGeometry`).
+/// Whether this round should build is a separate question: built, it checks clean too.
+#[test]
+fn a_failed_round_leaves_the_body_as_it_was() {
+    let mut k = Kernel::default();
+    let (s, c) = 10f64.to_radians().sin_cos();
+    let mut a = create_cylinder(&mut k, Point3::new(0.0, 0.0, -50.0), 20.0, 100.0).unwrap();
+    let turn_a = [
+        [c, s, 0.0, 0.0],
+        [-s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    transform_matrix(&mut k, &mut a, &turn_a, true).unwrap();
+    let (s, c) = (-115f64).to_radians().sin_cos();
+    let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, -25.0), 18.9, 50.0).unwrap();
+    let place_b = [
+        [c, 0.0, -s, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [s, 0.0, c, 0.0],
+        [24.0, 0.0, 8.0, 1.0],
+    ];
+    transform_matrix(&mut k, &mut b, &place_b, true).unwrap();
+    let mut part = boolean_union(&mut k, a, b).unwrap();
+    let seam = Point3::new(20.0, 0.0, 26.988_612_035_771_11);
+    let at_b_seam: Vec<EdgeId> = part
+        .edge_list()
+        .iter()
+        .copied()
+        .filter(|&e| {
+            let r = part.edge(e).unwrap();
+            let Some(curve) = r.curve.as_ref() else {
+                return false;
+            };
+            let start = curve.evaluate_point(&k, r.interval.evaluate(0.0)).unwrap();
+            let mid = curve.evaluate_point(&k, r.interval.evaluate(0.5)).unwrap();
+            (start - seam).length() < 1e-6
+                && (mid.x.hypot(mid.y) - 20.0).abs() < 1e-4
+                && mid.y.abs() > 1e-3
+        })
+        .collect();
+    assert_eq!(at_b_seam.len(), 2, "{at_b_seam:?}");
+    let lines = check_brep(&mut k, &mut part, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "the part: {lines:?}");
+    let before = shape(&k, &part);
+
+    let r = fillet_edges(&mut k, &mut part, &at_b_seam, 2.0, 1, 1, 1.0);
+    println!("fillet_edges: {r:?}");
+    let lines = check_brep(&mut k, &mut part, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{r:?} left the body invalid: {lines:?}");
+    if r.is_err() {
+        assert!(shape(&k, &part) == before, "{r:?} changed the body");
+    }
 }

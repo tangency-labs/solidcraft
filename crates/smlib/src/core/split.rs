@@ -18,6 +18,7 @@
 use std::sync::PoisonError;
 
 use solidcore::EntityRef;
+use solidcore::Result as SolidResult;
 use solidcore::boolean::api_brep::boolean_with_options;
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::geom::a_object::BooleanOperation;
@@ -43,7 +44,7 @@ use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p2::{is_manifold_solid, is_sheet};
 use solidcore::topology::brep::p3::{new_brep, with_kernel_callbacks};
 use solidcore::topology::brep::p8::create_face_from_surface;
-use solidcore::topology::brep::p9::orient_sheet_surfaces;
+use solidcore::topology::brep::p9::{OrientSheetNote, orient_sheet_surfaces};
 use solidcore::topology::brep::p10::merge_curves_on_surface_through_surface;
 use solidcore::topology::brep::planar_section::face_planar_section_curves;
 use solidcore::topology::brep_cache::CacheObject;
@@ -112,7 +113,7 @@ fn clamped(k: &[f64], p: usize) -> bool {
 
 /// The tool's surface as `smlib_ssi.cpp`'s constructors make it, then its natural UV domain
 /// (`construct`: finite and not empty, else `SM_ERR_INVALID_INPUT`).
-pub(super) fn tool(k: &Kernel, spec: &Spec) -> solidcore::Result<Out<Tool>> {
+pub(super) fn tool(k: &Kernel, spec: &Spec) -> SolidResult<Out<Tool>> {
     let mut plane = None;
     let surface = match spec {
         Spec::Plane { origin, xaxis, yaxis, u, v } => {
@@ -228,7 +229,7 @@ fn curve_ref(e: EdgeId, _type_code: i64) -> ObjectRef {
 }
 
 /// `cut_face`: cuts `face` where `tool` meets it; the faces it was split into besides itself.
-fn cut_face(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, face: FaceId, tool: &Tool, tol: f64) -> solidcore::Result<Out<Vec<FaceId>>> {
+fn cut_face(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, face: FaceId, tool: &Tool, tol: f64) -> SolidResult<Out<Vec<FaceId>>> {
     let Some(surface) = face_p2::surface(b, face)? else {
         return Ok(Err(Error::Status(SM_ERR)));
     };
@@ -387,7 +388,7 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
 
 /// `slice`: a copy of `body` sliced by `sheet` (SMLib's slice reads the side from the surfaces, not
 /// the faces' uses). `None` when nothing is left.
-fn slice(k: &mut Kernel, body: &Body, sheet: Brep) -> solidcore::Result<Out<Option<Brep>>> {
+fn slice(k: &mut Kernel, body: &Body, sheet: Brep) -> SolidResult<Out<Option<Brep>>> {
     let a = {
         let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
         brep_copy(k, &g)?
@@ -409,8 +410,8 @@ fn both_sides(
     k: &mut Kernel,
     body: &Body,
     whole: bool,
-    mut side: impl FnMut(&mut Kernel, bool) -> solidcore::Result<Out<Brep>>,
-) -> solidcore::Result<Out<Option<(Brep, Brep)>>> {
+    mut side: impl FnMut(&mut Kernel, bool) -> SolidResult<Out<Brep>>,
+) -> SolidResult<Out<Option<(Brep, Brep)>>> {
     let solid = {
         let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
         is_manifold_solid(&g)?
@@ -437,7 +438,7 @@ fn both_sides(
 }
 
 /// One side of `smlib_split_body`: a one-face sheet on the tool's surface, turned over with `flip`.
-fn side(k: &mut Kernel, body: &Body, spec: &Spec, flip: bool) -> solidcore::Result<Out<Brep>> {
+fn side(k: &mut Kernel, body: &Body, spec: &Spec, flip: bool) -> SolidResult<Out<Brep>> {
     let tolerance = body.0.lock().unwrap_or_else(PoisonError::into_inner).tolerance();
     let t = match tool(k, spec)? {
         Ok(t) => t,
@@ -464,8 +465,54 @@ pub(crate) fn split_body(body: &Body, spec: &Spec) -> Result<Option<(Body, Body)
     if body.0.is_poisoned() {
         return Err(Error::Internal("smlib_split_body: the body was left unfinished by an earlier panic".to_owned()));
     }
-    let r = super::run_on("smlib_split_body", &[("brep", body)], |k| both_sides(k, body, false, |k, flip| side(k, body, spec, flip)))??;
+    let r = super::run_on("smlib_split_body", &[("brep", body)], |k| {
+        match by_closed_tool(k, body, spec)? {
+            Ok(Some(parts)) => return Ok(Ok(parts)),
+            Ok(None) => {}
+            Err(e) => return Ok(Err(e)),
+        }
+        both_sides(k, body, false, |k, flip| side(k, body, spec, flip))
+    })??;
     Ok(r.map(|(b, f)| (Body::new(b), Body::new(f))))
+}
+
+/// `smlib_split_body` by a tool whose surface closes on itself both ways (a sphere, a whole
+/// torus): its one-face sheet is then a closed shell, the solid the surface bounds, and
+/// `SM_BO_SLICE` with it fails (`SM_ERR`); the part behind the surface (inside it, its normal
+/// pointing out) is the body's intersection with that solid and the part in front their
+/// difference. `None` for a tool whose sheet is open, which [`both_sides`] slices; a side left
+/// empty is `Some(None)`; a body that is no manifold solid is [`Error::NotSolid`].
+fn by_closed_tool(k: &mut Kernel, body: &Body, spec: &Spec) -> SolidResult<Out<Option<Option<(Brep, Brep)>>>> {
+    let solid = {
+        let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+        is_manifold_solid(&g)?
+    };
+    if !solid {
+        return Ok(Err(Error::NotSolid));
+    }
+    let sheet = match side(k, body, spec, false)? {
+        Ok(s) => s,
+        Err(e) => return Ok(Err(e)),
+    };
+    if !is_manifold_solid(&sheet)? {
+        return Ok(Ok(None));
+    }
+    let mut parts = [None, None];
+    for (part, op) in parts.iter_mut().zip([BooleanOperation::Intersection, BooleanOperation::Difference]) {
+        let a = {
+            let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+            brep_copy(k, &g)?
+        };
+        let tool = brep_copy(k, &sheet)?;
+        let options = MergeOptions::new(false, false, false, false, false);
+        let r = match boolean_with_options(k, a, tool, op, options) {
+            Ok(r) => r.result,
+            Err(e) => return Ok(Err(status(e))),
+        };
+        *part = (!r.face_list().is_empty()).then_some(r);
+    }
+    let [Some(back), Some(front)] = parts else { return Ok(Ok(Some(None))) };
+    Ok(Ok(Some(Some((back, front)))))
 }
 
 /// `smlib_split_body_by_sheet`: the manifold solid `body` cut in two by `sheet` as it is (one or
@@ -497,7 +544,8 @@ pub(crate) fn split_body_by_sheet(body: &Body, sheet: &Body, face: usize) -> Res
             // the sheet's own attributes, so its faces' tags see each swap.
             let turned = with_kernel_callbacks(k, &mut copy, |k, b, env| orient_sheet_surfaces(k, b, Some(f), !flip, env));
             copy.refresh_cached_topology();
-            Ok(match turned {
+            // the orientation's note fails the side as its status 1 did
+            Ok(match OrientSheetNote::stop_on_note(turned) {
                 Ok(()) => Ok(copy),
                 Err(e) => Err(status(e)),
             })

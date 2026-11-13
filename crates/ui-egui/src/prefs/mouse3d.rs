@@ -224,7 +224,13 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         let calibration = app.space_mouse.device.as_ref().and_then(|device| app.preferences.space_mouse_calibrations.get(device));
         let meters: [_; 6] = std::array::from_fn(|axis| axis_meter(calibration, raw, app.preferences.space_mouse_axis_source, axis));
-        ui_kit::settings_axis_header(ui);
+        let columns = ui_kit::AxisColumns {
+            axis: solidcraft_ui_text::tr("prefs.axis"),
+            live_input: solidcraft_ui_text::tr("prefs.live_input"),
+            speed: solidcraft_ui_text::tr("prefs.speed"),
+            source: solidcraft_ui_text::tr("prefs.source"),
+        };
+        ui_kit::settings_axis_header(ui, &columns);
         for (axis, (name, off)) in rows.iter().enumerate() {
             ui.push_id(("space_mouse_axis", axis), |ui| {
                 let (value, zone) = meters[axis];
@@ -233,6 +239,7 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
                     (prefs.space_mouse_reverse.get_mut(axis), prefs.space_mouse_axis_speed.get_mut(axis), &mut prefs.space_mouse_axis_source);
                 ui_kit::settings_axis_row(
                     ui,
+                    &columns,
                     name,
                     value,
                     zone,

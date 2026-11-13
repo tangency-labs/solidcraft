@@ -998,7 +998,7 @@ fn m10_stock(z0: f64, z1: f64, rmax: impl Fn(f64) -> f64) -> f64 {
 }
 
 /// ISO 4753's chamfered end on both free ends of an M10 stud: a 45° cone down to the external
-/// minor diameter d3 (ISO 724), cut after the groove; the volume as the stock's chamfered section
+/// minor diameter d3 (ISO 724); the volume as the stock's chamfered section
 /// with the thread's material fraction (as ladder 06/006). d3 lies below the modelled root, so
 /// each end face is the whole disk of d3, with the cone a whole ring around it, not pinched
 /// where the groove reaches the end.
@@ -1140,48 +1140,112 @@ fn a_runout_fades_the_groove_out_before_the_shoulder() {
     assert!(e.err().map(|e| e.to_string()).unwrap_or_default().contains("`ease_in` is gone"));
 }
 
-/// A modelled M10 thread's flanks are several B-spline faces per turn (spans of one sweep); where
-/// two of them meet with one tangent plane and one curvature the join is left out of the shaded
-/// view (still pickable and in the wireframe), so the flank reads as one surface. The normal angle across each join is measured
-/// independently (`seam_diagnostics`, projecting stations onto both surfaces).
 #[test]
-fn a_modelled_threads_flank_joins_are_not_drawn() {
+fn a_saved_segmented_thread_flank_pick_does_not_select_a_different_face() {
     use solidcore_record::brep::Surface;
-    let mut s = Session::default();
-    run(&mut s, "solid.cylinder", json!({"radius": 5.0, "height": 12, "body_name": "Shaft"}));
-    run(&mut s, "solid.thread", json!({"face": [5.0, 0, 6.0], "designation": "M10x1.5", "modeled": true}));
-    let st = s.model.state();
-    let body = &st.body("Shaft").unwrap().body;
-    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
-    let record = body.record();
-    let free_form = |f: u32| {
-        record
-            .faces
-            .get(f as usize)
-            .is_some_and(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
-    };
-    let tolerances = solidcraft_kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: 0.5, curvature_per_mm: 1.0, ..Default::default() };
-    let report = solidcraft_kernel::seam_diagnostics(body, &[], 33, tolerances).unwrap();
-    let mut flank_joins = 0;
-    let mut worst: f64 = 0.0;
-    for seam in &report.seams {
-        let e = seam.edge;
-        let uses = &record.edges[e].uses;
-        if uses.len() != 2 || !uses.iter().all(|u| free_form(u.face)) {
-            continue;
+
+    // Captured from the segmented build before continuous_flanks existed, including the old
+    // groove-before-chamfer construction. Picks near both chamfered ends exercise its order.
+    let cases = [
+        ("none", vec![("F2:face:12", Vec3::new(4.7828951862188696, -0.0057530612776590315, 1.6606274291037717))]),
+        (
+            "both",
+            vec![
+                ("F2:face:41", Vec3::new(0.09242260275006192, 4.273234209721337, 0.23586874398281996)),
+                ("F2:face:7", Vec3::new(0.9625365002593353, -4.6849682261915895, 6.262443362555148)),
+                ("F2:face:51", Vec3::new(-0.0924226027501412, 4.273234209721336, 11.764131256017183)),
+            ],
+        ),
+    ];
+    for (tip, picks) in cases {
+        let mut thread = json!({
+            "designation": "M10x1.5", "face": [5, 0, 6], "face_names": ["F1:side"],
+            "id": 2, "modeled": true, "name": "Thread1", "suppressed": false, "type": "thread"
+        });
+        if tip != "none" {
+            thread["tip"] = json!(tip);
         }
-        let angle = seam.normal_angle_deg.value;
-        if angle < 0.5 {
-            flank_joins += 1;
-            worst = worst.max(angle);
-            assert!(mesh.smooth_edges[e] && !mesh.shaded_edge_visible(e), "join {e} at {angle} deg is drawn");
-            assert!(mesh.edge_visible(e) && mesh.edge_pickable(e), "join {e} stays in the wireframe and pickable");
-        } else {
-            assert!(mesh.shaded_edge_visible(e), "crease {e} at {angle} deg is hidden");
+        let mut saved: Value = serde_json::from_str(&solidcraft_doc::Document::default().to_json()).unwrap();
+        saved["features"] = json!([
+            {
+                "axis": [0, 0, 1], "base": [0, 0, 0], "body_names": ["Shaft"], "height": "12",
+                "id": 1, "name": "Cylinder1", "operation": "new_body", "param_names": ["d1", "d2"],
+                "radius": "5", "suppressed": false, "type": "cylinder"
+            }, thread
+        ]);
+        saved["next_id"] = json!(3);
+        saved["params"] = json!([]);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+        let check_picks = |session: &Session| {
+            let rebuilt = session.model.state();
+            let shaft = rebuilt.body("Shaft").unwrap();
+            for (name, pick) in &picks {
+                let (face, point) = solidcraft_doc::naming::face_on_body(shaft, name, *pick).unwrap();
+                assert!(point.dist(*pick) < 0.01, "{tip}: {name} must stay on its original flank: {point:?}");
+                assert!(
+                    matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }),
+                    "{tip}: {name} must not select a cylinder"
+                );
+            }
+        };
+        check_picks(&reopened);
+        run(
+            &mut reopened,
+            "timeline.redefine",
+            json!({
+                "feature": 2, "command": "solid.thread",
+                "params": {"face": [5, 0, 6], "designation": "M10x1.5", "modeled": true, "tip": tip}
+            }),
+        );
+        assert!(matches!(reopened.doc.feature(2).unwrap().kind, solidcraft_doc::FeatureKind::Thread { continuous_flanks: false, .. }));
+        check_picks(&reopened);
+        let saved_again = solidcraft_doc::Document::from_json(&reopened.doc.to_json()).unwrap();
+        assert!(matches!(saved_again.feature(2).unwrap().kind, solidcraft_doc::FeatureKind::Thread { continuous_flanks: false, .. }));
+    }
+}
+
+/// A modelled M10 thread keeps each flank as one B-spline face across all turns. Cylinder seams
+/// must not split either flank into separate faces for selection, meshing or STEP export.
+#[test]
+fn a_modelled_thread_keeps_each_flank_as_one_face() {
+    use solidcore_record::brep::Surface;
+    // Include a partial final turn and a chamfered stock: neither may fragment the flanks.
+    for (height, tip) in [(12.0, "none"), (12.345, "none"), (12.345, "both")] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 5.0, "height": height, "body_name": "Shaft"}));
+        run(&mut s, "solid.thread", json!({"face": [5.0, 0, height / 2.0], "designation": "M10x1.5", "modeled": true, "tip": tip}));
+        let st = s.model.state();
+        let shaft = st.body("Shaft").unwrap();
+        let body = &shaft.body;
+        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+        let record = body.record();
+        let flanks: Vec<usize> = record
+            .faces
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(flanks.len(), 2, "one selectable face per flank, independent of the turn count");
+        let names = solidcraft_doc::naming::face_names(shaft);
+        let picks: Vec<_> = flanks
+            .iter()
+            .map(|&flank| {
+                assert!(mesh.tri_face.iter().any(|f| *f as usize == flank), "flank {flank} must tessellate");
+                (names[flank].clone(), solidcraft_doc::naming::face_spot(shaft, flank).unwrap().point)
+            })
+            .collect();
+        // The named picks downstream face commands store must still find the same kind of face
+        // after the history is serialized and rebuilt, including the reordered chamfer cuts.
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        let rebuilt = reopened.model.state();
+        let shaft = rebuilt.body("Shaft").unwrap();
+        for (name, point) in picks {
+            let (face, found) = solidcraft_doc::naming::face_on_body(shaft, &name, point).unwrap();
+            assert!(found.dist(point) < 1e-6, "the saved flank pick must remain on its named face: {name}");
+            assert!(matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }));
         }
     }
-    // SMLib's flank pieces meet with normals about 1.5e-6 degrees apart (measured).
-    assert!(flank_joins >= 32 && worst < 1e-4, "{flank_joins} flank joins, the worst {worst} deg apart");
 }
 
 /// A pipe thread's profile for [`pipe_material`]: (flank half angle, thread height h, flat at crest
@@ -1471,6 +1535,71 @@ fn a_hole_with_wall_for_the_groove_is_left_as_drilled() {
     let mut s = block_with_bore(20.0);
     let e = s.execute("solid.thread", &json!({"face": [10, 0, 10], "designation": "M12", "modeled": true})).unwrap_err().to_string();
     assert!(e.contains("does not fit a 20.00 mm hole") && e.contains("takes M20"), "{e}");
+}
+
+/// #14191: the fill goes all the way round the hole, so a hole whose wall is open along the
+/// thread is not filled in: one that breaks out of the side of the part, one a cross hole meets,
+/// one drilled into a slanted face. Each is refused with the drill to use, and the part is left as
+/// it was. A blind hole and a chamfered one are still filled, and so are a counterbored hole and a
+/// cross-drilled one where the thread stops short of the counterbore and the cross hole.
+#[test]
+fn a_hole_open_along_the_thread_is_not_filled_in() {
+    let block = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 20, "body_name": "Blk"}));
+        s
+    };
+    let cut = |s: &mut Session, dia: f64, height: f64, base: [f64; 3], axis: &str| {
+        run(s, "solid.cylinder", json!({"diameter": dia, "height": height, "base": base, "axis": axis, "operation": "cut"}));
+    };
+    let m12 = |face: [f64; 3]| json!({"face": face, "designation": "M12", "modeled": true});
+
+    let mut side = block();
+    cut(&mut side, 12.0, 20.0, [0.0, 16.0, 0.0], "Z");
+    let mut cross = block_with_bore(12.0);
+    cut(&mut cross, 4.0, 20.0, [-20.0, 0.0, 10.0], "X");
+    let mut slanted = Session::default();
+    run(&mut slanted, "sketch.create", json!({"plane": "XZ", "name": "P"}));
+    // On XZ the sketch's second coordinate runs down: the top falls from z = 25 to z = 15.
+    run(&mut slanted, "sketch.line", json!({"points": [[-20, 0], [20, 0], [20, -15], [-20, -25]], "closed": true}));
+    run(&mut slanted, "sketch.finish", json!({}));
+    run(&mut slanted, "solid.extrude", json!({"sketch": "P", "distance": 40, "direction": "symmetric", "body_name": "Blk"}));
+    cut(&mut slanted, 12.0, 30.0, [0.0, 0.0, 0.0], "Z");
+    for (what, mut s, face) in [("side", side, [-6.0, 16.0, 10.0]), ("cross hole", cross, [0.0, 6.0, 15.0]), ("slanted", slanted, [0.0, 6.0, 8.0])] {
+        let before = volume(&mut s, "Blk");
+        let e = s.execute("solid.thread", &m12(face)).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("this 12 mm hole is too wide for a modelled M12 thread and can't be filled in"), "{what}: {e}");
+        assert!(e.contains("drill 10.3 mm for M12"), "{what}: {e}");
+        assert!((volume(&mut s, "Blk") - before).abs() < 1e-9, "{what}: the part changed");
+    }
+
+    let mut blind = block();
+    cut(&mut blind, 12.0, 10.0, [0.0, 0.0, 10.0], "Z");
+    let mut counterbored = block_with_bore(12.0);
+    cut(&mut counterbored, 20.0, 5.0, [0.0, 0.0, 15.0], "Z");
+    let mut chamfered = block_with_bore(12.0);
+    run(&mut chamfered, "solid.chamfer", json!({"edges": [[6, 0, 20]], "distance": 1}));
+    let mut cross_drilled = block_with_bore(12.0);
+    cut(&mut cross_drilled, 4.0, 20.0, [-20.0, 0.0, 4.0], "X");
+    // 10 mm of thread from the end at `from`.
+    let part_way = |face: [f64; 3], from: [f64; 3]| {
+        let mut p = m12(face);
+        p["from"] = json!(from);
+        p["length"] = json!(10);
+        p
+    };
+    for (what, mut s, p) in [
+        ("blind", blind, m12([6.0, 0.0, 15.0])),
+        ("chamfered", chamfered, m12([6.0, 0.0, 10.0])),
+        ("counterbored", counterbored, part_way([6.0, 0.0, 5.0], [6.0, 0.0, 0.0])),
+        ("cross-drilled", cross_drilled, part_way([6.0, 0.0, 15.0], [6.0, 0.0, 20.0])),
+    ] {
+        let before = volume(&mut s, "Blk");
+        let made = s.execute("solid.thread", &p).unwrap_or_else(|e| panic!("{what}: {e}"));
+        let warning = made["feature"].as_u64().and_then(|f| s.model.result(f)).and_then(|r| r.warning.clone()).unwrap_or_default();
+        assert!(warning.contains("narrowed the 12 mm hole"), "{what}: {warning}");
+        assert!(volume(&mut s, "Blk") > before + 1.0, "{what}: the hole was not filled in");
+    }
 }
 
 /// #11609: a design saved with an automatic thread keeps the size it had (a 12 mm hole stays

@@ -748,7 +748,6 @@ fn state() -> FilletExecutive<Handle> {
         vertex_corner_map: BTreeMap::new(),
         edgeuse_solver_map: BTreeMap::new(),
         self_intersection_handler: None,
-        blend_curve_at_thirds: false,
         mark_corner_patches: false,
         cliff_overflow: false,
         open_ends: Vec::new(),
@@ -794,13 +793,13 @@ fn null_create_status_is_remapped_by_do_filleting_and_boolean_restores() {
     let mut k = Kernel::default();
     assert!(matches!(
         executive.create_fillet_brep(&mut k, &mut access, None),
-        Err(SolidError::Upstream { code: 1006, .. })
+        Err(ref e) if e.upstream_status() == Some(1006)
     ));
     for prior in [false, true] {
         k.context.set_doing_boolean(prior);
         assert!(matches!(
             executive.do_filleting(&mut k, &mut access, None),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(ref e) if e.upstream_status() == Some(1001)
         ));
         assert_eq!(k.context.doing_boolean(), prior);
     }
@@ -915,7 +914,7 @@ fn final_stitch_failure_sets_bad_merge_and_stops_before_cleanup_postprocess() {
     let mut k = Kernel::default();
     assert!(matches!(
         executive.do_filleting(&mut k, &mut access, None),
-        Err(SolidError::Upstream { code: 1001, .. })
+        Err(ref e) if e.upstream_status() == Some(1001)
     ));
     assert_eq!(access.stitch_tolerances.len(), 5);
     assert_eq!(executive.error.code, 7);
@@ -985,7 +984,7 @@ fn corner_failure_records_context_and_stops_without_allocating_shell() {
     };
     assert!(matches!(
         executive.create_fillet_brep(&mut Kernel::default(), &mut access, None),
-        Err(SolidError::Upstream { code: 1001, .. })
+        Err(ref e) if e.upstream_status() == Some(1001)
     ));
     assert_eq!(executive.error.code, 3);
     assert_eq!(executive.error.status, 2);
@@ -1029,7 +1028,7 @@ fn corner_error_reporting_preserves_a_null_filleted_vertex() {
     };
     assert!(matches!(
         executive.create_fillet_brep(&mut Kernel::default(), &mut access, None),
-        Err(SolidError::Upstream { code: 1001, .. })
+        Err(ref e) if e.upstream_status() == Some(1001)
     ));
     assert_eq!(executive.error.code, 3);
     assert!(executive.error.vertex.is_none());
@@ -1415,14 +1414,20 @@ fn open_result_is_refused_naming_its_first_laminar_edge() {
         .iter()
         .all(|&e| crate::topology::edge::is_manifold(&body, e).unwrap()));
     let (executive, _, result) = fillet_body(body);
+    // #13790: a typed blend failure at the edge, with the status of the bare `Upstream` it
+    // replaced
+    let error = result.unwrap_err();
     assert_eq!(
-        result,
-        Err(SolidError::Upstream {
-            operation: OP,
-            code: 1001,
-            entity: Some(EntityRef::Edge(laminar)),
-        })
+        error,
+        SolidError::blend_at(
+            OP,
+            BlendFailure::Failed("the fillet's result is not a closed manifold solid"),
+            EntityRef::Edge(laminar),
+        )
     );
+    assert_eq!(error.sm_status(), Some(1001));
+    assert_eq!(error.upstream_status(), Some(1001));
+    assert_eq!(error.entity(), Some(EntityRef::Edge(laminar)));
     assert_eq!(executive.error.code, 7); // SM_FILERR_BAD_MERGE
     assert_eq!(executive.error.status, 2); // SM_FIL_FAILURE
     assert_eq!(
@@ -1447,8 +1452,9 @@ fn result_with_a_fin_on_an_edge_is_refused_naming_that_edge() {
     let (executive, _, result) = fillet_body(body);
     assert!(matches!(
         result,
-        Err(SolidError::Upstream { code: 1001, entity: Some(EntityRef::Edge(e)), .. })
-            if e == shared
+        Err(ref e) if e.upstream_status() == Some(1001)
+            && e.blend_failure().is_some()
+            && e.entity() == Some(EntityRef::Edge(shared))
     ));
     assert_eq!(executive.error.code, 7);
 }

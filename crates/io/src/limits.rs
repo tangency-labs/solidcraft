@@ -118,6 +118,7 @@ pub fn set_preferred(limits: FileLimits) -> Result<(), String> {
     let limits = limits.validate()?;
     PREFERRED_STEP.store(limits.step, Ordering::Relaxed);
     PREFERRED_DESIGN.store(limits.design, Ordering::Relaxed);
+    sync_parser();
     Ok(())
 }
 
@@ -136,7 +137,14 @@ pub fn set_override(bytes: Option<u64>) -> Result<(), String> {
             OVERRIDE.store(b, Ordering::Relaxed);
         }
     }
+    sync_parser();
     Ok(())
+}
+
+/// Tell the STEP parser the limit now in force: the size check here lets a file through, and
+/// the parser has its own cap, which must not refuse it again (#13329).
+fn sync_parser() {
+    solidcraft_kernel::set_step_max_bytes(max_step_bytes());
 }
 
 /// The `--max-file-size` this run started with, in bytes.

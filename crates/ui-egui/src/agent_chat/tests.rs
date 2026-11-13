@@ -4,7 +4,7 @@ use std::sync::mpsc::channel;
 fn transcript_clipboard_harness(layout: crate::ui_kit::LayoutMode) -> crate::scenario::Harness {
     let mut h = narrow_chat();
     h.app.ui.layout = layout;
-    h.app.preferences.agent_chat_width = 500.0;
+    resize_chat(&mut h, 500.0);
     h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Transcript clipboard sentinel".into() });
     h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"})).unwrap();
     h.app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
@@ -113,11 +113,154 @@ fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
         transcript_click(&mut h, at);
         match hidden {
             "closed" => h.app.agent_chat.open = false,
-            "minimized" => h.app.preferences.agent_chat_minimized = true,
+            "minimized" => {
+                h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
+            }
             _ => h.app.preferences.ai_features = false,
         }
         h.frame_with(vec![egui::Event::Paste("SolidCraft bodies".into())]);
         assert_eq!(h.app.session.model.state().bodies.len(), 2, "{hidden}: the invisible panel must not retain CAD keys");
+    }
+}
+
+/// `c` is `reference`, or `reference` faded: a window floating inside the app fades its shapes.
+fn same_colour(c: egui::Color32, reference: egui::Color32) -> bool {
+    let k = f32::from(c.a()) / f32::from(reference.a().max(1));
+    c.a() > 0
+        && [(c.r(), reference.r()), (c.g(), reference.g()), (c.b(), reference.b())]
+            .iter()
+            .all(|&(x, y)| (f32::from(x) - f32::from(y) * k).abs() <= 2.0)
+}
+
+/// The filled rectangles outlined outside, as text selection marks are, drawn this frame, with
+/// their outline colour.
+fn outlined_rects(h: &crate::scenario::Harness) -> Vec<(egui::Rect, egui::Color32)> {
+    let mut rects = Vec::new();
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Rect(r) = shape
+                && r.stroke.width > 0.0
+                && r.stroke.color.a() > 0
+                && r.fill.a() > 0
+                && r.stroke_kind == egui::StrokeKind::Outside
+            {
+                rects.push((r.rect, r.stroke.color));
+            }
+        });
+    }
+    rects
+}
+
+/// The transcript's selection highlights (#10676), the outlined rectangles not drawn in `base`:
+/// how many, and the outline colour of the one that covers `text`'s first line.
+fn transcript_highlights(h: &crate::scenario::Harness, base: &[(egui::Rect, egui::Color32)], text: &str) -> (usize, Option<egui::Color32>) {
+    let rects: Vec<_> = outlined_rects(h).into_iter().filter(|r| !base.contains(r)).collect();
+    let mut at = None;
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(t) = shape
+                && t.galley.text() == text
+            {
+                at = Some(t.pos + egui::vec2(4.0, 4.0));
+            }
+        });
+    }
+    let at = at.unwrap_or_else(|| panic!("{text:?} is drawn"));
+    (rects.len(), rects.iter().find(|(r, _)| r.contains(at)).map(|(_, c)| *c))
+}
+
+/// #10676: Ctrl+A in the transcript selects every prompt and answer of the conversation, not
+/// the one Markdown block the selection was in, and Copy copies them in order as they read.
+/// Thoughts and notices are left out; Esc ends it; a focused composer keeps its own Ctrl+A.
+#[test]
+fn select_all_in_the_transcript_takes_the_whole_conversation() {
+    let reply = "# Clipboard test heading\n\nFIRST PARAGRAPH ALPHA. This text belongs to the assistant.\n\nSECOND PARAGRAPH BETA.\n\n- List item one\n- List item two\n\n```text\nCODE BLOCK GAMMA\nsecond code line\n```\n\nFINAL PARAGRAPH OMEGA.";
+    let expected = "User:\nMake a plate\n\nAssistant:\nClipboard test heading\n\nFIRST PARAGRAPH ALPHA. This text belongs to the assistant.\n\nSECOND PARAGRAPH BETA.\n\n• List item one\n• List item two\n\nCODE BLOCK GAMMA\nsecond code line\n\nFINAL PARAGRAPH OMEGA.\n\nUser:\nThanks\n\nAssistant:\nTranscript clipboard sentinel";
+    let ctrl =
+        |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND };
+    let copied = |h: &crate::scenario::Harness| {
+        h.output.commands.iter().find_map(|c| if let egui::OutputCommand::CopyText(t) = c { Some(t.clone()) } else { None })
+    };
+    let layouts =
+        [(crate::ui_kit::LayoutMode::Docked, false), (crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true)];
+    for (dark, (layout, popped)) in [true, false].into_iter().flat_map(|dark| layouts.map(|l| (dark, l))) {
+        let mut h = transcript_clipboard_harness(layout);
+        h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
+        h.app.ui.dark = dark;
+        if popped {
+            h.call("ui.resize", json!({"width": 1600, "height": 1000}));
+            h.app.preferences.agent_chat_popped = true;
+        }
+        // Before the sentinel, so the reply is partly scrolled away above it.
+        h.app.agent_chat.items.splice(
+            0..0,
+            [
+                Item::User { text: "Make a plate".into(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
+                Item::Agent { thought: false, text: reply.into() },
+                Item::Agent { thought: true, text: "THOUGHT DELTA".into() },
+                Item::Notice { text: "NOTICE EPSILON".into(), error: false },
+                Item::User { text: "Thanks".into(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
+            ],
+        );
+        h.frames(4);
+        // A double-click selects a word of one block, as in the report.
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        let undo = h.app.session.undo.len();
+        let base = outlined_rects(&h);
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(h.app.agent_chat.all_selected, "{layout:?} popped {popped}: Ctrl+A selects the conversation");
+        assert!(!h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection(), "the block selection gives way");
+        let (after, thought) = transcript_highlights(&h, &base, "THOUGHT DELTA");
+        // The prompts and one-block answers in view, and the reply's seven blocks.
+        assert!(after >= 9, "{layout:?} popped {popped}: every message block is highlighted ({after})");
+        assert!(thought.is_none(), "a thought is not highlighted");
+        // The prompt's bubble is filled with the selection colour itself: the outline must show
+        // on it, as on the reply's text and code backgrounds, in either theme.
+        let t = solidcraft_theme::Tokens::get();
+        assert_eq!(h.ctx.style_of(h.ctx.theme()).visuals.dark_mode, dark, "the theme took effect");
+        for text in ["Thanks", "Transcript clipboard sentinel", "FINAL PARAGRAPH OMEGA.", "CODE BLOCK GAMMA\nsecond code line"] {
+            let outline = transcript_highlights(&h, &base, text).1.unwrap_or_else(|| panic!("{text:?} is highlighted"));
+            for (name, under) in [("bubble", t.accent_soft), ("panel", t.panel), ("dialog body", t.dialog_body), ("code", t.field)] {
+                assert!(
+                    !same_colour(outline, under),
+                    "dark {dark} {layout:?} popped {popped}: {text:?} outline {outline:?} vanishes on the {name} {under:?}"
+                );
+            }
+        }
+        h.frame_with(vec![egui::Event::Copy]);
+        assert_eq!(copied(&h).as_deref(), Some(expected), "{layout:?} popped {popped}: Copy takes the whole conversation");
+        assert!(h.app.copied_bodies.is_empty(), "the CAD body is not copied");
+        assert!(h.app.dialog.is_none(), "Ctrl+A opens nothing in CAD");
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(h.app.agent_chat.all_selected, "still selected");
+        h.frame_with(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(!h.app.agent_chat.all_selected, "Esc ends it");
+        assert_eq!(transcript_highlights(&h, &base, "THOUGHT DELTA").0, 0, "and its highlight");
+        // An ordinary selection works again afterwards.
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(h.app.agent_chat.all_selected);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        assert!(!h.app.agent_chat.all_selected, "a click ends it");
+        h.frame_with(vec![egui::Event::Copy]);
+        // (The clicks follow the earlier double-click at once: a word or the block, as egui counts them.)
+        let part = copied(&h).unwrap_or_default();
+        assert!(!part.is_empty() && "Transcript clipboard sentinel".contains(&part), "a block selection copies only itself: {part:?}");
+        // The composer keeps its own Select All.
+        h.app.agent_chat.input = "draft".into();
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("sc_agent_chat_input")));
+        h.frame();
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(!h.app.agent_chat.all_selected, "{layout:?} popped {popped}: Ctrl+A in the composer selects only the draft");
     }
 }
 
@@ -364,6 +507,19 @@ fn a_messages_changes_undo_as_one_step() {
     assert!(matches!(app.agent_chat.items[n], Item::Changes { undone: true, .. }));
 }
 
+/// The conversation knows a design by its revision: the very design the host gave it, never an
+/// equal copy, and only the host's own type gets the design back (#13438).
+#[test]
+fn a_revision_is_the_very_design_not_an_equal_one() {
+    let design = Arc::new(String::from("plate"));
+    let equal = Arc::new(String::from("plate"));
+    let revision = Revision::of(&design);
+    assert!(revision.is(&design) && !revision.is(&equal), "an equal design is another design");
+    assert!(revision.same(&Revision::of(&design)) && !revision.same(&Revision::of(&equal)));
+    assert!(revision.get::<String>().is_some_and(|d| Arc::ptr_eq(&d, &design)), "the host gets its own design back");
+    assert!(revision.get::<u32>().is_none(), "and nothing of another type");
+}
+
 /// Saving waits for Allow or Deny; Deny answers the agent without running it, Allow runs it.
 #[test]
 fn file_actions_wait_for_the_user() {
@@ -501,8 +657,7 @@ fn the_chat_pops_out_into_its_own_window_and_docks_back() {
     h.frames(3);
     assert!(rect_of("agent_chat:panel").is_some() && rect_of("agent_chat:window").is_none(), "docked by default");
     assert!(!h.app.preferences.agent_chat_popped);
-    let pop = handle_at("agent_chat:pop_out").expect("a pop-out button in the header");
-    h.call("ui.click", json!({"x": pop.x, "y": pop.y}));
+    h.call("ui.agent_chat", json!({"popped": true}));
     h.frames(3);
     assert!(h.app.preferences.agent_chat_popped);
     assert!(rect_of("agent_chat:panel").is_none(), "the side panel is gone");
@@ -3043,12 +3198,24 @@ fn new_chat_clears_the_files_waiting_and_asks_first() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+fn resize_chat(h: &mut crate::scenario::Harness, width: f32) {
+    h.frames(2);
+    h.app
+        .run_panel_command(
+            "panel.resize",
+            &json!({
+                "target":{"type":"instance","id":"assistant"},"size":{"width":width,"height":400},"thickness_only":true
+            }),
+        )
+        .unwrap();
+}
+
 /// A harness with the chat open at its narrowest and nothing to look for.
 fn narrow_chat() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.agent_chat_width = panel::MIN_WIDTH;
     h.app.agent_chat.open = true;
     h.app.agent_chat.detection = Some(Default::default());
+    resize_chat(&mut h, 280.0);
     h
 }
 
@@ -3206,6 +3373,33 @@ fn the_agent_list_keeps_the_panels_side_margin() {
         let refresh = at(tr("ui.agent_chat_refresh")).expect("Refresh");
         assert!(refresh.right() <= panel.right() - margin, "{layout:?}: Refresh at {refresh:?} in {panel:?}");
     }
+}
+
+/// #14385: Add agent and Refresh, side by side on the Agent row, are buttons of one size.
+#[test]
+fn add_agent_and_refresh_are_the_same_size() {
+    let mut h = narrow_chat();
+    h.frames(3);
+    h.frame();
+    let panel = solidcraft_ui_registry::rect_of("agent_chat:panel").expect("the panel");
+    let (mut texts, mut boxes) = (Vec::new(), Vec::new());
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |s| match s {
+            egui::Shape::Text(t) => texts.push((t.galley.text().to_string(), egui::Rect::from_min_size(t.pos, t.galley.rect.size()))),
+            egui::Shape::Rect(r) => boxes.push(r.rect),
+            _ => {}
+        });
+    }
+    // A button is the smallest box around its label.
+    let button = |label: &str| {
+        let text = texts.iter().find(|(t, r)| t == label && panel.contains(r.center())).map(|(_, r)| *r).expect(label);
+        let frame = boxes.iter().filter(|b| b.contains_rect(text)).min_by(|a, b| a.area().total_cmp(&b.area())).copied();
+        (text, frame.expect(label))
+    };
+    let (add_text, add) = button(tr("ui.ai_add_agent"));
+    let (refresh_text, refresh) = button(tr("ui.agent_chat_refresh"));
+    assert!((add.height() - refresh.height()).abs() < 0.5, "Add agent {add:?}, Refresh {refresh:?}");
+    assert!((add_text.height() - refresh_text.height()).abs() < 0.5, "labels: Add agent {add_text:?}, Refresh {refresh_text:?}");
 }
 
 /// Every chip and the text box sit inside the panel.
@@ -3435,19 +3629,13 @@ fn files_dropped_on_the_chat_attach_and_the_app_does_not_open_them() {
     assert!(!h.app.file_load.busy(), "the app doesn't open them as well");
     drop_files(&mut h, egui::pos2(300.0, 500.0), &[d.join("brief.md")]);
     assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(2), "over the 3D view: not the chat's");
-    // Folded to its strip, a drop on the strip is the chat's too.
-    h.call("ui.agent_chat", json!({"minimized": true}));
+    // Collapsing and closing release the body as an attachment drop target.
+    h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
     h.frames(3);
-    let strip = h.app.agent_chat.drop_rect.expect("the strip takes drops");
-    assert!(strip.width() < 60.0, "{strip:?}");
-    drop_files(&mut h, strip.center(), &[d.join("brief.md")]);
-    assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(3));
-    // Closed: nothing is the chat's, wherever the pointer was.
+    assert!(h.app.agent_chat.drop_rect.is_none());
     h.app.agent_chat.open = false;
     h.frames(2);
     assert!(h.app.agent_chat.drop_rect.is_none());
-    drop_files(&mut h, strip.center(), &[d.join("brief.md")]);
-    assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(3));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -3660,6 +3848,51 @@ fn assistant_marks_follow_chat_login_turns_and_approvals() {
     }
     assert_eq!(assistant_mark_for(State::Ready, "signed_in", true, 0, true, false), Stopped);
     assert_eq!(assistant_mark_for(State::Ready, "signed_in", true, 0, false, true), Stopped);
+}
+
+/// #12283: an agent started without SolidCraft's tools (no solidcraft-cli beside the app) can't
+/// reach the design. The panel's badge and the application bar's mark say so, not Ready; the
+/// badge's hover text says how to get the tools.
+#[test]
+fn an_agent_without_the_design_tools_is_not_shown_as_ready() {
+    let mut h = crate::scenario::Harness::new();
+    // The status badge belongs to the independent Assistant window.
+    h.app.preferences.agent_chat_popped = true;
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.app.agent_chat.set_state(State::Ready);
+    h.app.agent_chat.tools_available = Some(true);
+    h.frames(3);
+    assert_eq!(assistant_mark(&h.app), AssistantMark::Ready);
+    assert!(h.widget(tr("ui.agent_chat_state_ready")).is_some(), "with the tools, the badge says Ready");
+
+    h.app.agent_chat.tools_available = Some(false);
+    h.frames(3);
+    assert_eq!(assistant_mark(&h.app), AssistantMark::NoDesign);
+    assert!(h.widget(tr("ui.agent_chat_state_no_design")).is_some(), "the badge says the design can't be reached");
+    assert!(h.widget(tr("ui.agent_chat_state_ready")).is_none(), "and not Ready");
+    let tip = assistant_tip(&h.app, AssistantMark::NoDesign);
+    assert!(tip.contains(tr("ui.agent_chat_state_no_design")), "{tip}");
+    assert!(tr("ui.agent_chat_no_design_hint").contains("SOLIDCRAFT_CLI"));
+    // The hint names the cause: the chat's endpoint that did not start, or the missing CLI;
+    // the application bar's tooltip carries it too.
+    h.app.agent_chat.tools_port = None;
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_no_control"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_no_control")));
+    h.app.agent_chat.tools_port = Some(12345);
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_no_design_hint"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_no_design_hint")));
+    // solidcraft-cli was found and handed to the agent, but its tools did not start (an endpoint
+    // agent whose MCP start failed): the hint does not say the CLI is missing.
+    h.app.agent_chat.tools_bridged = true;
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_tools_not_started"));
+    assert!(!tr("ui.agent_chat_tools_not_started").contains("not found"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_tools_not_started")));
+    h.app.agent_chat.tools_bridged = false;
+    assert!(!assistant_tip(&h.app, AssistantMark::Ready).contains(tr("ui.agent_chat_no_design_hint")));
+
+    // A turn in progress, or one waiting for approval, still shows what it is doing.
+    h.app.agent_chat.set_state(State::Busy);
+    assert_eq!(assistant_mark(&h.app), AssistantMark::Busy);
 }
 
 /// An app whose endpoint agents answer at once (offline), with `api-1` and `api-2` added.
@@ -4017,13 +4250,14 @@ fn pick_into_dialog(app: &mut SolveApp, sels: &[solidcraft_engine::Sel]) {
     app.dialog = Some(d);
 }
 
-/// Pick context opens the picker with Elements, Features and Bodies; OK puts what was picked in the
-/// tray above the message box, as chips with an ×; × takes one out; Cancel keeps what was there.
+/// Pick context opens the picker with Elements, Features and Bodies; OK puts a pill into the message
+/// box, at the caret; Cancel, and OK with nothing picked, add nothing.
 #[test]
-fn the_picker_fills_a_tray_of_chips_that_can_be_trimmed() {
+fn the_picker_puts_a_pill_into_the_text_where_the_caret_is() {
     let mut h = crate::scenario::Harness::new();
     h.call("ui.agent_chat", json!({"open": true}));
     let sels = box_selection(&mut h.app);
+    h.app.agent_chat.input = "make to match".into();
     h.frames(3);
     let [x, y] = h.widget("Pick context").expect("the button is there");
     h.call("ui.click", json!({"x": x, "y": y}));
@@ -4036,65 +4270,364 @@ fn the_picker_fills_a_tray_of_chips_that_can_be_trimmed() {
     h.call("ui.click", json!({"x": x, "y": y}));
     h.frames(4);
     assert!(h.app.dialog.is_none(), "OK closed the picker");
-    assert_eq!(h.app.agent_chat.picked.len(), 4);
-    assert_eq!(h.app.agent_chat.picked_context.items.len(), 4);
-    for heading in ["Elements 2", "Features 1", "Bodies 1"] {
-        assert!(h.widget(heading).is_some(), "{heading} is drawn in the tray");
-    }
-    // × takes the body out: the tray and the picks stay in step.
-    let cross = solidcraft_ui_registry::handle_at("agent_chat:picked_remove:3").expect("every chip has an ×");
-    h.call("ui.click", json!({"x": cross.x, "y": cross.y}));
-    h.frames(4);
-    assert_eq!(h.app.agent_chat.picked.len(), 3);
-    assert!(h.app.agent_chat.picked_context.items.iter().all(|i| i.kind != context::Kind::Body));
-    // Reopened, the picker holds what is in the tray; Cancel leaves it alone.
-    start_pick(&mut h.app);
-    assert_eq!(h.app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>()), Some(vec![2, 1, 0]));
-    pick_into_dialog(&mut h.app, &[solidcraft_engine::Sel::Body { name: "Body1".into() }]);
+    assert_eq!(h.app.agent_chat.pills.len(), 1);
+    let pill = &h.app.agent_chat.pills[0];
+    assert_eq!(pill.context.items.len(), 4);
+    assert_eq!(pill.label, "1 face + 1 edge + 1 feature + 1 body");
+    let text = h.app.agent_chat.input.clone();
+    assert_eq!(text, format!("make to match {} ", pills::marker(pill.id, &pill.label)), "at the end: nothing was typed after it");
+    // Cancel adds nothing, and nor does OK with nothing picked.
+    start_pick(&mut h.app, Some(0));
+    pick_into_dialog(&mut h.app, &sels[3..]);
     crate::dialogs::cancel(&mut h.app);
-    assert!(h.app.dialog.is_none());
-    assert_eq!(h.app.agent_chat.picked.len(), 3, "Cancel keeps what was picked before");
-    // The control channel opens it too and reports what is picked.
-    let reply = h.call("ui.agent_chat", json!({"pick": true}));
+    assert!(h.app.dialog.is_none() && h.app.agent_chat.pills.len() == 1);
+    start_pick(&mut h.app, Some(0));
+    let d = h.app.dialog.take().expect("the picker");
+    pick_done(&mut h.app, &d).expect("OK");
+    assert_eq!(h.app.agent_chat.pills.len(), 1);
+    assert_eq!(h.app.agent_chat.input, text);
+    // The control channel opens it too, with a place in the box, and reports the pills.
+    let reply = h.call("ui.agent_chat", json!({"pick": true, "pick_at": 4}));
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ChatContext)));
-    assert_eq!(reply["result"]["picked"].as_array().map(Vec::len), Some(3));
+    assert_eq!(reply["result"]["pills"].as_array().map(Vec::len), Some(1));
+    // `picked` still lists what the box carries, one item after another, as before the pills.
+    let items: Vec<Value> =
+        h.app.agent_chat.pills.iter().flat_map(|p| &p.context.items).map(|i| json!({"label": i.label, "detail": i.detail})).collect();
+    assert!(!items.is_empty());
+    assert_eq!(reply["result"]["picked"], Value::Array(items));
+    assert_eq!(h.app.agent_chat.pick_at, Some(4));
     crate::dialogs::cancel(&mut h.app);
     // While another dialog is open, the button does nothing.
     h.app.start("solid.box");
     let before = h.app.dialog.is_some();
-    start_pick(&mut h.app);
+    start_pick(&mut h.app, None);
     assert!(before && !matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ChatContext)));
 }
 
-/// What was picked goes with the next message, once, together with an attached selection that does
-/// not repeat it.
+/// Make a pick of `sels` and put its pill at character `at` of the box.
+fn pick_pill(app: &mut SolveApp, at: usize, sels: &[solidcraft_engine::Sel]) {
+    start_pick(app, Some(at));
+    pick_into_dialog(app, sels);
+    let d = app.dialog.take().expect("the picker");
+    pick_done(app, &d).expect("OK");
+}
+
+/// A pick goes to the agent where it was made: the marks in the text are numbered in reading order
+/// whichever was picked first, and the groups follow the message under the same numbers, with what
+/// an attached selection adds listed apart.
 #[test]
-fn the_picks_go_with_the_next_message_once() {
+fn picks_reach_the_agent_at_the_place_they_were_made() {
     let (mut app, script, ctx) = app_with_script();
     let sels = box_selection(&mut app);
-    start_pick(&mut app);
-    pick_into_dialog(&mut app, &sels[2..]); // the feature and the body
-    let d = app.dialog.take().expect("the picker");
-    pick_done(&mut app, &d).expect("OK");
-    assert_eq!(app.agent_chat.picked_context.items.len(), 2);
-
-    // The same body is also selected and Attach selection is on: it is listed once.
-    app.session.selection = vec![sels[3].clone(), sels[0].clone()];
+    app.agent_chat.input = "make  match ".into();
+    // The body is picked first and goes at the end; the face picked second goes in front of it.
+    pick_pill(&mut app, 12, &sels[3..]);
+    pick_pill(&mut app, 5, &sels[..1]);
+    assert_eq!(app.agent_chat.pills.len(), 2);
+    app.session.selection = vec![sels[1].clone()];
     app.agent_chat.attach_selection = true;
-    send(&mut app, &ctx, "look at these".into());
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
     let prompt = script.calls().pop().expect("a prompt");
-    assert!(prompt.starts_with("prompt: look at these\n\n[Selected in SolidCraft"), "{prompt}");
-    assert!(prompt.contains("3 item(s)"), "two picked and one more selected: {prompt}");
-    assert_eq!(prompt.matches("- Body1").count(), 1, "{prompt}");
-    let Some(Item::User { context, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
-    assert_eq!(context.items.len(), 3);
-    assert!(app.agent_chat.picked.is_empty() && app.agent_chat.picked_context.is_empty(), "the tray is empty again");
+    assert!(prompt.starts_with("prompt: make «1: Flat face"), "the face picked second stands first and is 1: {prompt}");
+    assert!(prompt.contains(" match «2: Body1» \n\n[Selected"), "the body's mark follows 'match': {prompt}");
+    let block = &prompt[prompt.find("[Selected in SolidCraft").expect("the block")..];
+    assert!(block.contains("stands for the numbered group below"), "{block}");
+    let g1 = block.find("\n«1: ").expect("group 1");
+    let g2 = block.find("\n«2: Body1»\nBodies:\n- Body1").expect("group 2");
+    let rest = block.find("Selected as well, not placed in the message:").expect("the selection that is not placed");
+    assert!(g1 < g2 && g2 < rest, "{block}");
+    assert!(block.contains("Elements:") && block[rest..].contains("Elements:"), "{block}");
+    let Some(Item::User { text, context, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
+    assert!(text.contains("«1: ") && text.contains("«2: Body1»"), "{text}");
+    assert_eq!(context.groups.iter().map(|(n, _)| *n).collect::<Vec<_>>(), vec![1, 2]);
+    assert!(app.agent_chat.pills.is_empty(), "nothing is left to carry");
     // The next message carries nothing of it.
     ended(&script, "");
     poll(&mut app, &ctx);
     app.agent_chat.attach_selection = false;
     send(&mut app, &ctx, "and now?".into());
     assert_eq!(script.calls().pop().as_deref(), Some("prompt: and now?"));
+}
+
+/// A pill whose mark was taken out of the text is not sent; a mark nobody picked is plain text.
+#[test]
+fn a_deleted_mark_drops_its_pick() {
+    let (mut app, script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    pick_pill(&mut app, 0, &sels[3..]);
+    pick_pill(&mut app, 0, &sels[2..3]);
+    // Take the first pick's mark out and type one that stands for nothing.
+    let first = pills::spans(&app.agent_chat.input)
+        .into_iter()
+        .find(|s| app.agent_chat.pills.iter().any(|p| p.id == s.id && p.context.items.iter().any(|i| i.kind == context::Kind::Body)))
+        .expect("the body's mark");
+    let text = pills::remove(&app.agent_chat.input, first.start, first.end) + " «9: nothing»";
+    send(&mut app, &ctx, text);
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.contains("1 item(s)") && !prompt.contains("- Body1") && prompt.contains("‹9: nothing›") && !prompt.contains("«9:"), "{prompt}");
+    let Some(Item::User { context, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
+    assert_eq!(context.items.len(), 1);
+}
+
+/// The agent replaced the design: the pills stood for the old one's geometry, so they and their
+/// marks leave the box, and the words around them stay.
+#[test]
+fn replacing_the_design_takes_the_pills_out_of_the_box() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.input = "make  round".into();
+    pick_pill(&mut app, 5, &sels[3..]);
+    assert_eq!(app.agent_chat.pills.len(), 1);
+    continue_in_document(&mut app);
+    assert!(app.agent_chat.pills.is_empty());
+    assert_eq!(app.agent_chat.input, "make  round");
+}
+
+/// Queued messages that go as one prompt keep their picks apart: the second message's marks follow
+/// the first one's numbers.
+#[test]
+fn queued_messages_number_their_picks_on() {
+    let (mut app, script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.state = Some(State::Busy);
+    for pick in [&sels[3..], &sels[2..3]] {
+        app.agent_chat.input = "see ".into();
+        pick_pill(&mut app, 4, pick);
+        let text = std::mem::take(&mut app.agent_chat.input);
+        send(&mut app, &ctx, text);
+    }
+    assert_eq!(app.agent_chat.pending.len(), 2);
+    app.agent_chat.state = Some(State::Ready);
+    send_queue(&mut app, &ctx, false);
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.starts_with("prompt: see «1: Body1» \n\nsee «2: "), "the second message's mark follows the first one's number: {prompt}");
+    assert!(prompt.contains("\n«1: Body1»\nBodies:\n- Body1") && prompt.contains("\n«2: "), "{prompt}");
+}
+
+/// Backspace right after a pill takes it whole; Delete right before one does too.
+#[test]
+fn backspace_and_delete_take_a_pill_whole() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    h.app.agent_chat.input = "a b".into();
+    pick_pill(&mut h.app, 2, &sels[3..]);
+    h.frames(3);
+    let marker_end = pills::spans(&h.app.agent_chat.input)[0].end;
+    place_caret_for_test(&mut h, marker_end);
+    h.step(&json!({"key": "Backspace"})).expect("key");
+    h.frames(2);
+    assert!(pills::spans(&h.app.agent_chat.input).is_empty(), "the whole mark went: {:?}", h.app.agent_chat.input);
+    assert_eq!(h.app.agent_chat.input, "a  b", "only the mark went: {:?}", h.app.agent_chat.input);
+    // Delete from in front of a fresh one.
+    h.app.agent_chat.input = "a b".into();
+    h.app.agent_chat.pills.clear();
+    pick_pill(&mut h.app, 2, &sels[3..]);
+    h.frames(3);
+    let start = pills::spans(&h.app.agent_chat.input)[0].start;
+    place_caret_for_test(&mut h, start);
+    h.step(&json!({"key": "Delete"})).expect("key");
+    h.frames(2);
+    assert!(pills::spans(&h.app.agent_chat.input).is_empty(), "{:?}", h.app.agent_chat.input);
+}
+
+/// The word-delete key (Alt+Backspace) next to a pill takes it whole too, not a part of its mark.
+#[test]
+fn a_word_delete_next_to_a_pill_takes_it_whole() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    h.app.agent_chat.input = "a ".into();
+    pick_pill(&mut h.app, 2, &sels[3..]);
+    h.frames(3);
+    let end = pills::spans(&h.app.agent_chat.input)[0].end;
+    place_caret_for_test(&mut h, end);
+    h.step(&json!({"key": "Backspace", "alt": true})).expect("key");
+    h.frames(2);
+    assert!(!h.app.agent_chat.input.contains(pills::OPEN) && !h.app.agent_chat.input.contains(pills::CLOSE), "{:?}", h.app.agent_chat.input);
+}
+
+/// A pick made with the caret inside an earlier pill goes after it and leaves it whole.
+#[test]
+fn a_pick_made_inside_a_pill_does_not_break_it() {
+    let (mut app, script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[3..]);
+    let first = pills::spans(&app.agent_chat.input)[0].clone();
+    pick_pill(&mut app, first.start + 3, &sels[2..3]);
+    let spans = pills::spans(&app.agent_chat.input);
+    assert_eq!(spans.len(), 2, "both marks are whole: {:?}", app.agent_chat.input);
+    assert!(spans[0].end <= spans[1].start);
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.contains("«1: Body1»\nBodies:") && prompt.contains("«2: "), "both picks arrive: {prompt}");
+}
+
+/// What is picked and also selected is listed once, under the pick.
+#[test]
+fn a_picked_thing_that_is_also_selected_is_listed_once() {
+    let (mut app, script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    pick_pill(&mut app, 0, &sels[3..]);
+    app.session.selection = vec![sels[3].clone(), sels[1].clone()];
+    app.agent_chat.attach_selection = true;
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
+    let prompt = script.calls().pop().expect("a prompt");
+    assert_eq!(prompt.matches("- Body1").count(), 1, "{prompt}");
+    assert!(prompt.contains("2 item(s)") && prompt.contains("not placed in the message"), "the edge is the only one not placed: {prompt}");
+}
+
+/// A face picked as a pill and selected again at another point is still one face: it is listed
+/// once, under its pill.
+#[test]
+fn a_face_picked_and_selected_at_another_point_is_listed_once() {
+    use solidcraft_engine::Sel;
+    let (mut app, _script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    let Sel::Face { body, index, point } = sels[0].clone() else { panic!("a face") };
+    let elsewhere = Sel::Face { body, index, point: solidcore_record::Vec3::new(point.x + 1.0, point.y + 1.0, point.z) };
+    app.agent_chat.state = Some(State::Busy);
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[..1]);
+    app.session.selection = vec![elsewhere];
+    app.agent_chat.attach_selection = true;
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
+    let queued = app.agent_chat.pending.last().expect("queued");
+    let faces: Vec<_> = queued.context.items.iter().filter(|i| i.kind == context::Kind::Element).map(|i| (i.group, i.attached)).collect();
+    assert_eq!(faces, [(1, true)], "one face, under its pill, attached too");
+}
+
+/// A pick that was also selected with Attach selection on is one item under its pill; taking the
+/// pill out of the queued message keeps it, once, as not placed: it was attached too.
+#[test]
+fn a_pick_that_was_also_attached_stays_once_when_its_pill_is_taken_out() {
+    let (mut app, _script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.state = Some(State::Busy);
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[3..]);
+    app.session.selection = vec![sels[3].clone()];
+    app.agent_chat.attach_selection = true;
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
+    let bodies = |p: &Pending| p.context.items.iter().filter(|i| i.kind == context::Kind::Body).map(|i| i.group).collect::<Vec<_>>();
+    let queued = app.agent_chat.pending.last_mut().expect("queued");
+    assert_eq!(bodies(queued), [1], "listed once, under the pill");
+    queued.text = "see".into();
+    queued.regroup();
+    assert_eq!(bodies(queued), [0], "kept once, as not placed");
+}
+
+/// A mark pasted from an earlier message stands for nothing: it is sent as plain brackets, so it is
+/// not read as one of the numbered groups.
+#[test]
+fn a_pasted_mark_is_not_read_as_a_group() {
+    let (mut app, script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    // Numbers keep counting up across a session, so a mark from an earlier message (they are
+    // numbered from 1 when sent) is never the number of a pick being made.
+    app.agent_chat.next_pill = 4;
+    app.agent_chat.input = "old «1: Plate · 3 faces» new ".into();
+    pick_pill(&mut app, 29, &sels[3..]);
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.starts_with("prompt: old ‹1: Plate · 3 faces› new «1: Body1»"), "{prompt}");
+    assert_eq!(prompt.matches("«1: Body1»").count(), 2, "the mark in the text and its group, and no other: {prompt}");
+    assert!(!prompt.contains("«1: Plate"), "{prompt}");
+}
+
+/// With no room in the queue the words and their picks stay in the box; nothing is lost.
+#[test]
+fn a_full_queue_keeps_the_words_and_their_picks() {
+    let (mut app, _script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.state = Some(State::Busy);
+    app.agent_chat.pending =
+        (0..MAX_PENDING).map(|_| Pending { text: "x".into(), image: false, context: Context::default(), files: Vec::new() }).collect();
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[3..]);
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text.clone());
+    assert_eq!(app.agent_chat.pending.len(), MAX_PENDING, "nothing was added");
+    assert_eq!(app.agent_chat.input, text, "the words are back in the box");
+    assert_eq!(app.agent_chat.pills.len(), 1, "and so is the pick");
+}
+
+/// Sending text through the control channel does not take the picks of what is in the box.
+#[test]
+fn a_message_sent_from_elsewhere_leaves_the_boxs_picks() {
+    let (mut app, _script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.input = "draft ".into();
+    pick_pill(&mut app, 6, &sels[3..]);
+    send(&mut app, &ctx, "something else".into());
+    assert_eq!(app.agent_chat.pills.len(), 1, "the box still has its mark and its pick");
+    assert!(pills::spans(&app.agent_chat.input).len() == 1);
+}
+
+/// `@` while another tool's dialog is open is only a character: the picker cannot open.
+#[test]
+fn an_at_sign_stays_while_another_dialog_is_open() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.app.start("solid.box");
+    assert!(h.app.dialog.is_some());
+    h.app.agent_chat.input = "5 ".into();
+    h.app.agent_chat.caret_to = Some(2);
+    h.frames(3);
+    h.step(&json!({"text": "@"})).expect("typed");
+    h.frames(3);
+    assert_eq!(h.app.agent_chat.input, "5 @", "the @ is kept");
+}
+
+/// The group headers use the same safe mark as the text, and a group whose items were all past the
+/// limit says so instead of standing empty.
+#[test]
+fn the_group_headers_are_safe_and_never_empty() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    let mut context = context::describe(&mut app.session, &sels[3..]).in_group(1, "bad » name\nnext");
+    context.groups.push((2, "Gone".into()));
+    let block = context.prompt_block();
+    assert!(block.contains("\n«1: bad name next»\nBodies:"), "{block}");
+    assert!(block.contains("\n«2: Gone»\n(none listed: past the limit)"), "{block}");
+    assert!(!block.contains("bad »"), "{block}");
+}
+
+/// Put the caret of the message box at a character in a test harness and give the box the focus.
+fn place_caret_for_test(h: &mut crate::scenario::Harness, at: usize) {
+    h.app.agent_chat.caret_to = Some(at);
+    h.frames(3);
+}
+
+/// Typing `@` where a word starts opens the picker and leaves no `@` in the text; inside a word
+/// (an address) it is just a character.
+#[test]
+fn typing_an_at_sign_opens_the_picker_where_it_was_typed() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.app.agent_chat.input = "match ".into();
+    h.app.agent_chat.caret_to = Some(6);
+    h.frames(3);
+    h.step(&json!({"text": "@"})).expect("typed");
+    h.frames(3);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ChatContext)), "the picker opened");
+    assert_eq!(h.app.agent_chat.input, "match ", "the @ is not left in the text");
+    assert_eq!(h.app.agent_chat.pick_at, Some(6));
+    crate::dialogs::cancel(&mut h.app);
+    h.app.agent_chat.input = "mail me".into();
+    h.app.agent_chat.caret_to = Some(4);
+    h.frames(3);
+    h.step(&json!({"text": "@"})).expect("typed");
+    h.frames(3);
+    assert!(h.app.dialog.is_none(), "inside a word it is just a character");
+    assert_eq!(h.app.agent_chat.input, "mail@ me");
 }
 
 /// Two clicks on two rims are two things (the chat counts and describes what was clicked). The
@@ -4160,6 +4693,233 @@ fn a_split_wall_clicked_once_is_one_item() {
     send(&mut app, &ctx, "this wall".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("1 item(s)") && prompt.contains("Round face r10"), "{prompt}");
+}
+
+/// The chat open over `boxes` boxes, and the picker open with Elements active: the harness and the
+/// boxes' feature ids and names, in order.
+fn picker_over_boxes(boxes: usize, timeline_left: bool) -> (crate::scenario::Harness, Vec<(u64, String)>) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("view.history_layout", json!({"dock":if timeline_left { "left" } else { "bottom" }})).unwrap();
+    h.call("ui.agent_chat", json!({"open": true}));
+    for i in 0..boxes {
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": format!("Body{}", i + 1)})).expect("a box");
+    }
+    let features = h.app.session.doc.features.iter().map(|f| (f.id, f.name.clone())).collect();
+    start_pick(&mut h.app, None);
+    h.frames(3);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(0), "the picker opens with Elements active");
+    (h, features)
+}
+
+fn click_handle(h: &mut crate::scenario::Harness, handle: &str) {
+    h.step(&json!({"click": {"handle": handle}})).unwrap_or_else(|e| panic!("{handle}: {e}"));
+    h.frames(3);
+}
+
+/// What the picker's inputs hold: Elements, Features, Bodies.
+fn picked(h: &crate::scenario::Harness) -> Vec<Vec<solidcraft_engine::Sel>> {
+    h.app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| i.items.clone()).collect()).unwrap_or_default()
+}
+
+/// OK makes one pill that holds what is named here, and nothing else.
+fn ok_makes_one_pill_of(h: &mut crate::scenario::Harness, kind: context::Kind, label: &str) {
+    click_handle(h, "dialog:ok");
+    assert!(h.app.dialog.is_none(), "OK closed the picker");
+    assert_eq!(h.app.agent_chat.pills.len(), 1);
+    let items: Vec<_> = h.app.agent_chat.pills[0].context.items.iter().map(|e| (e.kind, e.label.clone())).collect();
+    assert_eq!(items, [(kind, label.to_string())]);
+}
+
+/// A step clicked in either History bar goes into Features while Elements is active, and the edit
+/// selection is left alone (#11318).
+#[test]
+fn a_history_step_clicked_while_picking_lands_in_features_and_leaves_the_selection_alone() {
+    use solidcraft_engine::Sel;
+    for left in [false, true] {
+        let (mut h, features) = picker_over_boxes(1, left);
+        let (id, name) = features[0].clone();
+        let selection = h.app.session.selection.clone();
+        click_handle(&mut h, &format!("timeline:{name}"));
+        assert_eq!(picked(&h), [vec![], vec![Sel::Feature { id }], vec![]], "left={left}");
+        assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(1), "Features is the active list now; left={left}");
+        assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged; left={left}");
+        // A second click takes the step out again (after the double-click time: a double click edits).
+        h.frames(30);
+        click_handle(&mut h, &format!("timeline:{name}"));
+        assert_eq!(picked(&h), [vec![], vec![], vec![]], "a second click takes it out; left={left}");
+        assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged; left={left}");
+        h.frames(30);
+        click_handle(&mut h, &format!("timeline:{name}"));
+        ok_makes_one_pill_of(&mut h, context::Kind::Feature, &name);
+    }
+}
+
+/// The same for a step in the Browser's Features folder, and a body in its Bodies folder goes into
+/// Bodies (#11318).
+#[test]
+fn a_browser_row_clicked_while_picking_lands_in_the_list_that_takes_it() {
+    use solidcraft_engine::Sel;
+    let (mut h, features) = picker_over_boxes(1, false);
+    let (id, name) = features[0].clone();
+    h.app.tree.expanded.insert("c0/features".into());
+    h.frames(3);
+    let selection = h.app.session.selection.clone();
+    let row = format!("row:browser-feature:c0:{id}");
+    click_handle(&mut h, &row);
+    assert_eq!(picked(&h), [vec![], vec![Sel::Feature { id }], vec![]]);
+    assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged");
+    h.frames(30);
+    click_handle(&mut h, &row);
+    assert_eq!(picked(&h), [vec![], vec![], vec![]], "a second click takes it out");
+    assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged");
+    h.frames(30);
+    click_handle(&mut h, &row);
+    ok_makes_one_pill_of(&mut h, context::Kind::Feature, &name);
+
+    h.app.agent_chat.pills.clear();
+    start_pick(&mut h.app, None);
+    h.frames(3);
+    click_handle(&mut h, "row:Body1");
+    assert_eq!(picked(&h), [vec![], vec![], vec![Sel::Body { name: "Body1".into() }]]);
+    assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged");
+    ok_makes_one_pill_of(&mut h, context::Kind::Body, "Body1");
+}
+
+/// The Features field says to click steps, not faces (#11318).
+#[test]
+fn the_features_field_says_what_to_click() {
+    let d = crate::dialogs::Dialog::chat_context();
+    let hints: Vec<_> = d.inputs.iter().map(|i| (i.label, crate::dialogs::hint(i))).collect();
+    let features = hints.iter().find(|(label, _)| *label == "Features").map(|(_, hint)| *hint).unwrap_or_default();
+    assert!(!features.contains("click faces") && features.contains("History"), "{hints:?}");
+}
+
+/// The picker lists each picked step under its field, and the × on one takes it out (#11318).
+#[test]
+fn the_picker_lists_what_was_picked_and_takes_one_out() {
+    use solidcraft_engine::Sel;
+    let (mut h, features) = picker_over_boxes(2, false);
+    click_handle(&mut h, "dialog:Features");
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(1), "a click on the field makes it active");
+    for (_, name) in &features {
+        click_handle(&mut h, &format!("timeline:{name}"));
+    }
+    let ids: Vec<Sel> = features.iter().map(|(id, _)| Sel::Feature { id: *id }).collect();
+    assert_eq!(picked(&h).get(1), Some(&ids));
+    // Each listed item is a row with a × of its own (`ui_kit::list_row`). The list starts folded,
+    // as in every dialog (#3683); the arrow beside the field opens it.
+    let rows = || {
+        let mut rows: Vec<_> = solidcraft_ui_registry::handles("dialog:list:Features:").into_iter().map(|(name, _)| name).collect();
+        rows.sort();
+        rows.dedup();
+        rows
+    };
+    assert!(rows().is_empty(), "the list starts folded");
+    click_handle(&mut h, "dialog:list_toggle:Features");
+    assert_eq!(rows(), ["dialog:list:Features:0:remove", "dialog:list:Features:1:remove"], "one row per picked step");
+    assert!(solidcraft_ui_registry::rect_of("dialog:list:Features:1").is_some());
+    click_handle(&mut h, "dialog:list:Features:0:remove");
+    assert_eq!(picked(&h).get(1).map(Vec::as_slice), ids.get(1..), "the first step was taken out");
+    assert_eq!(rows(), ["dialog:list:Features:0:remove"], "one row is left");
+}
+
+// ---- Chips: hover and things that are gone (#2286) ----
+
+/// The chip under the pointer lights its target in the model for as long as the pointer is on it.
+#[test]
+fn hovering_a_chip_lights_what_it_stands_for() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    let context = context::describe(&mut h.app.session, &sels);
+    h.app.agent_chat.items.push(Item::User { text: "look".into(), image: false, pictures: Vec::new(), context: context.clone(), files: Vec::new() });
+    h.frames(4);
+    assert!(h.app.highlighted().iter().all(|s| !sels.contains(s)), "nothing is lit without the pointer");
+    // The feature's chip is the third item.
+    let at = solidcraft_ui_registry::handle_at("agent_chat:sent:0:chip:2").expect("the chip is drawn");
+    h.call("ui.move", json!({"x": at.x, "y": at.y}));
+    h.call("ui.move", json!({"x": at.x + 1.0, "y": at.y}));
+    h.frames(3);
+    assert!(h.app.highlighted().contains(&sels[2]), "the feature is lit: {:?}", h.app.highlighted());
+    assert!(!h.app.highlighted().contains(&sels[3]), "only the chip's own item");
+    h.call("ui.move", json!({"x": 5.0, "y": 5.0}));
+    h.frames(3);
+    assert!(h.app.highlighted().iter().all(|s| !sels.contains(s)), "lit no longer once the pointer is away");
+}
+
+/// The pill in a sent message lights what it stands for while the pointer is on it, and the chips
+/// below the message are only for what is not in a pill.
+#[test]
+fn hovering_a_pill_in_a_sent_message_lights_its_group() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    let in_pill = context::describe(&mut h.app.session, &sels[2..3]).in_group(1, "the feature");
+    let mut context = in_pill;
+    context.merge(context::describe(&mut h.app.session, &sels[3..]));
+    let text = format!("check {} against the body", pills::marker(1, "the feature"));
+    h.app.agent_chat.items.push(Item::User { text, image: false, pictures: Vec::new(), context, files: Vec::new() });
+    h.frames(4);
+    let at = solidcraft_ui_registry::handle_at("agent_chat:sent:0:pill:1").expect("the pill is drawn in the message");
+    h.call("ui.move", json!({"x": at.x, "y": at.y}));
+    h.call("ui.move", json!({"x": at.x + 1.0, "y": at.y}));
+    h.frames(3);
+    assert!(h.app.highlighted().contains(&sels[2]), "the pill's feature is lit: {:?}", h.app.highlighted());
+    assert!(!h.app.highlighted().contains(&sels[3]), "only the pill's own group");
+    h.call("ui.move", json!({"x": 5.0, "y": 5.0}));
+    h.frames(3);
+    assert!(h.app.highlighted().iter().all(|s| !sels.contains(s)), "lit no longer once the pointer is away");
+    // The feature is in the pill, so it has no chip; the body (from Attach selection) has one.
+    assert!(solidcraft_ui_registry::handle_at("agent_chat:sent:0:chip:0").is_some(), "the unplaced body has a chip");
+    assert!(solidcraft_ui_registry::handle_at("agent_chat:sent:0:chip:1").is_none(), "the feature has none: it is a pill");
+}
+
+/// In the shared panel layout the model is drawn before the panels: a chip still lights its target
+/// while the pointer is on it, and no longer once the pointer is away.
+#[test]
+fn hovering_a_chip_in_the_shared_layout_lights_its_target_until_the_pointer_leaves() {
+    use solidcraft_engine::Sel;
+    let (mut h, _script) = shared_assistant_harness();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"})).expect("a box");
+    let body = Sel::Body { name: "Plate".into() };
+    let context = context::describe(&mut h.app.session, std::slice::from_ref(&body));
+    let at = h.app.agent_chat.items.len();
+    h.app.agent_chat.items.push(Item::User { text: "look".into(), image: false, pictures: Vec::new(), context, files: Vec::new() });
+    h.frames(4);
+    assert!(!h.app.highlighted().contains(&body), "nothing is lit without the pointer");
+    let chip = solidcraft_ui_registry::handle_at(&format!("agent_chat:sent:{at}:chip:0")).expect("the chip is drawn");
+    h.call("ui.move", json!({"x": chip.x, "y": chip.y}));
+    h.call("ui.move", json!({"x": chip.x + 1.0, "y": chip.y}));
+    h.frames(3);
+    assert!(h.app.highlighted().contains(&body), "the body is lit: {:?}", h.app.highlighted());
+    h.call("ui.move", json!({"x": 5.0, "y": 5.0}));
+    h.frames(3);
+    assert!(!h.app.highlighted().contains(&body), "lit no longer once the pointer is away");
+}
+
+/// A chip or pill whose body, feature, face or edge has left the design is struck through (flagged), in the
+/// pill and on a sent message; undoing that leaves them as they were.
+#[test]
+fn chips_of_things_that_are_gone_are_flagged() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    let context = context::describe(&mut h.app.session, &sels);
+    h.app.agent_chat.items.push(Item::User { text: "look".into(), image: false, pictures: Vec::new(), context: context.clone(), files: Vec::new() });
+    h.app.agent_chat.pills = vec![Pill { id: 1, label: "all".into(), context: context.clone().in_group(1, "all") }];
+    h.app.agent_chat.input = pills::marker(1, "all");
+    h.app.agent_chat.chips_version += 1;
+    h.frames(4);
+    assert_eq!(h.app.agent_chat.gone.sent.get(&0), Some(&vec![false; 4]), "everything is still there");
+    assert_eq!(h.app.agent_chat.gone.pills, vec![false], "the pill is as it was");
+    // The box is undone: its body, feature, face and edge are gone.
+    h.app.run("edit.undo", json!({})).expect("undo");
+    h.frames(4);
+    assert_eq!(h.app.agent_chat.gone.sent.get(&0), Some(&vec![true; 4]), "all four are gone");
+    assert_eq!(h.app.agent_chat.gone.pills, vec![true], "and flagged once something in it has gone");
+    h.app.run("edit.redo", json!({})).expect("redo");
+    h.frames(4);
+    assert_eq!(h.app.agent_chat.gone.sent.get(&0), Some(&vec![false; 4]), "back after a redo");
 }
 
 // ---- Attached pictures in the shared viewer ----
@@ -4248,6 +5008,10 @@ fn an_attached_picture_and_the_views_picture_share_the_viewer() {
 fn add_agent_opens_its_dialog_from_home() {
     use solidcraft_ui_registry::handle_at;
     let mut h = crate::scenario::Harness::new();
+    // The search for installed agents counts as done, so it doesn't start when the page opens
+    // (#14384): finishing between the frame that drew Add agent and the click, it replaced the
+    // "Detecting…" line above the button, which moved, and the click missed it.
+    h.app.agent_chat.detection = Some(Default::default());
     h.call("ui.resize", json!({"width": 1600.0, "height": 1000.0}));
     h.call("ui.home", json!({"open": true}));
     h.call("ui.prefs", json!({"open": "AI"}));
@@ -4780,7 +5544,6 @@ fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {
     h.app.run("sketch.finish", json!({})).unwrap();
     let feature = h.app.session.doc.features[0].id;
     h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Feature { id: feature }]})).unwrap();
-    h.app.preferences.shared_panel_layout = true;
     h.frames(6);
     assert!(h.app.panel_runtime().is_some());
     assert!(h.app.agent_chat.detecting.is_none(), "the deterministic discovery fixture starts no worker");
@@ -4814,6 +5577,47 @@ fn shared_assistant_float(h: &mut crate::scenario::Harness, width: f32, height: 
 fn shared_assistant_body(h: &crate::scenario::Harness) -> egui::Rect {
     let body = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|panel| panel.instance.0 == "assistant").unwrap().body.unwrap();
     egui::Rect::from_min_size(egui::pos2(body.origin.x, body.origin.y), egui::vec2(body.size.width, body.size.height))
+}
+
+/// #15087: in a short docked Assistant, the sign-in box scrolls above the message box.
+#[test]
+fn a_long_sign_in_box_scrolls_inside_a_short_docked_assistant() {
+    use solidcraft_ui_registry::{handle_at, rect_of};
+    let (mut h, _script) = shared_assistant_harness();
+    h.app.ui.show_browser = true;
+    h.app.ui.show_timeline = true;
+    h.call("ui.resize", json!({"width":960,"height":600}));
+    let terminal = |id: &str, name: &str, flag: &str| acp::AuthMethod {
+        id: id.into(),
+        name: name.into(),
+        description: format!("Sign in with {name}"),
+        kind: acp::AuthKind::Terminal { args: vec!["--cli".into(), "auth".into(), "login".into(), flag.into()], command: None },
+    };
+    h.app.agent_chat.argv = vec!["standin-agent".into()];
+    h.app.agent_chat.auth = vec![terminal("console", "Console", "--console"), terminal("subscription", "Subscription", "--claudeai")];
+    // A new chat: its tip is drawn below the sign-in box, where the conversation goes.
+    h.app.agent_chat.items.clear();
+    h.app.agent_chat.input.clear();
+    h.app.agent_chat.state = Some(State::NeedsAuth);
+    h.frames(8);
+    let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 600.0));
+    let body = shared_assistant_body(&h);
+    let composer = rect_of("agent_chat:composer_footer").expect("the message box");
+    let providers = rect_of("agent_chat:providers").expect("the sign-in box's scroll area");
+    let conversation = rect_of("agent_chat:conversation").expect("the conversation");
+    assert!(window.expand(1.0).contains_rect(body), "the Assistant {body:?} fits the window");
+    assert!(body.expand(1.0).contains_rect(composer), "the message box {composer:?} stays inside {body:?}");
+    assert!(providers.bottom() <= composer.top() + 1.0, "the sign-in box {providers:?} ends above the message box {composer:?}");
+    assert!(conversation.bottom() <= composer.top() + 1.0, "the conversation {conversation:?} ends above the message box {composer:?}");
+    for _ in 0..10 {
+        if handle_at("agent_chat:auth_retry").is_some_and(|at| providers.contains(at)) {
+            break;
+        }
+        h.call("ui.scroll", json!({"x":providers.center().x,"y":providers.center().y,"delta":-300}));
+        h.frames(4);
+    }
+    let at = handle_at("agent_chat:auth_retry").expect("the I've signed in button is drawn");
+    assert!(providers.contains(at), "scrolling the sign-in box brings I've signed in: connect again {at:?} into view {providers:?}");
 }
 
 #[test]
@@ -5007,4 +5811,319 @@ fn shared_assistant_header_uses_live_status_and_one_click_starts_one_new_chat() 
     assert!(!script.calls().iter().any(|call| call.starts_with("prompt:") || call == "cancel"));
     assert_eq!(h.app.agent_chat.input, "Retained responsive composer draft");
     assert!(h.app.agent_chat.items.is_empty());
+}
+
+/// A picker that takes a typed model id says so in its search hint; one that doesn't keeps the
+/// plain hint (#14369).
+#[test]
+fn the_model_search_hint_says_when_an_id_can_be_typed() {
+    crate::i18n::install();
+    assert_eq!(model_search_hint(false), "Search models…");
+    assert_eq!(model_search_hint(true), "Search, or type any model id…");
+}
+
+/// Enter sends the box's text with its picks, wherever the caret is; so does `send_input` on the
+/// control channel (the box is emptied, the picks go with the message).
+#[test]
+fn enter_and_the_control_channel_send_the_box_with_its_pills() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    h.app.agent_chat.input = "put it ".into();
+    pick_pill(&mut h.app, 7, &sels[3..]);
+    h.app.agent_chat.input.push_str("here");
+    h.app.agent_chat.caret_to = Some(3);
+    h.frames(4);
+    h.step(&json!({"key": "Enter"})).expect("key");
+    h.frames(4);
+    let last_user = |h: &crate::scenario::Harness| h.app.agent_chat.items.iter().rev().find(|i| matches!(i, Item::User { .. })).cloned();
+    let Some(Item::User { text, context, .. }) = last_user(&h) else { panic!("Enter sent it: {:?}", h.app.agent_chat.input) };
+    assert!(text.contains("«1: Body1»") && context.groups.len() == 1, "{text}");
+    assert!(h.app.agent_chat.input.is_empty() && h.app.agent_chat.pills.is_empty());
+    // The same through the control channel.
+    h.app.agent_chat.items.clear();
+    h.app.agent_chat.input = "again ".into();
+    pick_pill(&mut h.app, 6, &sels[3..]);
+    let reply = h.call("ui.agent_chat", json!({}));
+    assert!(reply["result"]["input"].as_str().is_some_and(|t| t.contains("«")), "the status shows the box");
+    h.call("ui.agent_chat", json!({"send_input": true}));
+    assert!(matches!(last_user(&h), Some(Item::User { context, .. }) if context.groups.len() == 1), "the control channel sent it");
+    assert!(h.app.agent_chat.input.is_empty());
+    assert!(h.app.agent_chat.pills.is_empty(), "the picks went with the message");
+}
+
+/// Two entries that read the same but stand for different things light their own things: what
+/// was lit last is kept only for the very same entries.
+#[test]
+fn entries_that_read_the_same_light_their_own_things() {
+    use solidcraft_engine::Sel;
+    let (mut app, _script, _ctx) = app_with_script();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).expect("Body1");
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new"})).expect("Body2");
+    let bodies = app.session.world_state().map(|s| s.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>()).unwrap_or_default();
+    assert_eq!(bodies, ["Body1", "Body2"]);
+    // One cache for both, as the chat keeps one.
+    let mut cache = None;
+    let entry = |name: &str| context::Entry {
+        kind: context::Kind::Body,
+        label: "Body".into(),
+        detail: String::new(),
+        sels: vec![Sel::Body { name: name.into() }],
+        names: Vec::new(),
+        group: 1,
+        attached: false,
+    };
+    let (first, second) = (entry("Body1"), entry("Body2"));
+    assert_eq!(lit(&mut cache, &app.session, std::iter::once(&first)), first.sels);
+    assert_eq!(lit(&mut cache, &app.session, std::iter::once(&second)), second.sels, "not the first one's");
+}
+
+/// A pill (or chip) lights the face it was made for even after an edit has renumbered the faces:
+/// the face is found by its persistent name, not by the number it had; one that has gone lights
+/// nothing.
+#[test]
+fn a_chip_lights_its_face_by_name_after_the_faces_are_renumbered() {
+    use solidcraft_engine::Sel;
+    let (mut app, _script, _ctx) = app_with_script();
+    app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).expect("a box");
+    let faces = app.session.execute("model.faces", &json!({"body": "Body1"})).expect("faces")["faces"].as_array().cloned().unwrap_or_default();
+    let at = |v: &Value| solidcore_record::Vec3::new(v[0].as_f64().unwrap_or(0.0), v[1].as_f64().unwrap_or(0.0), v[2].as_f64().unwrap_or(0.0));
+    let pick = |f: &Value| Sel::Face { body: "Body1".into(), index: f["index"].as_u64().unwrap_or(0) as usize, point: at(&f["point"]) };
+    let (first, last) = (faces.first().expect("faces").clone(), faces.last().expect("faces").clone());
+    assert_ne!(first["index"], last["index"]);
+    let sel = pick(&last);
+    let mut entry = context::describe(&mut app.session, std::slice::from_ref(&sel)).items[0].clone();
+    let mut names = context::NameCache::new();
+    assert_eq!(context::current_sels(&app.session, &entry, &mut names), vec![sel.clone()], "untouched: as picked");
+    // An edit has renumbered the faces: the chip still holds the number it was made with (here the
+    // number of another face), and the name of the face it stands for.
+    let was = entry.sels.clone();
+    entry.sels = vec![pick(&first)];
+    entry.names = context::describe(&mut app.session, &was).items[0].names.clone();
+    let lit = context::current_sels(&app.session, &entry, &mut names);
+    assert!(
+        matches!(lit.as_slice(), [Sel::Face { index, .. }] if Some(*index as u64) == last["index"].as_u64()),
+        "the face of the name is lit, not the one of the stale number: {lit:?}"
+    );
+    // A name no face has any more: gone, lights nothing.
+    entry.names = vec!["F99:nowhere".into()];
+    assert!(context::current_sels(&app.session, &entry, &mut names).is_empty());
+}
+
+/// Editing a queued message: the marks that are left keep their groups (numbered 1, 2, ... again), a
+/// mark that was taken out drops its picks as in the message box, a mark typed by hand stands for
+/// nothing, and what Attach selection added (never placed) stays.
+#[test]
+fn editing_a_queued_message_keeps_its_marks_and_groups_together() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    let mut context = context::describe(&mut app.session, &sels[3..]).in_group(1, "Body1");
+    context.merge(context::describe(&mut app.session, &sels[2..3]).in_group(2, "the feature"));
+    context.merge(context::describe(&mut app.session, &sels[..1]));
+    let mut queued = Pending { text: "fit «1: Body1» to «2: the feature» now".into(), image: false, context, files: Vec::new() };
+    queued.text = "fit «2: the feature» to «9: typed» now".into();
+    queued.regroup();
+    assert_eq!(queued.text, "fit «1: the feature» to ‹9: typed› now");
+    assert_eq!(queued.context.groups, vec![(1, "the feature".to_string())]);
+    let group_of = |kind: context::Kind| queued.context.items.iter().find(|i| i.kind == kind).map(|i| i.group);
+    assert_eq!(group_of(context::Kind::Feature), Some(1), "the feature is the first mark now");
+    assert_eq!(group_of(context::Kind::Body), None, "the body's mark was taken out: its pick is dropped");
+    let unplaced: Vec<_> = queued.context.items.iter().filter(|i| i.group == 0).map(|i| i.kind).collect();
+    assert_eq!(unplaced, [context::Kind::Element], "the face Attach selection added stays");
+}
+
+/// New chat keeps the box as it is, with the picks its marks stand for.
+#[test]
+fn new_chat_keeps_the_draft_and_its_picks() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[3..]);
+    new_chat(&mut app);
+    assert_eq!(app.agent_chat.pills.len(), 1, "the mark is still in the box, and so is what it stands for");
+    assert_eq!(pills::spans(&app.agent_chat.input).len(), 1);
+}
+
+/// How many times the last frame drew `text` (#11986).
+fn drawn(h: &crate::scenario::Harness, text: &str) -> usize {
+    let mut n = 0;
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(t) = shape
+                && t.galley.text() == text
+            {
+                n += 1;
+            }
+        });
+    }
+    n
+}
+
+/// A chat with a scripted agent, open and wide enough for a tool card's whole row (#11986).
+fn timed_chat() -> (crate::scenario::Harness, Script) {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    resize_chat(&mut h, 520.0);
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.frames(2);
+    (h, script)
+}
+
+/// Move everything in the conversation `ms` into the past, as if that long had gone by.
+fn age(chat: &mut AgentChat, ms: f64) {
+    for stamp in &mut chat.times {
+        stamp.at -= ms;
+    }
+    if let Some(turn) = chat.turn.as_mut() {
+        turn.began -= ms;
+        turn.heard -= ms;
+    }
+}
+
+/// #11986: each message and tool card says when it came in ("4 min ago", its exact time on
+/// hover), and a running call counts how long it has run.
+#[test]
+fn each_message_and_tool_card_shows_when_it_came_in() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    send(&mut h.app, &ctx, "make a dodecahedron".into());
+    script.report(Event::Text { thought: false, text: "Starting with a sketch.".into() });
+    script.report(Event::Tool {
+        id: "t1".into(),
+        title: Some("sketch.inspect".into()),
+        kind: None,
+        status: Some(ToolStatus::InProgress),
+        input: None,
+        output: None,
+    });
+    h.frames(2);
+    assert_eq!(h.app.agent_chat.times.len(), h.app.agent_chat.items.len(), "every item has its time");
+    assert!(h.app.agent_chat.times.iter().all(times::Stamp::known));
+    age(&mut h.app.agent_chat, 4.0 * 60_000.0 + 5_000.0);
+    h.frames(2);
+    assert!(drawn(&h, "4 min ago") >= 2, "the prompt and the reply say when they came");
+    assert!(drawn(&h, "running for 4 min") > 0, "the running call counts how long it has run");
+    assert!(crate::scenario::rect_of("agent_chat:thinking").is_none(), "a running call counts for itself");
+    let exact = times::exact(&h.app.agent_chat.stamp(0)).unwrap();
+    assert!(exact.ends_with(" UTC") && exact.len() == "2026-11-04 14:17:05 UTC".len(), "{exact}");
+    // Once done, the card says when it came instead.
+    script.report(Event::Tool { id: "t1".into(), title: None, kind: None, status: Some(ToolStatus::Completed), input: None, output: None });
+    h.frames(2);
+    assert!(drawn(&h, "running for 4 min") == 0);
+    assert!(drawn(&h, "4 min ago") >= 3, "the done card says when it came in");
+}
+
+/// #11986: while the agent works with nothing running, the conversation counts how long since it
+/// last said or did something, so a long think is visibly still running; anything it does starts
+/// the count again.
+#[test]
+fn a_working_agent_shows_how_long_it_has_been_thinking() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    send(&mut h.app, &ctx, "make a dodecahedron".into());
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 0 s") > 0, "the count starts with the message");
+    age(&mut h.app.agent_chat, 12.0 * 60_000.0);
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 12 min") > 0);
+    script.report(Event::Text { thought: true, text: "Placing the faces".into() });
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 0 s") > 0, "the agent did something: the count starts again");
+    age(&mut h.app.agent_chat, 2.0 * 3_600_000.0 + 5.0 * 60_000.0);
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 2 h 5 min") > 0);
+    // Waiting for the user is not thinking.
+    h.app.agent_chat.push(Item::Permission { key: 1, title: "Write a file".into(), options: Vec::new(), answer: None });
+    h.frames(2);
+    assert!(crate::scenario::rect_of("agent_chat:thinking").is_none(), "an open question is the user's turn");
+    ended(&script, "");
+    h.frames(2);
+    assert!(h.app.agent_chat.heard_at().is_none() && crate::scenario::rect_of("agent_chat:thinking").is_none(), "no count once it answered");
+}
+
+/// #11986: an answer says how long it took under its last item, and a stopped one says it ended.
+#[test]
+fn an_answer_says_how_long_it_took() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    send(&mut h.app, &ctx, "make a dodecahedron".into());
+    script.report(Event::Text { thought: false, text: "Done: twelve faces.".into() });
+    h.frames(2);
+    age(&mut h.app.agent_chat, 23.0 * 60_000.0 + 30_000.0);
+    ended(&script, "");
+    h.frames(2);
+    assert!(drawn(&h, "Answered in 23 min") > 0);
+    let last = h.app.agent_chat.items.len() - 1;
+    assert!(h.app.agent_chat.stamp(last).took.is_some_and(|(_, answered)| answered), "on the answer's last item");
+    send(&mut h.app, &ctx, "and a cube".into());
+    h.frames(2);
+    age(&mut h.app.agent_chat, 90_000.0);
+    cancel(&mut h.app);
+    end_turn(&mut h.app);
+    h.frames(2);
+    assert!(drawn(&h, "Ended after 1 min") > 0, "a stopped answer did not answer");
+}
+
+/// #11986: the times stay beside their items when old ones go and when a waiting prompt is taken
+/// back, and a conversation emptied by New chat starts with none.
+#[test]
+fn item_times_stay_beside_their_items() {
+    let mut chat = AgentChat::default();
+    for i in 0..MAX_ITEMS {
+        chat.push(Item::Notice { text: format!("n{i}"), error: false });
+        if let Some(s) = chat.times.last_mut() {
+            s.at = i as f64 + 1.0;
+        }
+    }
+    chat.push(Item::Notice { text: "last".into(), error: false });
+    assert_eq!(chat.times.len(), chat.items.len());
+    assert!(matches!(chat.items.first(), Some(Item::Notice { text, .. }) if text == &format!("n{}", MAX_ITEMS / 10)));
+    assert_eq!(chat.stamp(0).at, (MAX_ITEMS / 10) as f64 + 1.0, "the first item kept its own time");
+    // An item added without a time shows none, and the next one is still in its place.
+    chat.items.push(Item::Notice { text: "untimed".into(), error: false });
+    chat.push(Item::Notice { text: "timed".into(), error: false });
+    let n = chat.items.len();
+    assert!(!chat.stamp(n - 2).known() && chat.stamp(n - 1).known());
+    chat.remove_item(0);
+    assert_eq!(chat.times.len(), chat.items.len());
+    assert_eq!(chat.stamp(0).at, (MAX_ITEMS / 10) as f64 + 2.0);
+}
+
+/// #11986: lengths of time read in whole seconds, minutes, then hours and minutes; a clock that
+/// went back reads as none, never as a negative time.
+#[test]
+fn lengths_of_time_read_in_seconds_minutes_and_hours() {
+    // The English catalog: under nextest no other test has installed it in this process.
+    crate::i18n::install();
+    assert_eq!(times::span(0.0), "0 s");
+    assert_eq!(times::span(59_999.0), "59 s");
+    assert_eq!(times::span(60_000.0), "1 min");
+    assert_eq!(times::span(23.0 * 60_000.0 + 59_000.0), "23 min");
+    assert_eq!(times::span(3_600_000.0), "1 h 0 min");
+    assert_eq!(times::span(2.0 * 3_600_000.0 + 5.0 * 60_000.0), "2 h 5 min");
+    assert_eq!(times::span(-5_000.0), "0 s");
+    assert_eq!(times::span(f64::NAN), "0 s");
+    assert!(times::exact(&times::Stamp::default()).is_none() && times::ago(&times::Stamp::default(), 1.0).is_none());
+    let noon = times::Stamp { at: 1_793_793_600_000.0, took: None };
+    assert_eq!(times::exact(&noon).as_deref(), Some("2026-11-04 12:00:00 UTC"));
+    assert_eq!(times::running(&noon, noon.at + 30_000.0).as_deref(), Some("running for 30 s"));
+    assert_eq!(times::took(&times::Stamp { at: 1.0, took: Some((61_000.0, true)) }).as_deref(), Some("Answered in 1 min"));
+}
+
+#[test]
+fn plugin_runs_always_keep_per_run_consent() {
+    for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
+        for command in ["plugin.run", "PLUGIN.RUN"] {
+            let (mut app, tx) = app_in_a_turn();
+            app.agent_chat.running_id = "claude".into();
+            app.preferences.ai_permissions = mode;
+            agents::remember(&mut app.preferences, "claude", command);
+            let reply = ask(&tx, "engine.execute", json!({"command":command,"params":{"path":"sample","entry":"make"}}));
+            pump_tools(&mut app);
+            assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: {command}");
+            assert!(reply.try_recv().is_err(), "consent must precede dispatch");
+        }
+    }
 }

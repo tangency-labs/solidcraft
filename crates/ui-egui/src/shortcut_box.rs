@@ -565,7 +565,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                             ui_kit::CommandSearch::heading(ui, if recent { "search.recent" } else { "search.commands" }, count);
                                             last_recent = Some(recent);
                                         }
-                                        let mut item = ui_kit::MenuItem::new(id, label, icon);
+                                        let mut item = ui_kit::MenuItem::new(id, label, *icon);
                                         item.enabled = enabled.get(index).copied().unwrap_or(false);
                                         item.highlighted = index == app.sbox.index;
                                         let shortcut = crate::keymap::display_for(app, id).unwrap_or_default();
