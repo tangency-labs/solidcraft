@@ -31,7 +31,7 @@ use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolver, FilletSurfaceGenerator,
     FilletSurfaceGeneratorType, OffsetSurfaceSlot,
 };
-use crate::blend::fillet_tangent_rollover::{offset_folds, tangent_rollover_supports, Rollover};
+use crate::blend::fillet_tangent_rollover::{tangent_rollover_supports, Rollover};
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::{PointClassType, PointClassification};
@@ -277,6 +277,7 @@ fn sections(
 ) -> Result<Option<Vec<TsectPnt>>> {
     let mut out: Vec<TsectPnt> = Vec::new();
     for &t in ts {
+        k.check_cancelled(OP)?;
         let Some(section) = ball_section_at(k, target, solver, curve, t, out.last())? else {
             return Ok(None);
         };
@@ -505,6 +506,7 @@ fn sides_wholly_off(
     let mut wholly_off = candidates.each_ref().map(|found| !found.is_empty());
     let mut previous: Option<TsectPnt> = None;
     for &t in &ts {
+        k.check_cancelled(OP)?;
         let Some(section) = ball_section_at(k, target, solver, &curve, t, previous.as_ref())?
         else {
             return Ok(None);
@@ -562,7 +564,8 @@ fn carried(
 }
 
 /// [`carried`]'s trial, which leaves the solver rolled on the faces beyond. A face beyond
-/// without a surface, or an edge without a tangent, carries nothing.
+/// without a surface carries nothing; one whose offset by the ball is not proved regular over
+/// the face ([`offset_proved_regular`]) neither.
 ///
 /// # Errors
 /// Those of the rolls, the section solves, the classifications, the evaluations and
@@ -575,8 +578,7 @@ fn carried_rolled(
     sides: &Sides,
     rollovers: [Option<Rollover>; 2],
 ) -> Result<bool> {
-    let mut supports = [None, None];
-    for (rail, (rollover, support)) in rollovers.iter().zip(supports.iter_mut()).enumerate() {
+    for (rail, rollover) in rollovers.iter().enumerate() {
         let Some(rollover) = rollover else {
             continue;
         };
@@ -585,39 +587,134 @@ fn carried_rolled(
         };
         let surface = surface.clone_for_evaluation()?;
         roll_solver_surface(k, solver.base_mut(), rail, &surface, *rollover)?;
-        *support = Some(surface);
     }
     let Some(rolled) = sections(k, target, solver, &inputs.offsets, &sides.curve, &sides.ts)?
     else {
         return Ok(false);
     };
     let tolerance = target.tolerance();
-    for (section, &t) in rolled.iter().zip(&sides.ts) {
-        let Some(along) = sides.curve.evaluate(k, t, 1, true, false)?.get(1).copied() else {
-            return Ok(false);
-        };
-        for (rail, (rollover, support)) in rollovers.iter().zip(&supports).enumerate() {
-            let (Some(rollover), Some(support), Some(&offset)) =
-                (rollover, support, inputs.offsets.get(rail))
-            else {
+    for section in &rolled {
+        for (rail, rollover) in rollovers.iter().enumerate() {
+            let Some(rollover) = rollover else {
                 continue;
             };
             let uv = section.uv_pos(side_of(rail));
             if off(classify(k, target, rollover.face, uv, tolerance)?) {
                 return Ok(false);
             }
-            let contact = support.evaluate_point(k, uv)?;
-            let offset_beyond = if rollover.opposite_normals {
-                -offset
-            } else {
-                offset
-            };
-            if offset_folds(k, target, rollover.face, contact, along, offset_beyond)? {
-                return Ok(false);
-            }
+        }
+    }
+    // the face beyond's offset by the ball, proved not to fold over the whole face
+    let Some(first) = rolled.first() else {
+        return Ok(false);
+    };
+    for (rail, rollover) in rollovers.iter().enumerate() {
+        let (Some(rollover), Some(&offset)) = (rollover, inputs.offsets.get(rail)) else {
+            continue;
+        };
+        let offset_beyond = if rollover.opposite_normals {
+            -offset
+        } else {
+            offset
+        };
+        let uv = first.uv_pos(side_of(rail));
+        if !offset_proved_regular(k, target, rollover.face, offset_beyond, uv)? {
+            return Ok(false);
         }
     }
     Ok(true)
+}
+
+/// Whether the offset of `face`'s surface by `offset` (along the surface's normal, as
+/// [`crate::blend::fillet_tangent_rollover`]'s fold test takes it) is proved regular over the
+/// whole face: its NURB is the surface (a B-spline, a plane, a cone, a sphere, a torus, a surface
+/// of revolution or of extrusion; not a net standing in for a definition), and
+/// [`certify_regular`] proves `(1 - k1 d)(1 - k2 d) > 0` over the face's parameter box (which
+/// lies in the NURB's domain and holds `at`, a point of the face) by the Bernstein forms of its
+/// patches, `d` the offset along the NURB's normal `Su x Sv`. The box is connected, so neither
+/// factor changes sign on it; at `at` their sum, `2 - offset (k1 + k2)` from the fundamental
+/// forms, is positive, so both are, everywhere: the ball's offset does not fold over the face,
+/// nor turn inside out. Any other answer, or a frame that degenerates at `at`, is not proved.
+///
+/// # Errors
+/// Those of the evaluations, the NURB and [`certify_regular`]; a cancellation.
+fn offset_proved_regular(
+    k: &Kernel,
+    target: &Brep,
+    face: FaceId,
+    offset: f64,
+    at: Point2,
+) -> Result<bool> {
+    use crate::offset::construction::sheets::{certify_regular, Regularity};
+    use crate::surface::surface::SurfaceKind;
+    let Some(surface) = crate::topology::face::p2::surface(target, face)? else {
+        return Ok(false);
+    };
+    let exact = matches!(
+        surface.kind(),
+        SurfaceKind::BSpline(_)
+            | SurfaceKind::Plane(_)
+            | SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+    );
+    if !exact || !offset.is_finite() {
+        return Ok(false);
+    }
+    let Some(with) = crate::topology::brep::p3::with_nurb(k, surface)? else {
+        return Ok(false);
+    };
+    let Some(nurb) = with.gw_nurb() else {
+        return Ok(false);
+    };
+    let domain = crate::topology::face::p2::uv_domain(target, face)?;
+    let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
+    let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) = (
+        nurb.u_knots().first(),
+        nurb.u_knots().last(),
+        nurb.v_knots().first(),
+        nurb.v_knots().last(),
+    ) else {
+        return Ok(false);
+    };
+    let [bu0, bu1, bv0, bv1] = uv_box;
+    let inside = u0 <= bu0
+        && bu0 <= at.x
+        && at.x <= bu1
+        && bu1 <= u1
+        && v0 <= bv0
+        && bv0 <= at.y
+        && at.y <= bv1
+        && bv1 <= v1;
+    if !inside || bu0 >= bu1 || bv0 >= bv1 {
+        return Ok(false);
+    }
+    let [_, du, dv, duv, duu, dvv] = surface.evaluate_2nd_derivatives(k, at, true, true)?;
+    let n = surface.evaluate_normal(
+        k,
+        at,
+        crate::nurbs::knots::Side::Left,
+        crate::nurbs::knots::Side::Left,
+    )?;
+    let facing = du.cross(dv).dot(n);
+    if facing.is_nan() || facing == 0.0 {
+        return Ok(false);
+    }
+    let d = if facing > 0.0 { offset } else { -offset };
+    if certify_regular(k, nurb, d, Some(uv_box))? != Regularity::Regular {
+        return Ok(false);
+    }
+    // k1 + k2 = (E N - 2 F M + G L) / (E G - F^2), with the surface's normal
+    let (e, f, g) = (du.dot(du), du.dot(dv), dv.dot(dv));
+    let (l, m, nn) = (duu.dot(n), duv.dot(n), dvv.dot(n));
+    let det = e * g - f * f;
+    if det.is_nan() || det <= 0.0 {
+        return Ok(false);
+    }
+    let sum = 2.0 - offset * ((e * nn - 2.0 * f * m + g * l) / det);
+    Ok(sum > 0.0)
 }
 
 /// The most pieces one rolled rail is cut into for one face's bound ([`rail_clear_of`]).
@@ -680,7 +777,9 @@ impl SessionObjects<'_> {
 /// `fit` of a point of the face's boundary, which is within `zone` of an edge's curve, which
 /// is within `zone` of the face across it. So the rail crosses no edge of the face: it lies
 /// on the face, all of it. A rail without a curve or whose curve has no B-spline form this
-/// proof reads, a face without a surface, or a rail that comes as near another face (one it ends on, a face continued past its
+/// proof reads, a face without a surface or with an edge that has no face across and is no
+/// seam, a middle point farther than the fit from the face's surface, or a rail that comes as
+/// near another face (one it ends on, a face continued past its
 /// boundary by its surface over the face's UV box), is not proved.
 ///
 /// # Errors
@@ -710,9 +809,17 @@ fn rail_within_face(
         &domain,
         &crate::surface::surface::p5::DropPointOptions::default(),
     )?;
-    if !dropped.success
+    if !fit.is_finite()
+        || !dropped.success
         || classify(k, target, face, dropped.result_uv, tolerance)? != PointClassType::Face
     {
+        return Ok(false);
+    }
+    // the middle on the surface, within the fit the trace keeps (a check of the one point; the
+    // whole rail's fit to the surface is the trace's, as for every blend)
+    let foot = surface.evaluate_point(k, dropped.result_uv)?;
+    let off_surface = (foot - middle).length();
+    if off_surface.is_nan() || off_surface > fit.max(tolerance) {
         return Ok(false);
     }
     let Some(pieces) = rail_pieces(&curve, ivl.min(), ivl.max())? else {
@@ -726,14 +833,24 @@ fn rail_within_face(
             return Ok(false);
         }
         zone = zone.max(edge_zone);
-        for f in edge::faces(target, e, None)? {
-            if f != face && !others.contains(&f) {
-                others.push(f);
+        // an edge with no face across (a sheet's or a laminar edge) leaves nothing to measure
+        // the crossing against; a seam (the face on both sides) bounds nothing
+        let (mut across, mut uses_here) = (false, 0usize);
+        for eu in edge::edgeuses(target, e, None, None)? {
+            match eu1::face(target, eu)? {
+                Some(f) if f == face => uses_here += 1,
+                Some(f) => {
+                    across = true;
+                    if !others.contains(&f) {
+                        others.push(f);
+                    }
+                }
+                None => {}
             }
         }
-    }
-    if !fit.is_finite() {
-        return Ok(false);
+        if !across && uses_here < 2 {
+            return Ok(false);
+        }
     }
     // rounded up: the sum and the product, gamma_2
     let gap = (fit.max(tolerance) + 2.0 * zone) * (1.0 + crate::nurbs::math::gamma(2));
@@ -785,6 +902,15 @@ fn rail_pieces(curve: &Curve, lo: f64, hi: f64) -> Result<Option<Vec<RailPiece>>
     } else {
         nurb.clone()
     };
+    // a NaN would be dropped by the folds below (`f64::max`); the `NOZ` and `NOW` markers are
+    // finite
+    let finite = nurb
+        .cpts()
+        .iter()
+        .all(|c| c.x.is_finite() && c.y.is_finite() && c.z.is_finite() && c.w.is_finite());
+    if !finite {
+        return Ok(None);
+    }
     let largest = nurb
         .cpts()
         .iter()
@@ -810,7 +936,11 @@ fn rail_pieces(curve: &Curve, lo: f64, hi: f64) -> Result<Option<Vec<RailPiece>>
             } else {
                 c.w
             };
-            h.push([c.x, c.y, c.z, w]);
+            let point = [c.x, c.y, c.z, w];
+            if !point.iter().all(|v| v.is_finite()) {
+                return Ok(None);
+            }
+            h.push(point);
         }
         pieces.push(RailPiece { h, err, depth: 0 });
     }
@@ -828,6 +958,10 @@ impl RailPiece {
     /// not finite.
     fn ball(&self) -> Option<(Point3, f64)> {
         use crate::nurbs::math::gamma;
+        // the folds below drop a NaN (`f64::min`, `f64::max`): none may reach them
+        if !self.err.is_finite() || !self.h.iter().flatten().all(|v| v.is_finite()) {
+            return None;
+        }
         let w_min = self.h.iter().map(|c| c[3]).fold(f64::INFINITY, f64::min);
         if !crate::geom::certified::above(w_min - self.err, 0.0) {
             return None;
@@ -966,4 +1100,65 @@ fn rail_clear_of(
         stack.push(left);
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::surface::surface::SurfaceKind;
+
+    /// A cylinder's offset toward its axis folds past its radius, and away from it never: the
+    /// bound proves the offset regular at 4.5 toward the axis of a radius 5 cylinder and away
+    /// from it at 20, and not at 5.1 toward it. (Closer to the radius `certify_regular` does
+    /// not certify within its budget, from 4.75 here: not proved, so nothing is proposed.)
+    #[test]
+    fn a_cylinder_s_offset_is_proved_regular_below_its_radius_only() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_cylinder(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            5.0,
+            10.0,
+        )
+        .unwrap();
+        let face = b
+            .faces()
+            .ids()
+            .find(|&f| {
+                matches!(
+                    crate::topology::face::p2::surface(&b, f)
+                        .unwrap()
+                        .unwrap()
+                        .kind(),
+                    SurfaceKind::Cone(_)
+                )
+            })
+            .unwrap();
+        let domain = crate::topology::face::p2::uv_domain(&b, face).unwrap();
+        let at = Point2::new(
+            0.5 * (domain.min.x + domain.max.x),
+            0.5 * (domain.min.y + domain.max.y),
+        );
+        let surface = crate::topology::face::p2::surface(&b, face)
+            .unwrap()
+            .unwrap();
+        let p = surface.evaluate_point(&k, at).unwrap();
+        let n = surface
+            .evaluate_normal(
+                &k,
+                at,
+                crate::nurbs::knots::Side::Left,
+                crate::nurbs::knots::Side::Left,
+            )
+            .unwrap();
+        // the offset along the normal that moves toward the axis
+        let inward = if p.x * n.x + p.y * n.y > 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        assert!(offset_proved_regular(&k, &b, face, 4.5 * inward, at).unwrap());
+        assert!(offset_proved_regular(&k, &b, face, -20.0 * inward, at).unwrap());
+        assert!(!offset_proved_regular(&k, &b, face, 5.1 * inward, at).unwrap());
+    }
 }

@@ -337,7 +337,7 @@ pub(crate) fn section_seeds(
 /// `kappa` the surface's normal curvature in that direction (`II(t, t) / I(t, t)`). A ball of that
 /// signed offset cannot roll on the face there. A point the face does not take, or a degenerate
 /// frame, counts as folding (the rollover is then not attempted).
-pub(crate) fn offset_folds(
+fn offset_folds(
     k: &Kernel,
     target: &Brep,
     face: FaceId,
