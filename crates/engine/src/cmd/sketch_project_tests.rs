@@ -830,7 +830,7 @@ fn intersection_curve_of_two_sketch_curves_is_one_curve_at_any_scale() {
     // curve and a large one does not fall apart into pieces.
     for k in [0.01, 100.0] {
         let mut s = Session::default();
-    s.project_body_silhouette = true;
+        s.project_body_silhouette = true;
         let pts = |p: [[f64; 2]; 4]| json!(p.map(|q| q.map(|v| v * k)));
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Top"}));
         let top =
@@ -1188,7 +1188,7 @@ fn a_face_engraved_with_text_projects_its_letters_exactly_and_extrudes() {
     let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
     let engraved = || {
         let mut s = Session::default();
-    s.project_body_silhouette = true;
+        s.project_body_silhouette = true;
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
         run(&mut s, "sketch.finish", json!({}));
@@ -1523,7 +1523,7 @@ fn whole_body_project_stays_on_the_body_outline_after_a_late_chamfer() {
     for (face, plane) in planes {
         for chamfer in chamfers {
             let mut s = Session::default();
-    s.project_body_silhouette = true;
+            s.project_body_silhouette = true;
             run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"}));
             run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 10]], "radius": 5}));
             let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": face}, "project_edges": false}))["sketch"].as_u64().unwrap();
@@ -1793,7 +1793,7 @@ fn whole_body_intersect_keeps_a_small_round_between_short_walls() {
 fn a_rebuilt_projection_keeps_user_constraints_without_a_warning() {
     for dimensioned in [false, true] {
         let mut s = Session::default();
-    s.project_body_silhouette = true;
+        s.project_body_silhouette = true;
         run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"}));
         run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 10]], "radius": 5}));
         let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}, "project_edges": false}))["sketch"].as_u64().unwrap();
