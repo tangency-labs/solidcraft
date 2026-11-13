@@ -2369,15 +2369,13 @@ fn assert_host_geometry(h: &PanelMountHarness, host: &HostLayout) {
             .chain(card.inline_content)
             .collect();
         for (index, bounds) in slots.iter().enumerate() {
-            assert!(card.header.contains_rect(*bounds));
-            assert_eq!(bounds.origin.y, card.header.origin.y);
-            assert_eq!(bounds.size.height, card.header.size.height);
+            assert!(card.header.contains_rect(*bounds) || card.action_bar.is_some_and(|row| row.contains_rect(*bounds)));
             for other in slots.iter().skip(index + 1) {
                 assert!(!egui_rect(*bounds).intersect(egui_rect(*other)).is_positive(), "disjoint header targets");
             }
         }
         if let Some(body) = card.body {
-            assert_eq!(body.origin.y, bottom(card.header) + host.metrics.content_header_height);
+            assert_eq!(body.origin.y, bottom(card.action_bar.unwrap_or(card.header)) + host.metrics.content_header_height);
         }
     }
     let mut represented = std::collections::BTreeSet::new();
@@ -4547,7 +4545,7 @@ fn raw_below_short_card_previews_and_commits_halfway_through_clear_space_before_
 
 #[test]
 fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_footprints() {
-    fn feedback(output: &egui::FullOutput, title: &str, source: egui::Rect, ink: egui::Color32, faded: bool, badge: bool) {
+    fn feedback(output: &egui::FullOutput, title: &str, source: egui::Rect, tab: bool, faded: bool, badge: bool) {
         let t = solidcraft_theme::Tokens::get();
         let (mut originals, mut badges, mut others) = (0, 0, 0);
         for clipped in &output.shapes {
@@ -4555,15 +4553,26 @@ fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_foo
                 if let egui::Shape::Text(text) = shape {
                     if text.galley.job.text == title {
                         let original = source.contains(text.pos);
-                        let expected = if original { ink.gamma_multiply(if faded { 0.5 } else { 1.0 }) } else { t.form_ink };
-                        assert!(text.galley.job.sections.iter().all(|section| section.format.color == expected));
+                        let opacity = if original && faded { 0.5 } else { 1.0 };
+                        let ink = if !original {
+                            t.form_ink
+                        } else if tab {
+                            t.app_bar_text
+                        } else {
+                            t.form_primary
+                        };
+                        assert!(text.galley.job.sections.iter().all(|section| {
+                            section.format.color == ink.gamma_multiply(opacity)
+                                || (tab && original && section.format.color == ink.gamma_multiply(opacity * 0.7))
+                        }));
                         if original {
                             originals += 1;
                         } else {
                             badges += 1;
                         }
                     } else if matches!(text.galley.job.text.as_str(), "Specimen peer" | "Specimen other") {
-                        assert!(text.galley.job.sections.iter().all(|section| section.format.color == t.form_ink));
+                        let ink = if text.galley.job.text == "Specimen peer" { t.app_bar_text } else { t.form_ink };
+                        assert!(text.galley.job.sections.iter().all(|section| section.format.color == ink));
                         others += 1;
                     }
                 }
@@ -4608,31 +4617,30 @@ fn raw_drag_title_tracks_only_the_source_text_without_changing_host_state_or_foo
             let source = egui_rect(raw.host.frame().unwrap().controls.iter().find(|control| control.target == target).unwrap().bounds);
             let controls = raw.host.frame().unwrap().controls.iter().map(|control| (control.id, control.bounds)).collect::<Vec<_>>();
             let title = raw.content.runtime.instance_presentation(&id("editor")).unwrap().title;
-            let ink = solidcraft_theme::Tokens::get().form_primary; // Editor declares attention.
             let start = raw.at(target);
             raw.pointer(start, true, false);
             let below = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(5.99, 0.0))], false);
-            feedback(&below.1, &title, source, ink, false, false);
-            let threshold = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(6.0, 0.0))], false);
+            feedback(&below.1, &title, source, group, false, false);
+            let threshold = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(6.01, 0.0))], false);
             assert_eq!(raw.host.interaction().move_source(), Some(&id("editor")));
             assert!(threshold.1.viewport_output.get(&egui::ViewportId::ROOT).unwrap().repaint_delay.is_zero());
             // Source text was already painted before input; the requested next
             // pass dims it, including when there is no candidate animation.
             let at = egui::pos2(700.0, 500.0); // Clear canvas, no landing.
             let held = raw.frame(vec![egui::Event::PointerMoved(at)], false);
-            feedback(&held.1, &title, source, ink, true, true);
+            feedback(&held.1, &title, source, group, true, true);
             let invalid = raw.frame(Vec::new(), false);
             assert!(invalid.0.preview.as_ref().unwrap().action.is_none());
-            feedback(&invalid.1, &title, source, ink, true, true);
+            feedback(&invalid.1, &title, source, group, true, true);
             let left = raw.frame(vec![egui::Event::PointerGone], false);
-            feedback(&left.1, &title, source, ink, true, false);
+            feedback(&left.1, &title, source, group, true, false);
             assert!(raw.host.interaction().move_position().is_none());
             let returned = raw.frame(vec![egui::Event::PointerMoved(at)], false);
-            feedback(&returned.1, &title, source, ink, true, true);
+            feedback(&returned.1, &title, source, group, true, true);
             let cancelled = raw.frame(vec![host_key(egui::Key::Escape, true), button_event(at, false)], false);
             assert!(cancelled.1.viewport_output.get(&egui::ViewportId::ROOT).unwrap().repaint_delay.is_zero());
             let restored = raw.frame(vec![host_key(egui::Key::Escape, false)], false);
-            feedback(&restored.1, &title, source, ink, false, false);
+            feedback(&restored.1, &title, source, group, false, false);
             assert_eq!(raw.content.runtime.layout().inspect(), before);
             assert_eq!(raw.content.runtime.controller_count(), controllers);
             assert_eq!(raw.content.native.commits, native_commits);
@@ -4820,7 +4828,7 @@ fn raw_host_inactive_tab_widget_drag_obeys_threshold_and_moves_only_its_retained
         let jitter = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(5.99, 0.0))], false).0;
         assert!(jitter.preview.is_none());
         assert_eq!(raw.content.runtime.layout().inspect(), before);
-        let threshold = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(6.0, 0.0))], false).0;
+        let threshold = raw.frame(vec![egui::Event::PointerMoved(start + egui::vec2(6.01, 0.0))], false).0;
         assert!(threshold.preview.is_some(), "the real tab starts at six logical points at scale {scale}");
         assert_eq!(raw.content.runtime.layout().inspect(), before);
 

@@ -11427,11 +11427,14 @@ mod tests {
     #[test]
     fn the_lit_face_does_not_change_while_the_view_is_rotated() {
         let mut h = crate::scenario::Harness::new();
-        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200}}));
-        h.app.cam =
-            Camera { target: Vec3::new(200.0, 200.0, 100.0), yaw: 0.6, pitch: 0.9, roll: 0.0, distance: 700.0, fov: 0.0, up: Default::default() };
+        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200, "corner": [-200,-200,-100]}}));
+        h.app.set_origin_shown(false);
+        h.app.cam = Camera { target: Vec3::ZERO, yaw: 0.3, pitch: 0.15, roll: 0.0, distance: 700.0, fov: 0.0, up: Default::default() };
         h.frames(3);
-        let at = face_pixel(&h);
+        // A low orbit through the box centre crosses side faces without
+        // tracking a point on the top face as the camera turns.
+        let at = projection(&h.app, h.app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
         h.call("ui.move", json!({"x": at.x, "y": at.y}));
         h.frames(2);
         let lit = face_of(&h.app.viewport.hover);
@@ -11447,8 +11450,8 @@ mod tests {
         };
         h.frame_with(vec![rotate(egui::TouchPhase::Start, egui::vec2(40.0, 0.0))]);
         let mut picked = Vec::new();
-        for step in 1..=4 {
-            h.frame_with(vec![rotate(egui::TouchPhase::Move, egui::vec2(40.0 * step as f32, 0.0))]);
+        for step in 1..=12 {
+            h.frame_with(vec![rotate(egui::TouchPhase::Move, egui::vec2(80.0, 0.0))]);
             assert_eq!(
                 face_of(&h.app.viewport.hover),
                 lit,
@@ -11582,7 +11585,7 @@ mod tests {
         for y in 2..18 {
             for x in 2..18 {
                 let at = rect.min + egui::vec2(rect.width() * x as f32 / 20.0, rect.height() * y as f32 / 20.0);
-                if crate::viewport::pick(&h.app, &proj, at).iter().any(|hit| matches!(hit, crate::viewport::Hit::Face { .. })) {
+                if matches!(candidate(&h.app, &pick(&h.app, &proj, at)), Some((Hit::Face { .. }, _))) {
                     return at;
                 }
             }
