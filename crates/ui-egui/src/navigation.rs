@@ -483,6 +483,7 @@ pub(crate) fn modifier_motion(
     let previous = app.viewport.modifier_nav;
     if previous.map(|(m, _)| m) != next.map(|(m, _)| m) {
         app.viewport.orbit_pivot = None;
+        app.viewport.orbit_pivot_at = None;
         app.viewport.orbit_from = None;
         app.viewport.orbit_free = None;
     }
@@ -1044,6 +1045,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     if !dragging && motion.is_none() && !(trackpad_orbit && app.viewport.trackpad_gesture) {
         app.viewport.orbit_pivot = None;
+        app.viewport.orbit_pivot_at = None;
         app.viewport.orbit_from = None;
         app.viewport.cursor_wrap = None;
     }
@@ -1076,6 +1078,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     if !app.viewport.spin {
         app.viewport.spin_pivot = None;
+        app.viewport.spin_pivot_at = None;
     }
     if !app.cam.is_valid() {
         app.viewport.orbit_free = None;
@@ -1497,7 +1500,8 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
 fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
     match app.preferences.orbit_around {
         OrbitAround::ViewCentre => {
-            app.viewport.spin_pivot = kept_view_middle(app, rect, app.viewport.spin_pivot);
+            let kept = app.viewport.spin_pivot_at.map(|at| (app.viewport.spin_pivot, at));
+            (app.viewport.spin_pivot, app.viewport.spin_pivot_at) = kept_view_middle(app, rect, kept);
             app.viewport.spin_pivot
         }
         OrbitAround::Origin => Some(Vec3::ZERO),
@@ -1514,20 +1518,27 @@ fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
 
 /// The orbit pivot around the view's centre for the drag under way (see [`kept_view_middle`]).
 fn view_middle_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
-    app.viewport.orbit_pivot = kept_view_middle(app, rect, app.viewport.orbit_pivot);
+    let kept = app.viewport.orbit_pivot_at.map(|at| (app.viewport.orbit_pivot, at));
+    (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at) = kept_view_middle(app, rect, kept);
     app.viewport.orbit_pivot
 }
 
-/// [`view_middle`] for an orbit under way: the point it began with while that point is still under
-/// the free view's middle (turning about it keeps it there), else the point under it now, as after
-/// a pan or a zoom in the same gesture.
-fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>) -> Option<Vec3> {
-    let middle = home_centre(app);
-    let proj = || projection(app, rect);
-    match kept.zip(middle) {
-        Some((p, m)) if proj().to_screen(p).is_some_and(|s| s.distance(m) < 0.5) => Some(p),
-        _ => view_middle(app, rect),
+/// [`view_middle`] for an orbit under way, with the screen point it was chosen under: the choice it
+/// began with (a point, or `None` for the camera's target) while that point is still where it was on
+/// screen (turning about it keeps it there), else the choice for the view now, as after a pan or a
+/// zoom in the same gesture. The free view's middle itself is no test: Home's framing point moves as
+/// the model's outline turns, most near the top view, and choosing again there swung the model aside
+/// (#16091).
+fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<(Option<Vec3>, Pos2)>) -> (Option<Vec3>, Option<Pos2>) {
+    let proj = projection(app, rect);
+    let screen = |p: Option<Vec3>| proj.to_screen(p.unwrap_or(app.cam.target)).filter(|s| s.is_finite());
+    if let Some((p, at)) = kept
+        && screen(p).is_some_and(|s| s.distance(at) < 0.5)
+    {
+        return (p, Some(at));
     }
+    let p = view_middle(app, rect);
+    (p, screen(p))
 }
 
 /// The screen point Home and Fit centre the model on, through the one function they use

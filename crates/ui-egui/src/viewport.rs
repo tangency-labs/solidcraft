@@ -234,6 +234,9 @@ pub struct ViewportState {
     /// The point the orbit under way turns around (Preferences: orbit around the cursor, or the
     /// view's centre (`navigation::view_middle`)), chosen when it begins.
     pub orbit_pivot: Option<Vec3>,
+    /// Where the view-centre orbit pivot (the camera's target while that is `None`) was on screen
+    /// when the orbit chose it; the pivot is kept while it stays there (#16091).
+    pub orbit_pivot_at: Option<egui::Pos2>,
     /// The model point a trackpad twist turns around (Orbit around: the cursor), kept while the
     /// twist goes on (see [`crate::navigation::twist_turn`]).
     pub twist_pivot: Option<Vec3>,
@@ -250,6 +253,9 @@ pub struct ViewportState {
     /// the view's centre (`navigation::view_middle`)), chosen when it starts and kept until it
     /// stops, so the model stays in view (#1044).
     pub spin_pivot: Option<Vec3>,
+    /// Where the view-centre spin pivot (the camera's target while that is `None`) was on screen
+    /// when the spin chose it.
+    pub spin_pivot_at: Option<egui::Pos2>,
     /// The 3D mouse's motion this frame, for the page showing the camera to apply with what its
     /// camera may do (`navigation::device`).
     pub device_motion: Option<crate::space_mouse::DeviceMotion>,
