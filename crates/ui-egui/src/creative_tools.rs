@@ -192,7 +192,7 @@ pub(crate) fn pole(app: &SolveApp) -> Option<Item> {
         _ => return None,
     };
     let mut item = crate::context_menu::cmd(app, id, app.tr("creative_mode.pole")).with(params);
-    item.icon = "axis_normal_to_face".into();
+    item.icon = "axis_center_pole".into();
     item.tip = Some(app.tr("creative_mode.pole_tip").replace("{target}", &of));
     Some(item)
 }

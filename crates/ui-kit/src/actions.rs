@@ -176,6 +176,33 @@ fn icon_button_presentation(
     response.backing_on_hover_text(solidcraft_ui_text::tr_label(label))
 }
 
+/// The pale tile behind artwork buttons on a dark card (the light theme's icon backdrop).
+const ARTWORK_TILE: egui::Color32 = egui::Color32::from_rgb(0xe9, 0xee, 0xf4);
+
+/// An icon button that paints the icon's own palette artwork (outlines, shaded faces and accent),
+/// dimmed when disabled. The label is its tooltip and accessible name. The artwork always uses
+/// the light look. On a dark card each icon sits on a pale tile, so its ink outlines and ghost
+/// dashes read exactly as in the light theme instead of sinking into the background.
+fn artwork_button(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, enabled: bool) -> Response {
+    let t = Tokens::get();
+    let response = ui.interact(rect, ui.make_persistent_id(("artwork_button", icon, label)), egui::Sense::click());
+    let opacity = if enabled { 1.0 } else { 0.4 };
+    let lit = response.hovered() || response.has_focus();
+    if ui.visuals().dark_mode {
+        let tile = rect.shrink(t.space_2);
+        ui.painter().rect_filled(tile, t.control_radius, ARTWORK_TILE.gamma_multiply(opacity));
+        if lit {
+            ui.painter().rect_stroke(tile, t.control_radius, egui::Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
+        }
+    } else if lit {
+        ui.painter().rect_filled(rect, t.control_radius, t.hover);
+    }
+    crate::icons::paint_on(ui.painter(), rect.shrink(t.space_4), icon, Some(false), opacity);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr_label(label)));
+    pointer_on_hover(ui, &response);
+    response.backing_on_hover_text(solidcraft_ui_text::tr_label(label))
+}
+
 /// Plain secondary text action, sharing the kit's normal hit height and typography.
 pub fn text_button(ui: &mut Ui, label: &str, enabled: bool) -> Response {
     let t = Tokens::get();
@@ -775,6 +802,16 @@ pub fn compact_icon_label_button(ui: &mut Ui, label: &str, icon: &str, enabled: 
 
 /// A name chip and quiet actions in a selection card. Feature code supplies command data only.
 pub fn selection_actions(ui: &mut Ui, name: &str, actions: &[super::StageAction<'_>]) -> Option<usize> {
+    selection_row(ui, name, actions, false)
+}
+
+/// [`selection_actions`] for a tool bar people pick from at a glance: each action's full-colour
+/// artwork, larger, instead of a single-colour silhouette that fills its shapes in.
+pub fn selection_tools(ui: &mut Ui, name: &str, actions: &[super::StageAction<'_>]) -> Option<usize> {
+    selection_row(ui, name, actions, true)
+}
+
+fn selection_row(ui: &mut Ui, name: &str, actions: &[super::StageAction<'_>], artwork: bool) -> Option<usize> {
     let t = Tokens::get();
     let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     ui.spacing_mut().interact_size.y = t.control_height - t.space_2;
@@ -790,8 +827,15 @@ pub fn selection_actions(ui: &mut Ui, name: &str, actions: &[super::StageAction<
         for (index, action) in actions.iter().enumerate() {
             let response = ui
                 .add_enabled_ui(action.enabled, |ui| {
-                    let (rect, _) = ui.allocate_exact_size(vec2(t.control_height - t.space_2, t.control_height - t.space_2), egui::Sense::hover());
-                    icon_button_colored(ui, rect, action.icon.unwrap_or("inspect"), action.label, action.primary.then_some(accent.ink))
+                    let icon = action.icon.unwrap_or("inspect");
+                    if artwork {
+                        let side = t.control_height + t.space_12;
+                        let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
+                        artwork_button(ui, rect, icon, action.label, action.enabled)
+                    } else {
+                        let (rect, _) = ui.allocate_exact_size(vec2(t.control_height - t.space_2, t.control_height - t.space_2), egui::Sense::hover());
+                        icon_button_colored(ui, rect, icon, action.label, action.primary.then_some(accent.ink))
+                    }
                 })
                 .inner;
             solidcraft_ui_registry::publish_target(&format!("selection:action:{index}"), response.rect);

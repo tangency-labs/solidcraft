@@ -198,7 +198,7 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     let name = selection_name(app);
     let ctx = ui.ctx().clone();
     let pill = ui_kit::Container::selection_card(&ctx, egui::Id::unique("creative_selection"), anchor, free, |ui| {
-        ui_kit::selection_actions(ui, &name, &actions)
+        ui_kit::selection_tools(ui, &name, &actions)
     });
     crate::scenario::publish_rect("creative:selection", pill.response.rect);
     crate::shell::register_panel(app, "creative:selection", Some(pill.response.rect), None);

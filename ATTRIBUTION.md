@@ -472,6 +472,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | crates/look/icons/design/svg/model/boolean_union.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | crates/look/icons/design/svg/model/boolean_subtract.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | crates/look/icons/design/svg/model/boolean_intersect.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/axis_center_pole.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | crates/look/icons/design/svg/model/placeholder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/plane.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/plane_angle.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
