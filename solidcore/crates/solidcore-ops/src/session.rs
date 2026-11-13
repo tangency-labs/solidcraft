@@ -493,16 +493,24 @@ fn written(
 /// error (unported code, invalid input to an adapter, a missing record...) fails the call
 /// instead of hiding as a skipped entity. So does a status error whose cause chain
 /// ([`SolidError::cause`]) holds a solidcore-side failure ([`SolidError::is_port_failure`]) or a
-/// cancellation: a stage that failed because a call was unported, or because the caller cancelled,
-/// is no answer of the operation on its input.
+/// cancellation, or a blend certificate that spent its work budget
+/// ([`SolidError::is_not_certified`]): a stage that failed because a call was unported, because
+/// the caller cancelled or because the work was given up, is no answer of the operation on its
+/// input.
 ///
 /// # Errors
 /// The kernel's error when it stands for no status, or when its cause chain holds a port
-/// failure or a cancellation.
+/// failure, a cancellation or a certificate past its budget.
 pub(crate) fn answer<T>(r: solidcore::Result<T>) -> solidcore::Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_status_answer() => Ok(None),
+        Err(e)
+            if e.is_status_answer()
+                && !std::iter::successors(Some(&e), |e| e.cause())
+                    .any(SolidError::is_not_certified) =>
+        {
+            Ok(None)
+        }
         Err(e) => Err(e),
     }
 }

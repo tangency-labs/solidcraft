@@ -1747,7 +1747,7 @@ impl SolidError {
     /// ([`crate::error::blend::BlendFailure::NotCertified`]). Every filter that passes a
     /// cancellation on passes this on too: work given up never becomes another result.
     #[must_use]
-    pub(crate) fn is_not_certified(&self) -> bool {
+    pub fn is_not_certified(&self) -> bool {
         matches!(
             self.blend_failure(),
             Some(blend::BlendFailure::NotCertified { .. })
