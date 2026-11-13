@@ -1978,7 +1978,7 @@ impl Session {
     pub fn restore_checkpoint(&mut self, id: u64) -> Result<()> {
         let missing = || {
             EngineError::Other(format!(
-                "no checkpoint {id} (used up by restoring or forgetting it or an earlier one, or dropped: only the last {MAX_CHECKPOINTS} are kept)"
+                "no checkpoint {id} (used up by restoring it or an earlier one, or by forgetting it, or dropped: only the last {MAX_CHECKPOINTS} are kept)"
             ))
         };
         let i = self.checkpoints.iter().position(|c| c.id == id).ok_or_else(missing)?;

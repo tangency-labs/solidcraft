@@ -2421,6 +2421,8 @@ fn a_used_up_or_dropped_checkpoint_says_why() {
 #[test]
 fn forgetting_a_checkpoint_keeps_the_later_ones() {
     let mut s = Session::default();
+    let empty = s.doc.clone();
+    let earlier = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
     let outer = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
     run(&mut s, "solid.box", json!({"name": "Kept", "length": 10, "width": 10, "height": 10}));
     let inner = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
@@ -2438,6 +2440,9 @@ fn forgetting_a_checkpoint_keeps_the_later_ones() {
     let second = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first}));
     assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": second})).is_err());
+    // Neither forgetting a later checkpoint nor restoring one used up the earlier one.
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": earlier}));
+    assert!(Arc::ptr_eq(&s.doc, &empty) && s.undo.is_empty());
 }
 
 /// Regression (#3242): `file.new` replaced the session and its checkpoints with it, so a
