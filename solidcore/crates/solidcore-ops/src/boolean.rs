@@ -12,6 +12,7 @@ use solidcore::boolean::merge::MergeOptions;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::kernel::Kernel;
 use solidcore::primitive::primitive_creation::p1::Boolean2d;
+use solidcore::topology::brep::validation::update_tolerances_after_boolean;
 use solidcore::Brep;
 use solidcore::Result as KernelResult;
 
@@ -56,6 +57,16 @@ fn finished(k: &mut Kernel, r: Brep, expect: Expect) -> KernelResult<Done> {
         Err(Error::Empty) => Done::Empty,
         Err(e) => Done::Refused(e),
     })
+}
+
+/// The tolerance update a boolean's result gets before the result contract checks it
+/// ([`update_tolerances_after_boolean`]): a vertex a grazing cut left wider than the check
+/// allows is centred on its edges' ends, then marginal edge/vertex, vertex/face and edge/face
+/// gaps are covered by growing tolerances. Tolerances only grow: a result that already passes
+/// is unchanged. Without it, the validity check of [`finished`] refuses a sound result for a
+/// sub-micron gap.
+fn after_boolean(k: &mut Kernel, r: &mut Brep) -> KernelResult<()> {
+    update_tolerances_after_boolean(k, r).map(|_| ())
 }
 
 /// What the operands make a boolean's result: a solid when every operand is one. Each comes
@@ -126,8 +137,9 @@ pub fn boolean(a: Body, b: Body, op: BooleanOp) -> Result<Option<Body>> {
         let mut operands = [take(a), take(b)];
         let expect = expect_of(k, &mut operands)?;
         let [(ca, _), (cb, _)] = operands;
-        let r = sm::boolean(k, ca, cb, operation(op))?;
-        finished(k, r.result, expect)
+        let mut r = sm::boolean(k, ca, cb, operation(op))?.result;
+        after_boolean(k, &mut r)?;
+        finished(k, r, expect)
     })?;
     result(d, Ok(None))
 }
@@ -161,7 +173,10 @@ pub fn union_all(bodies: Vec<Body>) -> Result<Body> {
             level = next;
         }
         match level.pop() {
-            Some(r) => finished(k, r, expect),
+            Some(mut r) => {
+                after_boolean(k, &mut r)?;
+                finished(k, r, expect)
+            }
             None => Ok(Done::Empty),
         }
     })?;

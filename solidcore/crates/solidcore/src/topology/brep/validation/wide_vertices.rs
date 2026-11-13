@@ -1,4 +1,4 @@
-//! (not upstream) Vertices a boolean leaves with a tolerance `Test #82` refuses.
+//! Vertices a boolean leaves with a tolerance `Test #82` refuses.
 //!
 //! A cut whose outline grazes a slanted face leaves a vertex at one edge's end with the other
 //! edges' ends up to the whole gap away; the tolerance update then grows the vertex's tolerance
