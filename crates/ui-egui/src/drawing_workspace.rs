@@ -87,7 +87,7 @@ pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
     if !active(app) {
         return Vec::new();
     }
-    [app.drawing_workspace.strip, app.drawing_workspace.settings, app.drawing_workspace.page.card].into_iter().flatten().collect()
+    [app.drawing_workspace.strip, app.drawing_workspace.settings].into_iter().flatten().collect()
 }
 
 pub(crate) fn settings_rect(app: &SolveApp) -> Option<Rect> {

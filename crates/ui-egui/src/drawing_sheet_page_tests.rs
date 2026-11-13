@@ -80,6 +80,7 @@ fn true_size_is_one_millimetre_at_any_ui_scale() {
     assert!(((visible[2] - visible[0]) * number(&p["points_per_mm"]) - f64::from(canvas.width())).abs() < 1e-3, "{p}");
     // A calibration of 1.25 makes 100 % a quarter larger.
     h.app.preferences.drawing_calibration = 1.25;
+    h.step(&json!({"click": {"handle": "nav:slot:sheet_zoom"}})).unwrap();
     h.step(&json!({"click": {"handle": "sheet:actual_size"}})).unwrap();
     h.frames(2);
     let p = page(&mut h);
@@ -146,7 +147,7 @@ fn fit_sheet_shows_the_whole_sheet_and_zoom_stays_in_range() {
     h.frames(120);
     let zoom = number(&page(&mut h)["zoom"]);
     assert!(zoom > 2.0 && zoom <= 32.0 + 1e-9, "{zoom}");
-    // Fit (F6 runs view.fit), Home and the card's Fit sheet all frame it again.
+    // Fit (F6 runs view.fit), Home and the zoom menu's Fit sheet all frame it again.
     for fit in [json!({"command": "view.fit"}), json!({"command": "view.home"})] {
         set_zoom(&mut h.app, &ctx, 4.0);
         h.frames(2);
@@ -156,13 +157,14 @@ fn fit_sheet_shows_the_whole_sheet_and_zoom_stays_in_range() {
     }
     set_zoom(&mut h.app, &ctx, 4.0);
     h.frames(2);
+    h.step(&json!({"click": {"handle": "nav:slot:sheet_zoom"}})).unwrap();
     h.step(&json!({"click": {"handle": "sheet:fit"}})).unwrap();
     h.frames(2);
     assert!(whole(&page(&mut h)));
     assert!(h.call("ui.view", json!({"view": "front"}))["ok"] == false, "a sheet has no 3D views");
 }
 
-/// The card shows whole percent, and tenths below 10 %; typing a shown value back keeps it.
+/// The navigation bar shows whole percent, and tenths below 10 %; typing a shown value back keeps it.
 #[test]
 fn the_zoom_readout_is_rounded() {
     for (zoom, shown) in [(0.72996, 73.0), (1.0, 100.0), (0.0549, 5.5), (0.05, 5.0), (0.0996, 10.0), (31.99, 3199.0)] {
