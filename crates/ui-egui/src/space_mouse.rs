@@ -195,11 +195,11 @@ pub fn default_button_jobs(device: &str) -> std::collections::BTreeMap<u8, Butto
 fn buttons_active(app: &SolveApp, ctx: &egui::Context, focused: bool) -> bool {
     app.preferences.space_mouse_enabled
         && focused
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && app.space_mouse.calibrating.is_none()
         && !app.home.open
         && !app.file_picker_busy()
-        && !app.file_load.busy()
+        && !app.file_load_holds()
         // The keyboard shortcuts wait for a report draft too (`SolveApp::logic`).
         && app.issue_report.draft.is_none()
         && !crate::keymap::capturing(app)
@@ -307,7 +307,7 @@ pub fn buttons_hook(app: &mut SolveApp, ctx: &egui::Context, seen: Buttons, raw:
 fn run_button_job(app: &mut SolveApp, job: &ButtonJob, modifiers: egui::Modifiers, raw: &mut egui::RawInput) {
     match job {
         // Navigation, where the 3D mouse's section is.
-        ButtonJob::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_NAVIGATION),
+        ButtonJob::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_MOUSE3D),
         ButtonJob::View(view) => app.animate_view(view),
         ButtonJob::Key(ButtonKey::Esc) => {
             for pressed in [true, false] {
@@ -493,7 +493,7 @@ pub(crate) fn stories(language: &str, mapping: Option<DriverMapping>, source: [u
         let row = source.iter().position(|&s| s == motion);
         motion_story(mapping, source, motion)
             .zip(row)
-            .map(|(label, row)| crate::i18n::Locale::for_language(language).format(label, &[("n", &(row + 1).to_string())]))
+            .map(|(label, row)| solidcraft_ui_text::Locale::for_language(language).format(label, &[("n", &(row + 1).to_string())]))
             .unwrap_or_default()
     })
 }
@@ -582,6 +582,10 @@ pub fn navigate_frame(app: &mut SolveApp, ctx: &egui::Context, mapping: DriverMa
     // Then the user's choice of which motion drives which axis (invert and speed then go with the
     // axis, not the motion). After the settle: that works on the device's own calibrated axes.
     let axes = reassigned(axes, app.preferences.space_mouse_axis_source);
+    // Back at rest: the next push picks what the view turns around afresh.
+    if !axes.moving() {
+        app.viewport.device_pivot = None;
+    }
     // Only the window with focus: with two windows open, the cap moves the one being used, not both.
     if !app.preferences.space_mouse_enabled || app.home.open || app.file_picker_busy() || !axes.moving() || !ctx.input(|i| i.focused) {
         return false;
@@ -685,12 +689,13 @@ mod tests {
     use super::*;
     use crate::Services;
     use solidcraft_engine::Session;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_engine::geom::prelude::*;
+    use solidcraft_viewport::Camera;
 
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps
     /// the orientation, as editing a sketch does.
-    fn navigate(cam: &mut Camera, motion: Motion, seconds: f64, height: f64, sketch: bool, reverse_zoom: bool) {
-        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, reverse_zoom, false);
+    fn navigate(cam: &mut Camera, motion: Motion, seconds: f64, height: f64, sketch: bool) {
+        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, false, None, None);
     }
 
     /// A window that has run a frame, with or without focus. A context that has never run one
@@ -814,12 +819,12 @@ mod tests {
         assert!(!shifted());
         // Menu (button 1) opens Preferences; there, buttons only light up their rows.
         press(&mut app, &ctx, 1, vec![]);
-        assert!(app.prefs_window.open);
+        assert!(app.prefs_window.shell.open);
         press(&mut app, &ctx, 0, vec![]);
         assert_eq!(escapes(&press(&mut app, &ctx, ESC, vec![])), 0);
         assert_eq!(app.space_mouse.seen & ESC, ESC);
         // A job the user set replaces the defaults.
-        app.prefs_window.open = false;
+        app.prefs_window.shell.open = false;
         press(&mut app, &ctx, 0, vec![]);
         app.preferences.space_mouse_buttons.insert("hid 046d:c62b".into(), [(23, ButtonJob::Key(ButtonKey::Alt))].into());
         let raw = press(&mut app, &ctx, ESC, vec![]);
@@ -872,14 +877,14 @@ mod tests {
         let raw = press(&mut app, &ctx, 0b11111, vec![]);
         assert_eq!(app.session.doc.metadata.author(), Some("Jane"), "the mapped Undo did not run");
         assert_eq!(escapes(&raw), 0, "no Esc");
-        assert!(!app.prefs_window.open, "no Preferences");
+        assert!(!app.prefs_window.shell.open, "no Preferences");
         assert!(!ctx.input(|i| i.modifiers.shift), "no held Shift");
         assert_eq!((app.cam, app.session.undo.len(), app.dialog.is_some()), (cam, undo, dialog));
         // Once the draft is closed the same buttons work again (a fresh press).
         app.issue_report.draft = None;
         press(&mut app, &ctx, 0, vec![]);
         press(&mut app, &ctx, 0b11111, vec![]);
-        assert!(app.prefs_window.open);
+        assert!(app.prefs_window.shell.open);
         assert_eq!(app.session.doc.metadata.author(), None, "and the mapped Undo runs");
     }
 
@@ -1033,10 +1038,10 @@ mod tests {
         let ctx = window(true);
         press(&mut app, &ctx, SHIFT, vec![]);
         assert!(ctx.input(|i| i.modifiers.shift));
-        app.prefs_window.open = true;
+        app.prefs_window.shell.open = true;
         press(&mut app, &ctx, SHIFT, vec![]);
         assert!(!ctx.input(|i| i.modifiers.shift), "Preferences open");
-        app.prefs_window.open = false;
+        app.prefs_window.shell.open = false;
         press(&mut app, &ctx, SHIFT, vec![]);
         assert!(ctx.input(|i| i.modifiers.shift));
         crate::space_mouse_calibration::start(&mut app);
@@ -1068,6 +1073,22 @@ mod tests {
         let ctx = window(true);
         let raw = press(&mut app, &ctx, SHIFT, vec![wheel(1.0)]);
         assert!(raw.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { modifiers, .. } if modifiers.shift)));
+    }
+
+    /// What the cap turns the view around is chosen when it starts turning and let go when it is
+    /// back at rest.
+    #[test]
+    fn the_cap_lets_go_of_its_turning_point_at_rest() {
+        let mut app = app();
+        app.preferences.space_mouse_model_pivot = true;
+        let ctx = window(true);
+        app.space_mouse.device = Some("hid 046d:c62b".into());
+        frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [300, 0, 0], rotation: [0; 3] }, 0.016);
+        assert_eq!(app.viewport.device_pivot, None, "a pan alone turns around nothing");
+        frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [300, 0, 0], rotation: [300, 0, 0] }, 0.016);
+        assert!(app.viewport.device_pivot.is_some(), "a turn holds a point");
+        frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
+        assert_eq!(app.viewport.device_pivot, None, "at rest it is let go");
     }
 
     #[test]
@@ -1139,6 +1160,7 @@ mod tests {
 
     fn wheel(dy: f32) -> egui::Event {
         egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: egui::vec2(0.0, dy),
             modifiers: egui::Modifiers::NONE,
@@ -1154,14 +1176,14 @@ mod tests {
     fn six_axes_move_the_camera_and_sketches_keep_their_orientation() {
         let mut cam = Camera::default();
         let before = cam;
-        navigate(&mut cam, raw(Axes { translation: [350, 350, 350], rotation: [350, 350, 350] }), 0.02, 600.0, false, false);
+        navigate(&mut cam, raw(Axes { translation: [350, 350, 350], rotation: [350, 350, 350] }), 0.02, 600.0, false);
         assert_ne!(cam.target, before.target);
         assert!(cam.distance < before.distance);
         assert_ne!(cam.yaw, before.yaw);
         assert_ne!(cam.pitch, before.pitch);
         assert_ne!(cam.roll, before.roll);
         let orientation = (cam.yaw, cam.pitch, cam.roll);
-        navigate(&mut cam, raw(Axes { translation: [350, 0, 0], rotation: [350, 350, 350] }), 0.02, 600.0, true, false);
+        navigate(&mut cam, raw(Axes { translation: [350, 0, 0], rotation: [350, 350, 350] }), 0.02, 600.0, true);
         assert_eq!((cam.yaw, cam.pitch, cam.roll), orientation);
         assert!(cam.is_valid());
     }
@@ -1171,57 +1193,79 @@ mod tests {
         let before = Camera::default();
 
         let mut slide = before;
-        navigate(&mut slide, raw(Axes { translation: [350, 0, 0], rotation: [0; 3] }), 0.02, 600.0, false, false);
+        navigate(&mut slide, raw(Axes { translation: [350, 0, 0], rotation: [0; 3] }), 0.02, 600.0, false);
         assert_ne!(slide.target, before.target);
         assert_eq!(slide.distance, before.distance);
 
         let mut push = before;
-        navigate(&mut push, raw(Axes { translation: [0, 350, 0], rotation: [0; 3] }), 0.02, 600.0, false, false);
+        navigate(&mut push, raw(Axes { translation: [0, 350, 0], rotation: [0; 3] }), 0.02, 600.0, false);
         assert_eq!(push.target, before.target);
         assert!(push.distance < before.distance);
 
         let mut lift = before;
-        navigate(&mut lift, raw(Axes { translation: [0, 0, 350], rotation: [0; 3] }), 0.02, 600.0, false, false);
+        navigate(&mut lift, raw(Axes { translation: [0, 0, 350], rotation: [0; 3] }), 0.02, 600.0, false);
         assert_ne!(lift.target, before.target);
         assert_eq!(lift.distance, before.distance);
 
         let mut tilt = before;
-        navigate(&mut tilt, raw(Axes { translation: [0; 3], rotation: [350, 0, 0] }), 0.02, 600.0, false, false);
+        navigate(&mut tilt, raw(Axes { translation: [0; 3], rotation: [350, 0, 0] }), 0.02, 600.0, false);
         assert_eq!((tilt.yaw, tilt.roll), (before.yaw, before.roll));
         assert_ne!(tilt.pitch, before.pitch);
 
         let mut roll = before;
-        navigate(&mut roll, raw(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false, false);
+        navigate(&mut roll, raw(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false);
         assert_eq!((roll.pitch, roll.roll), (before.pitch, before.roll));
         assert_ne!(roll.yaw, before.yaw);
 
         let mut twist = before;
-        navigate(&mut twist, raw(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false, false);
+        navigate(&mut twist, raw(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false);
         assert_eq!((twist.yaw, twist.pitch), (before.yaw, before.pitch));
         assert_ne!(twist.roll, before.roll);
     }
 
+    /// Reverse zoom direction is a wheel and trackpad setting: it turns the wheel's zoom around
+    /// and leaves the cap's, which has its own invert switch (#8993).
     #[test]
-    fn reverse_zoom_setting_applies_to_spacemouse() {
-        let before = Camera::default();
-        let motion = raw(Axes { translation: [0, 350, 0], rotation: [0; 3] });
-        let mut normal = before;
-        navigate(&mut normal, motion, 0.02, 600.0, false, false);
-        let mut reversed = before;
-        navigate(&mut reversed, motion, 0.02, 600.0, false, true);
-        assert!(normal.distance < before.distance);
-        assert!(reversed.distance > before.distance);
+    fn reverse_zoom_setting_flips_the_wheel_and_leaves_the_cap() {
+        let wheel_zooms_in = |reverse: bool| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.zoom_reverse = reverse;
+            h.app.preferences.smooth_wheel_zoom = false;
+            h.call("ui.move", serde_json::json!({"x":800,"y":500}));
+            let before = h.app.cam.half_height();
+            h.call("ui.scroll", serde_json::json!({"x":800,"y":500,"delta":120}));
+            h.app.cam.half_height() < before
+        };
+        assert!(wheel_zooms_in(false));
+        assert!(!wheel_zooms_in(true), "the wheel turns around");
+        // The cap's zoom axis pushed forward with the wheel reversed or not, and with the cap's own
+        // invert switch for that axis on or off.
+        let cap_distance = |wheel_reversed: bool, cap_inverted: bool| {
+            let mut app = app();
+            app.preferences.zoom_reverse = wheel_reversed;
+            app.preferences.space_mouse_reverse[1] = cap_inverted;
+            let ctx = window(true);
+            app.space_mouse.device = Some("hid 046d:c62b".into());
+            let before = app.cam.distance;
+            frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [0, 350, 0], rotation: [0; 3] }, 0.02);
+            (before, app.cam.distance)
+        };
+        let (before, normal) = cap_distance(false, false);
+        assert!(normal < before, "pushing the cap forward zooms in");
+        assert_eq!(cap_distance(true, false).1, normal, "the cap zooms the same way with the wheel reversed");
+        assert!(cap_distance(false, true).1 > before, "the cap's own invert switch turns it around");
+        assert_eq!(cap_distance(true, true).1, cap_distance(false, true).1);
     }
 
     #[test]
     fn object_mode_tilts_roll_and_twists_spin() {
         let before = Camera::default();
         let mut tilt = before;
-        navigate(&mut tilt, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false, false);
+        navigate(&mut tilt, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false);
         assert_eq!((tilt.yaw, tilt.pitch), (before.yaw, before.pitch));
         assert_ne!(tilt.roll, before.roll);
         let mut twist = before;
-        navigate(&mut twist, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false, false);
+        navigate(&mut twist, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false);
         assert_ne!(twist.yaw, before.yaw);
         assert_eq!((twist.pitch, twist.roll), (before.pitch, before.roll));
         // The physical tilt right (Ry−) rolls one way and the clockwise twist (Rz+) spins the
@@ -1382,11 +1426,12 @@ mod tests {
     #[test]
     fn navigation_off_the_start_page_and_a_hostile_speed_leave_the_view_alone() {
         let ctx = window(true);
-        let mut off = app();
+        // The app is large: kept on the heap, three at once do not overflow a test thread's stack.
+        let mut off = Box::new(app());
         off.preferences.space_mouse_enabled = false;
-        let mut home = app();
+        let mut home = Box::new(app());
         home.home.open = true;
-        let mut nan = app();
+        let mut nan = Box::new(app());
         nan.preferences.space_mouse_speed = f32::NAN;
         for mut app in [off, home, nan] {
             let before = app.cam;
@@ -1398,7 +1443,7 @@ mod tests {
         let distances: Vec<f64> = speeds
             .iter()
             .map(|&speed| {
-                let mut app = app();
+                let mut app = Box::new(app());
                 app.preferences.space_mouse_speed = speed;
                 frame(&mut app, &ctx, DriverMapping::default(), PUSH, 0.02);
                 assert!(app.cam.is_valid(), "{speed}");
@@ -1489,7 +1534,7 @@ mod tests {
         assert_eq!(app.space_mouse.raw, PUSH);
         assert!(app.space_mouse.calibrating.as_ref().is_some_and(|(_, wizard)| wizard.progress() > 0.0));
         // Closing Preferences ends it, so the cap moves the view again.
-        app.prefs_window.open = false;
+        app.prefs_window.shell.open = false;
         crate::prefs::show(&mut app, &ctx);
         assert!(app.space_mouse.calibrating.is_none());
         assert!(frame(&mut app, &ctx, DriverMapping::default(), PUSH, 0.02));
@@ -1794,7 +1839,7 @@ mod tests {
         app.preferences.look_at_anim = false;
         assert!(bridge(&mut app, &ctx, BridgeMotion::default(), &["top"]));
         let mut top = Camera::default();
-        top.set_view(solidcraft_engine::render::StandardView::Top);
+        top.set_view(solidcraft_viewport::StandardView::Top);
         let target = app.cam_anim.map_or(app.cam, |a| a.to);
         assert_eq!((target.yaw, target.pitch), (top.yaw, top.pitch));
         // Names it doesn't know are no view.

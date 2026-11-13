@@ -1,0 +1,2807 @@
+{
+ "cases": [
+  {
+   "name": "order_curves_rectangle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:638",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-05,
+    "outer": false
+   }
+  },
+  {
+   "name": "order_curves_rectangle_outer",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:638",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-05,
+    "outer": true
+   }
+  },
+  {
+   "name": "order_curves_rectangle_shuffled",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:638",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         -5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         5,
+         -3,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         3,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-05,
+    "outer": true
+   }
+  },
+  {
+   "name": "planar_faces_l_shape_holes",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:318",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "v": [
+        10.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        10.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        10.0,
+        0.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        5.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        10.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        -5.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        5.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        5.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        5.0,
+        10.0,
+        0.0
+       ],
+       "v": [
+        -5.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0.0,
+        10.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        -10.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        10.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        1.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        3.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        3.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        1.0,
+        8.0,
+        0.0
+       ],
+       "v": [
+        3.0,
+        -3.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        4.242640687119285
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        4.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        -3.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        3.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "ellipse": {
+       "c": [
+        6.0,
+        2.5,
+        0.0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0.0,
+        360.0
+       ],
+       "radii": [
+        1.5,
+        1.5
+       ]
+      }
+     }
+    ],
+    "tol": 0.01,
+    "outer": true
+   }
+  },
+  {
+   "name": "planar_faces_l_shape_holes_zone_tol",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:318",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "v": [
+        10.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        10.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        10.0,
+        0.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        5.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        10.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        -5.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        5.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        5.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        5.0,
+        10.0,
+        0.0
+       ],
+       "v": [
+        -5.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0.0,
+        10.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        -10.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        10.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        1.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        3.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        3.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        1.0,
+        8.0,
+        0.0
+       ],
+       "v": [
+        3.0,
+        -3.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        4.242640687119285
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        4.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        -3.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        3.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "ellipse": {
+       "c": [
+        6.0,
+        2.5,
+        0.0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0.0,
+        360.0
+       ],
+       "radii": [
+        1.5,
+        1.5
+       ]
+      }
+     }
+    ],
+    "tol": 1e-05,
+    "outer": true
+   }
+  },
+  {
+   "name": "planar_faces_outer_loops_direct",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:318",
+   "inputs": {
+    "op": "outer",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "v": [
+        10.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        10.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        10.0,
+        0.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        5.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        10.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        -5.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        5.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        5.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        5.0,
+        10.0,
+        0.0
+       ],
+       "v": [
+        -5.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0.0,
+        10.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        -10.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        10.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        1.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        3.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        3.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        1.0,
+        8.0,
+        0.0
+       ],
+       "v": [
+        3.0,
+        -3.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        4.242640687119285
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        4.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        -3.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        3.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "ellipse": {
+       "c": [
+        6.0,
+        2.5,
+        0.0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0.0,
+        360.0
+       ],
+       "radii": [
+        1.5,
+        1.5
+       ]
+      }
+     }
+    ],
+    "counts": [
+     6,
+     3,
+     1
+    ],
+    "orients": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "planar_faces_outer_loops_flipped_normal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:318",
+   "inputs": {
+    "op": "outer",
+    "curves": [
+     {
+      "line": {
+       "p": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "v": [
+        10.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        10.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        10.0,
+        0.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        5.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        10.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        -5.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        5.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        5.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        5.0,
+        10.0,
+        0.0
+       ],
+       "v": [
+        -5.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        5.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        0.0,
+        10.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        -10.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        10.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        1.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        0.0,
+        3.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        3.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        1.0,
+        8.0,
+        0.0
+       ],
+       "v": [
+        3.0,
+        -3.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        4.242640687119285
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "line": {
+       "p": [
+        4.0,
+        5.0,
+        0.0
+       ],
+       "v": [
+        -3.0,
+        0.0,
+        0.0
+       ],
+       "domain": [
+        0.0,
+        3.0
+       ],
+       "scale": 1.0
+      }
+     },
+     {
+      "ellipse": {
+       "c": [
+        6.0,
+        2.5,
+        0.0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0.0,
+        360.0
+       ],
+       "radii": [
+        1.5,
+        1.5
+       ]
+      }
+     }
+    ],
+    "counts": [
+     6,
+     3,
+     1
+    ],
+    "orients": [
+     2,
+     2,
+     2,
+     2,
+     2,
+     2,
+     1,
+     1,
+     1,
+     1
+    ],
+    "normal": [
+     0,
+     0,
+     -2
+    ],
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "planar_circle_r10",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:238",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "ellipse": {
+       "c": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0.0,
+        360.0
+       ],
+       "radii": [
+        10.0,
+        10.0
+       ]
+      }
+     }
+    ],
+    "tol": 0.01,
+    "outer": true
+   }
+  },
+  {
+   "name": "planar_circle_r10_zone_tol",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:238",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "ellipse": {
+       "c": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0.0,
+        360.0
+       ],
+       "radii": [
+        10.0,
+        10.0
+       ]
+      }
+     }
+    ],
+    "tol": 1e-05,
+    "outer": true
+   }
+  },
+  {
+   "name": "vertex_gap_covered_eu0",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     0,
+     1.3e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_covered_eu1",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     1,
+     1.3e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_covered_eu2",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances; control: this edit leaves the queried loop endpoints unchanged on both sides",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     2,
+     1.3e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_covered_eu3",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     3,
+     1.3e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_too_wide_eu0",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     0,
+     2.61e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_too_wide_eu1",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     1,
+     2.61e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_too_wide_eu2",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances; control: this edit leaves the queried loop endpoints unchanged on both sides",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     2,
+     2.61e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_too_wide_eu3",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     3,
+     2.61e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_edge_covered_eu0",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     1e-05
+    ],
+    "gap": [
+     0,
+     1e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_edge_covered_eu1",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     1e-05
+    ],
+    "gap": [
+     1,
+     1e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_edge_covered_eu2",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances; control: this edit leaves the queried loop endpoints unchanged on both sides",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     1e-05
+    ],
+    "gap": [
+     2,
+     1e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_edge_covered_eu3",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     1e-05
+    ],
+    "gap": [
+     3,
+     1e-05
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_zero_eu0",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_zero_eu1",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_zero_eu2",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances; control: this edit leaves the queried loop endpoints unchanged on both sides",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "vertex_gap_zero_eu3",
+   "upstream_ref": "issue #476: plane_square.smb with a measured UV trim endpoint gap and explicit model tolerances",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "tolerances": [
+     5.8e-06,
+     2.6e-05
+    ],
+    "gap": [
+     3,
+     0
+    ]
+   }
+  },
+  {
+   "name": "projected_seam_cone_eu0",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_cone_eu1",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_cone_eu2",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_cone_eu3",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  },
+  {
+   "name": "projected_seam_torus_eu0",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_torus_eu1",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_torus_eu2",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_torus_eu3",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  },
+  {
+   "name": "projected_seam_surf_rev_eu0",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_surf_rev_eu1",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_surf_rev_eu2",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_surf_rev_eu3",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  },
+  {
+   "name": "projected_seam_plane_square_eu0",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_plane_square_eu1",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_plane_square_eu2",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_plane_square_eu3",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  },
+  {
+   "name": "projected_seam_closed_u_eu0",
+   "upstream_ref": "#530; analytic degree-one square tube, closed u",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      4.0,
+      3.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_closed_u_eu1",
+   "upstream_ref": "#530; analytic degree-one square tube, closed u",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      4.0,
+      3.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_closed_u_eu2",
+   "upstream_ref": "#530; analytic degree-one square tube, closed u",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      4.0,
+      3.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_closed_u_eu3",
+   "upstream_ref": "#530; analytic degree-one square tube, closed u",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      4.0,
+      3.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  },
+  {
+   "name": "projected_seam_closed_v_eu0",
+   "upstream_ref": "#530; analytic degree-one square tube, closed v",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      3.0,
+      4.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_closed_v_eu1",
+   "upstream_ref": "#530; analytic degree-one square tube, closed v",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      3.0,
+      4.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_closed_v_eu2",
+   "upstream_ref": "#530; analytic degree-one square tube, closed v",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      3.0,
+      4.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_closed_v_eu3",
+   "upstream_ref": "#530; analytic degree-one square tube, closed v",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      3.0,
+      4.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  }
+ ]
+}

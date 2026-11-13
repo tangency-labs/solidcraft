@@ -67,6 +67,9 @@ fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
         (&["--out", "--quiet"][..], "--out needs a value"),
         (&["--ouut", "part.step"][..], "doesn't take --ouut"),
         (&["--unknown"][..], "doesn't take --unknown"),
+        (&["--quality"][..], "--quality needs a value"),
+        (&["--quality", "best"][..], "--quality must be standard, fine or finest, not `best`"),
+        (&["--quality", "standard", "--quality", "best"][..], "--quality is given more than once"),
     ];
     for existing in [false, true] {
         let saved = dir.0.join(format!("{existing}.solidcraft"));
@@ -145,7 +148,7 @@ fn eval_and_inspect_reject_invalid_options_before_script_execution_or_reporting(
 #[test]
 fn cli_loads_both_design_encodings_by_contents() {
     let dir = Scratch::new();
-    for extension in ["solidcraft", "solvecraft", "json"] {
+    for extension in ["sc", "solidcraft", "solvecraft", "json"] {
         let saved = dir.0.join(format!("box.{extension}"));
         json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&saved).output().unwrap());
         let bytes = std::fs::read(&saved).unwrap();
@@ -159,7 +162,7 @@ fn cli_loads_both_design_encodings_by_contents() {
 }
 
 /// #1369: a pending concept that did not land in the numbered release must not be silently
-/// dropped on open/resave, in either encoding or before replacing an existing destination.
+/// dropped on open/resave, in either encoding: it opens with a warning, and saving keeps it.
 #[test]
 fn unknown_pending_concepts_preserve_the_open_design_and_output_files() {
     use solidcraft_engine::{Session, doc, io};
@@ -173,38 +176,70 @@ fn unknown_pending_concepts_preserve_the_open_design_and_output_files() {
             let source = dir.0.join(format!("experimental-{version}.{extension}"));
             std::fs::write(&source, &bytes).unwrap();
             let mut session = Session::default();
-            session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
-            let original = session.doc.clone();
-            let original_path = session.path.clone();
-            let undo = session.undo.len();
-            let dirty = session.is_dirty();
-            let err = session.execute("doc.open", &json!({"path": source})).unwrap_err().to_string();
-            assert!(err.contains("experimental-card") && err.contains("update SolidCraft"), "{err}");
-            assert_eq!(session.doc, original);
-            assert_eq!(session.path, original_path);
-            assert_eq!(session.undo.len(), undo);
-            assert_eq!(session.is_dirty(), dirty);
+            // It opens, and the reply says what it is.
+            let reply = session.execute("doc.open", &json!({"path": source})).unwrap();
+            let notice = reply["newer_file"]["notice"].as_str().unwrap().to_string();
+            assert!(notice.contains("experimental-card") && notice.starts_with("Saved by a newer SolidCraft"), "{notice}");
+            assert_eq!(reply["warnings"][0], notice.as_str());
+            assert_eq!(session.doc.name, "Experimental");
 
             for existing in [false, true] {
                 let destination = dir.0.join(format!("output-{version}-{extension}-{existing}.{extension}"));
                 let backup = io::backup_path(&destination);
                 if existing {
                     std::fs::write(&destination, b"existing design").unwrap();
-                    std::fs::write(&backup, b"existing backup").unwrap();
                 }
                 let output = cli().args(["run", "--in"]).arg(&source).arg("--save").arg(&destination).output().unwrap();
-                assert_eq!(output.status.code(), Some(1));
                 let error = String::from_utf8_lossy(&output.stderr);
-                assert!(error.contains("experimental-card") && error.contains("update SolidCraft"), "{error}");
+                assert_eq!(output.status.code(), Some(0), "{error}");
+                assert!(error.contains("warning: Saved by a newer SolidCraft") && error.contains("experimental-card"), "{error}");
+                // Saved, it still says it has the change, and opens the same way.
+                let saved = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
+                assert!(saved.format_pending.iter().any(|name| name == "experimental-card"));
+                assert!(saved.newer_file.is_some());
                 if existing {
-                    assert_eq!(std::fs::read(&destination).unwrap(), b"existing design");
-                    assert_eq!(std::fs::read(&backup).unwrap(), b"existing backup");
-                } else {
-                    assert!(!destination.exists() && !backup.exists());
+                    assert_eq!(std::fs::read(&backup).unwrap(), b"existing design");
                 }
                 assert_eq!(std::fs::read(&source).unwrap(), bytes);
             }
         }
+    }
+}
+
+/// `eval` and `run` on a design one format newer, with a feature kind this version doesn't have:
+/// the rest builds, the reply names it, and the saved file still holds it, under the file's number.
+#[test]
+fn the_cli_opens_a_newer_design_and_saving_keeps_what_it_cant_read() {
+    use solidcraft_engine::{Session, doc, io};
+
+    let dir = Scratch::new();
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let mut file: Value = serde_json::from_slice(&io::write_design(&session.doc)).unwrap();
+    let newer = doc::format::format_string(doc::format::FORMAT + 1);
+    file["format"] = json!(newer);
+    let future = json!({"id": 900, "name": "Lattice1", "type": "gyroid_lattice", "cell": 2.5});
+    file["features"].as_array_mut().unwrap().push(future.clone());
+    let source = dir.0.join("newer.json");
+    std::fs::write(&source, file.to_string()).unwrap();
+
+    let output = cli().args(["eval"]).arg(&source).output().unwrap();
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{error}");
+    assert!(error.contains("warning: Saved by a newer SolidCraft") && error.contains("Lattice1"), "{error}");
+    let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(reply["body_count"], 1);
+    assert!(reply["newer_file"]["not_understood"][0].as_str().unwrap().contains("gyroid_lattice"), "{reply}");
+    assert!(reply["warnings"][0].as_str().unwrap().starts_with("Saved by a newer SolidCraft"), "{reply}");
+
+    for extension in ["json", "sc"] {
+        let destination = dir.0.join(format!("saved.{extension}"));
+        let output = cli().args(["run", "--in"]).arg(&source).arg("--save").arg(&destination).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let saved = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
+        assert_eq!(saved.format, newer, "never a lower number");
+        let again: Value = serde_json::from_slice(&io::write_design(&saved)).unwrap();
+        assert_eq!(again["features"].as_array().unwrap().last().unwrap(), &future);
     }
 }
 
@@ -229,7 +264,9 @@ fn known_pending_concepts_and_released_files_round_trip_with_inert_metadata() {
             assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
             let reopened = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
             assert_eq!(reopened.metadata, document.metadata);
-            assert_eq!(reopened.name, document.name);
+            // #4907: `run --save` maps to Save As, and a borrowed design name
+            // follows the destination file's stem instead of keeping the old name.
+            assert_eq!(reopened.name, format!("resaved-{index}"));
             assert_eq!(reopened.features, document.features);
             assert_eq!(std::fs::read(&source).unwrap(), bytes);
         }
@@ -243,15 +280,61 @@ fn results_still_save_and_export_the_script_once() {
     let saved = dir.0.join("box.json");
     let stl = dir.0.join("box.stl");
     let obj = dir.0.join("box.obj");
+    let glb = dir.0.join("box.glb");
     let result = json_output(
-        cli().arg("run").arg(dir.script()).arg("--results").arg("--save").arg(&saved).arg("--out").arg(&stl).arg("--out").arg(&obj).output().unwrap(),
+        cli()
+            .arg("run")
+            .arg(dir.script())
+            .arg("--results")
+            .arg("--save")
+            .arg(&saved)
+            .arg("--out")
+            .arg(&stl)
+            .arg("--out")
+            .arg(&obj)
+            .arg("--out")
+            .arg(&glb)
+            .output()
+            .unwrap(),
     );
     assert_eq!(result.as_array().unwrap().len(), 1);
     assert_eq!(body_count(&saved), 1);
-    for exported in [&stl, &obj] {
+    for exported in [&stl, &obj, &glb] {
         assert!(std::fs::metadata(exported).unwrap().len() > 0);
         assert_eq!(body_count(exported), 1);
     }
+}
+
+/// The triangles of a binary STL: the count after its 80-byte header.
+fn stl_triangles(path: &Path) -> u32 {
+    let bytes = std::fs::read(path).unwrap();
+    u32::from_le_bytes(bytes[80..84].try_into().unwrap())
+}
+
+/// #12270: `run --out part.stl --quality fine` writes the mesh at that quality, as
+/// `file.export`'s `quality` does, without a script to say so.
+#[test]
+fn run_exports_meshes_at_the_quality_asked_for() {
+    let dir = Scratch::new();
+    let script = dir.0.join("cylinder.json");
+    std::fs::write(&script, json!({"commands": [{"command": "solid.cylinder", "params": {"diameter": 40, "height": 10}}]}).to_string()).unwrap();
+    let export = |name: &str, quality: Option<&str>| {
+        let stl = dir.0.join(name);
+        let mut command = cli();
+        command.arg("run").arg(&script).arg("--quiet").arg("--out").arg(&stl);
+        if let Some(q) = quality {
+            command.args(["--quality", q]);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{quality:?}: {}", String::from_utf8_lossy(&output.stderr));
+        stl_triangles(&stl)
+    };
+    let default = export("default.stl", None);
+    let standard = export("standard.stl", Some("standard"));
+    let fine = export("fine.stl", Some("fine"));
+    let finest = export("finest.stl", Some("finest"));
+    assert_eq!(default, standard);
+    assert!(standard < fine && fine < finest, "standard {standard}, fine {fine}, finest {finest}");
 }
 
 #[test]
@@ -412,6 +495,11 @@ fn legacy_extension_and_format_tag_still_open() {
     assert_eq!(body_count(&resaved), 2);
     let reopened = solidcraft_engine::io::read_design(&std::fs::read(&resaved).unwrap()).unwrap();
     assert!(reopened.to_json().contains("\"solidcraft/"));
+    // `.solidcraft` (before `.sc`) opens as `--in` and as the design to evaluate; `.sc` too.
+    let current = dir.0.join("current.sc");
+    json_output(cli().args(["run", "--in"]).arg(&resaved).arg(dir.script()).arg("--save").arg(&current).output().unwrap());
+    assert_eq!(body_count(&current), 3);
+    assert!(solidcraft_engine::io::is_design_container(&std::fs::read(&current).unwrap()), "a .sc file is a design container");
 }
 
 /// `snapshot` starts from `--in` as `run` does (its script runs on that design), and refuses an
@@ -433,7 +521,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
         std::fs::read(&png).unwrap()
     };
     // Pictures are drawn on the GPU: without an adapter only the option checks below run.
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(_) => {
             let alone = shot("alone.png", &[shifted.as_os_str()]);
             let on_base = shot("on_base.png", &[shifted.as_os_str(), "--in".as_ref(), base.as_os_str()]);
@@ -441,7 +529,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
             assert_ne!(alone, on_base, "the script ran on the --in design");
             assert_ne!(base_only, on_base);
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("pictures left out: {e}")
         }
         Err(e) => panic!("{e}"),
@@ -458,7 +546,11 @@ fn snapshot_runs_its_script_on_the_in_design() {
 fn unknown_command_suggests_the_closest_id() {
     let output = cli().args(["exec", "file.open"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open`?"), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open` or `panel.open`?"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// #1833: `--timings` reports each command's time instead of the measurement, `--profile` adds
@@ -489,6 +581,78 @@ fn timings_and_profile_report_each_command() {
     let output = cli().arg("run").arg("--in").arg(&saved).arg("--timings").output().unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("--timings needs a script"));
+}
+
+/// #6921: `--param-check` checks a script's steps against their contracts on every path `run`
+/// takes (a script alone, on an `--in` design or script, with `--results`, `--timings` or
+/// `--profile`), and a warning reaches stderr even when a later step fails.
+#[test]
+fn param_check_reaches_every_script_run_takes() {
+    let dir = Scratch::new();
+    let typo = dir.0.join("typo.json");
+    let step = json!({"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4, "operaton": "new"}});
+    std::fs::write(&typo, json!({"commands": [step.clone()]}).to_string()).unwrap();
+    let base = dir.0.join("base.solidcraft");
+    json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&base).output().unwrap());
+    let saved = dir.0.join("saved.solidcraft");
+    let start = dir.script();
+    let (typo, base, saved_arg, start) = (typo.to_str().unwrap(), base.to_str().unwrap(), saved.to_str().unwrap(), start.to_str().unwrap());
+    let paths = [&[][..], &["--in", base], &["--in", start], &["--results"], &["--timings"], &["--timings", "--profile"]];
+    let run = |level: Option<&str>, extra: &[&str]| {
+        std::fs::remove_file(&saved).ok();
+        let check = level.map(|l| ["--param-check", l]).into_iter().flatten();
+        cli().args(["run", typo, "--save", saved_arg]).args(check).args(extra).output().unwrap()
+    };
+
+    // Off, the default: the step runs as it always has, without a word.
+    let off = run(None, &[]);
+    assert!(off.status.success() && !String::from_utf8_lossy(&off.stderr).contains("operaton"), "{off:?}");
+    assert_eq!(body_count(&saved), 1);
+
+    // Warn: each path runs the step, saves, and reports it on stderr; `--results` keeps it too.
+    for extra in paths {
+        let output = run(Some("warn"), extra);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{extra:?}: {stderr}");
+        assert!(stderr.contains("step 1: unknown key `operaton`; did you mean `operation`?"), "{extra:?}: {stderr}");
+        assert!(saved.exists(), "{extra:?}");
+        if extra == ["--results"] {
+            let results: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert!(results[0]["param_warnings"][0].as_str().is_some_and(|w| w.contains("operaton")), "{results}");
+        }
+    }
+
+    // Strict: on each path the run stops at the step, and nothing is written.
+    for extra in paths {
+        let output = run(Some("strict"), extra);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains("unknown key `operaton`"), "{extra:?}: {stderr}");
+        assert!(!saved.exists(), "{extra:?}");
+    }
+
+    // Warn, with a later step that fails: the run fails, and the first step's warning is still
+    // reported, timed or not.
+    let failing = dir.0.join("failing.json");
+    let fail = json!({"command": "solid.extrude", "params": {"sketch": "Nope"}});
+    std::fs::write(&failing, json!({"commands": [step, fail]}).to_string()).unwrap();
+    for extra in [&[][..], &["--timings"]] {
+        let output = cli().arg("run").arg(&failing).args(["--param-check", "warn"]).args(extra).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains("step 1: unknown key `operaton`") && stderr.contains("no sketch `Nope`"), "{extra:?}: {stderr}");
+    }
+
+    // A level it doesn't know and a missing value fail.
+    for (bad, says) in [
+        (&["--param-check", "loud"][..], "--param-check wants off, warn or strict, not `loud`"),
+        (&["--param-check"], "run: --param-check wants off, warn or strict"),
+    ] {
+        let output = cli().args(["run", typo]).args(bad).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{bad:?}: {stderr}");
+        assert!(stderr.contains(says), "{bad:?}: {stderr}");
+    }
 }
 
 fn render_setup_script(dir: &Scratch, job: Value) -> PathBuf {
@@ -523,6 +687,7 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .unwrap(),
         );
         assert_eq!(result["preflight"]["resolved"]["executor"], "cpu-raytrace");
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "available_ram");
         assert_eq!(result["export"]["frame"]["executor"], "cpu-raytrace");
         assert_eq!(result["preflight"]["request"]["integrator"], "raytrace");
         assert_eq!(result["preflight"]["request"]["raytrace"].get("progressive"), options.get("progressive"));
@@ -539,11 +704,12 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .arg(&saved)
                 .args(["--setup", "Portable setup", "--out"])
                 .arg(&overridden)
-                .args(["--width", "12", "--height", "8", "--exposure", "1.25"])
+                .args(["--width", "12", "--height", "8", "--exposure", "1.25", "--legacy-memory-admission"])
                 .env("SOLIDCRAFT_GPU", "must-not-be-read-for-cpu")
                 .output()
                 .unwrap(),
         );
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "software_pool_only");
         assert_eq!(result["preflight"]["request"]["width"], 12);
         assert_eq!(result["preflight"]["request"]["height"], 8);
         assert_eq!(result["preflight"]["request"]["raytrace"]["exposure_ev"], 1.25);
@@ -623,7 +789,13 @@ fn typed_gpu_render_selects_its_host_without_a_progressive_runtime_flag() {
         let script = render_setup_script(&dir, job.clone());
         let out = dir.0.join("gpu.png");
         let mut command = cli();
-        command.arg("render").arg(&script).args(["--setup", "Portable setup", "--out"]).arg(&out).env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
+        command
+            .arg("render")
+            .arg(&script)
+            .args(["--setup", "Portable setup", "--out"])
+            .arg(&out)
+            .arg("--legacy-memory-admission")
+            .env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
         if job.is_null() {
             command.arg("--progressive");
         }
@@ -660,5 +832,69 @@ fn render_setup_overrides_obey_shared_validation_before_host_initialization() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains(message), "{error}");
         assert!(!out.exists());
+    }
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_policy() {
+    let scratch = Scratch::new();
+    let package = scratch.0.join("sample");
+    std::fs::create_dir(&package).unwrap();
+    let (package_id, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+    let wat = include_str!("../../../crates/engine/src/plugin/fixture.wat")
+        .replace("\r\n", "\n")
+        .replace("__PACKAGE__", package_id)
+        .replace("__VERSION__", version)
+        .replace(
+            "      call $box\n      call $box\n",
+            "      call $box\n      call $box i32.const 2048 memory.grow i32.const -1 i32.eq if unreachable end\n",
+        );
+    assert!(wat.contains("memory.grow"), "the fixture must actually request more than 128 MiB");
+    std::fs::write(package.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
+    std::fs::write(package.join("plugin.json"), manifest.to_string()).unwrap();
+    let args = json!({"path":package}).to_string();
+    let inspected = json_output(cli().args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(inspected["within_host_limits"], false);
+    let run = json!({"path":package,"approval":inspected["approval"],"entry":"make"}).to_string();
+    let refused = cli().args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("user host limits"));
+    let policy = scratch.0.join("limits.json");
+    std::fs::write(&policy, json!({"max_fuel":u64::MAX,"max_memory_mib":512}).to_string()).unwrap();
+    let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(high["within_host_limits"], true);
+    assert_eq!(high["host_limits"]["max_fuel"].as_u64(), Some(u64::MAX));
+    let output = cli().env_remove("RUST_LOG").arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("fuel_consumed="), "fuel diagnostics are opt-in");
+    let debug = cli().env_remove("RUST_LOG").arg("--debug").arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(debug.status.success(), "{}", String::from_utf8_lossy(&debug.stderr));
+    let stderr = String::from_utf8_lossy(&debug.stderr);
+    let fuel = stderr.lines().find(|line| line.contains("craft_plugin_wasm") && line.contains("fuel_consumed="));
+    assert!(fuel.is_some(), "--debug must include shared plugin runtime diagnostics: {stderr}");
+    let fuel = fuel.unwrap();
+    let counter = |name: &str| fuel.split_once(&format!("{name}=")).unwrap().1.split([',', ' ']).next().unwrap().parse::<u64>().unwrap();
+    let (consumed, remaining, limit) = (counter("fuel_consumed"), counter("fuel_remaining"), counter("fuel_limit"));
+    assert!(consumed > 0 && remaining < limit);
+    assert_eq!(limit, 200_000_000_000);
+    assert_eq!(consumed + remaining, limit);
+    let mut bom = vec![0xef, 0xbb, 0xbf];
+    bom.extend(json!({"max_memory_mib":512}).to_string().as_bytes());
+    std::fs::write(&policy, bom).unwrap();
+    let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(high["host_limits"]["max_fuel"].as_u64(), Some(100_000_000_000));
+    assert_eq!(high["host_limits"]["max_memory_mib"], 512);
+    assert_eq!(high["within_host_limits"], false, "omitted fields keep the original ceiling");
+    for extra in [vec!["exec", "plugin.inspect", "{}", "--connect", "127.0.0.1:1"], vec!["mcp"]] {
+        let output = cli().arg(format!("--plugin-limits={}", policy.display())).args(extra).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("controls local sessions"), "refuse before any connection attempt");
+    }
+    for bad in [json!({"max_fuel":0}), json!({"max_memory_mib":4097}), json!({"max_fuel":1.25}), json!({"unknown":true})] {
+        std::fs::write(&policy, bad.to_string()).unwrap();
+        let o = cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+        assert!(!o.status.success());
     }
 }

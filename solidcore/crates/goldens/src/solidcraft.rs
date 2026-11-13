@@ -1,0 +1,3125 @@
+//! `--solidcraft-cases`: whole-operation regression cases from SolidCraft, scored
+//! against analytic expected values.
+//!
+//! Each file in `fixtures/solidcraft/` holds the cases of one SolidCraft issue that was
+//! reproduced on SolidCraft's earlier kernel: the issue, a fixing PR if any, and its test,
+//! and per case a list of `SM_API`-level steps (primitives, booleans, fillet, chamfer, offset)
+//! whose last body, `result`, is checked against values known in closed form (volume,
+//! lump count, face bounds). They keep those bugs fixed once the operations run end to
+//! end on solidcore.
+//!
+//! Like `--ssi-corpus`, this is a correctness report, not the gate: it never changes a
+//! unit's golden and verdicts never fail the run. A step that reaches unported code stops
+//! the case as `DEFERRED` on the unit returned in [`SolidError::Unported`]; a step whose
+//! `SM_API` entry point has no Rust function yet is deferred on the unit that owns that
+//! entry point (`harness/callgraph/units.json`), and one with no `SM_API` entry point at
+//! all says so. Nothing is skipped or faked.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+use solidcore::blend::fillet_executive::api as fillet_api;
+use solidcore::blend::fillet_executive::FitKind;
+use solidcore::boolean::api_brep as boolean;
+use solidcore::curve::curve::Curve;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::geom::object::ObjectRef;
+use solidcore::geom::vector3d::{Point3, Vec3};
+use solidcore::kernel::Kernel;
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::offset::offset_faces::OffsetFacesExecutive;
+use solidcore::primitive::api_curves as curves;
+use solidcore::primitive::api_primitives as primitives;
+use solidcore::primitive::primitive_creation::SweepOptions;
+use solidcore::query::api_queries::brep_is_manifold_solid;
+use solidcore::surface::surface::p2::SurfaceKind;
+use solidcore::surface::surface::Surface;
+use solidcore::sweep::api_brep as sweeps;
+use solidcore::sweep::api_surfaces::create_skin_primitive;
+use solidcore::topology::brep::mirror::mirror;
+use solidcore::topology::brep::p1::regions;
+use solidcore::topology::brep::p2::ArenaNotifyState;
+use solidcore::topology::brep::p3;
+use solidcore::topology::proto_topology::p1::api_transform::{
+    api_rotate, api_translate, TransformObject,
+};
+use solidcore::topology::{Brep, FaceId};
+use solidcore::SolidError;
+
+use crate::ssi::glob_match;
+use crate::HarnessError;
+
+/// Relative accuracy passed to `SmApiBrepComputeVolume`: its finest (upstream clamps
+/// to `[1e-8, 1e-1]`). The cases check volumes to absolute tolerances as tight as
+/// `0.01` on `30603` (3e-7 relative), finer than `1e-6` integrates: at `1e-6` both
+/// engines measure the same B-rep of #3396's stack `0.157` over its closed form, at
+/// `1e-8` `0.0008`.
+pub const VOLUME_ACCURACY: f64 = 1e-8;
+
+/// The body a case's expectations are checked on.
+pub const RESULT: &str = "result";
+
+/// Verdicts, in summary order.
+pub const VERDICTS: [&str; 5] = ["PASS", "FAIL", "UNCHECKED", "ERROR", "DEFERRED"];
+
+type P3 = [f64; 3];
+
+/// One issue's file.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaseFile {
+    /// The SolidCraft issue.
+    pub issue: String,
+    /// The SolidCraft PR that fixed it (or, with no PR, the commit), if one exists.
+    #[serde(default)]
+    pub pr: Option<String>,
+    /// The test or issue reproduction the cases come from.
+    pub test: String,
+    /// What broke, where the geometry and values come from.
+    pub summary: String,
+    /// The cases.
+    pub cases: Vec<Case>,
+}
+
+/// One case: steps building `result`, and what `result` must be.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Case {
+    /// Unique within its file.
+    pub name: String,
+    /// What this variant is.
+    #[serde(default)]
+    pub note: Option<String>,
+    /// Opt-in `Kernel::fixes` fields (`UpstreamFixes`) the case runs with, by field name
+    /// (none: pinned SMLib behaviour).
+    #[serde(default)]
+    pub fixes: Vec<String>,
+    /// A known kernel refusal: only that step failing with that error defers the case;
+    /// any other error stays an ERROR, and a run that completes is checked as usual.
+    #[serde(default)]
+    pub refused_by: Option<Refusal>,
+    /// Run in order; each writes the body `id`.
+    pub steps: Vec<Step>,
+    /// Checked on the body `result`.
+    pub expect: Expect,
+}
+
+/// The one failure a case expects from the kernel, and the issue that tracks it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Refusal {
+    /// The issue (`owner/repo#n`) the case is deferred on.
+    pub issue: String,
+    /// The `id` of the step that fails.
+    pub step: String,
+    /// Text the step's error contains (the failing call and its status).
+    /// Empty or whitespace-only text never matches a refusal.
+    pub error: String,
+}
+
+/// One operation (an `SM_API` call, or a deferred higher-level recipe). `id` is the
+/// body it writes; `a`, `b` and `body` name bodies written by earlier steps.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Step {
+    /// `SmApiCreateBox`.
+    Box {
+        /// Body written.
+        id: String,
+        /// Lower corner.
+        origin: P3,
+        /// Size along X, Y, Z.
+        size: P3,
+    },
+    /// `SmApiCreateSphere`.
+    Sphere {
+        /// Body written.
+        id: String,
+        /// Centre.
+        center: P3,
+        /// Radius.
+        radius: f64,
+    },
+    /// `SmApiCreateCylinder`, built along Z and, for another `axis`, turned onto it
+    /// with `SmApiRotate` about `origin`.
+    Cylinder {
+        /// Body written.
+        id: String,
+        /// Centre of the base.
+        origin: P3,
+        /// Axis direction (default +Z).
+        #[serde(default = "z_axis")]
+        axis: P3,
+        /// Radius.
+        radius: f64,
+        /// Length along the axis.
+        height: f64,
+    },
+    /// A copy (`SmApiBrepCopy`) of `body` turned about the line through `point` along `axis`, with
+    /// `SmApiRotate`.
+    Rotate {
+        /// Body written.
+        id: String,
+        /// Body turned (left as it is).
+        body: String,
+        /// A point on the axis.
+        point: P3,
+        /// Axis direction.
+        axis: P3,
+        /// Angle in degrees.
+        degrees: f64,
+    },
+    /// `SmApiBooleanUnion(a, b)`.
+    Union {
+        /// Body written.
+        id: String,
+        /// Target.
+        a: String,
+        /// Tool.
+        b: String,
+    },
+    /// `SmApiBooleanDifference(a, b)`.
+    Difference {
+        /// Body written.
+        id: String,
+        /// Target.
+        a: String,
+        /// Tool.
+        b: String,
+        /// When given, `b` is cut once per position (moved with `SmApiTranslate`), one
+        /// cut after the other.
+        #[serde(default)]
+        pattern: Option<Pattern>,
+    },
+    /// `SmApiBooleanIntersection(a, b)`.
+    Intersection {
+        /// Body written.
+        id: String,
+        /// Target.
+        a: String,
+        /// Tool.
+        b: String,
+    },
+    /// `SmApiCreateLinearSweep`: the closed `profile` (built in `plane`, moved by
+    /// `origin`) swept `distance` along the plane's normal, capped at both ends.
+    Extrude {
+        /// Body written.
+        id: String,
+        /// Closed loops of segments, in the plane's (u, v) coordinates.
+        profile: Vec<Seg>,
+        /// Plane of the profile (default XY).
+        #[serde(default)]
+        plane: ProfilePlane,
+        /// Where the plane's origin sits.
+        #[serde(default)]
+        origin: P3,
+        /// Sweep length along the normal.
+        distance: f64,
+    },
+    /// `SmApiCreateRotationalSweep`: the closed `profile` (built in `plane`, moved by
+    /// `origin`) turned `angle_deg` about the axis through `axis_point` along
+    /// `axis_dir`, capped at both ends.
+    Revolve {
+        /// Body written.
+        id: String,
+        /// Closed loops of segments, in the plane's (u, v) coordinates.
+        profile: Vec<Seg>,
+        /// Plane of the profile (default XY).
+        #[serde(default)]
+        plane: ProfilePlane,
+        /// Where the plane's origin sits.
+        #[serde(default)]
+        origin: P3,
+        /// A point on the axis (global coordinates).
+        axis_point: P3,
+        /// Axis direction (global coordinates).
+        axis_dir: P3,
+        /// Turn in degrees.
+        angle_deg: f64,
+    },
+    /// A circle of `radius` swept along `path` (built in `plane`, moved by `origin`),
+    /// capped at both ends: `SmApiCreatePipeSweep` for one segment,
+    /// `SmApiCreateSweepAlongPlanarPath` of a circle normal to the path start for more.
+    Pipe {
+        /// Body written.
+        id: String,
+        /// Pipe radius.
+        radius: f64,
+        /// Lines and arcs joined end to end, in the plane's (u, v) coordinates.
+        path: Vec<Seg>,
+        /// Plane of the path (default XY).
+        #[serde(default)]
+        plane: ProfilePlane,
+        /// Where the plane's origin sits.
+        #[serde(default)]
+        origin: P3,
+    },
+    /// `SmApiCreateSkinPrimitive`: a solid lofted through `sections` in order, each one
+    /// closed profile, of `degree` in the loft direction (1, ruled, by default), capped
+    /// at the first and last section.
+    Loft {
+        /// Body written.
+        id: String,
+        /// The sections, at least two.
+        sections: Vec<LoftSection>,
+        /// Degree in the loft direction: 1 linear, 2 quadratic, 3 cubic.
+        #[serde(default = "ruled")]
+        degree: usize,
+    },
+    /// `SmApiCreateCurveSweep`: the closed `profile` (built in `plane`, moved by
+    /// `origin`, so its plane is normal to the path's start tangent) swept along the
+    /// single `path` arc or line (in the XY plane at the world origin), capped at both
+    /// ends. The profile keeps its place relative to the path's start.
+    Sweep {
+        /// Body written.
+        id: String,
+        /// Closed loops of segments, in the plane's (u, v) coordinates.
+        profile: Vec<Seg>,
+        /// Plane of the profile (default XY).
+        #[serde(default)]
+        plane: ProfilePlane,
+        /// Where the plane's origin sits.
+        #[serde(default)]
+        origin: P3,
+        /// The path: one arc or line in the plane's (u, v) coordinates.
+        path: Seg,
+    },
+    /// Reflection of `body` in the plane `normal = at`; the original is not changed, join
+    /// the two with a `union` step. Runs `SmBrep::Mirror` (`SM_API` has no mirror).
+    Mirror {
+        /// Body written.
+        id: String,
+        /// Body reflected.
+        body: String,
+        /// Axis the mirror plane is perpendicular to.
+        normal: MirrorAxis,
+        /// Where the plane cuts that axis.
+        #[serde(default)]
+        at: f64,
+    },
+    /// `SmApiFilletEdges`, circular section.
+    Fillet {
+        /// Body written.
+        id: String,
+        /// Body filleted.
+        body: String,
+        /// A point on each edge to fillet.
+        edges: Vec<P3>,
+        /// Radius.
+        radius: f64,
+    },
+    /// `SmApiFilletEdges` with a linear cross section (SolidCraft #2672), edges picked as for
+    /// `fillet`. The constant-radius solver takes `distance` as the radius of the rolling
+    /// ball: the leg on each face for a right-angle edge between planes, `distance * cot(α/2)`
+    /// for an interior angle `α`, and it varies along the edge on curved faces.
+    Chamfer {
+        /// Body written.
+        id: String,
+        /// Body chamfered.
+        body: String,
+        /// A point on each edge to chamfer.
+        edges: Vec<P3>,
+        /// Rolling-ball radius: the leg on each face for a right-angle edge between planes.
+        distance: f64,
+    },
+    /// `SmApiCreateLinearSweep` of the loops of `body`'s face through the point `face`
+    /// (their edges' curves, trimmed to the edges), swept `distance` along `direction`
+    /// and capped at both ends: the prism of that face, for a cut by a face's own
+    /// boundary (tangency-labs/solidcore#968). The face is the one through the point
+    /// ([`face_through`]).
+    SweepFace {
+        /// Body written.
+        id: String,
+        /// Body whose face is swept (left as it is).
+        body: String,
+        /// A point inside the face (or on its own seam).
+        face: P3,
+        /// Sweep direction (need not be unit length).
+        direction: P3,
+        /// Sweep length.
+        distance: f64,
+    },
+    /// Offset selected faces along their outward normals, the rest of the body
+    /// following (SolidCraft's Offset Face).
+    OffsetFaces {
+        /// Body written.
+        id: String,
+        /// Body offset.
+        body: String,
+        /// A point on each face to offset.
+        faces: Vec<P3>,
+        /// Offset distance (negative: inward).
+        distance: f64,
+    },
+    /// SolidCraft #3170: four inside flanges on an XY rectangle, then close the
+    /// corner between flanges 0 (front) and 3 (left). Flange order is front,
+    /// right, rear, left; negative angles reverse the bend direction.
+    SheetCorner {
+        /// Body written.
+        id: String,
+        /// Rectangle width and depth, starting at the origin.
+        base_size: [f64; 2],
+        /// Sheet thickness.
+        thickness: f64,
+        /// Inside bend radius.
+        bend_radius: f64,
+        /// Neutral-axis fraction used for the flat pattern.
+        k_factor: f64,
+        /// Flange height, using SolidCraft's inside-height convention.
+        height: f64,
+        /// Signed bend angle in degrees.
+        angle_degrees: f64,
+        /// Clearance between the covered end and covering wall's inner face.
+        gap: f64,
+        /// Notch relief width and depth.
+        relief_size: [f64; 2],
+        /// Corner notch size.
+        corner_relief: f64,
+        /// Which of flanges 0 and 3 covers the other.
+        covering: usize,
+        /// Overlap length: half the thickness for Partial, the thickness for Full.
+        overlap: f64,
+    },
+}
+
+/// One piece of a profile, in the profile plane's (u, v) coordinates. Pieces that share
+/// end points form closed loops; a profile may hold several (outer boundary and holes).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Seg {
+    /// `SmApiCreateLineSegment`.
+    Line {
+        /// Start.
+        from: [f64; 2],
+        /// End.
+        to: [f64; 2],
+    },
+    /// A closed polygon: one line segment per consecutive pair, the last back to the
+    /// first.
+    Polygon {
+        /// Corners, at least three.
+        points: Vec<[f64; 2]>,
+    },
+    /// `SmApiCreateArc`, counter-clockwise from `start_deg` to `end_deg`.
+    Arc {
+        /// Centre.
+        center: [f64; 2],
+        /// Radius.
+        radius: f64,
+        /// Start angle from +u.
+        start_deg: f64,
+        /// End angle from +u.
+        end_deg: f64,
+    },
+    /// `SmApiCreateCircle`, analytic.
+    Circle {
+        /// Centre.
+        center: [f64; 2],
+        /// Radius.
+        radius: f64,
+    },
+}
+
+/// One section of a `loft`: a closed profile built in `plane` and moved by `origin`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoftSection {
+    /// One closed loop of segments, in the plane's (u, v) coordinates.
+    pub profile: Vec<Seg>,
+    /// Plane of the profile (default XY).
+    #[serde(default)]
+    pub plane: ProfilePlane,
+    /// Where the plane's origin sits.
+    #[serde(default)]
+    pub origin: P3,
+}
+
+/// The plane a profile is drawn in, as a right-handed rotation of XY.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfilePlane {
+    /// u along X, v along Y, normal +Z.
+    #[default]
+    Xy,
+    /// u along Y, v along Z, normal +X.
+    Yz,
+    /// u along Z, v along X, normal +Y.
+    Zx,
+    /// u along X, v along Z, normal -Y (XY turned +90 degrees about X).
+    Xz,
+}
+
+/// The axis a mirror plane is perpendicular to.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MirrorAxis {
+    /// The plane `x = at`.
+    X,
+    /// The plane `y = at`.
+    Y,
+    /// The plane `z = at`.
+    Z,
+}
+
+/// A grid of positions: `pitch[0] * i + pitch[1] * j` for `i < count[0]`,
+/// `j < count[1]`, `i` varying fastest.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Pattern {
+    /// Positions along each pitch vector.
+    pub count: [usize; 2],
+    /// The two pitch vectors.
+    pub pitch: [P3; 2],
+}
+
+/// What `result` must be. Absent fields are not checked.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Expect {
+    /// Bounded regions (`0`: the operation leaves nothing).
+    #[serde(default)]
+    pub lumps: Option<usize>,
+    /// Enclosed volume.
+    #[serde(default)]
+    pub volume: Option<VolumeExpect>,
+    /// At most this many faces on cylinders.
+    #[serde(default)]
+    pub cylinder_faces_max: Option<usize>,
+    /// The volume removed from an earlier body: its volume minus `result`'s, for an
+    /// operation whose result has no closed-form volume of its own
+    /// (tangency-labs/solidcore#968).
+    #[serde(default)]
+    pub removed: Option<RemovedExpect>,
+    /// Sheet-corner geometry and flat-pattern invariants from SolidCraft #3170.
+    #[serde(default)]
+    pub sheet_corner: Option<SheetCornerExpect>,
+    /// The kernel must refuse: the case passes when step `step` fails with an error
+    /// containing `error`, and fails when every step completes. Nothing else is checked
+    /// then (there is no `result`). Unlike the case's `refused_by` (a known defect that
+    /// defers the case), the refusal is the correct answer here.
+    #[serde(default)]
+    pub refused: Option<RefusedExpect>,
+    /// Whether `result` must be a closed manifold solid (`SmBrep::IsManifoldSolid`): a
+    /// blend that leaves an open or non-manifold body must not pass on its volume alone.
+    #[serde(default)]
+    pub manifold: Option<bool>,
+}
+
+/// A refusal a case expects: the step that fails and text its error contains.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefusedExpect {
+    /// The `id` of the step that must fail.
+    pub step: String,
+    /// Text the step's error contains. Empty or whitespace-only text is invalid.
+    pub error: String,
+    /// The largest size that builds, which the refusal must report
+    /// (`SolidError::FilletRefused`'s `fit`).
+    #[serde(default)]
+    pub fit_size: Option<FitSizeExpect>,
+}
+
+/// A refusal's expected largest size that builds.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FitSizeExpect {
+    /// The size.
+    pub value: f64,
+    /// Absolute tolerance.
+    pub tol: f64,
+    /// What it sizes (default `radius`).
+    #[serde(default = "radius_kind")]
+    pub kind: FitKindName,
+    /// Where the value comes from (SolidCraft's test, the fork, a closed form).
+    pub source: String,
+}
+
+fn radius_kind() -> FitKindName {
+    FitKindName::Radius
+}
+
+/// A valid folded solid, one connected non-overlapping flat pattern whose area
+/// changes when the corner is joined, and volume matching flat area times thickness.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SheetCornerExpect {
+    /// Minimum signed distances of flange ends 0 and 3 to the other wall's inner
+    /// plane. Covering is negative overlap; covered is positive gap.
+    pub end_face_distances: [f64; 2],
+    /// Absolute tolerance of the signed-distance checks, in millimetres.
+    pub distance_tol: f64,
+    /// Number of connected flat-pattern regions.
+    pub flat_regions: usize,
+    /// Relative tolerance of volume against flat area times thickness.
+    pub volume_relative_tol: f64,
+}
+
+/// An analytic volume removed from the body `from`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovedExpect {
+    /// The body before the removal, written by an earlier step.
+    pub from: String,
+    /// mm^3.
+    pub value: f64,
+    /// Absolute tolerance, mm^3.
+    pub tol: f64,
+    /// How `value` was derived.
+    pub formula: String,
+}
+
+/// An analytic volume.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VolumeExpect {
+    /// mm^3.
+    pub value: f64,
+    /// Absolute tolerance, mm^3.
+    pub tol: f64,
+    /// How `value` was derived.
+    pub formula: String,
+}
+
+fn z_axis() -> P3 {
+    [0.0, 0.0, 1.0]
+}
+
+fn ruled() -> usize {
+    1
+}
+
+/// A loaded case: `<file stem>/<name>` and its file.
+#[derive(Debug, Clone)]
+pub struct Loaded {
+    /// `<file stem>/<name>`.
+    pub id: String,
+    /// The file's fields (shared by its cases).
+    pub file: CaseFile,
+    /// The case.
+    pub case: Case,
+}
+
+/// The case directory.
+pub fn cases_dir(root: &Path) -> PathBuf {
+    root.join("fixtures").join("solidcraft")
+}
+
+/// Every case in `dir` whose id matches `glob`, sorted by file then file order, after
+/// checking each case ([`validate`]).
+///
+/// # Errors
+///
+/// An unreadable or invalid file, or duplicate case names in one file.
+pub fn load(dir: &Path, glob: Option<&str>) -> Result<Vec<Loaded>, HarnessError> {
+    let rd =
+        std::fs::read_dir(dir).map_err(|e| HarnessError::new(format!("{}: {e}", dir.display())))?;
+    let mut files: Vec<PathBuf> = rd
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .collect();
+    files.sort();
+    let mut out = Vec::new();
+    for path in files {
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| HarnessError::new(format!("{}: {e}", path.display())))?;
+        let file: CaseFile = serde_json::from_str(&text)
+            .map_err(|e| HarnessError::new(format!("{}: {e}", path.display())))?;
+        let mut names = std::collections::BTreeSet::new();
+        for case in &file.cases {
+            if !names.insert(case.name.as_str()) {
+                return Err(HarnessError::new(format!(
+                    "{}: duplicate case `{}`",
+                    path.display(),
+                    case.name
+                )));
+            }
+            validate(case).map_err(|e| {
+                HarnessError::new(format!("{}: {}: {e}", path.display(), case.name))
+            })?;
+        }
+        for case in &file.cases {
+            let id = format!("{stem}/{}", case.name);
+            if glob.is_none_or(|g| glob_match(g, &id)) {
+                out.push(Loaded {
+                    id,
+                    file: file.clone(),
+                    case: case.clone(),
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+impl Step {
+    /// The body this step writes.
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Box { id, .. }
+            | Self::Sphere { id, .. }
+            | Self::Cylinder { id, .. }
+            | Self::Rotate { id, .. }
+            | Self::Union { id, .. }
+            | Self::Difference { id, .. }
+            | Self::Intersection { id, .. }
+            | Self::Extrude { id, .. }
+            | Self::Revolve { id, .. }
+            | Self::Pipe { id, .. }
+            | Self::Loft { id, .. }
+            | Self::Sweep { id, .. }
+            | Self::Mirror { id, .. }
+            | Self::Fillet { id, .. }
+            | Self::Chamfer { id, .. }
+            | Self::OffsetFaces { id, .. }
+            | Self::SweepFace { id, .. }
+            | Self::SheetCorner { id, .. } => id,
+        }
+    }
+
+    /// The bodies this step reads.
+    pub fn inputs(&self) -> Vec<&str> {
+        match self {
+            Self::Box { .. }
+            | Self::Sphere { .. }
+            | Self::Cylinder { .. }
+            | Self::Extrude { .. }
+            | Self::Revolve { .. }
+            | Self::Pipe { .. }
+            | Self::Loft { .. }
+            | Self::Sweep { .. }
+            | Self::SheetCorner { .. } => Vec::new(),
+            Self::Union { a, b, .. }
+            | Self::Difference { a, b, .. }
+            | Self::Intersection { a, b, .. } => vec![a, b],
+            Self::Fillet { body, .. }
+            | Self::Chamfer { body, .. }
+            | Self::OffsetFaces { body, .. }
+            | Self::SweepFace { body, .. }
+            | Self::Rotate { body, .. }
+            | Self::Mirror { body, .. } => vec![body],
+        }
+    }
+}
+
+/// A profile has pieces, and every number in them is finite.
+fn valid_profile(profile: &[Seg]) -> bool {
+    let pt = |p: &[f64; 2]| p.iter().all(|x| x.is_finite());
+    !profile.is_empty()
+        && profile.iter().all(|s| match s {
+            Seg::Line { from, to } => pt(from) && pt(to),
+            Seg::Polygon { points } => points.len() >= 3 && points.iter().all(pt),
+            Seg::Arc {
+                center,
+                radius,
+                start_deg,
+                end_deg,
+            } => pt(center) && radius.is_finite() && start_deg.is_finite() && end_deg.is_finite(),
+            Seg::Circle { center, radius } => pt(center) && radius.is_finite(),
+        })
+}
+
+/// A sweep path has only lines and arcs (and its numbers are finite, checked by
+/// [`valid_profile`]).
+fn valid_path_segments(path: &[Seg]) -> bool {
+    path.iter()
+        .all(|s| matches!(s, Seg::Line { .. } | Seg::Arc { .. }))
+}
+
+/// Every step reads only bodies written before it, the last step writes [`RESULT`],
+/// and every number is finite.
+///
+/// # Errors
+///
+/// What is wrong, as text.
+pub fn validate(case: &Case) -> Result<(), String> {
+    let mut defined = std::collections::BTreeSet::new();
+    for (i, step) in case.steps.iter().enumerate() {
+        for input in step.inputs() {
+            if !defined.contains(input) {
+                return Err(format!("step {i} reads `{input}` before it is written"));
+            }
+        }
+        let finite = match step {
+            Step::Box { origin, size, .. } => origin.iter().chain(size).all(|x| x.is_finite()),
+            Step::Sphere { center, radius, .. } => {
+                center.iter().all(|x| x.is_finite()) && radius.is_finite()
+            }
+            Step::Cylinder {
+                origin,
+                axis,
+                radius,
+                height,
+                ..
+            } => {
+                origin.iter().chain(axis).all(|x| x.is_finite())
+                    && radius.is_finite()
+                    && height.is_finite()
+            }
+            Step::Rotate {
+                point,
+                axis,
+                degrees,
+                ..
+            } => point.iter().chain(axis).all(|x| x.is_finite()) && degrees.is_finite(),
+            Step::Difference {
+                pattern: Some(p), ..
+            } => p.pitch.iter().flatten().all(|x| x.is_finite()),
+            Step::Extrude {
+                profile,
+                origin,
+                distance,
+                ..
+            } => {
+                origin.iter().all(|x| x.is_finite())
+                    && distance.is_finite()
+                    && valid_profile(profile)
+            }
+            Step::Revolve {
+                profile,
+                origin,
+                axis_point,
+                axis_dir,
+                angle_deg,
+                ..
+            } => {
+                origin
+                    .iter()
+                    .chain(axis_point)
+                    .chain(axis_dir)
+                    .all(|x| x.is_finite())
+                    && angle_deg.is_finite()
+                    && valid_profile(profile)
+            }
+            Step::Pipe {
+                radius,
+                path,
+                origin,
+                ..
+            } => {
+                radius.is_finite()
+                    && origin.iter().all(|x| x.is_finite())
+                    && valid_path_segments(path)
+                    && valid_profile(path)
+            }
+            Step::Loft { sections, .. } => {
+                sections.len() >= 2
+                    && sections.iter().all(|s| {
+                        s.origin.iter().all(|x| x.is_finite()) && valid_profile(&s.profile)
+                    })
+            }
+            Step::Mirror { at, .. } => at.is_finite(),
+            Step::Sweep {
+                profile,
+                origin,
+                path,
+                ..
+            } => {
+                origin.iter().all(|x| x.is_finite())
+                    && valid_profile(profile)
+                    && valid_path_segments(std::slice::from_ref(path))
+            }
+            Step::Fillet { edges, radius, .. } => {
+                edges.iter().flatten().all(|x| x.is_finite()) && radius.is_finite()
+            }
+            Step::Chamfer {
+                edges, distance, ..
+            } => edges.iter().flatten().all(|x| x.is_finite()) && distance.is_finite(),
+            Step::OffsetFaces {
+                faces, distance, ..
+            } => faces.iter().flatten().all(|x| x.is_finite()) && distance.is_finite(),
+            Step::SweepFace {
+                face,
+                direction,
+                distance,
+                ..
+            } => {
+                face.iter().chain(direction).all(|x| x.is_finite())
+                    && direction.iter().any(|x| *x != 0.0)
+                    && distance.is_finite()
+                    && *distance > 0.0
+            }
+            Step::SheetCorner {
+                base_size,
+                thickness,
+                bend_radius,
+                k_factor,
+                height,
+                angle_degrees,
+                gap,
+                relief_size,
+                corner_relief,
+                covering,
+                overlap,
+                ..
+            } => {
+                if !matches!(covering, 0 | 3)
+                    || !base_size
+                        .iter()
+                        .chain(relief_size)
+                        .all(|x| x.is_finite() && *x > 0.0)
+                    || ![
+                        *thickness,
+                        *bend_radius,
+                        *height,
+                        *gap,
+                        *corner_relief,
+                        *overlap,
+                    ]
+                    .iter()
+                    .all(|x| x.is_finite() && *x > 0.0)
+                    || !k_factor.is_finite()
+                    || !(0.0..=1.0).contains(k_factor)
+                    || !angle_degrees.is_finite()
+                    || *angle_degrees == 0.0
+                    || angle_degrees.abs() >= 180.0
+                    || overlap > thickness
+                {
+                    return Err(format!("step {i} has invalid sheet-corner parameters"));
+                }
+                true
+            }
+            Step::Union { .. } | Step::Difference { .. } | Step::Intersection { .. } => true,
+        };
+        if !finite {
+            return Err(format!("step {i} has a non-finite number"));
+        }
+        defined.insert(step.id());
+    }
+    if case.steps.last().map(Step::id) != Some(RESULT) {
+        return Err(format!("the last step must write `{RESULT}`"));
+    }
+    if let Some(v) = &case.expect.volume {
+        if !(v.value.is_finite() && v.tol.is_finite() && v.tol > 0.0) {
+            return Err("volume value and tol must be finite, tol positive".into());
+        }
+    }
+    if let Some(r) = &case.expect.removed {
+        if !(r.value.is_finite() && r.tol.is_finite() && r.tol > 0.0) {
+            return Err("removed value and tol must be finite, tol positive".into());
+        }
+        if r.from == RESULT || !defined.contains(r.from.as_str()) {
+            return Err(format!(
+                "removed reads `{}`, which no step before the last writes",
+                r.from
+            ));
+        }
+    }
+    if let Some(r) = &case.expect.refused {
+        if r.error.trim().is_empty() {
+            return Err("refused needs the text its error contains".into());
+        }
+        if let Some(f) = &r.fit_size {
+            if !(f.value.is_finite() && f.value >= 0.0 && f.tol.is_finite() && f.tol > 0.0) {
+                return Err("refused fit_size value must be finite and >= 0, tol positive".into());
+            }
+        }
+        if !case.steps.iter().any(|s| s.id() == r.step) {
+            return Err(format!("refused names `{}`, which no step writes", r.step));
+        }
+        let e = &case.expect;
+        if e.lumps.is_some()
+            || e.volume.is_some()
+            || e.removed.is_some()
+            || e.cylinder_faces_max.is_some()
+            || e.sheet_corner.is_some()
+            || e.manifold.is_some()
+        {
+            return Err(
+                "a refused case has no result to check: drop its other expectations".into(),
+            );
+        }
+    }
+    if let Some(e) = &case.expect.sheet_corner {
+        if !e.end_face_distances.iter().all(|x| x.is_finite())
+            || !e.distance_tol.is_finite()
+            || e.distance_tol <= 0.0
+            || !e.volume_relative_tol.is_finite()
+            || e.volume_relative_tol <= 0.0
+            || e.flat_regions == 0
+        {
+            return Err("invalid sheet-corner expectations".into());
+        }
+    }
+    Ok(())
+}
+
+// ---- the Rust engine -----------------------------------------------------------------
+
+/// What blocks a deferred case.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Deferral {
+    /// The plan unit that will port the missing code, or `no SM_API entry point`.
+    pub blocked_by: String,
+    /// The upstream symbol (or what is missing).
+    pub symbol: String,
+}
+
+/// What `result` measured as.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Measured {
+    /// `SmApiBrepComputeVolume`.
+    pub volume: f64,
+    /// Regions other than the infinite one.
+    pub lumps: usize,
+    /// Faces, edges and vertices (`GetNumFaces`, `GetNumEdges`, `GetNumVertices`).
+    pub topology: [usize; 3],
+    /// Faces on a cylinder (`SmCone::IsCylinder`).
+    pub cylinder_faces: usize,
+    /// The volume of the case's `removed.from` body minus `volume`, when it asks for it.
+    pub removed: Option<f64>,
+    /// `SmBrep::IsManifoldSolid`: a closed solid with every edge on two faces.
+    pub manifold: bool,
+}
+
+/// How a case's run ended.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Run {
+    /// Every step ran; `result` measured.
+    Done(Measured),
+    /// A step reached code that is not ported yet.
+    Deferred(Deferral),
+    /// A step returned an error other than `Unported`.
+    Error(String),
+    /// A fillet or chamfer step was refused as too large, with the largest size that
+    /// builds it (`SolidError::FilletRefused`, WR-696).
+    /// Scored as an `ERROR`, except by a case that expects the refusal.
+    Refused {
+        /// The error, prefixed with the step as for [`Run::Error`].
+        message: String,
+        /// The largest size that builds the blend.
+        fit: Fit,
+    },
+}
+
+/// A refusal's largest size that builds (`FitSize` without its edge).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fit {
+    /// The size: `> 0`, or `0` when no size builds.
+    pub size: f64,
+    /// What it sizes.
+    pub kind: FitKindName,
+}
+
+/// What a [`Fit`] sizes (`FitKind`), as a case names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FitKindName {
+    /// A constant ball's radius (a round's radius, an equal chamfer's solver radius).
+    Radius,
+    /// The factor on two unequal offsets.
+    Scale,
+    /// A chord width.
+    Chord,
+}
+
+impl FitKindName {
+    fn of(kind: FitKind) -> Self {
+        match kind {
+            FitKind::Radius => Self::Radius,
+            FitKind::Scale => Self::Scale,
+            FitKind::Chord => Self::Chord,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Radius => "radius",
+            Self::Scale => "scale",
+            Self::Chord => "chord",
+        }
+    }
+}
+
+fn p3(p: P3) -> Point3 {
+    let [x, y, z] = p;
+    Vec3::new(x, y, z)
+}
+
+fn solid(e: &SolidError) -> Run {
+    match e {
+        SolidError::Unported { upstream, unit } => Run::Deferred(Deferral {
+            blocked_by: (*unit).to_string(),
+            symbol: (*upstream).to_string(),
+        }),
+        SolidError::FilletRefused { fit, .. } => Run::Refused {
+            message: e.to_string(),
+            fit: Fit {
+                size: fit.size,
+                kind: FitKindName::of(fit.kind),
+            },
+        },
+        // a typed blend failure reads as the bare `Upstream` it replaced did
+        // ("{operation}: upstream status N[ at entity]"), so a case's expected refusal text
+        // still matches (#13790)
+        e if e.blend_failure().is_some() => match crate::output::blend_status(e) {
+            Some(code) => Run::Error(format!(
+                "{}: upstream status {code}{}",
+                e.operation(),
+                e.entity()
+                    .map_or_else(String::new, |at| format!(" at {at}"))
+            )),
+            None => Run::Error(e.to_string()),
+        },
+        _ => Run::Error(e.to_string()),
+    }
+}
+
+/// `SM_FILLET_CIRCULAR`: any cross-section type other than linear (0) or blend curve (2).
+const FILLET_CIRCULAR: u32 = 1;
+
+/// `SM_FILLET_LINEAR`: a planar cross section (a chamfer).
+const FILLET_LINEAR: u32 = 0;
+
+/// Key domain of the copy a fillet step makes of its input.
+const FILLET_COPY_DOMAIN: u64 = 999;
+
+/// The operand `id` for the next step. A plain [`Clone`] resets every geometry owner, and
+/// a B-rep cache made from the clone then holds no edge or face, so the boolean's ray
+/// fires found nothing and classified a nested operand's faces as outside (a void was
+/// lost). `clone_standing_for_self` keeps the owners, as upstream's move does.
+fn take(bodies: &BTreeMap<String, Brep>, id: &str) -> Result<Brep, Run> {
+    bodies
+        .get(id)
+        .ok_or_else(|| Run::Error(format!("no body `{id}`")))?
+        .clone_standing_for_self()
+        .map_err(|e| solid(&e))
+}
+
+/// `SmApiBrepCopy(b)`: a copy that owns its geometry, so a later `SmApiTranslate`
+/// moves its curves and surfaces with its vertices. A plain [`Clone`] is not upstream's
+/// copy: its geometry keeps the source's owner names and stays put when the clone is
+/// transformed. Copy `n` names its objects in its own key domain.
+fn copy(k: &mut Kernel, b: &Brep, n: u64) -> Result<Brep, Run> {
+    let named = |entity, domain: u64| {
+        let r = p3::topology_ref(0, entity);
+        ObjectRef {
+            type_code: r.type_code,
+            key: ObjectKey(domain + r.type_code as u64 * 1_000_000 + (r.key.0 & 0xffff_ffff)),
+        }
+    };
+    let target_key = |entity| named(entity, n * 100_000_000);
+    let mut state = ArenaNotifyState::new(&Brep::new());
+    let mut env = state.env(None);
+    env.key_of = &target_key;
+    p3::api_brep_copy(k, &mut env, Some(b), &|entity| named(entity, 0)).map_err(|e| solid(&e))
+}
+
+/// `SmApiFilletEdges` on the edges picked by `points` of body `name`, with one constant
+/// `value` and cross section `xsect_type`. The body is filleted in place, as
+/// `SmApiFilletEdges` edits its B-rep: a `Clone` would keep the source's geometry owner
+/// names, which the fillet resolves back to their faces and edges.
+fn fillet_picked_edges(
+    k: &mut Kernel,
+    bodies: &BTreeMap<String, Brep>,
+    name: &str,
+    points: &[P3],
+    value: f64,
+    xsect_type: u32,
+) -> Result<Brep, Run> {
+    let source = bodies
+        .get(name)
+        .ok_or_else(|| Run::Error(format!("no body `{name}`")))?;
+    let mut b = copy(k, source, FILLET_COPY_DOMAIN)?;
+    let picked = points
+        .iter()
+        .map(|point| fillet_edge_at_point(k, &b, p3(*point)))
+        .collect::<Result<Vec<_>, Run>>()?;
+    fillet_api::fillet_edges(k, &mut b, &picked, value, xsect_type, 1, 1.0)
+        .map_err(|e| solid(&e))?;
+    Ok(b)
+}
+
+/// A fixture point must name exactly one nearby edge between distinct faces.
+/// The distance bound validates the selector only; it does not change fillet tolerances.
+fn fillet_edge_at_point(
+    k: &Kernel,
+    body: &Brep,
+    point: Point3,
+) -> Result<solidcore::topology::EdgeId, Run> {
+    use solidcore::geom::global_solver::SolverOperation;
+    use solidcore::topology::edge;
+
+    if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
+        return Err(Run::Error("fillet edge point is not finite".into()));
+    }
+    let tolerance = 1.0e-6 * (1.0 + point.length());
+    if !tolerance.is_finite() {
+        return Err(Run::Error("fillet edge point is too large".into()));
+    }
+    let mut selected = None;
+    for id in solidcore::query::api_queries::get_edges(body).map_err(|e| solid(&e))? {
+        // GetFaces deduplicates actual FaceIds: a closed surface's seam has one.
+        if edge::faces(body, id, None).map_err(|e| solid(&e))?.len() < 2 {
+            continue;
+        }
+        let Some(curve) = edge::curve(body, id).map_err(|e| solid(&e))? else {
+            continue;
+        };
+        let interval = edge::interval(body, id).map_err(|e| solid(&e))?;
+        let dropped = curve
+            .drop_point(
+                k,
+                &interval,
+                point,
+                None,
+                tolerance,
+                None,
+                SolverOperation::Minimize,
+            )
+            .map_err(|e| solid(&e))?;
+        if !dropped.success
+            || !dropped.parameter.is_finite()
+            || !dropped.distance.is_finite()
+            || dropped.distance < 0.0
+            || dropped.distance > tolerance
+        {
+            continue;
+        }
+        if selected.replace(id).is_some() {
+            return Err(Run::Error(
+                "fillet edge point matches multiple eligible edges".into(),
+            ));
+        }
+    }
+    selected.ok_or_else(|| Run::Error("fillet edge point matches no eligible edge".into()))
+}
+
+/// `body`'s face through `point`: the one whose surface holds the point within
+/// `1e-6 (1 + |point|)` and which classifies its parameter point inside
+/// (`SmFace::PointClassify`), or on an edge of its boundary that borders no other face
+/// (`SmEdge::GetFaces` lists it alone: its own seam, or a sheet's free edge); exactly one
+/// must. A point on an edge between two faces or on a vertex picks none.
+fn face_through(k: &Kernel, body: &mut Brep, point: Point3) -> Result<FaceId, Run> {
+    use solidcore::intersect::point_class::{PointClassType, PointClassification};
+    use solidcore::query::face::p2::{point_classify, PointClassifyOptions};
+    use solidcore::surface::surface::p4::NoObject;
+    use solidcore::surface::surface::p5::DropPointOptions;
+    use solidcore::topology::edge;
+    use solidcore::EntityRef;
+
+    if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
+        return Err(Run::Error("face point is not finite".into()));
+    }
+    let tolerance = 1.0e-6 * (1.0 + point.length());
+    let mut selected = None;
+    for f in body.face_list().to_vec() {
+        let Some(surface) = body.face(f).map_err(|e| solid(&e))?.surface.clone() else {
+            continue;
+        };
+        let domain = surface
+            .natural_uv_domain_with_nurb(k)
+            .map_err(|e| solid(&e))?;
+        let dropped = surface
+            .drop_point::<NoObject>(k, point, &domain, &DropPointOptions::default())
+            .map_err(|e| solid(&e))?;
+        // (a NaN gap is no match)
+        if !dropped.success || dropped.gap.is_nan() || dropped.gap > tolerance {
+            continue;
+        }
+        let mut pc = PointClassification::new(tolerance);
+        point_classify(
+            k,
+            body,
+            f,
+            dropped.result_uv,
+            &mut pc,
+            PointClassifyOptions::default(),
+        )
+        .map_err(|e| solid(&e))?;
+        let on_face = match (pc.point_class(), pc.edge_object()) {
+            (PointClassType::Face, _) => true,
+            (PointClassType::Edge, Some(EntityRef::Edge(e))) => {
+                edge::faces(body, e, None).map_err(|e| solid(&e))? == [f]
+            }
+            _ => false,
+        };
+        if !on_face {
+            continue;
+        }
+        if selected.replace(f).is_some() {
+            return Err(Run::Error("face point matches multiple faces".into()));
+        }
+    }
+    selected.ok_or_else(|| Run::Error("face point matches no face".into()))
+}
+
+/// The curves of the loops of `body`'s face through `point` ([`face_through`]), each its
+/// edge's curve trimmed to the edge (a copy), in loop order.
+fn face_boundary_curves(k: &Kernel, body: &mut Brep, point: Point3) -> Result<Vec<Curve>, Run> {
+    use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
+    use solidcore::topology::{edge, edgeuse, face, loopuse};
+
+    let f = face_through(k, body, point)?;
+    let mut out = Vec::new();
+    for l in face::p2::loops(body, f, false, None).map_err(|e| solid(&e))? {
+        for eu in loopuse::loop_edgeuses(body, l).map_err(|e| solid(&e))? {
+            let e = edgeuse::p1::edge(body, eu)
+                .map_err(|e| solid(&e))?
+                .ok_or_else(|| Run::Error("edge use without edge".into()))?;
+            let mut curve = edge::curve(body, e)
+                .map_err(|e| solid(&e))?
+                .ok_or_else(|| Run::Error("edge without curve".into()))?
+                .clone();
+            let mut interval = edge::interval(body, e).map_err(|e| solid(&e))?;
+            if interval != curve.natural_interval() {
+                curve
+                    .trim(k, &mut interval, TrimMode::Notify)
+                    .map_err(|e| solid(&e))?;
+            }
+            out.push(curve);
+        }
+    }
+    Ok(out)
+}
+
+/// A cylinder along Z turned onto `axis` about `origin`.
+fn cylinder(k: &mut Kernel, origin: P3, axis: P3, radius: f64, height: f64) -> Result<Brep, Run> {
+    let mut b =
+        primitives::create_cylinder(k, p3(origin), radius, height).map_err(|e| solid(&e))?;
+    let a = p3(axis).unitize().map_err(|e| solid(&e))?;
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let cos = a.dot(z).clamp(-1.0, 1.0);
+    if cos < 1.0 {
+        let turn = if cos > -1.0 {
+            z.cross(a)
+        } else {
+            Vec3::new(1.0, 0.0, 0.0)
+        };
+        api_rotate(
+            k,
+            Some(TransformObject::Brep(&mut b)),
+            p3(origin),
+            turn,
+            cos.acos().to_degrees(),
+        )
+        .map_err(|e| solid(&e))?;
+    }
+    Ok(b)
+}
+
+/// The curves of `profile`, drawn in XY, turned onto `plane` about the origin and moved
+/// by `origin`.
+fn profile_curves(
+    k: &mut Kernel,
+    profile: &[Seg],
+    plane: ProfilePlane,
+    origin: P3,
+) -> Result<Vec<Curve>, Run> {
+    let at = |[u, v]: [f64; 2]| Vec3::new(u, v, 0.0);
+    let mut out: Vec<Curve> = Vec::new();
+    for seg in profile {
+        match seg {
+            Seg::Line { from, to } => {
+                let l = curves::create_line_segment(at(*from), at(*to)).map_err(|e| solid(&e))?;
+                out.push(Curve::from(l));
+            }
+            Seg::Polygon { points } => {
+                // Each point to the next, the last back to the first.
+                for (from, to) in points.iter().zip(points.iter().cycle().skip(1)) {
+                    let l =
+                        curves::create_line_segment(at(*from), at(*to)).map_err(|e| solid(&e))?;
+                    out.push(Curve::from(l));
+                }
+            }
+            Seg::Arc {
+                center,
+                radius,
+                start_deg,
+                end_deg,
+            } => {
+                let a = curves::create_arc(at(*center), *radius, *start_deg, *end_deg)
+                    .map_err(|e| solid(&e))?;
+                out.push(Curve::from(a));
+            }
+            Seg::Circle { center, radius } => {
+                let c = curves::create_analytic_circle(k, at(*center), *radius)
+                    .map_err(|e| solid(&e))?;
+                out.push(Curve::from(c));
+            }
+        }
+    }
+    // XY -> YZ is the turn x -> y -> z -> x: 120 degrees about (1, 1, 1); ZX is 240.
+    // XZ is XY turned 90 degrees about X, so u is x and v is z.
+    let turn = match plane {
+        ProfilePlane::Xy => None,
+        ProfilePlane::Yz => Some((Vec3::new(1.0, 1.0, 1.0), 120.0)),
+        ProfilePlane::Zx => Some((Vec3::new(1.0, 1.0, 1.0), 240.0)),
+        ProfilePlane::Xz => Some((Vec3::X, 90.0)),
+    };
+    for c in &mut out {
+        if let Some((axis, deg)) = turn {
+            api_rotate(
+                k,
+                Some(TransformObject::Curve(c)),
+                Vec3::new(0.0, 0.0, 0.0),
+                axis,
+                deg,
+            )
+            .map_err(|e| solid(&e))?;
+        }
+        api_translate(k, Some(TransformObject::Curve(c)), p3(origin)).map_err(|e| solid(&e))?;
+    }
+    Ok(out)
+}
+
+fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -> Result<(), Run> {
+    let body = match step {
+        Step::Box { origin, size, .. } => {
+            let [x, y, z] = *size;
+            primitives::create_box(k, p3(*origin), x, y, z).map_err(|e| solid(&e))?
+        }
+        Step::Sphere { center, radius, .. } => {
+            primitives::create_sphere(k, p3(*center), *radius).map_err(|e| solid(&e))?
+        }
+        Step::Cylinder {
+            origin,
+            axis,
+            radius,
+            height,
+            ..
+        } => cylinder(k, *origin, *axis, *radius, *height)?,
+        Step::Rotate {
+            body,
+            point,
+            axis,
+            degrees,
+            ..
+        } => {
+            // A real copy (see `copy`): a plain clone would stay put when turned.
+            let source = take(bodies, body)?;
+            let mut turned = copy(k, &source, 1000 + bodies.len() as u64)?;
+            api_rotate(
+                k,
+                Some(TransformObject::Brep(&mut turned)),
+                p3(*point),
+                Vec3::new(axis[0], axis[1], axis[2]),
+                *degrees,
+            )
+            .map_err(|e| solid(&e))?;
+            turned
+        }
+        Step::Union { a, b, .. } => {
+            boolean::boolean_union(k, take(bodies, a)?, take(bodies, b)?).map_err(|e| solid(&e))?
+        }
+        Step::Intersection { a, b, .. } => {
+            boolean::boolean_intersection(k, take(bodies, a)?, take(bodies, b)?)
+                .map_err(|e| solid(&e))?
+        }
+        Step::Difference {
+            a,
+            b,
+            pattern: None,
+            ..
+        } => boolean::boolean_difference(k, take(bodies, a)?, take(bodies, b)?)
+            .map_err(|e| solid(&e))?,
+        Step::Difference {
+            a,
+            b,
+            pattern: Some(p),
+            ..
+        } => {
+            let mut target = take(bodies, a)?;
+            let tool_source = take(bodies, b)?;
+            let mut copies = 0;
+            let [p0, p1] = p.pitch;
+            for j in 0..p.count[1] {
+                for i in 0..p.count[0] {
+                    copies += 1;
+                    let mut tool = copy(k, &tool_source, copies)?;
+                    let (fi, fj) = (i as f64, j as f64);
+                    let shift = Vec3::new(
+                        p0[0] * fi + p1[0] * fj,
+                        p0[1] * fi + p1[1] * fj,
+                        p0[2] * fi + p1[2] * fj,
+                    );
+                    api_translate(k, Some(TransformObject::Brep(&mut tool)), shift)
+                        .map_err(|e| solid(&e))?;
+                    target = boolean::boolean_difference(k, target, tool).map_err(|e| solid(&e))?;
+                }
+            }
+            target
+        }
+        Step::Extrude {
+            profile,
+            plane,
+            origin,
+            distance,
+            ..
+        } => {
+            let cs = profile_curves(k, profile, *plane, *origin)?;
+            let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+            let normal = match plane {
+                ProfilePlane::Xy => Vec3::new(0.0, 0.0, 1.0),
+                ProfilePlane::Yz => Vec3::new(1.0, 0.0, 0.0),
+                ProfilePlane::Zx => Vec3::new(0.0, 1.0, 0.0),
+                ProfilePlane::Xz => Vec3::new(0.0, -1.0, 0.0),
+            };
+            sweeps::create_linear_sweep(k, &refs, normal, *distance, true).map_err(|e| solid(&e))?
+        }
+        Step::Revolve {
+            profile,
+            plane,
+            origin,
+            axis_point,
+            axis_dir,
+            angle_deg,
+            ..
+        } => {
+            let cs = profile_curves(k, profile, *plane, *origin)?;
+            let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+            sweeps::create_rotational_sweep(
+                k,
+                &refs,
+                p3(*axis_point),
+                p3(*axis_dir),
+                *angle_deg,
+                true,
+            )
+            .map_err(|e| solid(&e))?
+        }
+        Step::Pipe {
+            radius,
+            path,
+            plane,
+            origin,
+            ..
+        } => {
+            let cs = profile_curves(k, path, *plane, *origin)?;
+            if let [single] = cs.as_slice() {
+                sweeps::create_pipe_sweep(k, *radius, Some(single), true).map_err(|e| solid(&e))?
+            } else {
+                // The profile: a circle at the origin turned from +Z onto the path's start
+                // tangent; the sweep moves its centre to the path start.
+                let (u, v) = match path.first() {
+                    Some(Seg::Line { from, to }) => (to[0] - from[0], to[1] - from[1]),
+                    Some(Seg::Arc { start_deg, .. }) => {
+                        let (s, c) = start_deg.to_radians().sin_cos();
+                        (-s, c)
+                    }
+                    _ => return Err(Run::Error("pipe path starts with no line or arc".into())),
+                };
+                let t = match plane {
+                    ProfilePlane::Xy => Vec3::new(u, v, 0.0),
+                    ProfilePlane::Yz => Vec3::new(0.0, u, v),
+                    ProfilePlane::Zx => Vec3::new(v, 0.0, u),
+                    ProfilePlane::Xz => Vec3::new(u, 0.0, v),
+                }
+                .unitize()
+                .map_err(|e| solid(&e))?;
+                let mut circle = Curve::from(
+                    curves::create_analytic_circle(k, Vec3::new(0.0, 0.0, 0.0), *radius)
+                        .map_err(|e| solid(&e))?,
+                );
+                let z = Vec3::new(0.0, 0.0, 1.0);
+                let cos = t.dot(z).clamp(-1.0, 1.0);
+                if cos < 1.0 {
+                    let axis = if cos > -1.0 {
+                        z.cross(t)
+                    } else {
+                        Vec3::new(1.0, 0.0, 0.0)
+                    };
+                    api_rotate(
+                        k,
+                        Some(TransformObject::Curve(&mut circle)),
+                        Vec3::new(0.0, 0.0, 0.0),
+                        axis,
+                        cos.acos().to_degrees(),
+                    )
+                    .map_err(|e| solid(&e))?;
+                }
+                let refs: Vec<&Curve> = cs.iter().collect();
+                sweeps::create_sweep_along_planar_path(k, &[&circle], &refs, true, 3)
+                    .map_err(|e| solid(&e))?
+            }
+        }
+        Step::Loft {
+            sections, degree, ..
+        } => {
+            let mut counts = Vec::new();
+            let mut cs = Vec::new();
+            for s in sections {
+                let section = profile_curves(k, &s.profile, s.plane, s.origin)?;
+                counts.push(section.len());
+                cs.extend(section);
+            }
+            let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+            create_skin_primitive(k, &counts, &refs, *degree, true)
+                .map_err(|e| solid(&e))?
+                .brep
+        }
+        Step::Sweep {
+            profile,
+            plane,
+            origin,
+            path,
+            ..
+        } => {
+            let cs = profile_curves(k, profile, *plane, *origin)?;
+            // The path is one arc or line in the XY plane at the world origin (no plane
+            // turn, no translation), so the profile's plane is normal to its start tangent.
+            let path = profile_curves(k, std::slice::from_ref(path), ProfilePlane::Xy, [0.0; 3])?
+                .into_iter()
+                .next()
+                .ok_or_else(|| Run::Error("sweep path has no curve".into()))?;
+            let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+            let options = SweepOptions {
+                cap_ends: true,
+                // `SMLIB_SWEEP_FOLLOW`: the profile turns with the path's frame.
+                translational_sweep: false,
+                move_profile_center_to_path: false,
+                orient_profile_perpendicular_to_path: false,
+                move_to_profile: false,
+                profile_at_path_start: false,
+                up: None,
+            };
+            sweeps::create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
+                .map_err(|e| solid(&e))?
+                .brep
+        }
+        // `SmBrep::Mirror` on a copy of the body (SMLib-level, not in SM_API: the C++
+        // reference runs it only through unit `topology.brep_mirror`).
+        Step::Mirror {
+            body, normal, at, ..
+        } => {
+            let source = take(bodies, body)?;
+            let mut mirrored = copy(k, &source, bodies.len() as u64 + 1)?;
+            // origin on the plane; Z (the mirror normal) is X x Y
+            let (o, x, y) = match normal {
+                MirrorAxis::X => ([*at, 0.0, 0.0], Vec3::Y, Vec3::Z),
+                MirrorAxis::Y => ([0.0, *at, 0.0], Vec3::Z, Vec3::X),
+                MirrorAxis::Z => ([0.0, 0.0, *at], Vec3::X, Vec3::Y),
+            };
+            let plane = Axis2Placement::new(p3(o), x, y);
+            mirror(k, &mut mirrored, &plane).map_err(|e| solid(&e))?;
+            mirrored
+        }
+        // `SmApiFilletEdges(body, edges, radius, SM_FILLET_CIRCULAR)` with its default
+        // G1 continuity and the documented default thumbweight 1.0 (unused for circular).
+        Step::Fillet {
+            body,
+            edges,
+            radius,
+            ..
+        } => fillet_picked_edges(k, bodies, body, edges, *radius, FILLET_CIRCULAR)?,
+        // The same call with a linear cross section. `distance` is the rolling-ball radius:
+        // the leg on each face for a right-angle edge between planes. `chamfer_fillet`
+        // (`SmApiChamferFillet`) is not used: it takes every edge of the body and reads its
+        // distance as a chord.
+        Step::Chamfer {
+            body,
+            edges,
+            distance,
+            ..
+        } => fillet_picked_edges(k, bodies, body, edges, *distance, FILLET_LINEAR)?,
+        Step::SweepFace {
+            body,
+            face,
+            direction,
+            distance,
+            ..
+        } => {
+            let mut source = take(bodies, body)?;
+            let cs = face_boundary_curves(k, &mut source, p3(*face))?;
+            let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+            let dir = p3(*direction);
+            let dir = dir / dir.length();
+            sweeps::create_linear_sweep(k, &refs, dir, *distance, true).map_err(|e| solid(&e))?
+        }
+        // The SolidCraft fork's `SmOffsetFacesExecutive::OffsetFaces` (WR-615; SM_API only
+        // offsets or shells whole bodies): each face through a point moved `distance` along
+        // its outward normal, the tangent blends on it following. A refusal carries the
+        // executive's reason.
+        Step::OffsetFaces {
+            body,
+            faces,
+            distance,
+            ..
+        } => {
+            // On a copy, as the other in-place edits: the executive leaves a B-rep it
+            // fails on unspecified.
+            let source = take(bodies, body)?;
+            let mut moved = copy(k, &source, bodies.len() as u64 + 1)?;
+            let picked = faces
+                .iter()
+                .map(|p| face_through(k, &mut moved, p3(*p)))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut executive = OffsetFacesExecutive::new();
+            executive
+                .offset_faces(k, &mut moved, &picked, *distance)
+                .map_err(|e| match solid(&e) {
+                    Run::Error(m) if !executive.reason().is_empty() => {
+                        Run::Error(format!("{m}: {}", executive.reason()))
+                    }
+                    r => r,
+                })?;
+            moved
+        }
+        Step::SheetCorner { .. } => {
+            return Err(Run::Deferred(Deferral {
+                blocked_by: "no SM_API entry point".into(),
+                symbol: "sheet flange corner joining and flat pattern (SolidCraft #3170)".into(),
+            }))
+        }
+    };
+    bodies.insert(step.id().to_string(), body);
+    Ok(())
+}
+
+/// Makes the NURB of every analytic surface that the operation left without one (a
+/// boolean result's swept faces carry an `SmSurfOfExtrusion` whose base has none).
+/// Upstream's first `SmBSplineSurface::CalculateBoundingBox` makes it through the virtual
+/// `GetOrCreateGwNurbPointer`; the port's bounding box is a `const` method and returns
+/// `SM_ERR` instead, so the volume of such a body would fail here (recorded in
+/// plan/findings/query.brep--boolean-results-need-their-analytic-nurbs.md).
+fn make_missing_nurbs(k: &Kernel, b: &mut Brep) -> Result<(), SolidError> {
+    for f in b.face_list().to_vec() {
+        let Ok(face) = b.face_mut(f) else { continue };
+        let Some(surface) = face.surface.as_mut() else {
+            continue;
+        };
+        let missing = match surface.kind() {
+            SurfaceKind::Plane(s) => s.base().gw_nurb().is_none(),
+            SurfaceKind::Cone(s) => s.rev().base().gw_nurb().is_none(),
+            SurfaceKind::Sphere(s) => s.base().base().gw_nurb().is_none(),
+            SurfaceKind::Torus(s) => s.base().base().gw_nurb().is_none(),
+            SurfaceKind::SurfOfRevolution(s) => s.base().gw_nurb().is_none(),
+            SurfaceKind::SurfOfExtrusion(s) => s.base().gw_nurb().is_none(),
+            SurfaceKind::BSpline(_)
+            | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_)
+            | SurfaceKind::CurveBounded(_)
+            | SurfaceKind::Step(_)
+            | SurfaceKind::OffsetSurface(_)
+            | SurfaceKind::SrfInVolume(_) => false,
+        };
+        if !missing {
+            continue;
+        }
+        match surface.kind_mut() {
+            SurfaceKind::Plane(s) => s.make_nurb()?,
+            SurfaceKind::Cone(s) => s.make_nurb(k)?,
+            SurfaceKind::Sphere(s) => s.make_nurb(k)?,
+            SurfaceKind::Torus(s) => s.make_nurb(k)?,
+            SurfaceKind::SurfOfRevolution(s) => s.make_nurb(k)?,
+            SurfaceKind::SurfOfExtrusion(s) => s.make_nurb(k)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
+    make_missing_nurbs(k, b)?;
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let volume = brep_volume(k, b, VOLUME_ACCURACY, &attrs)?;
+    let infinite = b.infinite_region();
+    let lumps = regions(b, None)?
+        .into_iter()
+        .filter(|r| Some(*r) != infinite)
+        .count();
+    let mut cylinder_faces = 0;
+    for &f in b.face_list() {
+        if let Some(SurfaceKind::Cone(c)) = b.face(f)?.surface.as_ref().map(Surface::kind) {
+            if c.is_cylinder() {
+                cylinder_faces += 1;
+            }
+        }
+    }
+    let manifold = brep_is_manifold_solid(b)?;
+    Ok(Measured {
+        volume,
+        lumps,
+        manifold,
+        topology: [
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len(),
+        ],
+        cylinder_faces,
+        removed: None,
+    })
+}
+
+/// Turns on the `UpstreamFixes` field `name` a case asks for: any field, by its name
+/// ([`solidcore::kernel::UpstreamFixes::flag_mut`]; the arms below predate it and
+/// resolve the same fields).
+fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
+    let field = match name {
+        "imprint_extends_edge_to_proto_vertex" => &mut k.fixes.imprint_extends_edge_to_proto_vertex,
+        "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,
+        "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
+        "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
+        "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
+        "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
+        "boolean_new_face_closure_both_sides" => &mut k.fixes.boolean_new_face_closure_both_sides,
+        "loops_go_on_round_the_vertex" => &mut k.fixes.loops_go_on_round_the_vertex,
+        "revolve_nested_shells_as_cavities" => &mut k.fixes.revolve_nested_shells_as_cavities,
+        "revolve_splits_curves_on_axis" => &mut k.fixes.revolve_splits_curves_on_axis,
+        "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
+        "fillet_rails_meet_at_one_end_point" => &mut k.fixes.fillet_rails_meet_at_one_end_point,
+        "fillet_nx1_tangent_side_edge" => &mut k.fixes.fillet_nx1_tangent_side_edge,
+        "fillet_nx1_tangent_corner_edge" => &mut k.fixes.fillet_nx1_tangent_corner_edge,
+        "fillet_3x2_mixed_concave_side_edge" => &mut k.fixes.fillet_3x2_mixed_concave_side_edge,
+        "fillet_3x2_tangent_side_edge_roles" => &mut k.fixes.fillet_3x2_tangent_side_edge_roles,
+        "fillet_mitre_concave_face_corners" => &mut k.fixes.fillet_mitre_concave_face_corners,
+        "fillet_mitre_gap_patch" => &mut k.fixes.fillet_mitre_gap_patch,
+        "fillet_corner_per_vertex_fan" => &mut k.fixes.fillet_corner_per_vertex_fan,
+        "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
+        "fillet_rail_end_on_continued_surface" => &mut k.fixes.fillet_rail_end_on_continued_surface,
+        "fillet_cliff_overflow" => &mut k.fixes.fillet_cliff_overflow,
+        "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
+        "fillet_run_on_past_far_end_only" => &mut k.fixes.fillet_run_on_past_far_end_only,
+        _ => k
+            .fixes
+            .flag_mut(name)
+            .ok_or_else(|| format!("unknown `fixes` entry `{name}`"))?,
+    };
+    *field = true;
+    Ok(())
+}
+
+/// Runs `case` on solidcore.
+pub fn run_rust(case: &Case) -> Run {
+    run_rust_on(Kernel::default(), case)
+}
+
+/// Runs `case` on `k` (its `fixes` already set; the case's own `fixes` are turned on
+/// after them), for drivers that pick the kernel's fixes themselves (the
+/// `solidcraft_bench` example).
+pub fn run_rust_on(mut k: Kernel, case: &Case) -> Run {
+    for fix in &case.fixes {
+        if let Err(msg) = enable_fix(&mut k, fix) {
+            return Run::Error(msg);
+        }
+    }
+    let mut bodies = BTreeMap::new();
+    for (n, step) in case.steps.iter().enumerate() {
+        match step_rust(&mut k, &mut bodies, step) {
+            Ok(()) => {}
+            // Name the failing step (1-based) and the body it writes.
+            Err(Run::Error(msg)) => {
+                let refused = case.refused_by.as_ref().filter(|r| {
+                    !r.error.trim().is_empty() && r.step == step.id() && msg.contains(&r.error)
+                });
+                let msg = format!("step {} (`{}`): {msg}", n + 1, step.id());
+                return match refused {
+                    Some(r) => Run::Deferred(Deferral {
+                        blocked_by: r.issue.clone(),
+                        symbol: msg,
+                    }),
+                    None => Run::Error(msg),
+                };
+            }
+            Err(Run::Refused { message, fit }) => {
+                let refused = case.refused_by.as_ref().filter(|r| {
+                    !r.error.trim().is_empty() && r.step == step.id() && message.contains(&r.error)
+                });
+                let message = format!("step {} (`{}`): {message}", n + 1, step.id());
+                return match refused {
+                    Some(r) => Run::Deferred(Deferral {
+                        blocked_by: r.issue.clone(),
+                        symbol: message,
+                    }),
+                    None => Run::Refused { message, fit },
+                };
+            }
+            Err(stop) => return stop,
+        }
+    }
+    let mut m = match bodies.get_mut(RESULT) {
+        Some(b) => match measure(&k, b) {
+            Ok(m) => m,
+            Err(e) => return solid(&e),
+        },
+        None => return Run::Error(format!("no body `{RESULT}`")),
+    };
+    if let Some(r) = &case.expect.removed {
+        let Some(b) = bodies.get_mut(&r.from) else {
+            return Run::Error(format!("no body `{}`", r.from));
+        };
+        match measure(&k, b) {
+            Ok(before) => m.removed = Some(before.volume - m.volume),
+            Err(e) => return solid(&e),
+        }
+    }
+    Run::Done(m)
+}
+
+// ---- scoring --------------------------------------------------------------------------
+
+/// One expectation checked.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Check {
+    /// `lumps`, `volume`, `removed`, `cylinder_faces_max`, `manifold`, `sheet_corner`,
+    /// `refused`, `fit_size`.
+    pub name: &'static str,
+    /// `pass`, `fail` or `unchecked`.
+    pub status: &'static str,
+    /// Expected and measured, as text.
+    pub detail: String,
+}
+
+/// Checks `m` against `e`.
+pub fn checks(e: &Expect, m: &Measured) -> Vec<Check> {
+    let mut out = Vec::new();
+    let pass = |ok: bool| if ok { "pass" } else { "fail" };
+    if let Some(n) = e.lumps {
+        out.push(Check {
+            name: "lumps",
+            status: pass(m.lumps == n),
+            detail: format!("expected {n}, got {}", m.lumps),
+        });
+    }
+    if let Some(v) = &e.volume {
+        let err = (m.volume - v.value).abs();
+        out.push(Check {
+            name: "volume",
+            // A NaN volume fails: `err <= tol` is false.
+            status: pass(err <= v.tol),
+            detail: format!(
+                "expected {} +- {}, got {} (off by {err})",
+                v.value, v.tol, m.volume
+            ),
+        });
+    }
+    if let Some(r) = &e.removed {
+        // A run that did not measure it (no `removed.from`) is unchecked, a NaN fails.
+        out.push(match m.removed {
+            Some(got) => {
+                let err = (got - r.value).abs();
+                Check {
+                    name: "removed",
+                    status: pass(err <= r.tol),
+                    detail: format!(
+                        "expected {} +- {} removed from `{}`, got {got} (off by {err})",
+                        r.value, r.tol, r.from
+                    ),
+                }
+            }
+            None => Check {
+                name: "removed",
+                status: "unchecked",
+                detail: format!("the volume of `{}` was not measured", r.from),
+            },
+        });
+    }
+    if let Some(n) = e.cylinder_faces_max {
+        out.push(Check {
+            name: "cylinder_faces_max",
+            status: pass(m.cylinder_faces <= n),
+            detail: format!("at most {n}, got {}", m.cylinder_faces),
+        });
+    }
+    if let Some(want) = e.manifold {
+        out.push(Check {
+            name: "manifold",
+            status: pass(m.manifold == want),
+            detail: format!("expected {want}, got {}", m.manifold),
+        });
+    }
+    if e.sheet_corner.is_some() {
+        out.push(Check {
+            name: "sheet_corner",
+            status: "unchecked",
+            detail: "sheet-corner distances, validity, flat pattern and volume/area invariants need a sheet adapter".into(),
+        });
+    }
+    out
+}
+
+/// A run's verdict and its checks.
+/// A completed run without expectations is `UNCHECKED`, not a checked pass.
+pub fn verdict(e: &Expect, run: &Run) -> (&'static str, Vec<Check>) {
+    if let Some(r) = &e.refused {
+        return refusal_verdict(r, run);
+    }
+    match run {
+        Run::Deferred(_) => ("DEFERRED", Vec::new()),
+        Run::Error(_) | Run::Refused { .. } => ("ERROR", Vec::new()),
+        Run::Done(m) => {
+            let c = checks(e, m);
+            let v = if c.iter().any(|c| c.status == "fail") {
+                "FAIL"
+            } else if c.is_empty() || c.iter().any(|c| c.status == "unchecked") {
+                "UNCHECKED"
+            } else {
+                "PASS"
+            };
+            (v, c)
+        }
+    }
+}
+
+/// The verdict of a case that expects a refusal: `PASS` when step `r.step` failed with an
+/// error containing `r.error`, `FAIL` when every step completed or a step failed some
+/// other way, `DEFERRED` when unported code stopped it first.
+fn refusal_verdict(r: &RefusedExpect, run: &Run) -> (&'static str, Vec<Check>) {
+    let check = |ok: bool, detail: String| Check {
+        name: "refused",
+        status: if ok { "pass" } else { "fail" },
+        detail,
+    };
+    match run {
+        Run::Deferred(_) => ("DEFERRED", Vec::new()),
+        Run::Error(msg) | Run::Refused { message: msg, .. } => {
+            // `run_rust_on` names the failing step as "step N (`id`): ...".
+            let ok = msg.contains(&format!("(`{}`): ", r.step))
+                && !r.error.trim().is_empty()
+                && msg.contains(&r.error);
+            let detail = format!(
+                "expected `{}` to fail with `{}`, got: {msg}",
+                r.step, r.error
+            );
+            let mut checks = vec![check(ok, detail)];
+            if let Some(want) = &r.fit_size {
+                let got = match run {
+                    Run::Refused { fit, .. } => Some(*fit),
+                    _ => None,
+                };
+                let fit_ok = got.is_some_and(|g| {
+                    g.kind == want.kind && (g.size - want.value).abs() <= want.tol
+                });
+                checks.push(Check {
+                    name: "fit_size",
+                    status: if fit_ok { "pass" } else { "fail" },
+                    detail: match got {
+                        Some(g) => format!(
+                            "expected {} {} +- {}, got {} {} (off by {})",
+                            want.kind.as_str(),
+                            want.value,
+                            want.tol,
+                            g.kind.as_str(),
+                            g.size,
+                            (g.size - want.value).abs()
+                        ),
+                        None => format!(
+                            "expected {} {} +- {}, the refusal reports no size",
+                            want.kind.as_str(),
+                            want.value,
+                            want.tol
+                        ),
+                    },
+                });
+            }
+            let all = checks.iter().all(|c| c.status == "pass");
+            (if all { "PASS" } else { "FAIL" }, checks)
+        }
+        Run::Done(_) => (
+            "FAIL",
+            vec![check(
+                false,
+                format!(
+                    "expected `{}` to be refused, but every step completed",
+                    r.step
+                ),
+            )],
+        ),
+    }
+}
+
+/// Options of a `--solidcraft-cases` run.
+#[derive(Debug, Clone, Default)]
+pub struct CasesOptions {
+    /// Case id glob (`<file stem>/<name>`; `*` and `?`).
+    pub glob: Option<String>,
+    /// Report directory (default `reports/`).
+    pub report_dir: Option<PathBuf>,
+    /// Do not write the report.
+    pub no_report: bool,
+}
+
+fn run_entry(run: &Run, verdict: &str, checks: &[Check]) -> Value {
+    let mut e = serde_json::Map::new();
+    e.insert("verdict".into(), json!(verdict));
+    match run {
+        Run::Deferred(d) => {
+            e.insert(
+                "deferred".into(),
+                json!({"blocked_by": d.blocked_by, "symbol": d.symbol}),
+            );
+        }
+        Run::Error(msg) | Run::Refused { message: msg, .. } => {
+            e.insert("error".into(), json!(msg));
+            if let Run::Refused { fit, .. } = run {
+                e.insert(
+                    "fit".into(),
+                    json!({"size": crate::json::num(fit.size), "kind": fit.kind.as_str()}),
+                );
+            }
+            if !checks.is_empty() {
+                e.insert(
+                    "checks".into(),
+                    Value::Array(
+                        checks
+                            .iter()
+                            .map(
+                                |c| json!({"name": c.name, "status": c.status, "detail": c.detail}),
+                            )
+                            .collect(),
+                    ),
+                );
+            }
+        }
+        Run::Done(m) => {
+            e.insert(
+                "measured".into(),
+                json!({
+                    "volume": crate::json::num(m.volume),
+                    "lumps": m.lumps,
+                    "faces": m.topology[0],
+                    "edges": m.topology[1],
+                    "vertices": m.topology[2],
+                    "cylinder_faces": m.cylinder_faces,
+                    "removed": m.removed.map(crate::json::num),
+                    "manifold": m.manifold,
+                }),
+            );
+            e.insert(
+                "checks".into(),
+                Value::Array(
+                    checks
+                        .iter()
+                        .map(|c| json!({"name": c.name, "status": c.status, "detail": c.detail}))
+                        .collect(),
+                ),
+            );
+        }
+    }
+    Value::Object(e)
+}
+
+/// Runs every case matching `opts.glob`, prints one line per case and the summary, and
+/// writes `reports/solidcraft-cases.json` (`reports/solidcraft-cases_<glob>.json` for
+/// a glob). Exit `0` whatever the verdicts; `2` for an unreadable case file or report.
+pub fn run_cases(root: &Path, opts: &CasesOptions) -> ExitCode {
+    let cases = match load(&cases_dir(root), opts.glob.as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("goldens: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    if cases.is_empty() {
+        println!(
+            "SOLIDCRAFT-CASES: no case matches `{}`",
+            opts.glob.as_deref().unwrap_or("*")
+        );
+    }
+    println!(
+        "SOLIDCRAFT-CASES: {} case(s), Rust engine only",
+        cases.len()
+    );
+    let mut counts: BTreeMap<&str, usize> = VERDICTS.iter().map(|v| (*v, 0)).collect();
+    let mut blocked: BTreeMap<String, usize> = BTreeMap::new();
+    let mut entries = Vec::new();
+    for l in &cases {
+        let run = run_rust(&l.case);
+        let (v, c) = verdict(&l.case.expect, &run);
+        *counts.entry(v).or_default() += 1;
+        let detail = match &run {
+            Run::Deferred(d) => {
+                *blocked.entry(d.blocked_by.clone()).or_default() += 1;
+                format!("{}: {}", d.blocked_by, d.symbol)
+            }
+            Run::Error(msg) => msg.clone(),
+            Run::Refused { message, fit } => {
+                let fit_checks: Vec<String> = c
+                    .iter()
+                    .filter(|c| c.name == "fit_size")
+                    .map(|c| format!("fit_size {}: {}", c.status, c.detail))
+                    .collect();
+                if fit_checks.is_empty() {
+                    format!("{message} [fit {} {}]", fit.kind.as_str(), fit.size)
+                } else {
+                    format!("{message}; {}", fit_checks.join("; "))
+                }
+            }
+            Run::Done(m) => {
+                let [f, e, v] = m.topology;
+                let checked = c
+                    .iter()
+                    .map(|c| format!("{} {}: {}", c.name, c.status, c.detail))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                format!("{checked} [F/E/V {f}/{e}/{v}]")
+            }
+        };
+        println!("{:<64} rust {v:<10} {detail}", l.id);
+        entries.push(json!({
+            "id": l.id,
+            "issue": l.file.issue,
+            "pr": l.file.pr,
+            "test": l.file.test,
+            "rust": run_entry(&run, v, &c),
+        }));
+    }
+    let summary = VERDICTS
+        .iter()
+        .map(|v| format!("{v}={}", counts.get(v).copied().unwrap_or(0)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    println!("SOLIDCRAFT-CASES rust: {summary} (cases={})", cases.len());
+    if !blocked.is_empty() {
+        let by = blocked
+            .iter()
+            .map(|(u, n)| format!("{u}({n})"))
+            .collect::<Vec<_>>()
+            .join(",");
+        println!("SOLIDCRAFT-CASES rust: blocked_by={by}");
+    }
+
+    if !opts.no_report {
+        let report = json!({
+            "glob": opts.glob,
+            "volume_accuracy": VOLUME_ACCURACY,
+            "summary": {"rust": counts, "blocked_by": blocked},
+            "cases": entries,
+        });
+        let dir = opts
+            .report_dir
+            .clone()
+            .unwrap_or_else(|| root.join("reports"));
+        let mut name = "solidcraft-cases".to_string();
+        if let Some(g) = &opts.glob {
+            name.push('_');
+            name.extend(g.chars().filter(|c| c.is_alphanumeric() || *c == '_'));
+        }
+        let path = dir.join(format!("{name}.json"));
+        let written = std::fs::create_dir_all(&dir)
+            .and_then(|()| std::fs::write(&path, crate::json::to_canonical_string(&report)));
+        match written {
+            Ok(()) => println!(
+                "  report: {}",
+                path.strip_prefix(root).unwrap_or(&path).display()
+            ),
+            Err(e) => {
+                eprintln!("goldens: {}: {e}", path.display());
+                return ExitCode::from(2);
+            }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn all() -> Vec<Loaded> {
+        load(&cases_dir(&crate::case::repo_root()), None).unwrap()
+    }
+
+    #[test]
+    fn empty_selection_replaces_stale_reports_and_respects_report_options() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "goldens-solidcraft-empty-report-{}-{nonce}",
+            std::process::id()
+        ));
+        let fixtures = cases_dir(&root);
+        std::fs::create_dir_all(&fixtures).unwrap();
+        // Exercise both an empty corpus and a nonempty corpus filtered to zero cases.
+        for glob in [None, Some("missing")] {
+            if glob.is_some() {
+                let fixture = json!({
+                    "issue": "test", "pr": "test", "test": "test", "summary": "test",
+                    "cases": [{"name": "box", "steps": [
+                        {"op": "box", "id": "result", "origin": [0, 0, 0], "size": [1, 1, 1]}
+                    ], "expect": {"lumps": 1}}]
+                });
+                std::fs::write(fixtures.join("case.json"), fixture.to_string()).unwrap();
+            }
+            let mut opts = CasesOptions {
+                glob: glob.map(str::to_string),
+                report_dir: glob.map(|_| root.join("custom-reports")),
+                no_report: false,
+            };
+            let dir = opts
+                .report_dir
+                .clone()
+                .unwrap_or_else(|| root.join("reports"));
+            std::fs::create_dir_all(&dir).unwrap();
+            let filename = if glob.is_some() {
+                "solidcraft-cases_missing.json"
+            } else {
+                "solidcraft-cases.json"
+            };
+            let path = dir.join(filename);
+            let stale = r#"{"cases":[{"id":"stale"}],"summary":{"rust":{"PASS":1}}}"#;
+            std::fs::write(&path, stale).unwrap();
+            assert_eq!(run_cases(&root, &opts), ExitCode::SUCCESS);
+            let report: Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(report["cases"], json!([]), "glob {glob:?}");
+            assert_eq!(report["glob"], json!(glob));
+            assert_eq!(report["volume_accuracy"], json!(VOLUME_ACCURACY));
+            assert_eq!(report["summary"]["blocked_by"], json!({}));
+            for verdict in VERDICTS {
+                assert_eq!(report["summary"]["rust"][verdict], json!(0));
+            }
+            // --no-report must not overwrite an existing report or create a directory.
+            std::fs::write(&path, stale).unwrap();
+            opts.no_report = true;
+            assert_eq!(run_cases(&root, &opts), ExitCode::SUCCESS);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), stale);
+            let absent = dir.join("not-created");
+            opts.report_dir = Some(absent.clone());
+            assert_eq!(run_cases(&root, &opts), ExitCode::SUCCESS);
+            assert!(!absent.exists());
+            // A file cannot be a report directory, even when there are zero results.
+            opts.no_report = false;
+            opts.report_dir = Some(path);
+            assert_eq!(run_cases(&root, &opts), ExitCode::from(2));
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn every_case_file_loads() {
+        // No hard-coded total (every new case file would edit it and conflict): every
+        // file in the directory is a case file, and every case of every file loads.
+        let dir = cases_dir(&crate::case::repo_root());
+        let mut expected = 0;
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let p = e.unwrap().path();
+            assert_eq!(
+                p.extension().and_then(|x| x.to_str()),
+                Some("json"),
+                "{p:?}"
+            );
+            let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+            let n = v["cases"].as_array().map_or(0, Vec::len);
+            assert!(n > 0, "{p:?}: no cases");
+            expected += n;
+        }
+        let cases = all();
+        assert_eq!(
+            cases.len(),
+            expected,
+            "{:?}",
+            cases.iter().map(|c| &c.id).collect::<Vec<_>>()
+        );
+        for l in &cases {
+            assert!(
+                l.id.starts_with("a52-")
+                    || l.id.starts_with("catics-")
+                    || (l.file.issue.contains("/issues/")
+                        && l.file
+                            .pr
+                            .as_ref()
+                            .is_none_or(|pr| { pr.contains("/pull/") || pr.contains("/commit/") })),
+                "{}",
+                l.id
+            );
+            let e = &l.case.expect;
+            assert!(
+                e.lumps.is_some()
+                    || e.volume.is_some()
+                    || e.removed.is_some()
+                    || e.sheet_corner.is_some()
+                    || e.refused.is_some()
+                    || e.manifold.is_some(),
+                "{}: nothing to check",
+                l.id
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "nightly: runs the whole SolidCraft corpus (.github/workflows/nightly.yml)"]
+    fn every_case_reaches_a_verdict_without_a_harness_error() {
+        for l in all() {
+            let run = run_rust(&l.case);
+            assert!(
+                !matches!(run, Run::Error(ref m) if m.starts_with("no body")),
+                "{}: {run:?}",
+                l.id
+            );
+            let (v, _) = verdict(&l.case.expect, &run);
+            assert!(VERDICTS.contains(&v), "{}", l.id);
+        }
+    }
+
+    #[test]
+    fn fillet_picker_rejects_off_edge_points() {
+        let mut k = Kernel::default();
+        let body = primitives::create_box(&mut k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap();
+        assert!(matches!(
+            fillet_edge_at_point(&k, &body, Vec3::new(5.0, 10.0, 15.0)),
+            Err(Run::Error(message)) if message.contains("no eligible edge")
+        ));
+        assert!(matches!(
+            fillet_edge_at_point(&k, &body, Vec3::new(f64::NAN, 0.0, 0.0)),
+            Err(Run::Error(message)) if message.contains("not finite")
+        ));
+    }
+
+    #[test]
+    fn fillet_picker_rejects_ambiguous_box_vertices() {
+        let mut k = Kernel::default();
+        let body = primitives::create_box(&mut k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap();
+        assert!(matches!(
+            fillet_edge_at_point(&k, &body, Vec3::ZERO),
+            Err(Run::Error(message)) if message.contains("multiple eligible edges")
+        ));
+    }
+
+    #[test]
+    fn fillet_picker_selects_closed_cylinder_rim_at_its_seam_vertex() {
+        use solidcore::topology::{edge, vertex};
+
+        let mut k = Kernel::default();
+        let body = primitives::create_cylinder(&mut k, Vec3::ZERO, 5.0, 12.0).unwrap();
+        let edges = solidcore::query::api_queries::get_edges(&body).unwrap();
+        let rim = edges
+            .iter()
+            .copied()
+            .find(|id| {
+                edge::is_closed(&body, *id).unwrap()
+                    && edge::faces(&body, *id, None).unwrap().len() == 2
+            })
+            .unwrap();
+        let start = edge::vertex(&body, rim).unwrap().unwrap();
+        let point = vertex::point(&body, start).unwrap();
+        // Derive the shared seam endpoint from real topology, not a guessed
+        // cylinder parameter basis; the seam is excluded by distinct-face count.
+        assert!(edges.iter().any(|id| {
+            edge::faces(&body, *id, None).unwrap().len() == 1
+                && (edge::vertex(&body, *id).unwrap() == Some(start)
+                    || edge::other_vertex(&body, *id, edge::vertex(&body, *id).unwrap()).unwrap()
+                        == Some(start))
+        }));
+        assert_eq!(fillet_edge_at_point(&k, &body, point).unwrap(), rim);
+    }
+
+    #[test]
+    fn fillet_box_matches_analytic_removed_volume() {
+        let removed = (1.0 - std::f64::consts::PI / 4.0) * 0.5 * 0.5 * 20.0;
+        let case: Case = serde_json::from_value(json!({
+            "name": "single-edge-round",
+            "steps": [
+                {"op": "box", "id": "box", "origin": [0.0, 0.0, 0.0],
+                 "size": [10.0, 20.0, 30.0]},
+                {"op": "fillet", "id": "result", "body": "box",
+                 "edges": [[0.0, 10.0, 0.0]], "radius": 0.5}
+            ],
+            "expect": {"lumps": 1, "volume": {
+                "value": 6000.0 - removed, "tol": removed * 0.001,
+                "formula": "box minus one quarter-round edge cut"
+            }}
+        }))
+        .unwrap();
+        let run = run_rust(&case);
+        let (result, checks) = verdict(&case.expect, &run);
+        assert_eq!(result, "PASS", "{run:?}: {checks:?}");
+        if let Run::Done(measured) = run {
+            assert_eq!(measured.topology, [7, 15, 10]);
+        } else {
+            panic!("fillet did not produce a measured body");
+        }
+    }
+
+    #[test]
+    fn chamfer_box_matches_analytic_removed_volume() {
+        // A linear chamfer of leg d on a right-angle edge of length L removes L * d^2 / 2.
+        let removed = 20.0 * 0.5 * 0.5 / 2.0;
+        let case: Case = serde_json::from_value(json!({
+            "name": "single-edge-chamfer",
+            "steps": [
+                {"op": "box", "id": "box", "origin": [0.0, 0.0, 0.0],
+                 "size": [10.0, 20.0, 30.0]},
+                {"op": "chamfer", "id": "result", "body": "box",
+                 "edges": [[0.0, 10.0, 0.0]], "distance": 0.5}
+            ],
+            "expect": {"lumps": 1, "volume": {
+                "value": 6000.0 - removed, "tol": removed * 0.001,
+                "formula": "box minus one linear chamfer, L * d^2 / 2"
+            }}
+        }))
+        .unwrap();
+        let run = run_rust(&case);
+        let (result, checks) = verdict(&case.expect, &run);
+        assert_eq!(result, "PASS", "{run:?}: {checks:?}");
+        if let Run::Done(measured) = run {
+            // 7 faces, 15 edges, 10 vertices: one chamfer face replaces one edge.
+            assert_eq!(measured.topology, [7, 15, 10]);
+        } else {
+            panic!("chamfer did not produce a measured body");
+        }
+    }
+
+    #[test]
+    fn chamfer_rejects_empty_edges_and_bad_distance() {
+        let case = |edges: Value, distance: f64| -> Case {
+            serde_json::from_value(json!({
+                "name": "bad-chamfer",
+                "steps": [
+                    {"op": "box", "id": "box", "origin": [0.0, 0.0, 0.0],
+                     "size": [10.0, 20.0, 30.0]},
+                    {"op": "chamfer", "id": "result", "body": "box",
+                     "edges": edges, "distance": distance}
+                ],
+                "expect": {}
+            }))
+            .unwrap()
+        };
+        // Empty edges and a non-positive radius fail in the kernel (`fillet_edges`), on step 2.
+        for run in [
+            run_rust(&case(json!([]), 0.5)),
+            run_rust(&case(json!([[0.0, 10.0, 0.0]]), 0.0)),
+            run_rust(&case(json!([[0.0, 10.0, 0.0]]), -0.5)),
+        ] {
+            assert!(
+                matches!(&run, Run::Error(m) if m.starts_with("step 2")),
+                "{run:?}"
+            );
+        }
+        // Not representable in JSON: a NaN distance is refused by `validate`.
+        let mut nan = case(json!([[0.0, 10.0, 0.0]]), 0.5);
+        let Step::Chamfer { distance, .. } = &mut nan.steps[1] else {
+            panic!("not a chamfer")
+        };
+        *distance = f64::NAN;
+        assert!(validate(&nan).is_err());
+    }
+
+    #[test]
+    fn fixes_are_enabled_by_name() {
+        let mut k = Kernel::default();
+        enable_fix(&mut k, "imprint_extends_edge_to_proto_vertex").unwrap();
+        enable_fix(&mut k, "cover_refuses_folded_continuation").unwrap();
+        enable_fix(&mut k, "fillet_refuse_non_manifold_result").unwrap();
+        assert!(k.fixes.imprint_extends_edge_to_proto_vertex);
+        assert!(k.fixes.cover_refuses_folded_continuation);
+        assert!(k.fixes.fillet_refuse_non_manifold_result);
+        assert!(enable_fix(&mut k, "no_such_fix").is_err());
+    }
+
+    /// Every `UpstreamFixes` field can be named, also one without an arm of its own.
+    #[test]
+    fn every_fix_can_be_enabled_by_name() {
+        for &name in solidcore::kernel::UpstreamFixes::NAMES {
+            let mut k = Kernel::default();
+            enable_fix(&mut k, name).unwrap();
+            let on: Vec<&str> = k
+                .fixes
+                .flags()
+                .filter(|&(_, on)| on)
+                .map(|(n, _)| n)
+                .collect();
+            assert_eq!(on, [name]);
+        }
+    }
+
+    #[test]
+    fn a_refusal_defers_only_its_own_step_and_error() {
+        let refused = all()
+            .into_iter()
+            .find(|l| l.id.ends_with("/round_4_over_hole"))
+            .expect("the #422 case")
+            .case;
+        assert!(matches!(run_rust(&refused), Run::Deferred(_)));
+        let mut no_refusal = refused.clone();
+        no_refusal.refused_by = None;
+        let error = run_rust(&no_refusal);
+        assert!(matches!(error, Run::Error(_)));
+        for blank in ["", " ", "\t\r\n"] {
+            let mut blank_error = refused.clone();
+            blank_error.refused_by.as_mut().unwrap().error = blank.into();
+            assert_eq!(run_rust(&blank_error), error, "blank matcher {blank:?}");
+        }
+        let mut other_step = refused.clone();
+        if let Some(r) = other_step.refused_by.as_mut() {
+            r.step = "block".into();
+        }
+        assert!(matches!(run_rust(&other_step), Run::Error(_)));
+        let mut other_error = refused;
+        if let Some(r) = other_error.refused_by.as_mut() {
+            r.error = "upstream status 1002".into();
+        }
+        assert!(matches!(run_rust(&other_error), Run::Error(_)));
+    }
+
+    #[test]
+    #[ignore = "nightly: runs the whole SolidCraft corpus (.github/workflows/nightly.yml)"]
+    fn deferrals_name_a_plan_unit() {
+        let units: Vec<String> = crate::plan::load(&crate::case::repo_root())
+            .unwrap()
+            .into_iter()
+            .map(|u| u.id)
+            .collect();
+        for l in all() {
+            if let Run::Deferred(d) = run_rust(&l.case) {
+                assert!(
+                    d.blocked_by == "no SM_API entry point"
+                        || units.contains(&d.blocked_by)
+                        || l.case.refused_by.as_ref().map(|r| &r.issue) == Some(&d.blocked_by),
+                    "{}: {d:?}",
+                    l.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn refused_expectation_passes_only_on_that_steps_refusal() {
+        let e: Expect = serde_json::from_value(json!({
+            "refused": {"step": "result", "error": "status 1001"}
+        }))
+        .unwrap();
+        let r = e.refused.as_ref().unwrap();
+        let refused = Run::Error("step 2 (`result`): blend::x: upstream status 1001".into());
+        assert_eq!(verdict(&e, &refused).0, "PASS");
+        // another step, or another error, is not the refusal asked for
+        let other_step = Run::Error("step 1 (`body`): upstream status 1001".into());
+        assert_eq!(verdict(&e, &other_step).0, "FAIL");
+        let other_error = Run::Error("step 2 (`result`): no body `x`".into());
+        assert_eq!(verdict(&e, &other_error).0, "FAIL");
+        // completing is the failure a refused case guards against
+        let built = Run::Done(Measured {
+            volume: 0.0,
+            lumps: 0,
+            topology: [7, 20, 14],
+            cylinder_faces: 0,
+            removed: None,
+            manifold: false,
+        });
+        let (v, c) = verdict(&e, &built);
+        assert_eq!(v, "FAIL");
+        assert!(c[0].detail.contains("every step completed"), "{c:?}");
+        let deferred = Run::Deferred(Deferral {
+            blocked_by: "unit".into(),
+            symbol: "Sm".into(),
+        });
+        assert_eq!(verdict(&e, &deferred).0, "DEFERRED");
+        assert_eq!(r.step, "result");
+    }
+
+    #[test]
+    fn refused_cases_take_no_result_expectations() {
+        let case = |expect: Value| -> Case {
+            serde_json::from_value(json!({
+                "name": "c",
+                "steps": [{"op": "box", "id": "result", "origin": [0.0, 0.0, 0.0],
+                           "size": [1.0, 1.0, 1.0]}],
+                "expect": expect
+            }))
+            .unwrap()
+        };
+        assert!(validate(&case(
+            json!({"refused": {"step": "result", "error": "1001"}})
+        ))
+        .is_ok());
+        assert!(validate(&case(json!({"refused": {"step": "result", "error": "  "}}))).is_err());
+        assert!(
+            validate(&case(json!({"refused": {"step": "result", "error": "1001",
+            "fit_size": {"value": -1.0, "tol": 1e-6, "source": "s"}}})))
+            .is_err()
+        );
+        assert!(validate(&case(json!({"refused": {"step": "nope", "error": "1001"}}))).is_err());
+        assert!(validate(&case(
+            json!({"lumps": 1, "refused": {"step": "result", "error": "1001"}})
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn manifold_expectation_checks_the_result() {
+        let e: Expect = serde_json::from_value(json!({"lumps": 1, "manifold": true})).unwrap();
+        let m = |manifold: bool| {
+            Run::Done(Measured {
+                volume: 1.0,
+                lumps: 1,
+                topology: [6, 12, 8],
+                cylinder_faces: 0,
+                removed: None,
+                manifold,
+            })
+        };
+        assert_eq!(verdict(&e, &m(true)).0, "PASS");
+        let (v, c) = verdict(&e, &m(false));
+        assert_eq!(v, "FAIL");
+        assert!(
+            c.iter().any(|c| c.name == "manifold" && c.status == "fail"),
+            "{c:?}"
+        );
+    }
+
+    #[test]
+    fn a_round_taller_than_its_wall_is_refused() {
+        // SolidCraft #190: an r 13 disc 2 high cannot take a round of 2.001 on its top
+        // circle; the pinned kernel refuses it, and the refused case passes on that.
+        let case: Case = serde_json::from_value(json!({
+            "name": "disc-round-too-tall",
+            "steps": [
+                {"op": "cylinder", "id": "disc", "origin": [0.0, 0.0, 0.0], "radius": 13.0,
+                 "height": 2.0},
+                {"op": "fillet", "id": "result", "body": "disc", "edges": [[0.0, 13.0, 2.0]],
+                 "radius": 2.001}
+            ],
+            "expect": {"refused": {"step": "result", "error": "status 1001"}}
+        }))
+        .unwrap();
+        validate(&case).unwrap();
+        let run = run_rust(&case);
+        assert_eq!(verdict(&case.expect, &run).0, "PASS", "{run:?}");
+    }
+
+    #[test]
+    fn refused_fit_size_is_checked_against_the_refusal() {
+        let e: Expect = serde_json::from_value(json!({
+            "refused": {"step": "result", "error": "status 1001",
+                        "fit_size": {"value": 3.0, "tol": 1e-6, "source": "s"}}
+        }))
+        .unwrap();
+        let refused = |size: f64, kind: FitKindName| Run::Refused {
+            message: "step 2 (`result`): x: upstream status 1001: refused".into(),
+            fit: Fit { size, kind },
+        };
+        assert_eq!(verdict(&e, &refused(3.0, FitKindName::Radius)).0, "PASS");
+        let (v, c) = verdict(&e, &refused(2.5, FitKindName::Radius));
+        assert_eq!(v, "FAIL");
+        assert!(
+            c.iter().any(|c| c.name == "fit_size" && c.status == "fail"),
+            "{c:?}"
+        );
+        assert_eq!(verdict(&e, &refused(3.0, FitKindName::Scale)).0, "FAIL");
+        // a refusal without a size does not meet a fit_size expectation
+        let plain = Run::Error("step 2 (`result`): x: upstream status 1001".into());
+        let (v, c) = verdict(&e, &plain);
+        assert_eq!(v, "FAIL");
+        assert!(
+            c.iter().any(|c| c.detail.contains("reports no size")),
+            "{c:?}"
+        );
+        // and a refusal with a size is still an ERROR where no refusal is expected
+        let none: Expect = serde_json::from_value(json!({"lumps": 1})).unwrap();
+        assert_eq!(
+            verdict(&none, &refused(3.0, FitKindName::Radius)).0,
+            "ERROR"
+        );
+    }
+
+    #[test]
+    fn a_round_past_the_end_face_reports_its_fit() {
+        // SolidCraft #199: r 3.5 on a 14 x 6 bar's vertical edges; with the generic
+        // blend's checks the refusal reports the largest radius that builds, 3.
+        let case: Case = serde_json::from_value(json!({
+            "name": "bar-round-too-large",
+            "fixes": ["fillet_refuse_overlapping_bands"],
+            "steps": [
+                {"op": "box", "id": "bar", "origin": [14.0, 0.0, 0.0], "size": [14.0, 6.0, 10.0]},
+                {"op": "fillet", "id": "result", "body": "bar",
+                 "edges": [[14.0, 0.0, 5.0], [28.0, 0.0, 5.0], [14.0, 6.0, 5.0], [28.0, 6.0, 5.0]],
+                 "radius": 3.5}
+            ],
+            "expect": {"refused": {"step": "result", "error": "refused",
+                                   "fit_size": {"value": 3.0, "tol": 1e-6, "source": "half the end face"}}}
+        }))
+        .unwrap();
+        validate(&case).unwrap();
+        let run = run_rust(&case);
+        assert_eq!(verdict(&case.expect, &run).0, "PASS", "{run:?}");
+    }
+
+    #[test]
+    fn scoring() {
+        let e = Expect {
+            lumps: Some(2),
+            volume: Some(VolumeExpect {
+                value: 268.08,
+                tol: 0.27,
+                formula: String::new(),
+            }),
+            cylinder_faces_max: None,
+            sheet_corner: None,
+            refused: None,
+            manifold: None,
+            removed: None,
+        };
+        let ok = Measured {
+            volume: 268.02,
+            lumps: 2,
+            topology: [4, 4, 4],
+            cylinder_faces: 0,
+            removed: None,
+            manifold: true,
+        };
+        assert_eq!(verdict(&e, &Run::Done(ok)).0, "PASS");
+        // The bug: the whole intersect came out empty.
+        let empty = Measured {
+            volume: 0.0,
+            lumps: 0,
+            topology: [0, 0, 0],
+            cylinder_faces: 0,
+            removed: None,
+            manifold: true,
+        };
+        let (v, c) = verdict(&e, &Run::Done(empty));
+        assert_eq!(v, "FAIL");
+        assert!(c.iter().all(|c| c.status == "fail"));
+        let nan = Measured {
+            volume: f64::NAN,
+            lumps: 2,
+            ..ok
+        };
+        assert_eq!(verdict(&e, &Run::Done(nan)).0, "FAIL");
+        let faces = Expect {
+            cylinder_faces_max: Some(4),
+            ..e.clone()
+        };
+        assert_eq!(verdict(&faces, &Run::Done(ok)).0, "PASS");
+        let split = Measured {
+            cylinder_faces: 5,
+            ..ok
+        };
+        assert_eq!(verdict(&faces, &Run::Done(split)).0, "FAIL");
+        assert_eq!(verdict(&faces, &Run::Done(empty)).0, "FAIL");
+        let d = Run::Deferred(Deferral {
+            blocked_by: "u".into(),
+            symbol: "s".into(),
+        });
+        assert_eq!(verdict(&e, &d).0, "DEFERRED");
+        assert_eq!(verdict(&e, &Run::Error("x".into())).0, "ERROR");
+    }
+
+    #[test]
+    fn scoring_without_expectations_is_unchecked() {
+        let e: Expect = serde_json::from_value(json!({})).unwrap();
+        let run = Run::Done(Measured {
+            volume: 1.0,
+            lumps: 1,
+            topology: [6, 12, 8],
+            cylinder_faces: 0,
+            removed: None,
+            manifold: true,
+        });
+        let (v, c) = verdict(&e, &run);
+        assert!(c.is_empty());
+        assert_eq!(v, "UNCHECKED");
+
+        let report = run_entry(&run, v, &c);
+        assert_eq!(report["verdict"], "UNCHECKED");
+        assert_eq!(report["checks"], json!([]));
+        assert_eq!(report["measured"]["volume"], 1.0);
+
+        // Missing expectations must not hide a failed or deferred operation.
+        assert_eq!(verdict(&e, &Run::Error("x".into())).0, "ERROR");
+        let deferred = Run::Deferred(Deferral {
+            blocked_by: "u".into(),
+            symbol: "s".into(),
+        });
+        assert_eq!(verdict(&e, &deferred).0, "DEFERRED");
+    }
+
+    /// SolidCraft #3468: Offset Face beside a round moves the round with the face, through
+    /// the fork's `SmOffsetFacesExecutive`. No case defers; the boss's wall moved out and
+    /// in reaches its closed-form volume. (The two box cases reach the executive and stop
+    /// in its blend removal: their verdict is the kernel's, not pinned here.)
+    #[test]
+    fn offset_faces_cases_run_on_the_fork_executive() {
+        let cases = load(&cases_dir(&crate::case::repo_root()), Some("3468-*")).unwrap();
+        assert_eq!(cases.len(), 4);
+        for loaded in cases {
+            let run = run_rust(&loaded.case);
+            assert!(!matches!(run, Run::Deferred(_)), "{}: {run:?}", loaded.id);
+            // every face point picks its face: the executive is reached
+            assert!(
+                !matches!(run, Run::Error(ref m) if m.contains("face point")),
+                "{}: {run:?}",
+                loaded.id
+            );
+            if loaded.id.contains("/boss_wall_") {
+                let (v, checks) = verdict(&loaded.case.expect, &run);
+                assert_eq!(v, "PASS", "{}: {run:?} {checks:?}", loaded.id);
+            }
+        }
+    }
+
+    #[test]
+    fn sheet_corner_preserves_the_original_matrix_and_defers_explicitly() {
+        let cases = load(&cases_dir(&crate::case::repo_root()), Some("3170-*")).unwrap();
+        assert_eq!(cases.len(), 16);
+        let mut matrix = std::collections::BTreeSet::new();
+        for loaded in cases {
+            let [Step::SheetCorner {
+                base_size,
+                thickness,
+                bend_radius,
+                k_factor,
+                height,
+                angle_degrees,
+                gap,
+                relief_size,
+                corner_relief,
+                covering,
+                overlap,
+                ..
+            }] = loaded.case.steps.as_slice()
+            else {
+                panic!(
+                    "{}: expected the original sheet-corner operation",
+                    loaded.id
+                );
+            };
+            assert_eq!(*base_size, [120.0, 90.0]);
+            assert_eq!((*thickness, *bend_radius, *k_factor), (2.0, 1.0, 0.5));
+            assert_eq!((*height, *gap), (38.6, 0.5));
+            assert_eq!((*relief_size, *corner_relief), ([2.0, 1.0], 8.0));
+            assert!([90.0, 72.0, -90.0, -72.0].contains(angle_degrees));
+            assert!([1.0, 2.0].contains(overlap));
+            assert!(matrix.insert((*angle_degrees as i32, *overlap as i32, *covering)));
+            let expected = loaded.case.expect.sheet_corner.as_ref().unwrap();
+            let distances = if *covering == 0 {
+                [-overlap, *gap]
+            } else {
+                [*gap, -overlap]
+            };
+            assert_eq!(expected.end_face_distances, distances);
+            assert_eq!(expected.distance_tol, 1e-9);
+            assert_eq!(expected.flat_regions, 1);
+            assert_eq!(expected.volume_relative_tol, 1e-3);
+            let run = run_rust(&loaded.case);
+            let Run::Deferred(ref deferred) = run else {
+                panic!(
+                    "{}: missing sheet adapter must not pass: {run:?}",
+                    loaded.id
+                );
+            };
+            assert_eq!(deferred.blocked_by, "no SM_API entry point");
+            assert!(deferred.symbol.contains("#3170"));
+            assert_eq!(verdict(&loaded.case.expect, &run).0, "DEFERRED");
+            assert_eq!(
+                verdict(
+                    &loaded.case.expect,
+                    &Run::Done(Measured {
+                        volume: 1.0,
+                        lumps: 1,
+                        topology: [1, 0, 0],
+                        cylinder_faces: 0,
+                        removed: None,
+                        manifold: true,
+                    })
+                )
+                .0,
+                "UNCHECKED"
+            );
+        }
+    }
+
+    #[test]
+    fn sheet_corner_rejects_invalid_parameters_and_expectations() {
+        let file: Value = serde_json::from_str(include_str!(
+            "../../../fixtures/solidcraft/3170-sheet-corner-overlap.json"
+        ))
+        .unwrap();
+        let original = &file["cases"][0];
+        for (key, value) in [
+            ("base_size", json!([120, 0])),
+            ("thickness", json!(0)),
+            ("bend_radius", json!(-1)),
+            ("height", json!(0)),
+            ("k_factor", json!(1.1)),
+            ("angle_degrees", json!(0)),
+            ("angle_degrees", json!(180)),
+            ("gap", json!(-0.5)),
+            ("relief_size", json!([2, 0])),
+            ("corner_relief", json!(-8)),
+            ("covering", json!(1)),
+            ("overlap", json!(3)),
+        ] {
+            let mut changed = original.clone();
+            changed["steps"][0][key] = value;
+            let case: Case = serde_json::from_value(changed).unwrap();
+            assert!(validate(&case).is_err(), "accepted invalid {key}");
+        }
+        for key in ["distance_tol", "volume_relative_tol", "flat_regions"] {
+            let mut changed = original.clone();
+            changed["expect"]["sheet_corner"][key] = json!(0);
+            let case: Case = serde_json::from_value(changed).unwrap();
+            assert!(validate(&case).is_err(), "accepted invalid {key}");
+        }
+        let mut case: Case = serde_json::from_value(original.clone()).unwrap();
+        case.expect
+            .sheet_corner
+            .as_mut()
+            .unwrap()
+            .end_face_distances[0] = f64::NAN;
+        assert!(validate(&case).is_err());
+        let mut changed = original.clone();
+        changed["steps"][0]["coverng"] = json!(0);
+        assert!(serde_json::from_value::<Case>(changed).is_err());
+    }
+
+    #[test]
+    fn sweep_face_cuts_a_box_by_its_own_top_face() {
+        let json = |steps: Value, removed: Value| -> Case {
+            serde_json::from_value(json!({
+                "name": "c",
+                "steps": steps,
+                "expect": {"lumps": 1, "removed": removed},
+            }))
+            .unwrap()
+        };
+        // the box's top face swept 2 down and cut away: 10 x 10 x 2 removed
+        let case = json(
+            json!([
+                {"op": "box", "id": "block", "origin": [0, 0, 0], "size": [10, 10, 10]},
+                {"op": "sweep_face", "id": "prism", "body": "block", "face": [5, 5, 10],
+                 "direction": [0, 0, -2], "distance": 2},
+                {"op": "difference", "id": "result", "a": "block", "b": "prism"}
+            ]),
+            json!({"from": "block", "value": 200.0, "tol": 1e-6, "formula": "10 x 10 x 2"}),
+        );
+        validate(&case).unwrap();
+        let run = run_rust(&case);
+        let (v, c) = verdict(&case.expect, &run);
+        assert_eq!(v, "PASS", "{run:?} {c:?}");
+
+        // a point on no face, one on the box's corner (three faces' boundary) and one on
+        // the edge between its top and a side
+        for point in [[5.0, 5.0, 11.0], [10.0, 10.0, 10.0], [5.0, 10.0, 10.0]] {
+            let mut off = case.clone();
+            if let Step::SweepFace { face, .. } = &mut off.steps[1] {
+                *face = point;
+            }
+            assert!(
+                matches!(run_rust(&off), Run::Error(ref m) if m.contains("face point matches no face")),
+                "{point:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn removed_and_sweep_face_are_validated() {
+        let case = |steps: Value, removed: Value| -> Case {
+            serde_json::from_value(
+                json!({"name": "c", "steps": steps, "expect": {"removed": removed}}),
+            )
+            .unwrap()
+        };
+        let steps = |direction: Value, distance: f64| {
+            json!([
+                {"op": "box", "id": "block", "origin": [0, 0, 0], "size": [1, 1, 1]},
+                {"op": "sweep_face", "id": "result", "body": "block", "face": [0.5, 0.5, 1],
+                 "direction": direction, "distance": distance}
+            ])
+        };
+        let removed = |from: &str| json!({"from": from, "value": 1.0, "tol": 0.1, "formula": "f"});
+        assert!(validate(&case(steps(json!([0, 0, -1]), 1.0), removed("block"))).is_ok());
+        // `from` must be an earlier body, not `result` nor one no step writes
+        assert!(validate(&case(steps(json!([0, 0, -1]), 1.0), removed("result"))).is_err());
+        assert!(validate(&case(steps(json!([0, 0, -1]), 1.0), removed("nope"))).is_err());
+        // a sweep needs a direction and a positive distance
+        assert!(validate(&case(steps(json!([0, 0, 0]), 1.0), removed("block"))).is_err());
+        assert!(validate(&case(steps(json!([0, 0, -1]), 0.0), removed("block"))).is_err());
+        let bad_tol = json!({"from": "block", "value": 1.0, "tol": 0.0, "formula": "f"});
+        assert!(validate(&case(steps(json!([0, 0, -1]), 1.0), bad_tol)).is_err());
+    }
+
+    #[test]
+    fn removed_is_scored_against_its_body() {
+        let e: Expect = serde_json::from_value(json!({
+            "removed": {"from": "b", "value": 10.0, "tol": 1.0, "formula": "f"}
+        }))
+        .unwrap();
+        let m = |removed: Option<f64>| Measured {
+            volume: 1.0,
+            lumps: 1,
+            topology: [6, 12, 8],
+            cylinder_faces: 0,
+            removed,
+            manifold: true,
+        };
+        assert_eq!(verdict(&e, &Run::Done(m(Some(10.5)))).0, "PASS");
+        assert_eq!(verdict(&e, &Run::Done(m(Some(12.0)))).0, "FAIL");
+        assert_eq!(verdict(&e, &Run::Done(m(Some(f64::NAN)))).0, "FAIL");
+        assert_eq!(verdict(&e, &Run::Done(m(None))).0, "UNCHECKED");
+        let report = run_entry(
+            &Run::Done(m(Some(10.5))),
+            "PASS",
+            &checks(&e, &m(Some(10.5))),
+        );
+        assert_eq!(report["measured"]["removed"], 10.5);
+    }
+
+    #[test]
+    fn validation() {
+        let step = |json: &str| serde_json::from_str::<Step>(json).unwrap();
+        let case = |steps: Vec<Step>| Case {
+            name: "c".into(),
+            note: None,
+            fixes: Vec::new(),
+            refused_by: None,
+            steps,
+            expect: Expect::default(),
+        };
+        let bx = r#"{"op": "box", "id": "result", "origin": [0, 0, 0], "size": [1, 1, 1]}"#;
+        assert!(validate(&case(vec![step(bx)])).is_ok());
+        let late = r#"{"op": "union", "id": "result", "a": "x", "b": "x"}"#;
+        assert!(validate(&case(vec![step(late)])).is_err());
+        let other = r#"{"op": "box", "id": "other", "origin": [0, 0, 0], "size": [1, 1, 1]}"#;
+        assert!(validate(&case(vec![step(other)])).is_err());
+        assert!(serde_json::from_str::<Step>(
+            r#"{"op": "box", "id": "a", "origin": [0, 0, 0], "size": [1, 1, 1], "typo": 1}"#
+        )
+        .is_err());
+        let unknown = serde_json::from_str::<Step>(r#"{"op": "draft", "id": "a"}"#).unwrap_err();
+        assert!(
+            unknown.to_string().contains("unknown variant `draft`"),
+            "{unknown}"
+        );
+        let chamfer =
+            r#"{"op": "chamfer", "id": "a", "body": "b", "edges": [[0, 10, 0]], "distance": 0.5}"#;
+        assert!(serde_json::from_str::<Step>(chamfer).is_ok());
+        let with_typo = chamfer.replace(r#""distance": 0.5"#, r#""distance": 0.5, "typo": 1"#);
+        let err = serde_json::from_str::<Step>(&with_typo).unwrap_err();
+        assert!(err.to_string().contains("unknown field `typo`"), "{err}");
+        let ext = r#"{"op": "extrude", "id": "result", "distance": 1, "profile": [{"kind": "polygon", "points": [[0, 0], [1, 0], [1, 1]]}]}"#;
+        assert!(validate(&case(vec![step(ext)])).is_ok());
+        let flat = ext.replace("[[0, 0], [1, 0], [1, 1]]", "[[0, 0], [1, 0]]");
+        assert!(validate(&case(vec![step(&flat)])).is_err());
+        let empty = ext.replace(
+            r#"[{"kind": "polygon", "points": [[0, 0], [1, 0], [1, 1]]}]"#,
+            "[]",
+        );
+        assert!(validate(&case(vec![step(&empty)])).is_err());
+        let mirror = r#"{"op": "mirror", "id": "result", "body": "nope", "normal": "y"}"#;
+        assert!(validate(&case(vec![step(mirror)])).is_err());
+        assert!(serde_json::from_str::<Step>(
+            r#"{"op": "mirror", "id": "a", "body": "b", "normal": "w"}"#
+        )
+        .is_err());
+        let pipe = r#"{"op": "pipe", "id": "result", "radius": 1, "path": [{"kind": "line", "from": [0, 0], "to": [5, 0]}]}"#;
+        assert!(validate(&case(vec![step(pipe)])).is_ok());
+        let no_path = pipe.replace(r#"[{"kind": "line", "from": [0, 0], "to": [5, 0]}]"#, "[]");
+        assert!(validate(&case(vec![step(&no_path)])).is_err());
+        let circle_path = pipe.replace(
+            r#"{"kind": "line", "from": [0, 0], "to": [5, 0]}"#,
+            r#"{"kind": "circle", "center": [0, 0], "radius": 5}"#,
+        );
+        assert!(validate(&case(vec![step(&circle_path)])).is_err());
+        let loft = r#"{"op": "loft", "id": "result", "sections": [{"profile": [{"kind": "circle", "center": [0, 0], "radius": 2}]}, {"profile": [{"kind": "circle", "center": [0, 0], "radius": 1}], "origin": [0, 0, 5]}]}"#;
+        assert!(validate(&case(vec![step(loft)])).is_ok());
+        let Step::Loft { degree, .. } = step(loft) else {
+            panic!("not a loft")
+        };
+        assert_eq!(degree, 1);
+        let one = r#"{"op": "loft", "id": "result", "sections": [{"profile": [{"kind": "circle", "center": [0, 0], "radius": 2}]}]}"#;
+        assert!(validate(&case(vec![step(one)])).is_err());
+        assert!(serde_json::from_str::<Step>(&loft.replace("\"origin\"", "\"orign\"")).is_err());
+    }
+}

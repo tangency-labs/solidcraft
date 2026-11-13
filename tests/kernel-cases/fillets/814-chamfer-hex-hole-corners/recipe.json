@@ -1,0 +1,97 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "diameter": 55
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.polygon.inscribed",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 25,
+    "sides": 6,
+    "angle": 90
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "distance": 2,
+    "edges": [
+     [
+      0,
+      25,
+      5
+     ],
+     [
+      -21.650635,
+      12.5,
+      5
+     ],
+     [
+      -21.650635,
+      -12.5,
+      5
+     ],
+     [
+      0,
+      -25,
+      5
+     ],
+     [
+      21.650635,
+      -12.5,
+      5
+     ],
+     [
+      21.650635,
+      12.5,
+      5
+     ]
+    ]
+   }
+  }
+ ]
+}

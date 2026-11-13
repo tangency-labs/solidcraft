@@ -1,0 +1,41 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-timeline-roll-to-negative-position-refused",
+  "expected": {
+    "method": "a position counts the features to keep active (0 to 2): -1 is refused, not read as 0",
+    "outcome": "refused",
+    "refusal": "`position` -1 is negative",
+    "source": "invariants",
+    "sources": [],
+    "what": "timeline.roll_to a negative position"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 3 (timeline.roll_to): invalid parameters for `timeline.roll_to`: `position` -1 is negative: it counts the features to keep active, 0 to 2 (or \"end\")",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 3 (timeline.roll_to): invalid parameters for `timeline.roll_to`: `position` -1 is negative: it counts the features to keep active, 0 to 2 (or \"end\")",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "timeline.roll_to a negative position",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 3 (timeline.roll_to): invalid parameters for `timeline.roll_to`: `position` -1 is negative: it counts the features to keep active, 0 to 2 (or \"end\")"
+  ]
+}

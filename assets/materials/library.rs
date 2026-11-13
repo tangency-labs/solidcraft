@@ -7,7 +7,7 @@ pub const DEFAULT_MATERIAL: &str = "Default";
 pub const DEFAULT_DENSITY: f64 = 1.29;
 
 /// Physical materials: name and density (g/cm³).
-pub const MATERIALS: [(&str, f64); 14] = [
+pub const MATERIALS: &[(&str, f64)] = &[
     (DEFAULT_MATERIAL, DEFAULT_DENSITY),
     ("Steel", 7.85),
     ("Stainless Steel", 8.0),

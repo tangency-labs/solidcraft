@@ -1,0 +1,49 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-timeline-move-to-group-non-contiguous-refused",
+  "expected": {
+    "method": "folder R would hold Round and Notch with the sketch between them: not one contiguous run",
+    "outcome": "refused",
+    "refusal": "timeline folder `R` must contain one contiguous run of features",
+    "source": "invariants",
+    "sources": [],
+    "what": "timeline.move_to_group of a cut into a folder its sketch is outside of"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 8 (timeline.move_to_group): invalid parameters for `timeline.move_to_group`: timeline folder `R` must contain one contiguous run of features",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 8 (timeline.move_to_group): invalid parameters for `timeline.move_to_group`: timeline folder `R` must contain one contiguous run of features",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "timeline.move_to_group of a cut into a folder its sketch is outside of",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 8 (timeline.move_to_group): invalid parameters for `timeline.move_to_group`: timeline folder `R` must contain one contiguous run of features"
+  ]
+}

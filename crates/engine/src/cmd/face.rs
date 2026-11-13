@@ -3,10 +3,12 @@
 //! edges become lines, circular edges circles or arcs, anything else a chain of lines.
 
 use serde_json::{Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::{EmbossFace, apply_point, mat_inverse, mat_mul};
-use solidcraft_geom::{Mesh, Vec2, Vec3};
+use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 
-use crate::params::{bad, vec3};
+use crate::params::{bad, str_, vec3};
 use crate::{Result, Session};
 
 fn point_triangle_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
@@ -109,7 +111,7 @@ fn inside_hull(sorted: &[(f64, f64)], q: (f64, f64)) -> bool {
 /// The outward normal of the planar face at the world point `p`: on the model as the view
 /// places it (moved components where they are shown).
 pub(super) fn face_normal_world(s: &Session, p: Vec3) -> Option<Vec3> {
-    let (m, f, d, _) = face_at_state(&s.world_state(), p, None).ok().flatten()?;
+    let (m, f, d, _) = face_at_state(&*s.world_state().ok()?, p, None).ok().flatten()?;
     let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
     if d > tol * 10.0 {
         return None;
@@ -149,9 +151,119 @@ pub(super) fn face_ref(s: &Session, v: &Value, body: Option<&str>, cmd: &str) ->
     match face_ref_form(v).map_err(|why| bad(cmd, why))? {
         FaceRefForm::Point(p) => Ok(p),
         FaceRefForm::Name(name) => {
-            let st = if crate::frames::mapped() { s.model.state() } else { s.world_state() };
+            let st = if crate::frames::mapped() { s.model.state() } else { s.world_state()? };
             solidcraft_doc::naming::named_face_point(&st, body, name).map_err(|why| bad(cmd, why))
         }
+    }
+}
+
+/// The body a command that works on one body's faces applies to: `body` when given, or else the
+/// one body every picked point lies on, so the feature keeps it (its evaluation otherwise takes
+/// the body whose box is nearest the first point, and coincident faces tie there).
+/// A point on coincident faces of several bodies (bodies touching flush) says none of them:
+/// evaluation decides as it always has, and the command's result warns and names them
+/// ([`FacesBody::warn`]). With one body, names among the picks or picks on no face, nothing is
+/// chosen here and evaluation decides as before.
+/// Which bodies a point lies on is decided by each body's exact boundary
+/// ([`bodies_on_boundary`]), never by its display mesh: two bodies that touch along a line (gears
+/// in mesh) both hold a point on that line, whichever tessellation comes out nearer.
+pub(super) fn faces_body(s: &Session, p: &Value, refs: &[Value], points: &[Vec3]) -> FacesBody {
+    if let Some(n) = str_(p, "body") {
+        return FacesBody { body: Some(n.to_string()), tie: None };
+    }
+    let none = FacesBody { body: None, tie: None };
+    let st = s.model.state();
+    if st.bodies.len() < 2 || refs.iter().any(Value::is_string) {
+        return none;
+    }
+    let mut found: Option<String> = None;
+    for &pt in points {
+        let mut on = bodies_on_boundary(&st, pt);
+        let name = match on.len() {
+            0 => return none,
+            1 => on.remove(0),
+            // Evaluation still decides, as it always has; the result says the pick was shared.
+            _ => return FacesBody { body: None, tie: Some((pt, on)) },
+        };
+        match &found {
+            Some(f) if *f != name => return none,
+            Some(_) => {}
+            None => found = Some(name),
+        }
+    }
+    FacesBody { body: found, tie: None }
+}
+
+/// The bodies whose exact boundary holds `p`, in model order. A pick of the running command
+/// that was resolved against the placed model names its bodies, as for [`face_at_in`] (#419).
+/// A body's exact box, grown by a micrometre, skips bodies away from the point before the
+/// kernel's exact classification decides.
+fn bodies_on_boundary(st: &solidcraft_doc::ModelState, p: Vec3) -> Vec<String> {
+    if let Some(names) = crate::frames::picked(p).filter(|n| !n.is_empty()) {
+        return model_names(st, &names);
+    }
+    st.bodies
+        .iter()
+        .filter(|b| {
+            let Ok(bounds) = b.body.exact_bounds() else { return true };
+            let (lo, hi, grow) = (bounds.min, bounds.max, 1e-3);
+            p.x >= lo.x - grow && p.x <= hi.x + grow && p.y >= lo.y - grow && p.y <= hi.y + grow && p.z >= lo.z - grow && p.z <= hi.z + grow
+        })
+        .filter(|b| matches!(b.body.classify_point(p), Ok(solidcraft_kernel::PointClass::OnBoundary)))
+        .map(|b| b.name.clone())
+        .collect()
+}
+
+/// What [`faces_body`] found for a command's face picks.
+pub(super) struct FacesBody {
+    /// The body to save in the feature: the one named, or the one every pick lies on.
+    pub body: Option<String>,
+    /// A pick on coincident faces of several bodies (bodies touching flush), and those bodies.
+    tie: Option<(Vec3, Vec<String>)>,
+}
+
+impl FacesBody {
+    /// The body a face of the picks is looked up on: the feature's, or for a shared pick the
+    /// first body it lies on, as the faces are the same there.
+    pub fn lookup(&self) -> Option<&str> {
+        self.body.as_deref().or_else(|| self.tie.as_ref().and_then(|(_, b)| b.first()).map(String::as_str))
+    }
+
+    /// The command's result, with a warning when a pick lay on coincident faces of several
+    /// bodies: it names them and the body that changed, so a caller can name one with `body`.
+    pub fn warn(&self, mut out: Value) -> Value {
+        let Some((pt, tied)) = &self.tie else { return out };
+        let at = [pt.x, pt.y, pt.z].map(short_number).join(", ");
+        let changed = out.get("changed_bodies").and_then(Value::as_array).and_then(|a| a.first()).and_then(Value::as_str).map(str::to_string);
+        let mut note = format!("the face at [{at}] is on {}", and_list(tied));
+        if let Some(c) = changed {
+            note.push_str(&format!(", and {c} was changed"));
+        }
+        note.push_str("; name one with `body` to choose");
+        let note = match out.get("warning").and_then(Value::as_str) {
+            Some(w) if !w.is_empty() => format!("{w}; {note}"),
+            _ => note,
+        };
+        if let Some(o) = out.as_object_mut() {
+            o.insert("warning".into(), json!(note));
+        }
+        out
+    }
+}
+
+/// A coordinate for a message: at most three decimals, without trailing zeros.
+fn short_number(v: f64) -> String {
+    let s = format!("{v:.3}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s == "-0" { "0".to_string() } else { s.to_string() }
+}
+
+/// "A", "A and B", "A, B and C".
+fn and_list(names: &[String]) -> String {
+    match names.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        Some((last, _)) => last.clone(),
+        None => String::new(),
     }
 }
 
@@ -181,9 +293,24 @@ type FacePick = (std::sync::Arc<Mesh>, u32, f64, String);
 
 /// The face under a point of `only` (any body when `None`). Where faces of several bodies are
 /// equally near (bodies touching flush), the pick is ambiguous: `Err` names those bodies.
+/// A pick of the running command was resolved against the placed model, so the body under it
+/// wins: a body that only shares its place in the model is not in the way (#419). A named
+/// body still wins over that.
 fn face_at_in(s: &Session, p: Vec3, only: Option<&str>) -> std::result::Result<Option<FacePick>, Vec<String>> {
     let st = s.model.state();
-    face_at_state(&st, p, only)
+    match (crate::frames::picked(p), only) {
+        (Some(names), None) if names.len() > 1 => Err(model_names(&st, &names)),
+        (Some(names), None) => {
+            let under = names.first().and_then(|n| st.bodies.iter().find(|b| b.definition_name() == n.as_str()).map(|b| b.name.clone()));
+            face_at_state(&st, p, under.as_deref())
+        }
+        (_, only) => face_at_state(&st, p, only),
+    }
+}
+
+/// The names the model gives the bodies a pick met.
+fn model_names(st: &solidcraft_doc::ModelState, names: &[String]) -> Vec<String> {
+    names.iter().map(|n| st.bodies.iter().find(|b| b.definition_name() == n.as_str()).map(|b| b.name.clone()).unwrap_or_else(|| n.clone())).collect()
 }
 
 pub(super) fn face_at_state(st: &solidcraft_doc::ModelState, p: Vec3, only: Option<&str>) -> std::result::Result<Option<FacePick>, Vec<String>> {
@@ -230,16 +357,48 @@ fn xy(v: Vec2) -> Value {
     json!([v.x, v.y])
 }
 
+/// The picked points split into runs of coplanar, equally oriented faces of one body, in the
+/// order each run is first picked. Every pick is resolved against the body as it is now.
+pub(super) fn face_groups(s: &Session, points: &[Vec3], cmd: &str, face_body: Option<&str>) -> Result<Vec<Vec<Vec3>>> {
+    if points.len() > 1024 {
+        return Err(bad(cmd, "faces exceed the 1024-face limit"));
+    }
+    let state = s.model.state();
+    let mut groups: Vec<(String, solidcore_record::Plane, Vec<Vec3>)> = Vec::new();
+    for &point in points {
+        if !point.is_finite() {
+            return Err(bad(cmd, "faces must be finite points"));
+        }
+        let (mesh, index, distance, name) = face_at_in(s, point, face_body)
+            .map_err(|_| bad(cmd, "ambiguous face; specify face_body"))?
+            .ok_or_else(|| bad(cmd, "no body face at a selected point"))?;
+        let body = state.body(&name).ok_or_else(|| bad(cmd, "selected body disappeared"))?;
+        let plane = body.body.planar_face(index as usize).ok_or_else(|| bad(cmd, "faces must be planar"))?;
+        if distance > (mesh.bounds().diagonal() * 1e-3).max(1e-3) * 10.0 {
+            return Err(bad(cmd, "no body face at a selected point"));
+        }
+        let tolerance = (body.body.size() * 1e-9).max(1e-8);
+        match groups
+            .iter_mut()
+            .find(|(n, base, _)| *n == name && base.normal().dot(plane.normal()) >= 1.0 - 1e-9 && base.height(plane.origin).abs() <= tolerance)
+        {
+            Some((_, _, run)) => run.push(point),
+            None => groups.push((name, plane, vec![point])),
+        }
+    }
+    Ok(groups.into_iter().map(|(_, _, run)| run).collect())
+}
+
 /// Coplanar faces share one linked profile sketch and one Extrude feature. Resolve every
 /// pick before editing the document, so later picks never search an already modified body.
-pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_body: Option<&str>) -> Result<(u64, Vec<Vec2>, String)> {
+pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_body: Option<&str>, fixed: bool) -> Result<(u64, Vec<Vec2>, String)> {
     let first = points.first().copied().ok_or_else(|| bad(cmd, "faces must not be empty"))?;
     if points.len() > 1024 {
         return Err(bad(cmd, "faces exceed the 1024-face limit"));
     }
     let state = s.model.state();
     let mut picked = Vec::new();
-    let mut common: Option<(String, solidcraft_geom::Plane)> = None;
+    let mut common: Option<(String, solidcore_record::Plane)> = None;
     for &point in points {
         if !point.is_finite() {
             return Err(bad(cmd, "faces must be finite points"));
@@ -274,7 +433,7 @@ pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_
             .ok_or_else(|| bad(cmd, "degenerate face"))?;
         picked.push((index as usize, inside));
     }
-    let (id, first_inside, _) = sketch_of_face(s, first, cmd, face_body)?;
+    let (id, first_inside, _) = sketch_of_face(s, first, cmd, face_body, fixed)?;
     let (body, _) = common.ok_or_else(|| bad(cmd, "no faces selected"))?;
     let doc = s.placed_document();
     let source = state.body(&body).ok_or_else(|| bad(cmd, "source body disappeared"))?;
@@ -306,8 +465,10 @@ pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_
 
 /// Start a sketch on the planar face at `point` holding a copy of the face boundary. Returns
 /// the sketch id, a point inside the face (sketch coordinates), and the picked body's name.
-/// The sketch is left active.
-pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str, face_body: Option<&str>) -> Result<(u64, Vec2, String)> {
+/// The sketch is left active. `fixed` puts it on the face's plane as a fixed plane, which
+/// doesn't follow later changes to the face: for a face whose history can't keep an
+/// attachment (a converted mesh's, #6612), as the refusal of the attached sketch says.
+pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str, face_body: Option<&str>, fixed: bool) -> Result<(u64, Vec2, String)> {
     let none = || match face_body {
         Some(b) => bad(cmd, format!("no face of `{b}` at `face`")),
         None => bad(cmd, "no body face at `face`"),
@@ -367,7 +528,7 @@ pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str, face_body:
     drop(doc);
     let r = super::sketch::create_face_profile(
         s,
-        &json!({"plane": {"face": [world_inside.x, world_inside.y, world_inside.z], "body": world_body, "index": f, "path":path}, "project_edges": true}),
+        &json!({"plane": {"face": [world_inside.x, world_inside.y, world_inside.z], "body": world_body, "index": f, "path":path, "fixed": fixed}, "project_edges": true}),
         &body,
         f as usize,
     )?;

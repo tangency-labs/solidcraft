@@ -1,13 +1,11 @@
 //! Straight extrusion feedback from existing display triangles, without a scratch design.
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_engine::{
-    Sel,
-    doc::Document,
-    geom::{Aabb3, Seg2, Vec3},
-};
+use solidcore_record::{Seg2, Vec3};
+use solidcraft_engine::{Sel, doc::Document, geom::Aabb3};
 
 use crate::{
     SolveApp,
@@ -31,6 +29,9 @@ struct Surface {
     normal: Vec3,
     triangles: Vec<[Vec3; 3]>,
     edges: Vec<[Vec3; 2]>,
+    /// Per edge: whether its start is a corner of the outline, where the walls meet at an edge
+    /// of their own (a line is drawn up it), and the wall's normal at its start and end.
+    sides: Vec<(bool, [Vec3; 2])>,
 }
 
 impl StraightPreview {
@@ -115,6 +116,10 @@ impl StraightPreview {
         let color = scene.color(color);
         let cut_edge = scene.color(cut_edge);
         let triangle = |scene: &mut GpuScene, points: [Vec3; 3], normal: Vec3| {
+            // Removed material the preference leaves fully transparent: only the cut's outline.
+            if operation == "cut" && !colors.cut_tint {
+                return;
+            }
             for point in points {
                 if matches!(operation, "cut" | "intersect") {
                     scene.xray_tri(point.to_f32(), normal.to_f32(), color);
@@ -134,11 +139,18 @@ impl StraightPreview {
                 }
             }
             let edge_color = if operation == "cut" { cut_edge } else { scene.color(colors.edge) };
-            for &[a, b] in &surface.edges {
-                let normal = (b - a).cross(surface.normal).normalized()?;
-                triangle(&mut scene, [a + low, b + low, b + high], normal);
-                triangle(&mut scene, [a + low, b + high, a + high], normal);
-                for (a, b) in [(a + low, b + low), (a + high, b + high), (a + low, a + high)] {
+            for (&[a, b], &(corner, [na, nb])) in surface.edges.iter().zip(&surface.sides) {
+                for (points, normals) in [([a + low, b + low, b + high], [na, nb, nb]), ([a + low, b + high, a + high], [na, nb, na])] {
+                    for (point, normal) in points.into_iter().zip(normals) {
+                        if matches!(operation, "cut" | "intersect") {
+                            scene.xray_tri(point.to_f32(), normal.to_f32(), color);
+                        } else {
+                            scene.tri(point.to_f32(), normal.to_f32(), color);
+                        }
+                    }
+                }
+                let up = corner.then_some((a + low, a + high));
+                for (a, b) in [(a + low, b + low), (a + high, b + high)].into_iter().chain(up) {
                     scene.line(a.to_f32(), b.to_f32(), edge_color, 1.3, operation != "join");
                 }
             }
@@ -148,6 +160,7 @@ impl StraightPreview {
             sketches: Vec::new(),
             applied: None,
             stopped: None,
+            placed: None,
             tapered: Vec::new(),
             replaced: Vec::new(),
             error: crate::preview::extrusion_target_error(&app.session, commands, &app.session.model.state()),
@@ -157,7 +170,7 @@ impl StraightPreview {
 }
 
 fn prepare(app: &SolveApp, inputs: &[Sel]) -> Option<Cached> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let mut surfaces = Vec::new();
     let mut budget = 65_536usize;
     if inputs.iter().all(|input| matches!(input, Sel::Profile { .. })) {
@@ -180,7 +193,7 @@ fn prepare(app: &SolveApp, inputs: &[Sel]) -> Option<Cached> {
             if triangles.is_empty() {
                 return None;
             }
-            let edges = std::iter::once((&region.outer, true))
+            let edges: Vec<[Vec3; 2]> = std::iter::once((&region.outer, true))
                 .chain(region.holes.iter().map(|hole| (hole, false)))
                 .flat_map(|(loop_, outer)| {
                     let reverse = (loop_.signed_area() > 0.) != outer;
@@ -190,9 +203,12 @@ fn prepare(app: &SolveApp, inputs: &[Sel]) -> Option<Cached> {
                     })
                 })
                 .collect();
-            surfaces.push(Surface { normal: sketch.plane.normal(), triangles, edges });
+            // Profiles of lines only: every end is a corner.
+            let sides = walls(&edges, sketch.plane.normal(), &|_| true)?;
+            surfaces.push(Surface { normal: sketch.plane.normal(), triangles, edges, sides });
         }
     } else if inputs.iter().all(|input| matches!(input, Sel::Face { .. })) {
+        let mut vertices: HashMap<usize, (Vec<Vec3>, f64)> = HashMap::new();
         // One pass over each selected body's triangles, rather than one full scan per pick.
         for body in &state.bodies {
             let mut selected = HashMap::new();
@@ -206,7 +222,7 @@ fn prepare(app: &SolveApp, inputs: &[Sel]) -> Option<Cached> {
                     }
                     let normal = body.body.planar_face(*index)?.normal();
                     selected.insert(face, (surfaces.len(), *point));
-                    surfaces.push(Surface { normal, triangles: Vec::new(), edges: Vec::new() });
+                    surfaces.push(Surface { normal, triangles: Vec::new(), edges: Vec::new(), sides: Vec::new() });
                 }
             }
             if selected.is_empty() {
@@ -223,6 +239,19 @@ fn prepare(app: &SolveApp, inputs: &[Sel]) -> Option<Cached> {
                     }
                     surface.triangles.push(points);
                 }
+            }
+            // The ends of the face's own edges: an outline turns at a corner only there, never
+            // between the points a curved edge is drawn with.
+            for (face, (index, _)) in &selected {
+                let ends: Vec<Vec3> = mesh
+                    .edges
+                    .iter()
+                    .zip(&mesh.edge_faces)
+                    .filter(|(_, faces)| faces.contains(face))
+                    .flat_map(|(points, _)| [points.first().copied(), points.last().copied()])
+                    .flatten()
+                    .collect();
+                vertices.insert(*index, (ends, (mesh.bounds().diagonal() * 1e-9).max(1e-9)));
             }
             // The command resolves picks by their point. A stale display face index
             // must fall back rather than previewing a different face.
@@ -259,11 +288,72 @@ fn prepare(app: &SolveApp, inputs: &[Sel]) -> Option<Cached> {
                 return None;
             }
         }
+        for (index, surface) in surfaces.iter_mut().enumerate() {
+            let (ends, tolerance) = vertices.remove(&index).unwrap_or_default();
+            // A face whose edges the mesh doesn't list: every point may be a corner, as before.
+            let vertex = |p: Vec3| ends.is_empty() || ends.iter().any(|e| e.dist(p) <= tolerance);
+            surface.sides = walls(&surface.edges, surface.normal, &vertex)?;
+        }
     } else {
         return None;
     }
     let bounds = state.bodies.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh().bounds()));
     Some(Cached { document: app.session.doc.clone(), revision: app.session.revision, inputs: inputs.to_vec(), surfaces, bounds })
+}
+
+/// The walls an outline sweeps: per edge (in `edges`' order), whether its start is a corner
+/// and the wall's normal at its start and end. A point turns the outline at a corner only
+/// where `vertex` says an edge of the face ends there, and only by more than the points of the
+/// curves on either side turn it (a circle drawn in two halves meets itself smoothly). Between
+/// two smooth pieces the wall's normal is their mean, so a round wall shades round. `None`
+/// when an edge has no length.
+fn walls(edges: &[[Vec3; 2]], normal: Vec3, vertex: &dyn Fn(Vec3) -> bool) -> Option<Vec<(bool, [Vec3; 2])>> {
+    let key = |point: Vec3| [point.x, point.y, point.z].map(|coordinate| if coordinate == 0. { 0 } else { coordinate.to_bits() });
+    let starts: HashMap<_, usize> = edges.iter().enumerate().map(|(i, e)| (key(e[0]), i)).collect();
+    let next = |i: usize| edges.get(i).and_then(|e| starts.get(&key(e[1])).copied());
+    let mut prev = vec![None; edges.len()];
+    for i in 0..edges.len() {
+        if let Some(j) = next(i)
+            && let Some(slot) = prev.get_mut(j)
+        {
+            *slot = Some(i);
+        }
+    }
+    let dirs: Vec<Vec3> = edges.iter().map(|e| (e[1] - e[0]).normalized()).collect::<Option<_>>()?;
+    let outward: Vec<Vec3> = dirs.iter().map(|d| d.cross(normal).normalized()).collect::<Option<_>>()?;
+    // The turn at the start of edge `i`.
+    let turn = |i: usize| -> Option<f64> {
+        let p = prev.get(i).copied().flatten()?;
+        Some(dirs.get(p)?.dot(*dirs.get(i)?).clamp(-1.0, 1.0).acos())
+    };
+    let corner: Vec<bool> = (0..edges.len())
+        .map(|i| {
+            let (Some(a), Some(t)) = (edges.get(i).map(|e| e[0]), turn(i)) else { return true };
+            if !vertex(a) {
+                return false;
+            }
+            // How far the curves on either side turn between their own points.
+            let before = prev.get(i).copied().flatten().filter(|p| edges.get(*p).is_some_and(|e| !vertex(e[0]))).and_then(turn).unwrap_or(0.0);
+            let after = next(i).filter(|n| edges.get(*n).is_some_and(|e| !vertex(e[0]))).and_then(turn).unwrap_or(0.0);
+            t > 1.25 * before.max(after) + 1e-2
+        })
+        .collect();
+    let mean = |a: Vec3, b: Option<&Vec3>| b.and_then(|b| (a + *b).normalized()).unwrap_or(a);
+    let smooth = |i: usize| corner.get(i).is_some_and(|c| !c);
+    (0..edges.len())
+        .map(|i| {
+            let own = *outward.get(i)?;
+            let at_start = match prev.get(i).copied().flatten() {
+                Some(p) if smooth(i) => mean(own, outward.get(p)),
+                _ => own,
+            };
+            let at_end = match next(i) {
+                Some(n) if smooth(n) => mean(own, outward.get(n)),
+                _ => own,
+            };
+            Some((!smooth(i), [at_start, at_end]))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -297,7 +387,7 @@ mod tests {
     fn face_mesh_feedback_reuses_cap_and_handles_both_distance_signs() {
         let mut harness = Harness::new();
         harness.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
-        let state = harness.app.session.world_state();
+        let state = harness.app.session.world_state().unwrap();
         let face = state
             .body("Stock")
             .unwrap()
@@ -312,7 +402,7 @@ mod tests {
         let original = harness.app.session.doc.clone();
         let undo = harness.app.session.undo.len();
         let mut preview = StraightPreview::default();
-        let colors = Colors::from_tokens(&crate::theme::Tokens::get());
+        let colors = Colors::from_tokens(&solidcraft_theme::Tokens::get());
         let mut pointer = None;
         for distance in [2.0_f64, -2., 3.] {
             if let Kind::Extrude { distance: value, operation, auto_op, .. } = &mut harness.app.dialog.as_mut().unwrap().kind {
@@ -348,18 +438,110 @@ mod tests {
         commands[0].1 = json!({"distance":2,"taper":"3deg"});
         assert!(preview.compute(&harness.app, &commands, colors).is_none());
     }
+    /// Lines the feedback draws straight up the walls (along +z), under or over the model.
+    fn upright_lines(scene: &GpuScene) -> usize {
+        [&scene.lines, &scene.overlay]
+            .into_iter()
+            .flat_map(|lines| lines.as_chunks::<{ crate::gpu::LINE_SIZE }>().0)
+            .filter(|line| {
+                let v: Vec<f32> = line.as_chunks::<4>().0.iter().take(6).map(|bytes| f32::from_le_bytes(*bytes)).collect();
+                (v[0] - v[3]).abs() < 1e-4 && (v[1] - v[4]).abs() < 1e-4 && (v[2] - v[5]).abs() > 1e-3
+            })
+            .count()
+    }
+
+    /// A face with round edges is swept into round walls: no line up the wall at each point the
+    /// circle is drawn with, and normals that turn with the wall (the Bolted Flange's face looked
+    /// like a polygon while extruding, 2026-10-29). A box's face keeps a line up each corner.
+    #[test]
+    fn face_feedback_draws_lines_up_corners_only() {
+        for (shape, corners) in [("solid.cylinder", 0), ("solid.box", 4)] {
+            let mut harness = Harness::new();
+            let params = if shape == "solid.cylinder" {
+                json!({"radius": 20, "height": 5, "body_name": "Stock"})
+            } else {
+                json!({"length": 4, "width": 3, "height": 5, "body_name": "Stock"})
+            };
+            harness.app.run(shape, params).unwrap();
+            let state = harness.app.session.world_state().unwrap();
+            let face = state
+                .body("Stock")
+                .unwrap()
+                .body
+                .faces(0.001)
+                .unwrap()
+                .into_iter()
+                .find(|face| face.plane_normal.is_some_and(|normal| normal.z > 0.99))
+                .unwrap();
+            harness.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
+            harness.app.start("solid.extrude");
+            if let Kind::Extrude { distance, operation, auto_op, .. } = &mut harness.app.dialog.as_mut().unwrap().kind {
+                *distance = "2".into();
+                *operation = 0;
+                *auto_op = false;
+            }
+            let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
+            let mut preview = StraightPreview::default();
+            let built = preview.compute(&harness.app, &commands, Colors::from_tokens(&solidcraft_theme::Tokens::get())).unwrap().unwrap();
+            assert_eq!(upright_lines(&built.scene), corners, "{shape}");
+            if shape == "solid.cylinder" {
+                // Each wall vertex's normal points away from the axis.
+                let surface = &preview.cached.as_ref().unwrap().surfaces[0];
+                for (edge, (_, normals)) in surface.edges.iter().zip(&surface.sides) {
+                    for (point, normal) in edge.iter().zip(normals) {
+                        let radial = Vec3::new(point.x, point.y, 0.0).normalized().unwrap();
+                        assert!(normal.dot(radial) > 0.999, "{point:?}: {normal:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn side_face_preview_and_value_arrow_follow_the_selected_normal() {
+        let mut harness = Harness::new();
+        harness.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
+        harness.app.run("solid.move", json!({"bodies":["Stock"],"axis":[0,1,0],"angle":"30 deg"})).unwrap();
+        let state = harness.app.session.world_state().unwrap();
+        let base_bounds = state.body("Stock").unwrap().mesh().bounds();
+        let face = state
+            .body("Stock")
+            .unwrap()
+            .body
+            .faces(0.001)
+            .unwrap()
+            .into_iter()
+            .find(|face| face.plane_normal.is_some_and(|normal| normal.x > 0.8 && normal.z.abs() > 0.2))
+            .unwrap();
+        let normal = face.plane_normal.unwrap();
+        harness.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
+        harness.app.start("solid.extrude");
+        let dialog = harness.app.dialog.as_mut().unwrap();
+        if let Kind::Extrude { distance, operation, auto_op, .. } = &mut dialog.kind {
+            *distance = "2 mm".into();
+            *operation = 0;
+            *auto_op = false;
+        }
+        let (_, arrow) = crate::canvas::anchor(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
+        assert!((arrow.unwrap() - normal).len() < 1e-8);
+        let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
+        let scene =
+            StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&solidcraft_theme::Tokens::get())).unwrap().unwrap();
+        let bounds = scene.bounds;
+        assert!((bounds.max.x - (base_bounds.max.x + normal.x * 2.0)).abs() < 1e-5, "{bounds:?}");
+    }
     #[test]
     fn identity_component_feedback_skips_moved_and_repeated_placements() {
         let mut h = Harness::new();
         let made = h.app.run("component.create", json!({"name":"Imported part","grounded":false})).unwrap();
         h.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
-        let world = h.app.session.world_state();
+        let world = h.app.session.world_state().unwrap();
         let face =
             world.body("Stock").unwrap().body.faces(0.001).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
         h.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
         h.app.start("solid.extrude");
         let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-        let colors = Colors::from_tokens(&crate::theme::Tokens::get());
+        let colors = Colors::from_tokens(&solidcraft_theme::Tokens::get());
         let mut preview = StraightPreview::default();
         assert!(preview.compute(&h.app, &commands, colors).unwrap().is_ok());
         h.app.run("occurrence.move", json!({"occurrence":made["occurrence"],"translate":[20,0,0]})).unwrap();
@@ -375,7 +557,7 @@ mod tests {
     fn zero_distance_is_refused_without_a_scratch_preview() {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
-        let world = h.app.session.world_state();
+        let world = h.app.session.world_state().unwrap();
         let face =
             world.body("Stock").unwrap().body.faces(0.001).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
         h.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
@@ -384,7 +566,7 @@ mod tests {
             *distance = "0 mm".into();
         }
         let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-        let colors = Colors::from_tokens(&crate::theme::Tokens::get());
+        let colors = Colors::from_tokens(&solidcraft_theme::Tokens::get());
         let Some(Err(error)) = StraightPreview::default().compute(&h.app, &commands, colors) else { panic!("no immediate error") };
         let engine = h.app.session.preview(&commands).unwrap_err().to_string();
         assert_eq!(error, engine, "the same error as the extrusion's own");
@@ -408,7 +590,8 @@ mod tests {
             *auto_op = false;
         }
         let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
-        let scene = StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&crate::theme::Tokens::get())).unwrap().unwrap();
+        let scene =
+            StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&solidcraft_theme::Tokens::get())).unwrap().unwrap();
         assert!((mesh_volume(&scene.scene) - 168.).abs() < 1e-5);
         harness.app.dialog = None;
         harness.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -418,6 +601,6 @@ mod tests {
         harness.app.session.selection = vec![Sel::Profile { sketch: feature, index: 0 }];
         harness.app.start("solid.extrude");
         let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
-        assert!(StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&crate::theme::Tokens::get())).is_none());
+        assert!(StraightPreview::default().compute(&harness.app, &commands, Colors::from_tokens(&solidcraft_theme::Tokens::get())).is_none());
     }
 }

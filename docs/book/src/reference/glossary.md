@@ -33,6 +33,13 @@ later pull requests, one topic at a time, each pointing at its entry here.
 
 ## Terms
 
+### abbe number
+
+Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer d, F and C wavelengths.
+
+- **In SolidCraft:** Glass `model.dispersion.abbe_number`; larger values give less chromatic dispersion.
+- **For translators:** an optical material quantity, not a sample or photon count.
+
 ### appearance
 
 How a body, face or component looks on screen and in renders.
@@ -45,6 +52,43 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 - **Don't use:** look, colour (for the whole appearance), render material.
 - **Elsewhere:** appearance, visual material, colour.
 - **For translators:** not the physical material.
+
+### bill of materials
+
+The list of the components placed in a design or in one component, with the quantity of each.
+
+It lists every part at any depth, or only the direct children. Each component's *bill of
+materials type* decides whether it has a row and whether what it holds is counted.
+
+- **In SolidCraft:** `assembly.bom` ("Bill of Materials") and its window on the INSPECT panel;
+  each row's `item`, `part_number` and `count`; a component's `metadata` and `properties`
+  design-file keys, which `component.metadata.set` changes.
+- **Don't use:** BOM in labels; parts list (for the bill of materials itself).
+- **Elsewhere:** bill of materials, BOM, parts list.
+- **For translators:** not a parts list on a drawing, which is one table that shows it.
+
+### bill of materials type
+
+The rule that decides whether a component has a row in a bill of materials, and whether what it
+holds is counted there.
+
+There are five:
+
+- *normal*, something you make: a row; each occurrence adds one to its quantity.
+- *phantom*, something just to group: no row; what it holds counts where it is placed.
+- *reference*, something to use as a reference: no row, and nothing inside it counts.
+- *purchased*, something you buy: one row; nothing inside it is counted or listed.
+- *inseparable*, something made as one piece (welded, glued, riveted and so on): one row; of
+  what it holds, only the purchased components are listed, and only in a list of every part.
+
+- **In SolidCraft:** the `bom_type` part property, which `component.metadata.set` changes and
+  `component.metadata` reads; the `bom_type` of each `assembly.bom` row.
+- **Don't use:** BOM structure, item type, kind; made (for *normal*: it reads as "already
+  made").
+- **Elsewhere:** BOM structure, BOM type.
+- **For translators:** *normal* here is not the sketch line type, a direction or the display
+  quality (see *Words with more than one meaning*); *reference* is not a construction plane;
+  *phantom* is not a hidden or see-through display.
 
 ### body
 
@@ -69,6 +113,18 @@ a tree.
 - **For translators:** not the web browser. A language with its own CAD word for the tree may use
   it (in French, *arborescence*), so that "browser" and "web browser" don't share a word. See
   *web browser*.
+
+### caustic
+
+A concentration or structured redistribution of light caused by reflection or refraction.
+
+- **In SolidCraft:** Render job `caustics` controls the photon estimate for point and hard directional sources; finite sources also have camera-path estimates.
+
+### chromatic dispersion
+
+Variation of refractive index with wavelength that can separate colours along refracted paths.
+
+- **In SolidCraft:** Glass `model.dispersion`; the current renderer uses three representative wavelength bands.
 
 ### component
 
@@ -149,7 +205,7 @@ A design is saved as a *design file*.
 
 ### design file
 
-A file in which SolidCraft saves one design, with the `.solidcraft` extension.
+A file in which SolidCraft saves one design, with the `.sc` extension (`.solidcraft` in earlier releases; those files still open).
 
 - **In SolidCraft:** `file.save`, `file.save_as`, `doc.open`; the `solidcraft/N` format tag.
 - **Don't use:** document, project file.
@@ -168,6 +224,33 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Don't use:** measurement (for a dimension), size.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
+
+### end cap
+
+A plate that closes the open end of a frame member, shaped like the member profile's outer outline
+and set in from its edge.
+
+An end cap is a separate body named after its member. Compare a mounting plate, which is
+rectangular or round and need not follow the profile.
+
+- **In SolidCraft:** `frame.end_cap`; the `frame_end_cap` design-file key.
+- **Don't use:** plug, lid, blank (for the plate).
+- **Elsewhere:** end cap, end plate, cap plate.
+- **For translators:** a closing plate on a tube's end, not a cap of a sketch or surface.
+
+### equation curve
+
+A sketch curve whose shape comes from formulas over a range of one variable.
+
+It is a fit point spline through fixed points that the formulas place, and they place them again
+when the design's parameters change. Compare *spline*, whose points are placed by hand.
+
+- **In SolidCraft:** `sketch.equation_curve`, `sketch.equation_curve.edit`; the `equations`
+  design-file key of a sketch; `variable_unit` says whether the variable is a plain number or a
+  length like its range.
+- **Don't use:** formula curve, function curve, parametric curve (for the command).
+- **Elsewhere:** equation-driven curve, curve from equation, function plot.
+- **For translators:** "equation" is a mathematical formula, not a balance or an equality constraint.
 
 ### feature
 
@@ -195,6 +278,12 @@ makes is a *group*.
 - **Elsewhere:** folder, node.
 - **For translators:** not a group and not a folder on disk.
 
+### gather radius
+
+Radius of the surface neighbourhood used to estimate illumination from nearby photon hits.
+
+- **In SolidCraft:** Caustics `radius_mm`; smaller values preserve sharper details and require more photons to reduce noise.
+
 ### group
 
 A named container that someone makes, in the browser or in the timeline, to keep items together.
@@ -204,6 +293,7 @@ features are computed.
 
 - **In SolidCraft:** `browser.group`, `browser.ungroup`, `browser.rename_group`; `timeline.group`,
   `timeline.ungroup`, `timeline.rename_group`, `timeline.move_to_group`; the `group` parameter key;
+  the `groups` parameter of `timeline.delete` and `timeline.suppress` (a group with all its features);
   the `browser_groups` and `timeline_groups` design-file keys.
 - **Don't use:** feature folder, folder (for a group).
 - **Elsewhere:** folder, group.
@@ -222,6 +312,22 @@ A material sets mass, centre of gravity and strength values. How the body looks 
 - **Elsewhere:** material, physical material.
 - **For translators:** not an appearance.
 
+### moment of inertia
+
+How a body's mass resists turning about an axis: the mass times the square of its distance from
+that axis, summed over the body.
+
+SolidCraft reports the whole inertia tensor about the centre of mass in world axes, with its
+*principal moments* and *principal axes*: the three axes with no products of inertia between
+them. The *first moments* are the mass times the centre of mass.
+
+- **In SolidCraft:** `inertia_g_mm2`, `principal_moments_g_mm2`, `principal_axes`,
+  `first_moment_g_mm` and `about` in `component.properties` and `occurrence.properties`; the
+  Properties window's Moment of inertia section.
+- **Don't use:** rotational inertia, second moment of mass, mass moment.
+- **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
+- **For translators:** not the second moment of area of a cross-section, a different quantity.
+
 ### occurrence
 
 One placed copy of a component inside its parent component.
@@ -235,6 +341,29 @@ component changes every copy. The browser names occurrences with a number, such 
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
 
+### opaque path lighting
+
+Indirect diffuse and specular illumination computed by tracing finite light paths between opaque surfaces. Shown as **Indirect lighting (opaque surfaces)** in Sampling.
+
+- **In SolidCraft:** optional CPU `job.options.path` / runtime `raytrace.path`, enabled explicitly in Sampling.
+- **Don't use:** ambient occlusion, glass, full optical parity.
+- **For translators:** this describes light transport; it is unrelated to a modelling path or physical material density.
+
+### operations panel
+
+The panel in the view's bottom-right corner that lists each long operation under way, with its
+progress and a button that cancels it.
+
+An operation is work that takes long enough to run beside the window: opening or inserting a file,
+a feature dialog's OK computing, an undo or a history marker move recomputing the timeline, an
+agent's command. A new one goes on top; one that ends fades out.
+
+- **In SolidCraft:** the `ui.operations` control method; the `operations_panel` preference.
+- **Don't use:** job, task, activity.
+- **Elsewhere:** progress panel, background tasks.
+- **For translators:** an operation is work under way, not a feature's *operation* (join, cut,
+  intersect).
+
 ### part number
 
 A design property that holds the identifier an organisation gives a design.
@@ -243,6 +372,13 @@ A design property that holds the identifier an organisation gives a design.
   `document.metadata.set`.
 - **Don't use:** part number for a standard part's size.
 - **For translators:** see *Words with more than one meaning*, "part".
+
+### path depth
+
+The maximum number of shaded surfaces in a rendering path, starting with the first visible surface. A depth of 1 uses direct lighting only; higher values allow more light bounces. This does not count CAD mesh vertices.
+
+- **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
+- **For translators:** a count, not a geometric depth in millimetres or timeline depth.
 
 ### pattern instance
 
@@ -257,6 +393,48 @@ The first instance is the original.
 - **Elsewhere:** instance, element, occurrence.
 - **For translators:** not an occurrence of a component.
 
+### personal sheet metal rule
+
+A sheet metal rule kept in the user's preferences instead of a design, ready to add to any design.
+
+Picking one in Sheet Metal Rules fills the rule manager, and its OK copies the rule into the
+design, which then keeps a copy of its own. It is an app setting, not part of a design.
+
+- **In SolidCraft:** Sheet Metal Rules › Personal rules (`sheet.manage_rules`); the
+  `personal_sheet_rules` key of the stored preferences.
+- **Don't use:** preset, template, library rule.
+- **Elsewhere:** rule library, sheet metal style library.
+- **For translators:** "personal" as in the user's own, not private or confidential.
+
+### print face
+
+The flat face of a body that lies on the print bed when the body is sent to a slicer.
+
+A body has one print face at most. The export turns a copy of the body so this face points down
+at Z = 0, with the centre of mass over the origin; the design itself does not move.
+
+- **In SolidCraft:** `body.print_face`; the `print_faces` of a design; the `print_faces` and
+  `warnings` of a `file.send_to_slicer` reply.
+- **Don't use:** bottom face, base face (both say where a face is now, not where it is printed).
+- **Elsewhere:** place on face, lay flat, bed face.
+- **For translators:** the face the part stands on while it prints, not the printer's bed.
+
+### reference edge
+
+A straight edge of a flat face that a Single hole's centre or a cylinder's base centre keeps a
+set distance from, measured in that face's plane.
+
+Up to two reference edges place one hole or cylinder. Each distance is a parameter, and the
+feature follows its edges when the part changes.
+
+- **In SolidCraft:** the `references` parameter of `solid.hole` and `solid.cylinder` (each
+  `{edge, distance}`); the windows' Reference 1, Reference 2 and Distance 1, Distance 2 rows; the
+  "Reference distance" input (`ui.reference_1`, `ui.reference_2`, `ui.reference_distance`).
+- **Don't use:** datum edge, anchor edge.
+- **Elsewhere:** reference edge, edge offset, distance from edge.
+- **For translators:** an edge of a body, not a construction axis or a reference plane; the
+  distance is a length, not a reference value for light or material.
+
 ### rollback marker
 
 The marker in the timeline after which no feature is computed.
@@ -269,6 +447,24 @@ are kept, not deleted.
 - **Elsewhere:** rollback bar, rollback marker, end-of-part marker.
 - **For translators:** "history" is the undo history, not the timeline. French had three names
   for this marker while English did.
+
+### settings profile
+
+A named set of input and interface preferences that can be switched, exported and imported as
+one.
+
+A settings profile holds the Interface, Navigation and Sketch preferences, the interface
+language, keyboard shortcuts, the toolbar and the S box favourites. Settings that belong to one
+computer (the 3D mouse, graphics, units) stay out. It is an app setting, not part of a design.
+
+- **In SolidCraft:** `settings.profile.list`, `settings.profile.save`, `settings.profile.apply`,
+  `settings.profile.rename`, `settings.profile.delete`, `settings.profile.export`,
+  `settings.profile.import`; the `settings_profiles` key of the stored preferences; the
+  `solidcraft-profile/1` file format.
+- **Don't use:** preset, configuration, workspace (for the set of settings).
+- **Elsewhere:** settings profile, user profile, preferences set.
+- **For translators:** not a sketch profile and not a frame profile (see *Words with more than
+  one meaning*, "Profile"), and not a design configuration.
 
 ### sketch
 
@@ -302,6 +498,26 @@ a standard size.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
 
+### standard steel size
+
+A named steel section from a published standard, such as the channel `RSC 203x89` or the hollow
+section `SHS 100x100x5`, that a frame member can be made of without typing its dimensions.
+
+Its frame profile carries the standard's dimensions; a taper flange channel's flanges slope by its
+flange slope.
+
+- **In SolidCraft:** `frame.profile.list` (`sizes`), `profile: {"size": …}` in `frame.member`,
+  `frame.profile.properties` and `frame.profile.insert`; a channel's `flange_slope`.
+- **Don't use:** catalogue profile, library profile (for the size).
+- **Elsewhere:** standard section, section size, section designation.
+- **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
+### thin-film interference
+
+Interference between coherent optical waves reflected at the interfaces of a thin layer.
+
+- **In SolidCraft:** Glass `model.thin_film`, with `ior` and `thickness_nm`; this differs from an incoherent ideal Glass sheet.
+
 ### timeline
 
 The ordered list of a design's features, which SolidCraft computes from first to last.
@@ -311,6 +527,34 @@ The ordered list of a design's features, which SolidCraft computes from first to
 - **Don't use:** feature history, history (for the timeline).
 - **Elsewhere:** timeline, history, feature tree.
 - **For translators:** not the undo history.
+
+### turn (of two rounds)
+
+How two rounds of a fillet continue where they turn round a sharp corner edge between them, such
+as the rounds along a boss's base at its upright edges: in a mitre, or swept round the corner
+edge as a torus.
+
+- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key, `mitre`
+  (the default) or `swept`; the Fillet dialog's Turns row.
+- **Don't use:** corner (that is what fills a corner where three rounded edges meet, `corner`).
+- **Elsewhere:** mitred corner, swept corner, corner sweep.
+- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
+
+### view angles
+
+The yaw, pitch and roll, in degrees, that give the direction a view looks along and how its
+picture is turned.
+
+Yaw is the heading of the line of sight about the up axis (Front view 0°, Left 90°, Right −90°,
+Back 180°); pitch is how far the eye is above the ground plane (Top view 90°, Bottom −90°); a
+positive roll turns the picture clockwise. They are the camera's own angles, which `view.apply`
+and the MCP camera take in radians.
+
+- **In SolidCraft:** `view.angle_readout` and the View angles readout under the orientation
+  gizmo; the `yaw`, `pitch` and `roll` of `view.apply`'s `camera`.
+- **Don't use:** camera angles, view rotation.
+- **Elsewhere:** view orientation, azimuth and elevation.
+- **For translators:** the view's pitch is a tilt, not a thread's or a pattern's pitch.
 
 ### web browser
 
@@ -337,10 +581,16 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Part | a standard part | *standard part* | `parts.*` |
 | | a body, an occurrence or the design | *body*, *occurrence*, *design* | catalogue texts that say "part" |
 | | a design property | *part number* | Design Properties |
+| Profile | a closed region of a sketch that a feature uses | profile | `solid.extrude`, `solid.revolve` |
+| | the cross-section a frame member follows | frame profile | `frame.profile.*` |
+| | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
+| | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |
@@ -348,8 +598,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Normal | a sketch entity that isn't a construction entity | normal (line type) | the sketch palette's line type |
 | | the direction perpendicular to a surface | normal (direction) | the ruled surface's Normal mode |
 | | the middle display quality | normal (quality) | `ui.display_quality_normal` |
+| | a component with a row of its own in a bill of materials | normal (bill of materials type) | `bom_type` |
 | Quantity | the number of pattern instances | count | the pattern dialogs' Quantity rows, `ui.quantity` |
 | | what the motion plot shows: value, velocity or acceleration | plotted quantity | the motion study's Quantity row, `motion.plot_quantity` |
+| Reference | an edge a hole or cylinder keeps its distance from | *reference edge* | `references` of `solid.hole` and `solid.cylinder`, `ui.reference_1` |
+| | the measured values a material is checked against | reference (material) | `material.editor.reference` |
+| | the distance a light's intensity is given for | reference distance (light) | `render.cpu_light_reference` |
 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
@@ -368,11 +622,11 @@ Search lists both under the same name, and the label lookup gives both the same 
 ## A feature's type
 
 A feature type has one name: its design-file key, such as `sheet_flange`. The label (Flange) is
-its display name. Replies and scripts should use the design-file key; today `timeline.inspect`
-reports a different name (`EdgeFlangeFeature`), so a script can't match one against the other.
+its display name. Replies and scripts use the design-file key (`timeline.inspect` reports both
+`type: "sheet_flange"` and `type_name: "EdgeFlangeFeature"`).
 
 ## Open questions for the maintainer
 
-- **British or American spelling** for labels and docs. Today both are in use (colour and color,
-  centre and center, favourite and favorite); ids and keys use American spelling. #2501 proposes
-  an English (UK) language option, so either base spelling can be read in the other.
+- **British or American spelling** in the docs. The labels are settled: `en.json` is American
+  English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
+  both (colour and color, centre and center); ids and keys use American spelling.

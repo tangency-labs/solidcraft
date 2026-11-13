@@ -1,0 +1,53 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 30,
+    "height": 10,
+    "corner": [
+     0,
+     -15,
+     0
+    ],
+    "body_name": "Arm"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "diameter": 40,
+    "height": 20,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Arm"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      60,
+      -15,
+      10
+     ],
+     [
+      16,
+      12,
+      10
+     ]
+    ],
+    "radius": 2,
+    "corner": "g2"
+   }
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Sketch features</title>
+  <path d="M10 46C18 14 46 14 54 46" fill="none" stroke="currentColor" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="10" cy="46" r="8.6" fill="#ffffff"/>
+  <circle cx="54" cy="46" r="8.6" fill="#ffffff"/>
+  <circle cx="32" cy="22.5" r="8.6" fill="#ffffff"/>
+  <circle cx="10" cy="46" r="5.8" fill="currentColor"/>
+  <circle cx="54" cy="46" r="5.8" fill="currentColor"/>
+  <circle cx="32" cy="22.5" r="5.8" fill="currentColor"/>
+</svg>

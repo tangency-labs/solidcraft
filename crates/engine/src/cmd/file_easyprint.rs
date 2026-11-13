@@ -17,12 +17,16 @@ pub(super) struct Exported {
     pub ext: &'static str,
     /// A 3MF was asked for and couldn't be written, so this is an STL.
     pub fell_back: bool,
-    /// The bodies that went in: the ones named, else the selected ones.
+    /// The bodies that went in: the ones named, else the selected ones (read by `file.send`, which
+    /// the browser build doesn't have).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub bodies: Vec<String>,
+    /// The bodies laid on their print face, and the ones that couldn't be.
+    pub laid: super::print_face::Laid,
 }
 
-/// Export the bodies (the selected ones when none are named). A 3MF that can't be written is
-/// written as an STL, and `fell_back` says so.
+/// Export the bodies (the selected ones when none are named), each laid on its print face. A
+/// 3MF that can't be written is written as an STL, and `fell_back` says so.
 pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Format) -> Result<Exported> {
     let mut bodies = named.to_vec();
     if bodies.is_empty() {
@@ -31,7 +35,8 @@ pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Fo
     if bodies.is_empty() {
         return Err(bad(cmd, "select the bodies to send, or give `bodies`"));
     }
-    let doc = s.doc.painted(&s.world_state());
+    let mut doc = s.doc.painted(&*s.world_state()?);
+    let laid = super::print_face::lay_on_print_faces(s, &mut doc, &bodies, &[]);
     let write = |format| solidcraft_io::export_with_metadata(&doc, &bodies, format, &s.doc.name, &s.doc.metadata);
     let mut fell_back = false;
     let (bytes, ext) = match (format, write(format)) {
@@ -42,7 +47,7 @@ pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Fo
         }
         (_, Err(e)) => return Err(e.into()),
     };
-    Ok(Exported { bytes, ext, fell_back, bodies })
+    Ok(Exported { bytes, ext, fell_back, bodies, laid })
 }
 
 pub(super) fn open_in_easyprint(s: &mut Session, p: &Value) -> Result<Value> {
@@ -56,7 +61,7 @@ pub(super) fn open_in_easyprint(s: &mut Session, p: &Value) -> Result<Value> {
     if !bool_(p, "consent").unwrap_or(false) {
         return Err(bad(cmd, "this uploads the model to Printables' servers: ask the user, then pass `consent: true`"));
     }
-    let Exported { bytes, ext, fell_back, .. } = export_bodies(s, cmd, &string_list(p, "bodies"), format)?;
+    let Exported { bytes, ext, fell_back, laid, .. } = export_bodies(s, cmd, &string_list(cmd, p, "bodies")?, format)?;
     if bytes.len() > MAX_BYTES {
         let mb = bytes.len().div_ceil(1_000_000);
         return Err(bad(cmd, format!("the model is {mb} MB and EasyPrint takes {} MB at most: send fewer bodies", MAX_BYTES / 1_000_000)));
@@ -64,5 +69,7 @@ pub(super) fn open_in_easyprint(s: &mut Session, p: &Value) -> Result<Value> {
     let name = easyprint::file_name(&s.doc.name, ext);
     let size = bytes.len();
     upload(&name, bytes).map_err(|e| bad(cmd, e))?;
-    Ok(json!({"file_name": name, "bytes": size, "format": ext, "stl_fallback": fell_back, "uploading": true}))
+    let mut out = json!({"file_name": name, "bytes": size, "format": ext, "stl_fallback": fell_back, "uploading": true});
+    laid.report(&mut out);
+    Ok(out)
 }

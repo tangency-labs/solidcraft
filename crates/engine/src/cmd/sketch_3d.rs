@@ -4,22 +4,37 @@
 //! point, and usable as sweep and pipe paths.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_sketch::WireSpace;
 
-use super::sketch::{edit, target_sketch};
+use super::sketch::edit;
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, req_vec3, vec3};
+use crate::schema::sketch_3d::{Curves3dResult, Line3dParams, Move3dParams, Move3dResult, Point3dParams, Point3dResult, Spline3dParams};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+const LINE3D_CONTRACT: TypedContract<Line3dParams> = TypedContract::new();
+const SPLINE3D_CONTRACT: TypedContract<Spline3dParams> = TypedContract::new();
+const POINT3D_CONTRACT: TypedContract<Point3dParams> = TypedContract::new();
+const MOVE3D_CONTRACT: TypedContract<Move3dParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.line3d", "3D Line", line3d).icon("line").enabled(in_sketch).params(concat!(
-        "points: [[x,y,z]…] world points (2 or more): one 3D line per segment, joined end to end (needs 3D Sketch on)",
-        created_doc!()
-    )),
-    CommandSpec::new("sketch.spline3d", "3D Spline", spline3d)
+    CommandSpec::new("sketch.line3d", "3D Line", crate::checked!("sketch.line3d", line3d))
+        .icon("line")
+        .enabled(in_sketch_3d)
+        .contract(&LINE3D_CONTRACT)
+        .output(output_schema_for::<Curves3dResult>)
+        .params(concat!(
+            "points: [[x,y,z]…] world points (2 or more): one 3D line per segment, joined end to end (needs 3D Sketch on)",
+            created_doc!()
+        )),
+    CommandSpec::new("sketch.spline3d", "3D Spline", crate::checked!("sketch.spline3d", spline3d))
         .icon("spline")
-        .enabled(in_sketch)
+        .enabled(in_sketch_3d)
+        .contract(&SPLINE3D_CONTRACT)
+        .output(output_schema_for::<Curves3dResult>)
         .params(concat!("points: [[x,y,z]…] world fit points (2 or more): a smooth 3D curve through them (needs 3D Sketch on)", created_doc!())),
     CommandSpec::new("sketch.arc3d", "3D Arc", arc3d)
         .icon("arc3")
@@ -28,15 +43,25 @@ pub static COMMANDS: &[CommandSpec] = &[
             "start, through, end: [x,y,z] world points: an exact circular arc through them, from start through through to end (needs 3D Sketch on). Stored exactly (centre, radius, angles), so path consumers can treat it as a true arc",
             created_doc!()
         )),
-    CommandSpec::new("sketch.point3d", "3D Point", point3d)
+    CommandSpec::new("sketch.point3d", "3D Point", crate::checked!("sketch.point3d", point3d))
         .icon("point")
-        .enabled(in_sketch)
+        .enabled(in_sketch_3d)
+        .contract(&POINT3D_CONTRACT)
+        .output(output_schema_for::<Point3dResult>)
         .params(concat!("point: [x,y,z] world point (needs 3D Sketch on)", created_doc!())),
-    CommandSpec::new("sketch.move3d", "Move 3D Point", move3d)
+    CommandSpec::new("sketch.move3d", "Move 3D Point", crate::checked!("sketch.move3d", move3d))
         .icon("sketch_move")
         .enabled(in_sketch)
+        .contract(&MOVE3D_CONTRACT)
+        .output(output_schema_for::<Move3dResult>)
         .params("wire: drawn 3D curve or point id, index?: fit point (default 0), to: [x,y,z] | by: [dx,dy,dz]; points joined to it move too"),
 ];
+
+/// A command's reply as JSON: built from the type its output schema describes, so the two can't
+/// drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
 
 fn points(cmd: &str, p: &Value, min: usize) -> Result<Vec<Vec3>> {
     let a = p.get("points").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`points` must list [x,y,z] points"))?;
@@ -50,13 +75,13 @@ fn needs_3d(sk: &solidcraft_sketch::Sketch, cmd: &str) -> Result<()> {
     if sk.view.three_d { Ok(()) } else { Err(bad(cmd, "turn on 3D Sketch (sketch.options sketch_3d: true) to draw off the sketch plane")) }
 }
 
-/// The 3D Arc button starts an interactive tool, so it is only offered while a 3D sketch is
-/// being edited; otherwise the tool could only fail on its third click.
+/// The 3D Line, Spline, Arc and Point buttons start interactive tools, so they are only offered
+/// while a 3D sketch is being edited; otherwise the tools could only fail on their first click.
 fn in_sketch_3d(s: &Session) -> std::result::Result<(), String> {
-    let id = s.active_sketch.ok_or("no sketch is being edited (Create Sketch or Edit Sketch first)")?;
-    match s.doc.sketch(id) {
+    let id = sketch_store::active(s).ok_or("no sketch is being edited (Create Sketch or Edit Sketch first)")?;
+    match sketch_store::read(&s.doc, id) {
         Ok(sk) if sk.view.three_d => Ok(()),
-        Ok(_) => Err("turn on 3D Sketch (sketch.options sketch_3d: true) to draw 3D arcs".into()),
+        Ok(_) => Err("turn on 3D Sketch (sketch.options sketch_3d: true) to draw 3D curves".into()),
         Err(_) => Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into()),
     }
 }
@@ -64,7 +89,7 @@ fn in_sketch_3d(s: &Session) -> std::result::Result<(), String> {
 /// World command inputs belong to the target sketch's owner, which may differ from the
 /// active component when a script supplies an explicit sketch.
 fn inverse_owner_frame(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_doc::Mat> {
-    let id = target_sketch(s, p, cmd)?;
+    let id = sketch_store::target(s, p, cmd)?;
     let owner = s.doc.feature(id).map(|f| f.component).ok_or_else(|| bad(cmd, "target sketch is missing"))?;
     if owner != 0 && owner != s.active_component {
         if s.doc.occurrences.len() > 100_000 {
@@ -105,7 +130,7 @@ fn line3d(s: &mut Session, p: &Value) -> Result<Value> {
         needs_3d(sk, cmd)?;
         pts.windows(2).map(|w| sk.add_drawn_wire_in(w, WireSpace::Component).map_err(Into::into)).collect::<Result<Vec<String>>>()
     })?;
-    Ok(json!({"curves": ids, "sketch": info}))
+    reply(cmd, Curves3dResult { curves: ids, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn spline3d(s: &mut Session, p: &Value) -> Result<Value> {
@@ -116,7 +141,7 @@ fn spline3d(s: &mut Session, p: &Value) -> Result<Value> {
         needs_3d(sk, cmd)?;
         Ok(sk.add_drawn_wire_in(&pts, WireSpace::Component)?)
     })?;
-    Ok(json!({"curves": [id], "sketch": info}))
+    reply(cmd, Curves3dResult { curves: vec![id], sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn arc3d(s: &mut Session, p: &Value) -> Result<Value> {
@@ -144,7 +169,7 @@ fn point3d(s: &mut Session, p: &Value) -> Result<Value> {
         needs_3d(sk, cmd)?;
         Ok(sk.add_drawn_wire_in(&[at], WireSpace::Component)?)
     })?;
-    Ok(json!({"point": id, "sketch": info}))
+    reply(cmd, Point3dResult { point: id, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
@@ -182,7 +207,7 @@ fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
         };
         Ok(sk.move_drawn_point(&wire, index, to)?)
     })?;
-    Ok(json!({"moved": n, "sketch": info}))
+    reply(cmd, Move3dResult { moved: n, sketch: info, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

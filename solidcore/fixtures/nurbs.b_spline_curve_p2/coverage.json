@@ -1,0 +1,184 @@
+{
+ "cases": [
+  {
+   "name": "offset_arc_inward_past_center",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurve.cpp (SmBSplineCurve::CreateSimpleOffset, arc offset with negative / degenerate radius) (coverage: nurbs/b_spline_curve/p2.rs:1118)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "circle": {
+       "center": [
+        1,
+        1,
+        0
+       ],
+       "radius": 3.0,
+       "a0": 0.0,
+       "a1": 90.0
+      }
+     }
+    },
+    "op": "offset",
+    "tol": 0.0001,
+    "n": [
+     0,
+     0,
+     -1
+    ],
+    "d": 4.0
+   }
+  },
+  {
+   "name": "offset_arc_inward_to_center",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurve.cpp (SmBSplineCurve::CreateSimpleOffset, arc offset with negative / degenerate radius) (coverage: nurbs/b_spline_curve/p2.rs:1118)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "circle": {
+       "center": [
+        1,
+        1,
+        0
+       ],
+       "radius": 3.0,
+       "a0": 0.0,
+       "a1": 90.0
+      }
+     }
+    },
+    "op": "offset",
+    "tol": 0.0001,
+    "n": [
+     0,
+     0,
+     -1
+    ],
+    "d": 3.0
+   }
+  },
+  {
+   "name": "offset_arc_inward_below_tol",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurve.cpp (SmBSplineCurve::CreateSimpleOffset, arc offset with negative / degenerate radius) (coverage: nurbs/b_spline_curve/p2.rs:1118)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "circle": {
+       "center": [
+        1,
+        1,
+        0
+       ],
+       "radius": 3.0,
+       "a0": 0.0,
+       "a1": 90.0
+      }
+     }
+    },
+    "op": "offset",
+    "tol": 0.0001,
+    "n": [
+     0,
+     0,
+     -1
+    ],
+    "d": 2.99995
+   }
+  },
+  {
+   "name": "offset_arc_negative_distance_past_center",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurve.cpp (SmBSplineCurve::CreateSimpleOffset, arc offset with negative / degenerate radius) (coverage: nurbs/b_spline_curve/p2.rs:1118)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "circle": {
+       "center": [
+        1,
+        1,
+        0
+       ],
+       "radius": 3.0,
+       "a0": 0.0,
+       "a1": 90.0
+      }
+     }
+    },
+    "op": "offset",
+    "tol": 0.0001,
+    "n": [
+     0,
+     0,
+     1
+    ],
+    "d": -4.0
+   }
+  },
+  {
+   "name": "offset_arc_inward_just_above_tol",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurve.cpp (SmBSplineCurve::CreateSimpleOffset, arc offset with negative / degenerate radius) (coverage: nurbs/b_spline_curve/p2.rs:1118)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "circle": {
+       "center": [
+        1,
+        1,
+        0
+       ],
+       "radius": 3.0,
+       "a0": 0.0,
+       "a1": 90.0
+      }
+     }
+    },
+    "op": "offset",
+    "tol": 0.0001,
+    "n": [
+     0,
+     0,
+     -1
+    ],
+    "d": 2.9998
+   }
+  },
+  {
+   "name": "offset_arc_inward_far_past_center",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurve.cpp (SmBSplineCurve::CreateSimpleOffset, arc offset with negative / degenerate radius) (coverage: nurbs/b_spline_curve/p2.rs:1118)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "circle": {
+       "center": [
+        1,
+        1,
+        0
+       ],
+       "radius": 3.0,
+       "a0": 0.0,
+       "a1": 90.0
+      }
+     }
+    },
+    "op": "offset",
+    "tol": 0.0001,
+    "n": [
+     0,
+     0,
+     -1
+    ],
+    "d": 9.5
+   }
+  }
+ ]
+}

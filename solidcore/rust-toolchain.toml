@@ -1,0 +1,5 @@
+[toolchain]
+channel = "1.99.1"   # pinned: newer clippy lints must not break CI unannounced
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

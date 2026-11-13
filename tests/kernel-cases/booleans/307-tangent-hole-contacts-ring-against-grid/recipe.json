@@ -1,0 +1,122 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -50,
+     -50,
+     0
+    ],
+    "length": 100,
+    "width": 100,
+    "height": 5,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     25,
+     0,
+     -1
+    ],
+    "radius": 5,
+    "height": 7,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     -25,
+     0,
+     -1
+    ],
+    "radius": 5,
+    "height": 7,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     25,
+     -1
+    ],
+    "radius": 5,
+    "height": 7,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     -25,
+     -1
+    ],
+    "radius": 5,
+    "height": 7,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     15,
+     0,
+     -1
+    ],
+    "radius": 5,
+    "height": 7,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     -15,
+     0,
+     -1
+    ],
+    "radius": 5,
+    "height": 7,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     15,
+     -1
+    ],
+    "radius": 5,
+    "height": 7,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     -15,
+     -1
+    ],
+    "radius": 5,
+    "height": 7,
+    "operation": "cut"
+   }
+  }
+ ]
+}

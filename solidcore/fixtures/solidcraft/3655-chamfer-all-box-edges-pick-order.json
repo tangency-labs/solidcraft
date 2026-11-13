@@ -1,0 +1,200 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3655",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "Chamfering all twelve edges of a box was refused or accepted depending on the order the edges were picked, on SolidCraft's truck kernel (#3655). A 40 x 30 x 12.5 box, chamfer 2.5 on every edge, in the issue's failing order and in a plain order. Each corner is closed by a triangular facet through the points d from the corner on its three faces' diagonals ((0,d,d), (d,0,d), (d,d,0) at the origin corner): the box less every edge's triangle, the overlaps at the eight corners added back, less a tetrahedron of d^3/12 at each corner: 15000 - 0.5 d^2 * 330 + 6 d^3 - 8 d^3/12. 26 faces: 6, 12 chamfers and 8 corner triangles.",
+ "cases": [
+  {
+   "name": "issue_order",
+   "note": "The twelve edges in the issue's order.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      30,
+      12.5
+     ]
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "box",
+     "edges": [
+      [
+       40,
+       15,
+       12.5
+      ],
+      [
+       20,
+       0,
+       0
+      ],
+      [
+       0,
+       30,
+       6
+      ],
+      [
+       0,
+       15,
+       12.5
+      ],
+      [
+       40,
+       30,
+       6
+      ],
+      [
+       0,
+       0,
+       6
+      ],
+      [
+       40,
+       15,
+       0
+      ],
+      [
+       40,
+       0,
+       6
+      ],
+      [
+       20,
+       30,
+       12.5
+      ],
+      [
+       0,
+       15,
+       0
+      ],
+      [
+       20,
+       0,
+       12.5
+      ],
+      [
+       20,
+       30,
+       0
+      ]
+     ],
+     "distance": 2.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 14052.083333333334,
+     "tol": 0.0001,
+     "formula": "40*30*12.5 - 0.5*2.5^2*(4*40 + 4*30 + 4*12.5) + 6*2.5^3 - 8*2.5^3/12 (each corner closed by the triangular facet through (0,d,d), (d,0,d), (d,d,0) from it: the mitred corner less a tetrahedron of d^3/12)"
+    }
+   }
+  },
+  {
+   "name": "plain_order",
+   "note": "The same twelve edges, sorted by their pick points.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      30,
+      12.5
+     ]
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "box",
+     "edges": [
+      [
+       0,
+       0,
+       6
+      ],
+      [
+       0,
+       15,
+       0
+      ],
+      [
+       0,
+       15,
+       12.5
+      ],
+      [
+       0,
+       30,
+       6
+      ],
+      [
+       20,
+       0,
+       0
+      ],
+      [
+       20,
+       0,
+       12.5
+      ],
+      [
+       20,
+       30,
+       0
+      ],
+      [
+       20,
+       30,
+       12.5
+      ],
+      [
+       40,
+       0,
+       6
+      ],
+      [
+       40,
+       15,
+       0
+      ],
+      [
+       40,
+       15,
+       12.5
+      ],
+      [
+       40,
+       30,
+       6
+      ]
+     ],
+     "distance": 2.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 14052.083333333334,
+     "tol": 0.0001,
+     "formula": "40*30*12.5 - 0.5*2.5^2*(4*40 + 4*30 + 4*12.5) + 6*2.5^3 - 8*2.5^3/12 (each corner closed by the triangular facet through (0,d,d), (d,0,d), (d,d,0) from it: the mitred corner less a tetrahedron of d^3/12)"
+    }
+   }
+  }
+ ]
+}

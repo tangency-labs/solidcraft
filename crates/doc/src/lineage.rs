@@ -9,11 +9,12 @@
 //! bodies the feature built itself (whose faces are named by their role: the sketch curve they
 //! sweep, the cap they are). Naming (`history_names`) reads it; nothing here samples geometry.
 
+use solidcraft_geom::prelude::*;
 use std::sync::{Arc, OnceLock};
 
-use solidcraft_geom::Region2;
+use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
-use solidcraft_kernel::history::{Change, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::history::{BodyHistory, Change, FaceOrigin, FaceProv, History};
 
 use crate::SolvedSketch;
 
@@ -26,7 +27,7 @@ pub(crate) enum Operand {
     /// or mirror: its faces are named after their sources (`<name>@F<feature>.<instance>`).
     Copy { body: String, instance: usize },
     /// The cavity side of a shell grown from a body's faces (by name): each face is the inner
-    /// wall of the face it offsets (`F<feature>:inner:<name>`).
+    /// wall of the face it offsets (`F<feature>:inner(<name>)`).
     Inner(String),
     /// A body the feature built: each face's role (`side:<curve>`, `top`, `+x`, …; the first is
     /// its name, the others aliases), empty where the role is not known exactly.
@@ -96,6 +97,24 @@ impl Lineage {
         Lineage { history: self.history.clone(), operands }
     }
 
+    /// Whether each face of the body this is the lineage of came, in whole or in part, from a
+    /// face or edge of `name`, a body of the model before the feature.
+    pub(crate) fn faces_from_body(&self, name: &str) -> Vec<bool> {
+        let from: Vec<bool> = self.operands.iter().map(|op| matches!(op.as_ref(), Operand::Body(n) if n == name)).collect();
+        self.history
+            .faces
+            .iter()
+            .map(|face| {
+                face.origins.iter().any(|origin| match *origin {
+                    FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } => {
+                        from.get(operand) == Some(&true)
+                    }
+                    FaceOrigin::Profile { .. } | FaceOrigin::Cap { .. } => false,
+                })
+            })
+            .collect()
+    }
+
     /// A tool of `faces` faces and no edges (a mesh's triangles) whose faces have no role.
     pub(crate) fn unnamed_faces(faces: usize) -> Lineage {
         let faces = (0..faces).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();
@@ -129,6 +148,9 @@ impl Lineage {
 pub(crate) struct Traced {
     pub body: Body,
     pub lineage: Option<Lineage>,
+    /// How the feature built it, when that alone fixes it (a primitive from its numbers, a copy
+    /// of one moved): what a cut by it is remembered by (see `ModelBody::cut`).
+    pub recipe: Option<u64>,
 }
 
 impl Traced {
@@ -136,13 +158,13 @@ impl Traced {
     /// geometry, those of the bodies it is combined with by their history.
     pub fn unnamed(body: Body) -> Traced {
         let roles = vec![Vec::new(); body.face_count()];
-        Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body }
+        Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body, recipe: None }
     }
 
     /// A body the feature built, its faces' roles given (one per face), else not known.
     pub fn made(body: Body, roles: Option<Vec<Vec<String>>>) -> Traced {
         match roles.filter(|r| r.len() == body.face_count()) {
-            Some(roles) => Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body },
+            Some(roles) => Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body, recipe: None },
             None => Traced::unnamed(body),
         }
     }
@@ -151,14 +173,19 @@ impl Traced {
     /// which built it.
     pub fn copied(&self, copy: Body, feature: u64, instance: usize) -> Traced {
         let lineage = self.lineage.as_ref().and_then(|l| Lineage::step(&copy, &[&l.copied(feature, instance)]));
-        Traced { body: copy, lineage }
+        Traced { body: copy, lineage, recipe: None }
+    }
+
+    /// This tool, built by `recipe`.
+    pub fn with_recipe(self, recipe: Option<u64>) -> Traced {
+        Traced { recipe, ..self }
     }
 
     /// `result`, made by one kernel operation from `inputs` (in its operand order).
     pub fn step(result: Body, inputs: &[&Traced]) -> Traced {
         let lineages: Option<Vec<&Lineage>> = inputs.iter().map(|t| t.lineage.as_ref()).collect();
         let lineage = lineages.and_then(|l| Lineage::step(&result, &l));
-        Traced { body: result, lineage }
+        Traced { body: result, lineage, recipe: None }
     }
 
     /// `result`, made by one kernel operation from this body alone. Where that operation's
@@ -179,7 +206,7 @@ impl Traced {
             let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: l.clone(), names: OnceLock::new() })));
             Some(Lineage { history, operands: vec![stage] })
         });
-        Traced { body: result, lineage }
+        Traced { body: result, lineage, recipe: None }
     }
 }
 
@@ -214,13 +241,16 @@ impl<'a> ProfileRoles<'a> {
         if history.operands != 0 {
             return None;
         }
-        let segments: Vec<&solidcraft_geom::Seg2> =
+        let segments: Vec<&solidcore_record::Seg2> =
             self.region.map(|r| std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs).collect()).unwrap_or_default();
         let curves = self.sketch.map(crate::config::ExactSketchCurves::new);
         // Every curve the segment is drawn on (one, or several coincident or collinear ones).
         let curve = |segment: usize| -> Vec<String> {
             let (Some(curves), Some(segment)) = (curves.as_ref(), segments.get(segment)) else { return Vec::new() };
-            let drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            let mut drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            if drawn.is_empty() {
+                drawn.extend(curves.find_free_form(segment).map(|id| format!("side:{id}")));
+            }
             match self.thin {
                 // A thin wall's side beside its curve (the other side may lie on it).
                 Some(thin) if drawn.is_empty() => curves.find_offset(segment, &thin.curves, thin.distances),
@@ -276,7 +306,7 @@ impl<'a> ProfileRoles<'a> {
 /// numbered through the chains in order. It has no caps.
 pub(crate) struct ChainRoles<'a> {
     pub sketch: &'a SolvedSketch,
-    pub chains: &'a [Vec<solidcraft_geom::Seg2>],
+    pub chains: &'a [Vec<solidcore_record::Seg2>],
 }
 
 impl ChainRoles<'_> {
@@ -287,7 +317,7 @@ impl ChainRoles<'_> {
     }
 
     fn of(&self, history: &History) -> Vec<Vec<String>> {
-        let segments: Vec<&solidcraft_geom::Seg2> = self.chains.iter().flatten().collect();
+        let segments: Vec<&solidcore_record::Seg2> = self.chains.iter().flatten().collect();
         let curves = crate::config::ExactSketchCurves::new(self.sketch);
         history
             .faces
@@ -318,7 +348,7 @@ impl ChainRoles<'_> {
 /// answering to the others; its caps `start` and `end`.
 pub(crate) struct SectionRoles<'a> {
     /// Each section's sketch and loops (outer, then holes), in the order given.
-    pub sections: Vec<(&'a SolvedSketch, Vec<&'a solidcraft_geom::Loop2>)>,
+    pub sections: Vec<(&'a SolvedSketch, Vec<&'a solidcore_record::Loop2>)>,
 }
 
 impl SectionRoles<'_> {
@@ -405,6 +435,59 @@ pub(crate) fn cylinder_tool(body: Body) -> Traced {
             .collect()
     });
     Traced::made(body, roles)
+}
+
+/// A pipe swept from its circle (and, when hollow, the hole inside it), whose first
+/// `outer_segments` profile segments are the circle: its end faces `start` and `end`, as a
+/// sweep's caps are, its outside wall `side`, as a cylinder's is, and a hollow pipe's inside wall
+/// `inner` (#14897).
+pub(crate) fn pipe_tool(body: Body, outer_segments: usize) -> Traced {
+    let roles = body.history().filter(|h| h.operands == 0).map(|h| {
+        h.faces
+            .iter()
+            .map(|f| {
+                let mut roles: Vec<String> = Vec::new();
+                for origin in &f.origins {
+                    let role = match *origin {
+                        FaceOrigin::Cap { end } => {
+                            if end {
+                                "end"
+                            } else {
+                                "start"
+                            }
+                        }
+                        FaceOrigin::Profile { segment } if segment < outer_segments => "side",
+                        FaceOrigin::Profile { .. } => "inner",
+                        // One unknown origin leaves the face unknown: never a partial guess.
+                        _ => return Vec::new(),
+                    };
+                    if !roles.iter().any(|r| r == role) {
+                        roles.push(role.to_string());
+                    }
+                }
+                roles
+            })
+            .collect()
+    });
+    Traced::made(body, roles)
+}
+
+/// The roles of a cone primitive's faces, from the body revolved from its half section (base
+/// side first, then the sloped side, then the top side of a cut-off cone; the side on the axis
+/// makes no face): `bottom`, `side` and `top`, as a cylinder's are (#7476). `None` when the body
+/// has no history of its own.
+pub(crate) fn cone_roles(body: &Body) -> Option<Vec<Vec<String>>> {
+    body.history().filter(|h| h.operands == 0).map(|h| {
+        h.faces
+            .iter()
+            .map(|f| match f.origins.as_slice() {
+                [FaceOrigin::Profile { segment: 0 }] => vec!["bottom".to_string()],
+                [FaceOrigin::Profile { segment: 1 }] => vec!["side".to_string()],
+                [FaceOrigin::Profile { segment: 2 }] => vec!["top".to_string()],
+                _ => Vec::new(),
+            })
+            .collect()
+    })
 }
 
 /// A tool a feature builds without a sketch (a boss's post, a rib, a lip's band), its faces named
@@ -514,6 +597,15 @@ impl crate::ModelBody {
         crate::ModelBody::new(name, made.body, feature).with_lineage(made.lineage)
     }
 
+    /// This body as the feature changed it: under its name, from the feature that made it and with
+    /// its `component`, so a later step of the same feature still counts it among that
+    /// component's bodies (the copies of a pattern's second cut, #14305).
+    pub(crate) fn remade(&self, made: Traced) -> Self {
+        let mut remade = Self::traced_new(self.name.clone(), made, self.feature);
+        remade.component = self.component;
+        remade
+    }
+
     /// This body with what it came from during the feature (`None`: not known).
     pub(crate) fn with_lineage(mut self, lineage: Option<Lineage>) -> Self {
         self.made = match lineage {
@@ -531,14 +623,14 @@ impl crate::ModelBody {
             Made::Traced(l) => Some(l.as_ref().clone()),
             Made::Unknown => None,
         };
-        Traced { body: self.body.clone(), lineage }
+        Traced { body: self.body.clone(), lineage, recipe: None }
     }
 
     /// This body, as it was before the feature, as an operand named by `operand` (a moved copy of
     /// it, the cavity side of a shell grown from it); `None` once the feature has changed it.
     pub(crate) fn before_as(&self, operand: Operand) -> Traced {
         let lineage = matches!(self.made, Made::Before).then(|| Lineage::of(&self.body, operand));
-        Traced { body: self.body.clone(), lineage }
+        Traced { body: self.body.clone(), lineage, recipe: None }
     }
 
     /// The lineage a feature left this body with, when it made or changed it with one.
@@ -546,6 +638,150 @@ impl crate::ModelBody {
         match &self.made {
             Made::Traced(l) => Some(l.clone()),
             Made::Before | Made::Unknown => None,
+        }
+    }
+}
+
+/// The pieces feature `f` (saved before format 14) split a body into, named so the later
+/// features of the design find them. Those builds named the pieces in truck's shell order, which
+/// SMLib's need not follow, and a later feature names the piece it works on (`body`) and keeps
+/// the points it picked on it: each name goes to the piece nearest the points the features
+/// naming it picked. Pieces no later feature names keep the order they came in; so do all of
+/// them where the picks do not tell the pieces apart.
+pub(crate) fn order_legacy_lumps(bodies: &mut [crate::ModelBody], before: &crate::ModelState, doc: &crate::Document, f: &crate::Feature) {
+    for members in made_families(bodies, before) {
+        order_legacy_family(bodies, &members, doc, f);
+    }
+}
+
+/// The families of [`lump_families`] the feature that left `bodies` after `before` made: a family
+/// it left as it was keeps its names.
+fn made_families(bodies: &[crate::ModelBody], before: &crate::ModelState) -> Vec<Vec<usize>> {
+    lump_families(bodies)
+        .into_iter()
+        .filter(|members| members.iter().filter_map(|i| bodies.get(*i)).any(|b| !before.bodies.iter().any(|o| o.body.same(&b.body))))
+        .collect()
+}
+
+/// What [`order_legacy_lumps`] named the pieces of `bodies` (the state feature `f` left after
+/// `before`) by: a digest of each piece name with the points the later features of `doc` naming
+/// it picked, 0 where `f` was saved since format 14 or split nothing. Those features come after
+/// `f`, so the state is `f`'s only while this is the same: a script replays them after it, and
+/// an edit may change what they pick or name.
+pub(crate) fn legacy_picks_digest(bodies: &[crate::ModelBody], before: &crate::ModelState, doc: &crate::Document, f: &crate::Feature) -> u64 {
+    use std::hash::{Hash, Hasher};
+    if !f.shell_piece_order {
+        return 0;
+    }
+    let families = made_families(bodies, before);
+    if families.is_empty() {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for members in families {
+        let mut names: Vec<String> = members.iter().filter_map(|i| bodies.get(*i).map(|b| b.name.clone())).collect();
+        names.sort();
+        for (name, points) in names.iter().zip(later_picks(doc, f, &names)) {
+            name.hash(&mut h);
+            for p in points {
+                [p.x, p.y, p.z].map(f64::to_bits).hash(&mut h);
+            }
+        }
+    }
+    // 0 means "nothing named so"; a digest that happens to be 0 must not read as that.
+    h.finish().max(1)
+}
+
+/// The pieces each body a feature cut in two or more came out as (the bodies whose lineage is
+/// that one operand), as [`order_lumps`] finds them.
+fn lump_families(bodies: &[crate::ModelBody]) -> Vec<Vec<usize>> {
+    let mut families: Vec<(*const Operand, Vec<usize>)> = Vec::new();
+    for (i, b) in bodies.iter().enumerate() {
+        let Made::Traced(l) = &b.made else { continue };
+        let [op] = l.operands.as_slice() else { continue };
+        if !matches!(op.as_ref(), Operand::Stage(_)) {
+            continue;
+        }
+        let key = Arc::as_ptr(op);
+        match families.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, members)) => members.push(i),
+            None => families.push((key, vec![i])),
+        }
+    }
+    families.into_iter().map(|(_, m)| m).filter(|m| m.len() > 1).collect()
+}
+
+/// Per name of `names`: the points the features after `f` in `doc` that name that body picked
+/// on it.
+fn later_picks(doc: &crate::Document, f: &crate::Feature, names: &[String]) -> Vec<Vec<Vec3>> {
+    let later = doc.features.iter().skip_while(|g| g.id != f.id).skip(1);
+    let mut picks: Vec<Vec<Vec3>> = vec![Vec::new(); names.len()];
+    for g in later {
+        let Ok(kind) = serde_json::to_value(&g.kind) else { continue };
+        let Some(k) = kind.get("body").and_then(|b| b.as_str()).and_then(|b| names.iter().position(|n| n == b)) else { continue };
+        for key in ["edges", "faces", "face", "position"] {
+            let point = |v: &serde_json::Value| -> Option<Vec3> {
+                let a = v.as_array().filter(|a| a.len() == 3)?;
+                Some(Vec3::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?))
+            };
+            let found: Vec<Vec3> = match kind.get(key) {
+                Some(v) => {
+                    point(v).map(|p| vec![p]).unwrap_or_else(|| v.as_array().map(|a| a.iter().filter_map(point).collect()).unwrap_or_default())
+                }
+                None => Vec::new(),
+            };
+            if let Some(slot) = picks.get_mut(k) {
+                slot.extend(found);
+            }
+        }
+    }
+    picks
+}
+
+fn order_legacy_family(bodies: &mut [crate::ModelBody], members: &[usize], doc: &crate::Document, f: &crate::Feature) {
+    if members.len() > 64 {
+        return;
+    }
+    let names: Vec<String> = members.iter().filter_map(|i| bodies.get(*i).map(|b| b.name.clone())).collect();
+    let picks = later_picks(doc, f, &names);
+    // How far piece `i` is from the points of name `k` (the mesh's nearest triangle).
+    let far = |piece: usize, pts: &[Vec3]| -> f64 {
+        let Some(b) = members.get(piece).and_then(|i| bodies.get(*i)) else { return f64::INFINITY };
+        let m = b.mesh();
+        pts.iter()
+            .map(|p| {
+                m.triangles
+                    .iter()
+                    .filter_map(|t| m.tri(t))
+                    .map(|[a, b, c]| solidcraft_geom::compare::closest_on_triangle(*p, a, b, c).dist(*p))
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .fold(0.0, f64::max)
+    };
+    let mut order: Vec<Option<usize>> = vec![None; names.len()];
+    let mut taken = vec![false; members.len()];
+    for (k, pts) in picks.iter().enumerate().filter(|(_, p)| !p.is_empty()) {
+        let best =
+            (0..members.len()).filter(|i| !taken.get(*i).copied().unwrap_or(true)).map(|i| (far(i, pts), i)).min_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((d, i)) = best else { return };
+        // Only a piece the points lie on: a pick off every piece tells nothing.
+        let size = members.get(i).and_then(|m| bodies.get(*m)).map_or(1.0, |b| b.body.size().max(1.0));
+        if d > size * 1e-3 {
+            return;
+        }
+        if let (Some(o), Some(t)) = (order.get_mut(k), taken.get_mut(i)) {
+            *o = Some(i);
+            *t = true;
+        }
+    }
+    let mut free = (0..members.len()).filter(|i| !taken.get(*i).copied().unwrap_or(true));
+    let order: Vec<usize> = order.into_iter().map(|o| o.or_else(|| free.next())).collect::<Option<_>>().unwrap_or_default();
+    if order.len() != names.len() {
+        return;
+    }
+    for (name, piece) in names.into_iter().zip(order) {
+        if let Some(b) = members.get(piece).and_then(|i| bodies.get_mut(*i)) {
+            b.name = name;
         }
     }
 }
@@ -571,7 +807,12 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
     }
     for (_, members) in families.into_iter().filter(|(_, m)| m.len() > 1) {
         let feature = members.first().and_then(|i| bodies.get(*i)).map(|b| b.feature);
-        if members.iter().any(|i| bodies.get(*i).map(|b| b.feature) != feature) {
+        // A cut's pieces past the first belong to the cut itself (#10123), so its family spans
+        // two features: the piece that kept the body's name comes from the body's own feature
+        // and the rest from this feature. Any other mix is not a split's family: leave it be.
+        let same = members.iter().all(|i| bodies.get(*i).map(|b| b.feature) == feature);
+        let foreign = members.iter().filter(|i| bodies.get(**i).map(|b| b.feature) != Some(origin.feature.id)).count();
+        if !same && foreign > 1 {
             continue;
         }
         let least = |b: &crate::ModelBody| {
@@ -582,10 +823,23 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         let keys: Option<Vec<(String, usize)>> = members.iter().map(|i| bodies.get(*i).and_then(least).map(|k| (k, *i))).collect();
         let Some(mut keys) = keys else { continue };
         keys.sort();
-        let names: Vec<String> = members.iter().filter_map(|i| bodies.get(*i).map(|b| b.name.clone())).collect();
-        for (name, (_, i)) in names.into_iter().zip(keys) {
-            if let Some(b) = bodies.get_mut(i) {
-                b.name = name;
+        // A name moves with the feature it belongs to: in a cut's family the first name is the
+        // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
+        // the `body_names` of the feature a body says made it (#10438).
+        let names: Vec<(String, u64)> = members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature))).collect();
+        // The pieces take the family's places in that order too, so the state lists them as
+        // their names run. The session pins a feature's body names in state order, and the next
+        // evaluation hands them out in this order: listed in the kernel's order, the pieces
+        // swapped names once the design was evaluated again from its pinned names (opened).
+        let moved: Vec<crate::ModelBody> = keys.iter().filter_map(|(_, i)| bodies.get(*i).cloned()).collect();
+        if moved.len() != members.len() || names.len() != members.len() {
+            continue;
+        }
+        for ((mut b, (name, feature)), place) in moved.into_iter().zip(names).zip(&members) {
+            b.name = name;
+            b.feature = feature;
+            if let Some(slot) = bodies.get_mut(*place) {
+                *slot = b;
             }
         }
     }

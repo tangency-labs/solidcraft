@@ -1,14 +1,15 @@
 //! Associative trace definitions and dependency checks. Sampling uses the existing motion
 //! driver on a scratch session; only a changed generated wire is handed to the evaluator.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, JointOrigin, Snap};
 use solidcraft_doc::motion::{MotionTrace, TraceMotion};
 use solidcraft_doc::{IDENTITY, apply_point};
-use solidcraft_geom::Vec3;
 
 use crate::params::{bad, bool_};
 use crate::{Result, Session};
@@ -51,22 +52,14 @@ pub(super) fn source(s: &Session, p: &Value, cmd: &str) -> Result<MotionTrace> {
     let (occurrence, local) = super::traced_point(s, p, cmd)?;
     let point = match p.get("point_ref") {
         Some(v) => {
-            let mut reference = v.clone();
             // The origin parser uses an occurrence's first placement. A trace can name a
             // different nested instance; convert its world pick to that canonical frame.
-            let id = occurrence.last().copied().unwrap_or(0);
-            let placed = placed_world(s, &occurrence)?;
-            let inverse = solidcraft_doc::mat_inverse(&placed).ok_or_else(|| bad(cmd, "invalid occurrence placement"))?;
-            let canonical = joints::occurrence_world(&s.doc, id);
-            for key in ["face", "circle", "edge", "point", "corner"] {
-                if let Some(at) = reference.get(key).and_then(crate::params::vec3) {
-                    let at = apply_point(&canonical, apply_point(&inverse, at));
-                    reference[key] = json!([at.x, at.y, at.z]);
-                }
-            }
-            if let Some(z) = reference.get("z").and_then(crate::params::vec3) {
-                let z = solidcraft_doc::apply_vector(&canonical, solidcraft_doc::apply_vector(&inverse, z));
-                reference["z"] = json!([z.x, z.y, z.z]);
+            placed_world(s, &occurrence)?;
+            let mut reference = super::super::joints::in_first_placement(s, v, &occurrence, cmd)?;
+            // The trace's `occurrence` names the placement, and the reference now sits in its
+            // part's first placement: a pick's `path` would anchor it on the copy a second time.
+            if let Some(m) = reference.as_object_mut() {
+                m.remove("path");
             }
             let o = super::super::joints::origin_param(s, Some(&reference), cmd)?;
             if o.occurrence != occurrence.last().copied().unwrap_or(0) {
@@ -74,7 +67,7 @@ pub(super) fn source(s: &Session, p: &Value, cmd: &str) -> Result<MotionTrace> {
             }
             o
         }
-        None => JointOrigin { occurrence: occurrence.last().copied().unwrap_or(0), snap: Snap::Point { point: local, z: None, x: None } },
+        None => JointOrigin::new(occurrence.last().copied().unwrap_or(0), Snap::Point { point: local, z: None, x: None }),
     };
     let referenced = apply_point(&joints::resolve_origin(&s.doc, &s.model.state(), &point)?, Vec3::ZERO);
     if referenced.dist(local) > 1e-4 {
@@ -254,6 +247,7 @@ fn seeded(s: &Session, t: &MotionTrace) -> Session {
 pub(super) fn remember(s: &mut Session, t: &MotionTrace) {
     let key = inputs(s, t).map_err(|e| e.to_string());
     if let Ok(key) = &key
+        // design-only: a motion trace's wire is in one of the design's sketches.
         && let Some(points) = s.doc.sketch(t.sketch).ok().and_then(|sk| sk.wires.iter().find(|w| w.id == t.wire)).map(|w| w.fit.clone())
     {
         remember_points(s, t.sketch, key.clone(), points);
@@ -330,6 +324,7 @@ pub(crate) fn refresh(s: &mut Session) {
         let unchanged = s.motion_traces.entries.get(&t.sketch).is_some_and(|old| old.inputs == key);
         if unchanged
             && cached.as_ref().is_none_or(|points| {
+                // design-only: a motion trace's wire is in one of the design's sketches.
                 s.doc.sketch(t.sketch).ok().and_then(|sk| sk.wires.iter().find(|w| w.id == t.wire)).is_some_and(|w| same_points(&w.fit, points))
             })
         {
@@ -352,9 +347,11 @@ pub(crate) fn refresh(s: &mut Session) {
             remember_points(s, t.sketch, key.clone(), points.clone());
         }
         let error = match result {
+            // design-only: a motion trace's wire is in one of the design's sketches.
             Ok(points) => match s.doc.sketch(t.sketch).ok().and_then(|sk| sk.wires.iter().find(|w| w.id == t.wire)) {
                 Some(wire) if same_points(&wire.fit, &points) => None,
                 Some(_) => {
+                    // design-only: a motion trace's wire is in one of the design's sketches.
                     if let Ok(sk) = s.doc_mut().sketch_mut(t.sketch)
                         && let Some(wire) = sk.wires.iter_mut().find(|w| w.id == t.wire)
                     {
@@ -372,6 +369,7 @@ pub(crate) fn refresh(s: &mut Session) {
     }
     if changed {
         s.model.evaluate(&s.doc);
+        s.evaluations = s.evaluations.saturating_add(1);
         s.revision += 1;
     }
     for t in &traces {
@@ -403,7 +401,7 @@ pub(super) fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().assembly.traces.remove(i);
         Arc::make_mut(&mut s.motion_traces.entries).remove(&id);
         Arc::make_mut(&mut s.motion_traces.history).remove(&id);
-        return Ok(json!({"sketch":id,"auto_update":false}));
+        return reply(id, false);
     }
     let mut t = s.doc.assembly.traces.get(i).cloned().ok_or_else(|| bad(CMD, "trace is missing"))?;
     if p.get("study").is_some() || p.get("joint").is_some() {
@@ -429,5 +427,11 @@ pub(super) fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     {
         *slot = t;
     }
-    Ok(json!({"sketch":id,"auto_update":true}))
+    reply(id, true)
+}
+
+/// Edit Motion Trace's reply, from its type.
+fn reply(sketch: u64, auto_update: bool) -> Result<Value> {
+    let edited = crate::schema::motion_trace::MotionTraceEdited { sketch, auto_update, param_warnings: Vec::new() };
+    serde_json::to_value(edited).map_err(|e| bad(CMD, e.to_string()))
 }

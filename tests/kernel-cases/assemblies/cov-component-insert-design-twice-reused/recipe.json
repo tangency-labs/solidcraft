@@ -1,0 +1,22 @@
+{
+ "commands": [
+  {
+   "command": "component.insert_design",
+   "params": {
+    "path": "$CASE/plate.solidcraft"
+   }
+  },
+  {
+   "command": "component.insert_design",
+   "params": {
+    "path": "$CASE/plate.solidcraft",
+    "reuse": true,
+    "translate": [
+     0,
+     50,
+     0
+    ]
+   }
+  }
+ ]
+}

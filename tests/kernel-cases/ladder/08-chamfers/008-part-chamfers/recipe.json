@@ -1,0 +1,31 @@
+{
+ "base": "../../07-fillets/017-part-rounds",
+ "commands": [
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      23,
+      15,
+      30
+     ]
+    ],
+    "distance": 1
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      30,
+      40,
+      35
+     ]
+    ],
+    "distance": 2
+   }
+  }
+ ]
+}

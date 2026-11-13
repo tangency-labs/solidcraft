@@ -1,0 +1,156 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  3.5000000000000018,
+                  5.817072295949927e-16,
+                  9.5
+                ],
+                [
+                  9.500000000000002,
+                  5.817072295949927e-16,
+                  9.5
+                ]
+              ],
+              "index": 16
+            }
+          ],
+          "points": [
+            [
+              6.500000000000002,
+              5.817072295949927e-16,
+              9.5
+            ]
+          ],
+          "tolerance": 2.4974975465639857
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "3369-fillet-edge-ends-on-tangent-seam",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "bar with a stadium cross-section (rectangle 25 x 19 and two half discs of R9.5, area 25*19 + pi*9.5^2) extruded 14 along X; a slot x 3.5..9.5 cuts away the y<0 half of the round end (half disc, pi*9.5^2/2 * 6); the sharp edge left between the flat top and the slot floor (length 6) is rounded with R2, removing (1 - pi/4) r^2 L = (1 - pi/4)*4*6. V = 14*(475 + pi*90.25) - 6*pi*90.25/2 - 24*(1 - pi/4). The round ends on the slot walls, where only the 6 mm strip is affected.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3369",
+      "tangency-labs/solidcraft#3922"
+    ],
+    "volume_mm3": 9763.665662772806,
+    "what": "an R2 round on a straight edge whose ends sit on the tangent seam between a flat top and a rounded end"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 25,
+      "faces": 11,
+      "vertices": 16
+    }
+  },
+  "records": "3369-fillet-edge-ends-on-tangent-seam.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3267.7454461759116,
+      "body_count": 1,
+      "edges": 25,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 9763.665662831354
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3369",
+    "tangency-labs/solidcraft#3922"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an R2 round on a straight edge whose ends sit on the tangent seam between a flat top and a rounded end",
+  "why_not": []
+}

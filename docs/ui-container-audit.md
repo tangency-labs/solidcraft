@@ -33,21 +33,19 @@ windows use the shared composition, including its header and fixed outer frame.
 
 | Surfaces | Owners / composition | Container policy |
 | --- | --- | --- |
-| Browser, vertical History and Browser/History shared column | `browser`, `timeline_left`, `lib` | Adaptive panel; shared shell placement, resizing and fold state remain with owners |
-| Horizontal History | `timeline` | Adaptive panel surface; floating strip or bottom dock |
-| Assistant sheet and folded strip | `agent_chat/panel` → `Panel` | Adaptive feature surface; left/right position, resize, drag targets and native pop-out retained |
-| Feature forms, Parameters, material review, Redefine Sketch Plane | `dialogs`, `params_dialog`, `material_card_review`, `sketch_attachment_ui` → `Panel` | Adaptive feature surface; bounded anchors and pinned actions retained |
-| Sketch options | `sketch_palette` → `Panel` | Adaptive palette surface, preserving transparency |
+| Browser, History, Assistant, Sketch Options, Bill of Materials, Render Scene Browser, Library, Inspector and Shots | Content owners → `panel_runtime` → shared panel host | Shared placement, resizing, tabbing, collapse and dock surfaces. History and Shots use a fixed-height inline row at the bottom. |
+| Feature forms, Parameters, material review, Redefine Sketch Plane | `dialogs`, `params_dialog`, `material_card_review`, `sketch_attachment_ui` → `Panel` | Floating editor cards with right-edge initial placement, bounded drag and pinned actions |
 | Application bar, workspace and ribbon | `toolbar`, `shell` | Chrome hosts; adaptive card geometry comes from the shared policy |
-| Render settings | `render_workspace` | Panel host; existing right dock retained |
+| Status bar | `status_bar` | Application-bar surface along the window's bottom edge; flat and full width in both layouts, allocated before History and the viewport and counted as covered by the shell |
 | Preferences, managers, About, update/install/recovery/crash/issue prompts | `Window`, `Confirm` | System windows and modal sheets retain modality; these are not workspace sidebars |
-| BOM, Messages, mouse gestures, 3D mouse calibration | respective modules → `Window::show_body` | Shared header, tokenised frame and bounded body; native egui title bars/resize highlights and legacy report/width helpers removed |
+| Messages, mouse gestures, 3D mouse calibration | respective modules → `Window::show_body` | Shared header, tokenised frame and bounded body; native egui title bars/resize highlights and legacy report/width helpers removed |
 | Web stored-files and web recovery windows | `apps/solidcraft-web` → `Window::show_body` | Same shared composition; recovery requires an explicit choice and cannot be dismissed through the header |
 | File/workspace/document/Help/context/overflow menus, radial menu, Select Other and inline rename | respective owners → `Menu` / container popup | Anchored transient hosts; never consume workspace dock space |
 | Search, completions, colour and library popovers | `shortcut_box`, kit fields/choice/colour/table | Anchored popup containers; editor focus and completion semantics retained |
-| Dimension values, canvas placement values, canvas feedback and History resize seam | `dim_view`, `sketch_dims`, `canvas`, `timeline_left` | Model/control-anchored overlays; retain their coordinates rather than becoming docks |
+| Dimension values, canvas placement values and canvas feedback | `dim_view`, `sketch_dims`, `canvas` | Model/control-anchored overlays; retain their coordinates rather than becoming docks |
 | Status and loading/progress messages | `viewport`, `open_meshing` | Notification surfaces independent of layout |
-| Navigation bar | `viewport` | Shared navigation surface; shell still computes its available canvas bounds |
+| Navigation bar | `navigation_bar_view` | Measured single-row Navigation surface; upward Popup menus use kit list rows; shell supplies the free canvas bounds |
+| Persistent viewport status items | `ui_kit::viewport_status` | Content-hugging ViewportStatus pill surface; anchored row and Popup key cards, independent of workspace docking |
 | OK and Cancel in the view's corner | `view_confirm` | Navigation surface in its own area; the viewport layout reserves its corner and the shell counts it as covered |
 | Home, model viewport, Render canvas and native Assistant window content | `home`, `lib`, `agent_chat/panel` | Central content hosts, not floating workspace panels |
 | Loading input shield | `file_load` | Explicit input shield; must remain interactive while CAD input is blocked |
@@ -73,8 +71,14 @@ qualified default constructors, struct literals, macro-hidden hosts and popup sh
 Host APIs are default-denied except for explicit popup-state operations, so new egui
 constructors are rejected automatically. Private raw host/module imports are rejected too,
 preventing aliases from escaping into another source file.
-It also rejects raw outer popup/window frames and custom outer shadows. Invalid Rust
-fails closed. Read-only state queries, content-only frames, and test-only fixtures remain
+It also rejects raw outer popup/window frames and custom outer shadows, and egui's
+tooltip methods on a response (`on_hover_text`, `on_hover_ui`, their at-pointer and
+disabled forms, `show_tooltip_text`, `show_tooltip_ui`), as method calls, path calls and
+inside macros: tooltips are backing surfaces and go through `ui_kit::BackingTooltipExt`.
+Custom tooltips the kit builds with `egui::Tooltip` through `Container::show_tooltip`, and
+the tooltips egui draws inside its own widgets (an elided label), are not covered by the
+gate. Invalid Rust fails closed.
+Read-only state queries, content-only frames, and test-only fixtures remain
 valid; there are no per-feature allowances. This enforces the construction boundary;
 surface purpose and hand-painted content still need ordinary review.
 

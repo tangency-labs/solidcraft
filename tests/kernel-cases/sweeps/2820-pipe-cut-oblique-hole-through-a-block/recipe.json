@@ -1,0 +1,75 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 40,
+    "height": 20,
+    "corner": [
+     -20,
+     -20,
+     0
+    ],
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Path"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -9.999999999999998,
+      -7.320508075688775
+     ],
+     [
+      9.999999999999998,
+      27.320508075688775
+     ]
+    ],
+    "infer": false,
+    "ids": [
+     "p1"
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.pipe",
+   "params": {
+    "path_sketch": "Path",
+    "path": [
+     "p1"
+    ],
+    "diameter": 6,
+    "operation": "cut"
+   }
+  }
+ ]
+}
