@@ -254,8 +254,8 @@ impl Body {
     /// [`Error::Unsupported`] for a body with a closed shell (turned over, a solid would be inside
     /// out), the body as it was; the kernel's status.
     pub fn turn_over(&self) -> Result<()> {
-        with_body("turn_over_sheet", self, |_, b| {
-            Ok(turn_over_sheet(b).map_err(status))
+        with_body("turn_over_sheet", self, |k, b| {
+            Ok(turn_over_sheet(k, b).map_err(status))
         })?
     }
 

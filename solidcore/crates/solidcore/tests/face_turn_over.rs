@@ -1,9 +1,9 @@
-//! A face of a sheet turned over (`topology::face::p1::turn_over`) and a sheet turned over whole
-//! (`topology::brep::sheet::turn_over_sheet`): the face's upward use becomes its mate, each use
-//! keeping its orientation and loops, so the face's side against its surface is the other one
-//! (the normal in the upward use's sense, which `query::continuity` reads, is negated at every
-//! point), the body valid before and after; turning over twice gives the body back exactly; a
-//! closed body, and a face between two shells, are refused before anything changes.
+//! A face of a sheet turned over (`topology::face::p1::turn_over`, `SmFace::SwapUV`) and a sheet
+//! turned over whole (`topology::brep::sheet::turn_over_sheet`): the surface's u and v swapped,
+//! so the normal in the upward use's sense (which `query::continuity` reads) is negated at every
+//! point, the upward use still the Same one and the body valid before and after; turning over
+//! twice gives the uses, loops and normals back; a closed body, and a face between two shells,
+//! are refused before anything changes.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -86,9 +86,13 @@ fn a_sheet_turned_over_faces_the_other_way_and_stays_valid() {
         assert!((n.z.abs() - 1.0).abs() < 1e-12, "{n:?}");
     }
 
-    turn_over_sheet(&mut b).unwrap();
+    turn_over_sheet(&k, &mut b).unwrap();
     valid(&mut k, &mut b);
-    assert_eq!(side(&b, f), OrientType::Opposite);
+    assert_eq!(
+        side(&b, f),
+        OrientType::Same,
+        "the upward use is still the Same one"
+    );
     let after = upward_normals(&k, &mut b, f);
     assert_eq!(after.len(), before.len());
     for (a, n) in after.iter().zip(&before) {
@@ -101,30 +105,38 @@ fn a_sheet_turned_over_faces_the_other_way_and_stays_valid() {
 }
 
 #[test]
-fn turning_a_sheet_over_twice_gives_it_back_exactly() {
+fn turning_a_sheet_over_twice_gives_it_back() {
     let mut k = Kernel::default();
     let mut b = sheet(&mut k);
     let before = topology(&b);
     let f = b.face_list()[0];
+    let normals = upward_normals(&k, &mut b, f);
 
-    turn_over(&mut b, f).unwrap();
+    turn_over(&k, &mut b, f).unwrap();
     b.refresh_cached_topology();
     assert_ne!(
         topology(&b),
         before,
         "turned over once, the face is not as it was"
     );
-    turn_over(&mut b, f).unwrap();
+    turn_over(&k, &mut b, f).unwrap();
     b.refresh_cached_topology();
     assert_eq!(topology(&b), before);
+    for (a, n) in upward_normals(&k, &mut b, f).iter().zip(&normals) {
+        let d = *a - *n;
+        assert!(
+            d.x.abs() + d.y.abs() + d.z.abs() < 1e-12,
+            "{a:?} against {n:?}"
+        );
+    }
 
     let shell = b
         .faceuse(upward_faceuse(&b, f).unwrap().unwrap())
         .unwrap()
         .shell
         .unwrap();
-    turn_over_shell(&mut b, shell).unwrap();
-    turn_over_shell(&mut b, shell).unwrap();
+    turn_over_shell(&k, &mut b, shell).unwrap();
+    turn_over_shell(&k, &mut b, shell).unwrap();
     assert_eq!(topology(&b), before);
     valid(&mut k, &mut b);
 }
@@ -136,7 +148,7 @@ fn a_closed_body_is_refused_before_anything_changes() {
     let before = topology(&b);
 
     assert!(matches!(
-        turn_over_sheet(&mut b),
+        turn_over_sheet(&k, &mut b),
         Err(SolidError::Unsupported { .. })
     ));
     let f = b.face_list()[0];
@@ -146,11 +158,11 @@ fn a_closed_body_is_refused_before_anything_changes() {
         .shell
         .unwrap();
     assert!(matches!(
-        turn_over_shell(&mut b, shell),
+        turn_over_shell(&k, &mut b, shell),
         Err(SolidError::Unsupported { .. })
     ));
     assert!(matches!(
-        turn_over(&mut b, f),
+        turn_over(&k, &mut b, f),
         Err(SolidError::InvalidInput { .. })
     ));
     assert_eq!(topology(&b), before, "nothing changed");
