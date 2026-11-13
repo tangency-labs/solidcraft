@@ -67,35 +67,25 @@ fn lines(k: &mut Kernel, make: &dyn Fn() -> Brep, level: CheckLevel) -> Vec<Stri
     }
 }
 
-/// A kernel with the shortcuts `on` or off, with the default fixes or (`checks`) with
-/// the curve check's opt-in fixes, which read the radius search's results and measure
-/// UV trims on their surfaces.
-fn kernel(on: bool, checks: bool) -> Kernel {
-    let mut k = Kernel {
+/// A kernel with the shortcuts `on` or off.
+fn kernel(on: bool) -> Kernel {
+    Kernel {
         memoize_curve_caches: on,
         ..Kernel::default()
-    };
-    if checks {
-        k.fixes.bspline_check_min_radius = true;
-        k.fixes.uv_trim_checks_on_surface = true;
-        k.fixes.curve_check_zero_speed_tangent_end = true;
     }
-    k
 }
 
 /// Checks the body `make` builds with the shortcuts on (twice) and off at levels 1 and
-/// 2, with and without the curve check's opt-in fixes: the same lines.
+/// 2: the same lines.
 fn assert_same(name: &str, make: &dyn Fn() -> Brep) {
-    for checks in [false, true] {
-        for level in [CheckLevel::Level1, CheckLevel::Level2] {
-            let full = lines(&mut kernel(false, checks), make, level);
-            let mut on = kernel(true, checks);
-            let first = lines(&mut on, make, level);
-            let kept = lines(&mut on, make, level);
-            let at = format!("{name} at {level:?}, opt-in checks {checks}");
-            assert_eq!(first, full, "{at}: shortcuts on");
-            assert_eq!(kept, full, "{at}: from the kept results");
-        }
+    for level in [CheckLevel::Level1, CheckLevel::Level2] {
+        let full = lines(&mut kernel(false), make, level);
+        let mut on = kernel(true);
+        let first = lines(&mut on, make, level);
+        let kept = lines(&mut on, make, level);
+        let at = format!("{name} at {level:?}");
+        assert_eq!(first, full, "{at}: shortcuts on");
+        assert_eq!(kept, full, "{at}: from the kept results");
     }
 }
 
@@ -157,10 +147,9 @@ fn extruded_circles_check_the_same_with_and_without_the_shortcuts() {
 }
 
 /// The checks of the bodies at level 2, twice each (a body checked again after an edit
-/// elsewhere, as SolidCraft re-checks), timed, with the shortcuts on or off and the
-/// curve check's opt-in fixes (SolidCraft sets them).
+/// elsewhere, as SolidCraft re-checks), timed, with the shortcuts on or off.
 fn time_checks(bodies: &mut [Brep], shortcuts: bool) -> f64 {
-    let mut k = kernel(shortcuts, true);
+    let mut k = kernel(shortcuts);
     let start = Instant::now();
     for _ in 0..2 {
         for b in bodies.iter_mut() {

@@ -35,6 +35,17 @@ Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bod
 inserting one adds them to the current design. Later features build on them. Mesh bodies render,
 measure, move and export, but solid features need B-rep bodies.
 
+The stand-up offer for STEP and IGES files remembers your answer for unchanged files; Preferences › Design lets you turn this memory off or forget all remembered answers.
+
+Reopening an unchanged STEP or IGES file reuses its untouched import from a local cache,
+keyed by the file's SHA-256, import options and application build. It uses the same lossless,
+validated model cache as saved designs; a missing, damaged or incompatible entry imports
+again. Later edits and stand-up rotations are never stored in it, and your remembered
+stand-up answer still applies when you reopen. The cache keeps at most 512 MiB and 500 entries,
+removing the oldest first, in SolidCraft's data folder across updates. Preferences › Design ›
+**Reuse imports I've opened before** is on by default; turn it off to import every time,
+or use **Clear** beside it to remove cached imports without forgetting stand-up answers.
+
 Every imported file (STEP, IGES, 3MF, STL, OBJ or glTF) comes in as a new component named after the
 file, so its bodies never mix with yours. A STEP assembly keeps its structure: its parts and
 sub-assemblies become nested components, and a part used several times is one component with an
@@ -93,6 +104,9 @@ copy of the body so the print face points down at Z = 0, with its centre of mass
 origin; the design itself does not move. The face is tinted and outlined in the viewport, and a
 copy made with Move/Copy or Mirror keeps it. A print face that is gone or no longer flat is
 reported, and the body is sent as it lies. Curved faces and mesh bodies can't be print faces.
+Scripts and agents can write the same laid-down copies to an STL or 3MF file without a slicer:
+`file.export_stl`, `file.export_3mf`, `file.export` and `file.save_mesh` take
+`lay_on_print_faces: true`, and the reply names the bodies that were laid on their print face.
 Known limitation: after a shell of a body that is already shelled, no face of that body can be
 marked, as no sketch can be attached to one either; this needs kernel work in solidcore.
 

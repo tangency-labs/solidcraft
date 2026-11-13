@@ -7,7 +7,7 @@ use std::io::Read as _;
 use serde_json::Value;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
 use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
-use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error};
+use solidcore_ops::{make_box, make_sphere, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::brep::Brep as Record;
 
 fn all_fixes() {
@@ -63,6 +63,128 @@ fn boxes_touching_along_an_edge_union_to_a_closed_body() {
     let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
     assert!(near(volume(&u), 2.0), "{}", volume(&u));
     assert_eq!(u.solid_count().unwrap(), 2);
+}
+
+/// A 20 mm box with a closed void at its middle: a 10 mm cube void, or a sphere void of radius 5.
+fn box_with_void(cube: bool) -> Body {
+    let tool = if cube {
+        make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap()
+    } else {
+        make_sphere([10.0, 10.0, 10.0], 5.0).unwrap()
+    };
+    let b = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]).unwrap();
+    boolean(b, tool, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+#[test]
+fn a_union_that_fills_a_void_is_the_whole_box() {
+    all_fixes();
+    // Every face of the void is deleted, and the region they joined is material. The tool's
+    // faces lie on the void's, or inside the box's material, so none of them is copied in.
+    let fillers = [
+        (true, make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap()),
+        (true, make_box([4.0, 4.0, 4.0], [12.0, 12.0, 12.0]).unwrap()),
+        (true, make_box([5.0, 4.0, 4.0], [12.0, 12.0, 12.0]).unwrap()),
+        (false, make_sphere([10.0, 10.0, 10.0], 5.0).unwrap()),
+        (false, make_sphere([10.0, 10.0, 10.0], 6.0).unwrap()),
+        (
+            false,
+            make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap(),
+        ),
+    ];
+    for (n, (cube, filler)) in fillers.into_iter().enumerate() {
+        let u = boolean(box_with_void(cube), filler, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        assert!(near(volume(&u), 8000.0), "filler {n}: {}", volume(&u));
+        assert_eq!(u.counts().unwrap(), [6, 12, 8], "filler {n}");
+        assert!(u.is_manifold_solid().unwrap(), "filler {n}");
+        assert!(u.to_record().is_ok(), "filler {n}");
+    }
+    // A filler that leaves part of the void keeps that part: 20³ − 10 · 10 · 1.
+    let part = make_box([6.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    let u = boolean(box_with_void(true), part, BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    assert!(near(volume(&u), 7900.0), "{}", volume(&u));
+}
+
+#[test]
+fn a_cube_on_a_void_is_kept_out_by_a_difference_and_shares_nothing_with_it() {
+    all_fixes();
+    let cube = || make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    // The faces bound material on opposite sides: a difference keeps them, so the box is
+    // unchanged, and an intersection deletes them and leaves nothing.
+    let d = boolean(box_with_void(true), cube(), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    assert!(near(volume(&d), 7000.0), "{}", volume(&d));
+    assert_eq!(d.counts().unwrap(), [12, 24, 16]);
+    assert!(boolean(box_with_void(true), cube(), BooleanOp::Intersect)
+        .unwrap()
+        .is_none());
+}
+
+/// A cylinder lying along a box's edge, tangent there to the box's face. The two faces leave the
+/// edge together and part as the square of the distance over the cylinder's diameter, by less
+/// the larger the cylinder, so the fixed steps off the edge took a large one's faces for
+/// parallel (a zero sector, from 10 times the size) and for one surface (coincident faces,
+/// from 100 times). The union is the two solids touching along that line, at 1 to 1000 times
+/// the size, in either order.
+#[test]
+fn a_large_cylinder_resting_on_a_box_edge_unions() {
+    all_fixes();
+    for k in [1.0, 10.0, 40.0, 100.0, 1000.0] {
+        let cylinder =
+            || solidcore_ops::make_cylinder([0.0, 15.0 * k, 2.5 * k], 7.5 * k, 25.0 * k).unwrap();
+        let block = || make_box([0.0, 0.0, 0.0], [5.0 * k, 7.5 * k, 5.0 * k]).unwrap();
+        let want = (PI * 7.5 * 7.5 * 25.0 + 5.0 * 7.5 * 5.0) * (k * k * k);
+        for (a, b) in [(cylinder(), block()), (block(), cylinder())] {
+            let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+            let report = u.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{k}: {}", report.text);
+            assert_eq!(u.solid_count().unwrap(), 2, "{k}");
+            assert!(
+                near(volume(&u), want),
+                "{k}: {}, closed form {want}",
+                volume(&u)
+            );
+            u.to_record().unwrap();
+        }
+    }
+}
+
+/// Two equal cylinders side by side, touching along a line. Their faces leave the line
+/// together and part as the square of the distance over the radius, so the fixed steps off
+/// the line took two large ones for one surface, and the union failed (100 times the size)
+/// or the intersection was a whole cylinder (1000 times). The union is the two solids
+/// touching along the line and nothing is common, in either order.
+#[test]
+fn two_large_cylinders_touching_along_a_line_union() {
+    all_fixes();
+    for k in [1.0, 100.0, 1000.0] {
+        let left = || solidcore_ops::make_cylinder([0.0; 3], 7.5 * k, 25.0 * k).unwrap();
+        let right =
+            || solidcore_ops::make_cylinder([15.0 * k, 0.0, 2.5 * k], 7.5 * k, 25.0 * k).unwrap();
+        let want = 2.0 * PI * 7.5 * 7.5 * 25.0 * (k * k * k);
+        for (a, b) in [(left(), right()), (right(), left())] {
+            let u = boolean(a, b, BooleanOp::Union).unwrap().unwrap();
+            let report = u.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{k}: {}", report.text);
+            assert_eq!(u.solid_count().unwrap(), 2, "{k}");
+            assert!(
+                near(volume(&u), want),
+                "{k}: {}, closed form {want}",
+                volume(&u)
+            );
+        }
+        assert!(
+            boolean(left(), right(), BooleanOp::Intersect)
+                .unwrap()
+                .is_none(),
+            "{k}"
+        );
+    }
 }
 
 #[test]
@@ -255,15 +377,16 @@ fn a_dome_1e_8_off_its_circle_joins_to_its_mirror() {
 
 /// Cancel stops the full check of a long coil cut (solidcore#3247): a 20-turn square coil cut
 /// from a cylinder, the case of tangency-labs/solidcraft#3962, whose check takes seconds (most
-/// of the cut's time, in the edges' curve analyses). Cancelled from another thread part way,
-/// the check returns `Cancelled` within 500 ms (a few ms on a desktop; the bound leaves room
-/// for shared CI runners). nextest runs each test in a process of its own, so no other test's
-/// call holds the session's kernel meanwhile.
+/// of the cut's time, in the edges' curve analyses). Measured in the token's polls, not in
+/// time: a counting token (`CancelToken::after_polls`) first counts the polls of the whole
+/// check, `whole`; a token cancelled from a quarter of them then stops a second check there.
+/// It returns `Cancelled`, and the token is polled exactly once after the poll that cancelled
+/// it: by the session as the call returns, asking whether it was cancelled (`run_with`, after
+/// the kernel's call). Any further poll would be work done after the cancel.
 #[test]
 fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    use std::time::{Duration, Instant};
     let corners = [
         [19.0, 0.0, 12.0],
         [32.0, 0.0, 12.0],
@@ -288,23 +411,20 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     .unwrap();
     let stock = solidcore_ops::make_cylinder([0.0; 3], 20.0, 304.5).unwrap();
     let cut = boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap();
-    let token = CancelToken::new();
-    let watched = token.clone();
-    let worker = std::thread::spawn(move || {
-        let r = within(&watched, || cut.check(CheckLevel::All));
-        (r.map(|_| ()), Instant::now())
-    });
-    std::thread::sleep(Duration::from_millis(300));
-    let cancelled = Instant::now();
-    token.cancel();
-    let (r, returned) = worker.join().unwrap();
-    let took = returned.saturating_duration_since(cancelled);
-    eprintln!("the check returned {took:?} after Cancel");
-    assert_eq!(r, Err(Error::Cancelled));
-    assert!(
-        took < Duration::from_millis(500),
-        "returned {took:?} after Cancel"
+    let probe = CancelToken::after_polls(u64::MAX);
+    within(&probe, || cut.check(CheckLevel::All)).unwrap();
+    let whole = probe.polls().unwrap();
+    let n = whole / 4;
+    // cancelled well inside the check, not at its last poll
+    assert!(n >= 1 && whole >= 2 * n, "the check polls {whole} times");
+    let token = CancelToken::after_polls(n);
+    let r = within(&token, || cut.check(CheckLevel::All));
+    eprintln!(
+        "the check polls {whole} times; cancelled at {n}, polled {:?}",
+        token.polls()
     );
+    assert_eq!(r.map(|_| ()), Err(Error::Cancelled));
+    assert_eq!(token.polls(), Some(n + 1));
 }
 
 /// #13295: a bar of L section (100 long; its step's top edge along x at y 12.527, z 19.567)
@@ -387,4 +507,84 @@ fn a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid() {
             volume(&r)
         );
     }
+}
+
+/// A 120 degree sector of height 119 with its apex at the origin, its legs ending at the
+/// sketch point (±74.0452, 42.75) (85.5 at 30 and 150 degrees, rounded to four decimals, so
+/// each leg turns 1.636e-7 rad outward), its arc about the origin, turned `turn` degrees
+/// about z.
+#[allow(clippy::disallowed_methods)] // the test's operands and closed form, not ops geometry
+fn sector_of_rounded_sketch(turn: f64) -> Body {
+    let (x, y) = (74.0452, 42.75);
+    let profile = [
+        Curve::Line {
+            start: [0.0; 3],
+            end: [x, y, 0.0],
+        },
+        Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: x.hypot(y),
+            start: y.atan2(x),
+            end: y.atan2(-x),
+        },
+        Curve::Line {
+            start: [-x, y, 0.0],
+            end: [0.0; 3],
+        },
+    ];
+    let b = extrude(
+        &profile,
+        [0.0, 0.0, 1.0],
+        119.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let (s, c) = turn.to_radians().sin_cos();
+    b.transform(&[
+        [c, -s, 0.0, 0.0],
+        [s, c, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    b
+}
+
+/// Two copies of the sector of a sketch whose leg points were rounded, turned 120 degrees
+/// apart (SolidCraft, a case joined from three such sectors): the legs that should coincide
+/// cross at 3.3e-7 rad along the z axis, so the sectors overlap in a sliver, and the arc of
+/// one runs 2.8e-5 past the other's leg. The imprint splits that arc there; once the leg is
+/// gone the split vertex is redundant and its two arc pieces are joined back. The join kept
+/// the split as a knot, a span of 1.6e-7 of the arc whose control points coincide, and the
+/// cap faces' trim curves made from it failed the check (`SmBSplineCurve` test 15, the
+/// polar conversion test): the union was refused as not a solid. Joined into one span, the
+/// arc is the operand's again and the union is one valid solid of 6 faces, 12 edges and 8
+/// vertices, V = (2α - 2d)/2 · r² · 119 for the sector angle α = 120° + 2d and the overlap
+/// 2d, d = 30° - atan2(42.75, 74.0452).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn sectors_of_a_rounded_sketch_turned_120_degrees_union() {
+    session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+    let r = 74.0452_f64.hypot(42.75);
+    let d = 30_f64.to_radians() - 42.75_f64.atan2(74.0452);
+    let alpha = 2.0 * PI / 3.0 + 2.0 * d;
+    let want = (2.0 * alpha - 2.0 * d) / 2.0 * r * r * 119.0;
+    let u = boolean(
+        sector_of_rounded_sketch(0.0),
+        sector_of_rounded_sketch(120.0),
+        BooleanOp::Union,
+    )
+    .unwrap()
+    .unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [6, 12, 8]);
+    let v = volume(&u);
+    let off = (v - want).abs() / want;
+    assert!(!(off.is_nan() || off > 1e-9), "{v}, closed form {want}");
 }

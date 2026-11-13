@@ -2,7 +2,8 @@
 //! squares, X/Y/Z rotation rings and a centre ball for a free drag in the view plane. It is a
 //! constant size on screen. A drag reports its change since the drag began (distances snap to
 //! round steps at the current zoom, angles to 5°; hold Alt or Ctrl for a free drag), so the caller
-//! adds it to the values it had when the drag started.
+//! applies it to the values it had when the drag started: [`ring_order`] says how a turn goes on
+//! top of the angles.
 
 use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
@@ -69,6 +70,11 @@ struct State {
 }
 
 const DIRS: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
+
+/// The default order of a move's angles, left to right in the product (see [`turn_of`]): about
+/// X first, then Y, then Z.
+pub const ANGLE_ORDER: [usize; 3] = [2, 1, 0];
+
 /// Arrow length on screen (px).
 pub const LEN_PX: f64 = 110.0;
 
@@ -117,6 +123,18 @@ fn ring_basis(i: usize) -> (Vec3, Vec3) {
         1 => (Vec3::Z, Vec3::X),
         _ => (Vec3::X, Vec3::Y),
     }
+}
+
+/// Where round a ring (degrees) a press takes that ring, clear of the handles over it.
+#[cfg(test)]
+pub(crate) fn ring_grip(proj: &Proj, t: &Triad, ring: usize) -> Option<f64> {
+    let l = mm_per_px(proj, t.center)? * LEN_PX;
+    let sh = shapes(proj, t, l)?;
+    let (e1, e2) = ring_basis(ring);
+    (0..72).map(|k| f64::from(k) * 5.0).find(|a| {
+        let th = a.to_radians();
+        proj.to_screen(t.center + (e1 * th.cos() + e2 * th.sin()) * (RING * l)).is_some_and(|p| hit(&sh, p) == Some(Handle::Ring(ring)))
+    })
 }
 
 /// Distance from `p` to the screen segment a–b.
@@ -221,7 +239,9 @@ fn hit(s: &Shapes, p: Pos2) -> Option<Handle> {
     if let Some((i, _)) = s.planes.iter().find(|(_, q)| in_quad(p, q)) {
         return Some(Handle::Plane(*i));
     }
-    s.rings.iter().find(|(_, pts)| pts.windows(2).any(|w| seg_dist(p, w[0], w[1]) < 5.0)).map(|(i, _)| Handle::Ring(*i))
+    // From some views two rings lie almost on top of each other: the nearest takes the press.
+    let near = |pts: &Vec<Pos2>| pts.windows(2).map(|w| seg_dist(p, w[0], w[1])).fold(f32::MAX, f32::min);
+    s.rings.iter().map(|(i, pts)| (*i, near(pts))).filter(|r| r.1 < 5.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| Handle::Ring(i))
 }
 
 /// Millimetres per screen pixel at a point.
@@ -479,6 +499,38 @@ pub fn apply(m: &[[f64; 3]; 3], p: Vec3) -> Vec3 {
     )
 }
 
+/// The turn three angles about X, Y and Z make, as the product in `order`: the rightmost goes
+/// first. Read the other way round, each turns about the axes the ones left of it leave.
+pub fn turn_of(a: [f64; 3], order: [usize; 3]) -> [[f64; 3]; 3] {
+    let none = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    order.iter().fold(none, |m, i| mul(&m, &rotation(DIRS[(*i).min(2)], a[(*i).min(2)])))
+}
+
+/// An angle within one turn of zero, keeping its sign; a full turn is 0.
+pub fn within_turn(a: f64) -> f64 {
+    let r = a % std::f64::consts::TAU;
+    if std::f64::consts::TAU - r.abs() < 1e-6 { 0.0 } else { r }
+}
+
+/// The order that lets a drag on `ring` add to its own angle, so every angle stays what was
+/// dragged. The rings hold still on the world's axes, so a ring's turn goes on top of the turns
+/// made: its angle has to sit at the left end of the product. A ring whose angle is still zero
+/// can go there; `None` when it has an angle and a later turn lies on top of it, and no sum of
+/// angles makes the turn: the turns so far have to be kept and its angle start again.
+pub fn ring_order(angles: [f64; 3], order: [usize; 3], ring: usize) -> Option<[usize; 3]> {
+    let i = ring.min(2);
+    let at = order.iter().position(|o| *o == i)?;
+    if order[..at].iter().all(|o| angles[(*o).min(2)].abs() < 1e-12) {
+        return Some(order);
+    }
+    if angles[i].abs() >= 1e-12 {
+        return None;
+    }
+    let mut rest = order.into_iter().filter(|o| *o != i);
+    let [a, b] = [rest.next()?, rest.next()?];
+    Some([i, a, b])
+}
+
 /// The axis and angle of a rotation (angle 0 for none).
 pub fn axis_angle(m: &[[f64; 3]; 3]) -> (Vec3, f64) {
     let tr = m[0][0] + m[1][1] + m[2][2];
@@ -528,6 +580,49 @@ mod tests {
             }
         }
         assert!(worst <= limit, "a vertex {worst} px from the centre (limit {limit})");
+    }
+
+    /// An angle adds to what it was exactly when the product can take it at the left end, and
+    /// then the turn is about the world's axis, the one the ring shows.
+    #[test]
+    fn a_drag_adds_to_its_own_angle_and_turns_about_the_ring_shown() {
+        let on = |m: &[[f64; 3]; 3], o: &[[f64; 3]; 3]| m.iter().flatten().zip(o.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-9);
+        for (a, order) in
+            [([0.3, 0.0, 0.0], ANGLE_ORDER), ([0.0, 0.0, 1.5], ANGLE_ORDER), ([0.3, 0.7, 0.0], [2, 0, 1]), ([0.3, 0.7, 1.1], ANGLE_ORDER)]
+        {
+            for ring in 0..3 {
+                let Some(next) = ring_order(a, order, ring) else { continue };
+                let mut after = a;
+                after[ring] += 0.4;
+                let want = mul(&rotation(DIRS[ring], 0.4), &turn_of(a, order));
+                assert!(on(&turn_of(after, next), &want), "{a:?} {order:?} ring {ring}");
+            }
+        }
+        let (rx, ry, rz) = (0.3, -0.7, 1.1);
+        let zyx = mul(&mul(&rotation(Vec3::Z, rz), &rotation(Vec3::Y, ry)), &rotation(Vec3::X, rx));
+        assert!(on(&turn_of([rx, ry, rz], ANGLE_ORDER), &zyx), "the default order turns about X, then Y, then Z");
+    }
+
+    /// The second angle dragged reads what was dragged, whichever came first. Only going back to
+    /// an angle with a later one on top has to start over.
+    #[test]
+    fn only_going_back_under_a_later_turn_starts_an_angle_over() {
+        for (first, second) in [(0, 1), (1, 0), (2, 1), (1, 2), (0, 2), (2, 0)] {
+            let mut a = [0.0; 3];
+            a[first] = 1.5;
+            let order = ring_order(a, ANGLE_ORDER, second).unwrap();
+            a[second] = 0.4;
+            assert!(ring_order(a, order, second).is_some(), "the last ring turned goes on adding");
+            assert!(ring_order(a, order, first).is_none(), "{first} lies under {second}");
+        }
+    }
+
+    #[test]
+    fn an_angle_wraps_within_one_turn() {
+        let tau = std::f64::consts::TAU;
+        for (a, want) in [(tau, 0.0), (-tau, 0.0), (tau + 0.3, 0.3), (-tau - 0.3, -0.3), (1.0, 1.0), (-1.0, -1.0)] {
+            assert!((within_turn(a) - want).abs() < 1e-12, "{a} -> {}", within_turn(a));
+        }
     }
 
     #[test]

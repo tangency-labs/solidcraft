@@ -357,27 +357,29 @@ fn procedural_round(k: &mut Kernel) -> (Brep, Vec<EdgeId>) {
 }
 
 /// The procedural round's edges along the root, decided on its net with its definition's
-/// margin: today's verdict, exactly, on each: Undecided with no bound (pi, pi) at `s` = 87.04,
-/// where the pipe's foot crosses its net's C1 quarter knot (u = 15.708, multiplicity 2) and the
-/// definition's partials over the feet's box are refused (`FEET_BOX_CONTINUITY`). w2949's
-/// C1-knot follow-up encloses that box: then this test fails, and is to say Tangent (the
-/// module's unit test `a_procedural_round_s_edges_carry_its_margin` pins the parts).
+/// margin: Tangent on each. Where the pipe's foot crosses its net's C1 quarter knot (u =
+/// 15.708, multiplicity 2) the definition's feet box is taken cell by cell
+/// (tangency-labs/solidcraft#14284's C1-knot follow-up, and #15183 where the foot sits on the
+/// knot just outside the guesses' box); before them both edges were Undecided (pi, pi) at
+/// `s` = 87.04 (#15005). The module's unit test `a_procedural_round_s_edges_carry_its_margin`
+/// checks every piece.
 #[test]
 fn a_procedural_round_is_smooth() {
     let mut k = Kernel::default();
     let (mut b, edges) = procedural_round(&mut k);
-    for e in edges {
-        let verdict = tangent_all_along(&k, &mut b, e, SMOOTH).unwrap();
-        let Some(Tangency::Undecided { angle, margin, at }) = verdict else {
-            panic!("{e:?}: {verdict:?} (the C1 knot enclosed? then this test is to say Tangent)");
-        };
-        let unbounded = angle.to_bits() == PI.to_bits() && margin.to_bits() == PI.to_bits();
-        assert!(unbounded, "{e:?}: {verdict:?}");
-        // 87.04 is read off a run: the middle of the first part noted undecided there, where
-        // the pipe's foot crosses its quarter knot at s = 87.22 (the foot's map s -> u is the
-        // definition's solve, not redone here)
-        assert!((at - 87.04).abs() < 0.01, "{e:?}: {verdict:?}");
-    }
+    // every edge measured before anything is asserted, so a failure names them all
+    let seen: Vec<_> = edges
+        .into_iter()
+        .map(|e| (e, tangent_all_along(&k, &mut b, e, SMOOTH).unwrap()))
+        .collect();
+    eprintln!("procedural round edges: {seen:?}");
+    assert!(
+        seen.len() == 2
+            && seen
+                .iter()
+                .all(|(_, verdict)| *verdict == Some(Tangency::Tangent)),
+        "{seen:?}"
+    );
 }
 
 /// The edge use of `e` on a face that is not a plane, and that face.

@@ -10,9 +10,18 @@ use solidcraft_geom::prelude::*;
 use super::CommandSpec;
 use super::measure_sel::{resolve, sketch_of};
 use crate::params::bad;
-use crate::{Result, Sel, Session};
+use crate::schema::selection::{MAX_DETAIL, SelectionGetParams, SelectionGetResult, SelectionItem};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::{EngineError, Result, Sel, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.get", "Get Selection", selection_get).icon("select").noundo().params(
+const CONTRACT: TypedContract<SelectionGetParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.get", "Get Selection", crate::checked!("selection.get", selection_get))
+    .icon("select")
+    .noundo()
+    .contract(&CONTRACT)
+    .output(output_schema_for::<SelectionGetResult>)
+    .params(
     "detail?: bool (default true: resolve each item's geometry) → {count, items: [{kind (= type: body|face|edge|vertex|feature|sketch_curve|\
      sketch_point|sketch_midpoint|sketch_constraint|profile|plane|axis|construction_point|occurrence…), the selection's own fields as select.set takes them (body, index, point, \
      id, sketch, path…), and with detail: face: name (persistent face name), name_exact, surface ({type: plane|cylinder|cone|sphere|torus|\
@@ -21,9 +30,6 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.get", "Get S
      and occurrence_path in an assembly; sketch items: sketch (its id, as select.set takes it), sketch_name, entity (line|circle|arc|point|midpoint|…), position for points and midpoints}]}; read-only, [] when nothing is \
      selected",
 )];
-
-/// Items resolved in full; the rest of a huge selection is listed by identity only.
-const MAX_DETAIL: usize = 500;
 
 fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.get";
@@ -34,7 +40,7 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let s: &Session = s;
     let mut ctx = Context::new(s)?;
-    let items: Vec<Value> = s
+    let items: Vec<SelectionItem> = s
         .selection
         .iter()
         .enumerate()
@@ -43,14 +49,12 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
             if detail && i < MAX_DETAIL {
                 ctx.add_detail(sel, &mut v);
             }
-            Value::Object(v)
+            SelectionItem(v)
         })
         .collect();
-    let mut out = json!({"count": items.len(), "items": items});
-    if detail && s.selection.len() > MAX_DETAIL {
-        out["detail_limit"] = json!(MAX_DETAIL);
-    }
-    Ok(out)
+    let detail_limit = (detail && s.selection.len() > MAX_DETAIL).then_some(MAX_DETAIL);
+    let reply = SelectionGetResult { count: items.len(), items, detail_limit, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// The selection item as `select.set` takes it, with `kind` naming what it is.

@@ -930,3 +930,55 @@ fn a_flat_side_of_a_three_section_loft_takes_a_sketch_and_an_extrude() {
     let area = (20.0 + 12.0) / 2.0 * 404f64.sqrt();
     assert!((added - area).abs() < 1e-6 * area, "{added} vs {area}");
 }
+
+/// Attaching a sketch to a flat face of a large imported body with many B-spline faces meshed
+/// the whole body twice, at a tenth of the chord the model meshes it at, to find where the point
+/// lies: tens of seconds a click. The capture reads the model's own mesh of the body, which a
+/// pick has already made, so it meshes nothing; with only a point, the exact flatness check runs
+/// only for the face the point is on. Counted with the kernel's tessellation time on this thread,
+/// which is exactly zero when nothing is meshed.
+#[test]
+fn a_sketch_on_a_face_of_an_imported_spline_body_meshes_nothing_more() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-attach-mesh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("lofted.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    // Sections that do not scale linearly with height, so every side is a curved B-spline patch.
+    for (name, z, r) in [("S0", 0, 40.0), ("S1", 20, 28.0), ("S2", 40, 36.0)] {
+        run(&mut src, "sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name}));
+        run(&mut src, "sketch.polygon.inscribed", json!({"center": [0, 0], "radius": r, "sides": 48}));
+        run(&mut src, "sketch.finish", json!({}));
+    }
+    run(&mut src, "solid.loft", json!({"sections": [{"sketch": "S0"}, {"sketch": "S1"}, {"sketch": "S2"}], "body_name": "L"}));
+    run(&mut src, "file.export", json!({"path": path}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (name, bottom, curved) = {
+        let world = s.world_state().unwrap();
+        let body = &world.bodies[0];
+        let faces = body.body.faces(0.01).unwrap();
+        let bottom = faces.iter().find(|face| face.plane_normal.is_some_and(|n| n.z < -0.999)).unwrap().clone();
+        let curved = (0..body.body.face_count()).filter(|i| body.body.planar_face(*i).is_none()).count();
+        (body.name.clone(), bottom, curved)
+    };
+    assert!(curved >= 48, "the sides are curved B-spline faces: {curved}");
+    // The model's mesh of the body, as the viewport's pick made it.
+    for body in &s.model.state().bodies {
+        body.mesh();
+    }
+    let at = [bottom.centroid.x + 5.0, bottom.centroid.y - 3.0, 0.0];
+    let picks = [("exact", json!({"body": name, "index": bottom.index, "face": at})), ("point", json!({"face": at}))];
+    for (kind, pick) in picks {
+        let (made, times) = solidcraft_kernel::profile::capture(|| s.execute("sketch.create", &json!({"plane": pick, "name": kind})));
+        let made = made.unwrap_or_else(|error| panic!("{kind}: {error}"));
+        assert_eq!(times.tessellate_ms, 0.0, "{kind}: the body was meshed again");
+        assert_eq!(made["attachment"], json!("exact_face"), "{kind}: {made}");
+        let plane = s.model.state().sketch(made["sketch"].as_u64().unwrap()).unwrap().plane;
+        assert!(plane.normal().z < -1.0 + 1e-9 && plane.origin.z.abs() < 1e-9, "{kind}: {plane:?}");
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    // A point on the cap's plane but off the cap is on no face.
+    let off = s.execute("sketch.create", &json!({"plane": {"body": name, "index": bottom.index, "face": [100, 0, 0]}}));
+    assert!(off.is_err(), "{off:?}");
+}

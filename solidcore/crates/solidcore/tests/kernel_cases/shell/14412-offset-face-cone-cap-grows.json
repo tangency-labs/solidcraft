@@ -1,0 +1,228 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 30.0,
+        "draft": -0.17453292519943295,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 10.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "merge_faces",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "keep": {
+          "kind": "edge",
+          "picked": [],
+          "points": [],
+          "tolerance": 0.0002
+        }
+      }
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "offset_faces",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "distance": 2.0,
+        "faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              -5.019410128486253,
+              2.793778807334932,
+              30.0
+            ]
+          ],
+          "tolerance": 0.05263393813866613
+        }
+      }
+    }
+  ],
+  "case": "14412-offset-face-cone-cap-grows",
+  "expected": {
+    "area_mm2": 3700.494337823725,
+    "body_count": 1,
+    "faces": 3,
+    "method": "r10 circle extruded 30 with a 10 deg outward taper, top moved from z=30 to z=32: a frustum of height h=32 from r0=10 to r1=10+32*tan(10deg). V=pi*h/3*(r0^2+r0*r1+r1^2), area pi*(r0+r1)*h/cos(10deg)+pi*(r0^2+r1^2), 3 faces",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#14412"
+    ],
+    "volume_mm3": 16792.4006554399,
+    "what": "Offset Face moves the top of a tapered cylinder out 2 mm, so the top grows along the cone"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2
+    }
+  },
+  "records": "14412-offset-face-cone-cap-grows.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3700.4943378374583,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2,
+      "volume_mm3": 16792.40065536875
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#14412"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "merge_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "offset_faces"
+  ],
+  "ungraded": [],
+  "what": "Offset Face moves the top of a tapered cylinder out 2 mm, so the top grows along the cone",
+  "why_not": []
+}

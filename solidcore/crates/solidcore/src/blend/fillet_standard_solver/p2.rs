@@ -3207,6 +3207,30 @@ impl CircularCrossSectionFsg {
                     return Ok(None);
                 }
                 let mut leader = edge.copy();
+                // The edge's curve cut to where the stations are: an unbounded line is held as a
+                // NURB a million times the part's size, whose control points round at about
+                // 1e-9 mm, and every move of the round's frame (its recertificate is taken in its
+                // own) carries that rounding into the leader, past the round's bound. Cut, its
+                // control points are of the part's size; the round is built on the cut curve.
+                let station_ts = points
+                    .iter()
+                    .filter_map(|p| p.user_doubles.first().copied())
+                    .filter(|t| t.is_finite());
+                let (lo, hi) = station_ts
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| {
+                        (lo.min(t), hi.max(t))
+                    });
+                let whole = leader.natural_interval();
+                if lo < hi {
+                    let mut cut = Extent1d::from_min_max(lo.max(whole.min()), hi.min(whole.max()));
+                    if cut.length() > 0.0 && cut != whole {
+                        leader.trim(
+                            k,
+                            &mut cut,
+                            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                        )?;
+                    }
+                }
                 leader.set_out_of_bounds_enabled(true);
                 let Some(mut law) = law_in_parameter(lb)? else {
                     return Ok(None);

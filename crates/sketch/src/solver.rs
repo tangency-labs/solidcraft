@@ -274,9 +274,14 @@ impl State<'_> {
                 };
                 crate::curves::ellipse_polyline(self.p(*ci), self.p(*m), r)
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
+            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, handles }) => {
                 let p = self.spline_points(pts, *periodic);
-                crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())
+                if handles.is_empty() || *control {
+                    crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())
+                } else {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::spline_polyline_with_handles(&p, &handles, *periodic)
+                }
             }
             Some(CurveKind::Conic { a, b, apex, rho }) => crate::curves::conic_polyline(self.p(*a), self.p(*apex), self.p(*b), *rho),
             _ => Vec::new(),
@@ -362,7 +367,7 @@ impl State<'_> {
                     })
                     .collect()
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
+            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, handles }) => {
                 let p = self.spline_points(pts, *periodic);
                 if p.len() < 2 {
                     return Vec::new();
@@ -372,6 +377,13 @@ impl State<'_> {
                 } else if *control {
                     let k = (*degree as usize).min(solidcore_record::MAX_BEZIER_DEGREE).min(p.len().saturating_sub(1)).max(1);
                     crate::curves::bspline_beziers(&p, k).iter().filter_map(|span| solidcraft_geom::bezier(span)).collect()
+                } else if !handles.is_empty() {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::fit_beziers_with_handles(&p, &handles, *periodic)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 })
+                        .collect()
                 } else {
                     crate::curves::fit_beziers_mode(&p, *periodic)
                         .unwrap_or_default()
@@ -458,10 +470,15 @@ impl State<'_> {
                 let (cc, r) = self.round(c);
                 (cc - self.p(p)) / (r * r).max(1e-24)
             }
-            CurveKind::Spline { pts, control, degree, periodic, nurbs } => {
+            CurveKind::Spline { pts, control, degree, periodic, nurbs, handles } => {
                 let q = self.spline_points(pts, *periodic);
                 let at_end = pts.last() == Some(&p) && pts.first() != Some(&p);
-                crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, nurbs.as_ref(), t), at_end)
+                if handles.is_empty() || *control {
+                    crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, nurbs.as_ref(), t), at_end)
+                } else {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::end_curvature(&|t| crate::curves::spline_point_with_handles(&q, &handles, *periodic, t), at_end)
+                }
             }
             CurveKind::Conic { a, b, apex, rho } => {
                 let (pa, pb, px) = (self.p(*a), self.p(*b), self.p(*apex));
@@ -474,9 +491,14 @@ impl State<'_> {
         match self.sk.curves.get(c).map(|c| &c.kind)? {
             CurveKind::Line { a, b } => (self.p(*b) - self.p(*a)).normalized(),
             CurveKind::Circle { .. } | CurveKind::Arc { .. } => (self.p(p) - self.round(c).0).perp().normalized(),
-            CurveKind::Spline { pts, control, periodic, .. } => {
+            CurveKind::Spline { pts, control, periodic, handles, .. } => {
                 let q = self.spline_points(pts, *periodic);
-                crate::curves::spline_end_tangent_mode(&q, *control, *periodic, pts.last() == Some(&p) && pts.first() != Some(&p))
+                if handles.is_empty() {
+                    crate::curves::spline_end_tangent_mode(&q, *control, *periodic, pts.last() == Some(&p) && pts.first() != Some(&p))
+                } else {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::spline_end_tangent_with_handles(&q, &handles, *periodic, pts.last() == Some(&p) && pts.first() != Some(&p))
+                }
             }
             CurveKind::Conic { a, b, apex, .. } => {
                 if p == *a {
@@ -2747,7 +2769,11 @@ enum Turn {
 }
 
 fn turn(before: &ArcSense, after: &ArcSense) -> Turn {
-    let jump = (after.sweep - before.sweep).abs() > std::f64::consts::PI;
+    let turned = (after.sweep - before.sweep).abs();
+    let jump = turned > std::f64::consts::PI;
+    // A sweep that changed by half a turn is the same arc stored the other way round: its ends
+    // swapped. Comparing with `>` alone misses it, as the difference rounds just under pi.
+    let flip = (turned - std::f64::consts::PI).abs() <= 1e-9;
     // A line whose sense was clear and no longer is collapsed onto the arc: turned too.
     let lines: Vec<(&(usize, usize, usize, Option<f64>), bool)> = before
         .lines
@@ -2760,6 +2786,7 @@ fn turn(before: &ArcSense, after: &ArcSense) -> Turn {
         .collect();
     let (all, any) = (lines.iter().all(|(_, f)| *f), lines.iter().any(|(_, f)| *f));
     match (jump, any, all) {
+        (false, false, _) if flip => Turn::Swap,
         (false, false, _) => Turn::Kept,
         (true, _, true) => Turn::Swap,
         (false, true, false) if lines.len() == 2 => {
@@ -2812,7 +2839,9 @@ pub fn fillets_kept(before: &Sketch, after: &Sketch) -> bool {
 }
 
 /// The turns of every filleted arc from `before` to where `sk` is now, applying the swaps.
-fn settle(sk: &mut Sketch, before: &[ArcSense]) -> Vec<(usize, Turn)> {
+/// `restore` swaps even an arc whose lines all leave it: after a mirror, the ends the mirror
+/// swapped are put back however the solve left them.
+fn settle(sk: &mut Sketch, before: &[ArcSense], restore: bool) -> Vec<(usize, Turn)> {
     let after = arc_senses(sk, &|i| sk.points.get(i).map(|p| p.pos).unwrap_or_default());
     // A swap gives the corner its arc back when its lines cut back through it. An arc whose lines
     // all leave it already rounds its corner, whatever the reference it is judged against (a
@@ -2827,7 +2856,7 @@ fn settle(sk: &mut Sketch, before: &[ArcSense]) -> Vec<(usize, Turn)> {
         })
         .filter_map(|(arc, t, leave)| match t {
             Turn::Kept => None,
-            Turn::Swap if leave => None,
+            Turn::Swap if leave && !restore => None,
             t => Some((arc, t)),
         })
         .collect();
@@ -2865,7 +2894,7 @@ fn solve_sensed(
     if !report.ok() {
         return report;
     }
-    let mut turns = settle(sk, &before);
+    let mut turns = settle(sk, &before, false);
     let mirrors: Vec<(usize, usize, usize)> =
         turns.iter().filter_map(|(arc, t)| if let Turn::Mirror { p, across } = t { Some((*arc, *p, *across)) } else { None }).collect();
     if !mirrors.is_empty() {
@@ -2874,8 +2903,8 @@ fn solve_sensed(
             mirror_arc(sk, *arc, *p, *across);
         }
         let again = solve_inner(sk, hold, reference, analysis, old_values, budget);
-        let again_turns = if again.ok() { settle(sk, &before) } else { Vec::new() };
-        if again.ok() && again_turns.is_empty() {
+        let again_turns = if again.ok() { settle(sk, &before, true) } else { Vec::new() };
+        if again.ok() && again_turns.iter().all(|(_, t)| matches!(t, Turn::Swap)) {
             return again;
         }
         *sk = solved;

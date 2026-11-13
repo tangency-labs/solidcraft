@@ -23,6 +23,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
 use solidcore_record::Vec2;
 use solidcraft_doc::Expr;
+use solidcraft_doc::frame::sizes::Family;
 use solidcraft_doc::frame::{self, Anchor, MAX_MEMBERS, Profile, ProfileSpec};
 
 use super::check::{keyed, located, whole};
@@ -57,8 +58,26 @@ pub struct ProfileParam(pub ProfileSpec);
 impl<'de> Deserialize<'de> for ProfileParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         // The handler's `` `profile`: {error} ``, with serde_json's own wording of the error.
-        serde_json::from_value::<ProfileSpec>(Value::deserialize(d)?).map(ProfileParam).map_err(|e| D::Error::custom(keyed(e)))
+        let v = Value::deserialize(d)?;
+        if frame::size_with_dimensions(&v) {
+            return Err(D::Error::custom(keyed(frame::SIZE_ALONE)));
+        }
+        serde_json::from_value::<ProfileSpec>(v).map(ProfileParam).map_err(|e| D::Error::custom(keyed(e)))
     }
+}
+
+/// The schema of a standard size given by name: `size`, and `kind` at most.
+fn size_schema() -> Value {
+    let kinds: Vec<&str> = frame::profile_kinds().iter().map(|k| k.kind).collect();
+    json!({
+        "type": "object",
+        "properties": {
+            "size": {"type": "string", "minLength": 1, "maxLength": frame::MAX_SIZE_NAME, "pattern": not_blank_pattern()},
+            "kind": {"enum": kinds}
+        },
+        "required": ["size"],
+        "additionalProperties": false
+    })
 }
 
 /// The schema of one dimension, a number or an expression.
@@ -94,8 +113,8 @@ impl JsonSchema for ProfileParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A built-in profile: {\"kind\": bar | round_bar | rect_tube | round_tube | angle | channel | i_beam, …its dimensions}. Each dimension is a number in the design's units or a length expression over its parameters (\"tube_wall\", \"2 in\"); `frame.profile.list` gives each kind's dimensions and an example. A dimension that is left out and isn't required takes a default worked out from the profile's size.",
-            "anyOf": profile_kinds_schema(&dimension_schema())
+            "description": "A built-in profile: {\"kind\": bar | round_bar | rect_tube | round_tube | angle | channel | i_beam, …its dimensions}. Each dimension is a number in the design's units or a length expression over its parameters (\"tube_wall\", \"2 in\"); a channel's `flange_slope` is an angle, a number of degrees or an angle expression. `frame.profile.list` gives each kind's dimensions and an example. A dimension that is left out and isn't required takes a default worked out from the profile's size. Or a standard steel size by name, {\"size\": \"RSC 203x89\"}, alone: it brings its own dimensions (`frame.profile.list` lists the sizes).",
+            "anyOf": profile_kinds_schema(&dimension_schema()).into_iter().chain([size_schema()]).collect::<Vec<_>>()
         })
     }
 }
@@ -112,7 +131,7 @@ impl JsonSchema for ProfileOut {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A built-in profile: {\"kind\", …its dimensions}, each in mm.",
+            "description": "A built-in profile: {\"kind\", …its dimensions}, each in mm but a channel's `flange_slope`, in degrees.",
             "anyOf": profile_kinds_schema(&json!({"type": "number"}))
         })
     }
@@ -149,10 +168,38 @@ impl JsonSchema for AnchorParam {
 // frame.profile.list
 // ---------------------------------------------------------------------------------------------
 
-/// `frame.profile.list` takes no parameters.
+/// A family of standard sizes by its letters, as `frame.profile.list` reads `family`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FamilyParam(pub Family);
+
+impl<'de> Deserialize<'de> for FamilyParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        v.as_str()
+            .and_then(|f| Family::ALL.into_iter().find(|x| x.prefix() == f))
+            .map(FamilyParam)
+            .ok_or_else(|| D::Error::custom(whole("`family` must be RSC, PFC, RSA, SHS, RHS or CHS")))
+    }
+}
+
+impl JsonSchema for FamilyParam {
+    fn schema_name() -> Cow<'static, str> {
+        "FamilyParam".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let families: Vec<&str> = Family::ALL.iter().map(|f| f.prefix()).collect();
+        json_schema!({"description": "A family of standard steel sizes.", "type": "string", "enum": families})
+    }
+}
+
+/// List the built-in profiles and the standard steel sizes.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct ProfileListParams {}
+pub struct ProfileListParams {
+    /// List only this family's sizes. Default: every family.
+    #[serde(default)]
+    pub family: Option<FamilyParam>,
+}
 
 /// One built-in profile kind.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -181,12 +228,32 @@ impl From<&frame::ProfileKind> for ProfileKindInfo {
     }
 }
 
+/// One family of standard steel sizes.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SizeFamilyInfo {
+    /// The family's letters, which its sizes' names start with (`RSC`).
+    pub family: String,
+    /// The built-in profile kind its sizes are.
+    pub kind: String,
+    /// The standard the sizes come from.
+    pub standard: String,
+    /// The published table their dimensions were read from.
+    pub source: String,
+    /// Every size's name, as `profile.size` takes it (`RSC 203x89`).
+    pub names: Vec<String>,
+    /// The sizes the table adds to the standard's own range. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional: Vec<String>,
+}
+
 /// What `frame.profile.list` returns: the built-in profiles, each SolidCraft's own parametric
-/// definition.
+/// definition, and the standard steel sizes by name.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ProfileListResult {
     /// Every built-in profile kind.
     pub kinds: Vec<ProfileKindInfo>,
+    /// The standard sizes, family by family (only `family`'s when it is given).
+    pub sizes: Vec<SizeFamilyInfo>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -246,6 +313,9 @@ pub struct ProfilePropertiesParams {
 pub struct ProfileSection {
     /// The profile with every default filled in.
     pub profile: ProfileOut,
+    /// The standard size it is, by name, when it was given as one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
     /// The section's area, mm².
     pub area: f64,
     /// The centroid [x, y], mm, in the profile's own plane (x across, y up) from the centre of its
@@ -588,6 +658,12 @@ pub struct FrameMemberKeys {
     /// The profile point that sits on each line. Default: origin.
     #[serde(default)]
     pub anchor: Option<AnchorParam>,
+    /// The profile point that sits on each line, [x, y] in mm from the profile's own origin (a
+    /// bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of
+    /// other profiles). Takes precedence over `anchor`; the member stays attached at that point
+    /// when the profile's size changes.
+    #[serde(default)]
+    pub locate: Option<[f64; 2]>,
     /// How far the profile turns about the line, a number of degrees or an expression. Default:
     /// 0, which puts its y as near world up as the line allows (a vertical member's x along
     /// world X).
@@ -600,7 +676,8 @@ pub struct FrameMemberKeys {
     #[serde(default)]
     pub name: Option<String>,
     /// What the members are named after, then numbered: `Rail`, `Rail (2)`… Default: the
-    /// profile's description (`Rect Tube 40x40x3`), or the profile sketch's name.
+    /// standard size's name (`RSC 203x89`), the profile's description (`Rect Tube 40x40x3`), or
+    /// the profile sketch's name.
     #[serde(default)]
     pub body_name: Option<MemberName>,
     /// Names to keep, by line id, as Edit Feature keeps them. A line not listed gets a name from

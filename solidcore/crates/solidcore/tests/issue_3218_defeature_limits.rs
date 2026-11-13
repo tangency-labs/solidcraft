@@ -99,7 +99,7 @@ fn limit(
     );
     match &r {
         Err(e @ SolidError::Failed(f)) => {
-            assert!(matches!(f.entity, Some(EntityRef::Edge(_))), "{r:?}");
+            assert!(matches!(f.entity(), Some(EntityRef::Edge(_))), "{r:?}");
             assert_eq!(e.sm_status(), Some(SM_ERR), "{r:?}");
             match f.reason {
                 Reason::Defeature(d) => Some(d),

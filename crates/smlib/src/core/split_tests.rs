@@ -181,6 +181,24 @@ fn a_sheet_is_not_split_into_two_bodies() {
     assert_eq!(split_body(&sheet, &plane_x(5.0)).err(), Some(Error::NotSolid));
 }
 
+/// A sheet is no solid to split by a closed tool either: the whole sphere's split (the body's
+/// intersection and difference with the ball) checks the body first, as the slice does (#14214).
+#[test]
+fn a_sheet_is_not_split_by_a_whole_sphere() {
+    use solidcore::curve::curve::Curve;
+    use solidcore::geom::vector3d::Vec3;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    let sheet = super::run("sheet", |k| {
+        let c = Curve::from(create_line_segment(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0))?);
+        create_linear_sweep(k, &[Some(&c)], Vec3::new(0.0, 1.0, 0.0), 10.0, false)
+    })
+    .map(Body::new)
+    .unwrap();
+    let ball = Spec::Sphere { center: [5.0, 5.0, 0.0], xaxis: X, yaxis: Y, radius: 3.0, lon_deg: [0.0, 360.0], lat_deg: [-90.0, 90.0] };
+    assert_eq!(split_body(&sheet, &ball).err(), Some(Error::NotSolid));
+}
+
 /// Faces of the box -20..5 x -20..20 x -20..5 copied off it into a sheet (`CopyFaces` with merge,
 /// as the capi's test): the top z = 5 and, with `side`, the side x = 5 too.
 fn lid(side: bool) -> Body {

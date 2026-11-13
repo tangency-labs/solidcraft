@@ -227,10 +227,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.params = Some(d);
         return;
     }
-    let palette = app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive());
-    let side = crate::shell::floating_editor_side(app, palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx));
-    let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
-    let docked = egui::pos2(side.anchor_x(viewport), top);
+    let side = crate::frame::Side::Right;
+    let (_, docked) = crate::shell::floating_editor_anchor(app, ctx);
     let moved = crate::frame::dock_offset(ctx, "PARAMETERS");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
@@ -252,12 +250,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let chosen_height: Option<f32> = ctx.data_mut(|m| m.get_persisted(height_id())).filter(|h: &f32| h.is_finite());
     let width = chosen_width.map_or(solidcraft_theme::Tokens::get().form_card_width * 3.0, |w| w.max(crate::frame::DIALOG_MIN_W));
     let panel = panel.body_height(chosen_height);
-    let panel = if side == crate::frame::Side::Left {
-        let available = crate::sketch_palette::room_left_of(app, ctx, viewport);
-        panel.width(width.min(available))
-    } else {
-        panel.width(width)
-    };
+    let panel = panel.width(width.min((docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W)));
     let all = if let Some((_, rows)) = d.listed.as_ref().filter(|(rev, _)| *rev == app.session.revision) {
         rows.clone()
     } else {

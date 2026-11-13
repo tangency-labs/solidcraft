@@ -11,7 +11,7 @@
 //! state; [`items`] lists them and [`run_item`] runs one, so the control channel (`ui.menu`,
 //! `ui.menuPick`) and tests reach everything a click does.
 
-use crate::ui_kit::menu::{list_row_lit, menu_frame};
+use crate::ui_kit::menu::{list_row_lit, menu_frame, scroll_rows};
 use crate::ui_kit::{BackingTooltipExt as _, Container, Item, LIST_W, MenuItem, Surface};
 use egui::{Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
@@ -386,7 +386,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 act("ui.workspace.render", "Render", "ws_render")
                     .with(json!({"workspace":"render"}))
                     .key(if rendering { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load_holds()),
+                    .on(crate::render_workspace::entry_open(app)),
             ];
             for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", ""), ("Drawing", "ws_drawing")] {
                 v.push(act("ui.workspace", w, icon).key("coming later").on(false));
@@ -1394,6 +1394,17 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.spline.reverse", "Reverse Spline Direction").with(json!({ "curve": curve })));
     }
+    // #6502: a selected fit point spline shows its tangent handles and a drag stores them; the
+    // spline, or one of its tangent guides, puts edited handles back where they started.
+    if let [curve] = curves.as_slice()
+        && let Some(c) = ss.sketch.curve_index(curve).and_then(|i| ss.sketch.curves.get(i))
+        && let Some(spline) = match &c.kind {
+            CurveKind::Spline { handles, .. } if !handles.is_empty() => Some(c.id.clone()),
+            _ => c.spline_handle_of.clone(),
+        }
+    {
+        v.push(cmd(app, "sketch.spline.reset_handles", "Reset Tangent Handles").with(json!({ "curve": spline })));
+    }
     // #10783: a point of one spline of the sketch's own, alone, comes out of that spline.
     if let ([], [point]) = (curves.as_slice(), points.as_slice())
         && let Some(at) = ss.sketch.resolve_point(point)
@@ -1746,6 +1757,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 }
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
                 crate::browser::request_timeline_reveal(app, f);
+                let panel = if app.preferences.history_in_browser { "browser" } else { "history" };
+                crate::browser::reveal_shared_panel(app, panel);
             }
         }
         "ui.tangentChain" => tangent_chain(app),
@@ -2220,7 +2233,7 @@ fn tangent_chain(app: &mut SolveApp) {
         let Sel::Edge { body, index, .. } = s else { continue };
         let Some(b) = st.body(body) else { continue };
         let m = b.mesh();
-        for i in m.tangent_chain(*index, 2f64.to_radians()) {
+        for i in m.tangent_chain(*index, solidcraft_engine::geom::TANGENT_CHAIN) {
             let Some(e) = m.edges.get(i) else { continue };
             let Some(mid) = e.get(e.len() / 2).copied() else { continue };
             let x = Sel::Edge { body: body.clone(), index: i, point: mid };
@@ -2569,20 +2582,27 @@ fn radial_center(at: Pos2, screen: Rect) -> Pos2 {
     pos2(x, y)
 }
 
+/// The height [`menu_frame`] adds around its rows: margins and border.
+const MENU_CHROME: f32 = 14.0;
+
+/// The room a menu leaves between itself and the window's top and bottom edges.
+const MENU_SCREEN_GAP: f32 = 4.0;
+
 /// Height of a list of items as [`list_row`] draws them in [`menu_frame`] (margins and border).
 fn list_height(items: &[Item]) -> f32 {
-    14.0 + items
-        .iter()
-        .map(|i| {
-            if i.is_sep() {
-                11.0
-            } else if i.is_heading() {
-                24.0
-            } else {
-                30.0
-            }
-        })
-        .sum::<f32>()
+    MENU_CHROME
+        + items
+            .iter()
+            .map(|i| {
+                if i.is_sep() {
+                    11.0
+                } else if i.is_heading() {
+                    24.0
+                } else {
+                    30.0
+                }
+            })
+            .sum::<f32>()
 }
 
 /// Where the list goes next to a ring centred at `c`: below it when it fits, otherwise beside
@@ -2717,6 +2737,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
         inside |= resp.response.contains_pointer();
         list_place(c, list_height(&list), screen)
+    } else if list_height(&list) > screen.height() - 2.0 * MENU_SCREEN_GAP {
+        // Taller than the window: it fills the window's height and scrolls.
+        let x = place(at, Vec2::ZERO, vec2(LIST_W, 0.0), screen).x;
+        pos2(x, screen.top() + MENU_SCREEN_GAP)
     } else {
         place(at, Vec2::ZERO, vec2(LIST_W, list_height(&list)), screen)
     };
@@ -2763,7 +2787,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             if target == Target::Workspace {
                 picked = workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
             } else {
-                menu_frame(ui, |ui| seen.push(level_rows(ui, &list, 0, key_row, path.first().copied(), leaving == Some(0), &mut picked)));
+                // A menu taller than the window scrolls between full-width bars; a menu opened
+                // anywhere else starts at its top again.
+                let rows = egui::Id::unique(("sc_context_menu_rows", at.x.to_bits(), at.y.to_bits()));
+                let room = screen.height() - MENU_CHROME - 2.0 * MENU_SCREEN_GAP;
+                menu_frame(ui, |ui| {
+                    scroll_rows(ui, rows, room, list_height(&list) - MENU_CHROME, |ui| {
+                        seen.push(level_rows(ui, &list, 0, key_row, path.first().copied(), leaving == Some(0), &mut picked))
+                    })
+                });
             }
         });
     inside |= resp.response.contains_pointer() || resp.response.rect.contains(pointer.unwrap_or(Pos2::ZERO));
@@ -2885,6 +2917,10 @@ fn level_rows(
             kit.id = &handle;
         }
         let row = kit.show(ui);
+        // A row chosen with the keys scrolls into view in a menu taller than the window.
+        if cursor == Some(k) && ui.input(|i| i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::ArrowDown)) {
+            row.scroll_to_me(None);
+        }
         let row = match &item.tip {
             Some(tip) => row.backing_on_hover_text(tip.as_str()),
             None => row,
@@ -3342,7 +3378,11 @@ mod tests {
         let count = |h: &crate::scenario::Harness, id: &str| {
             let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sid).unwrap().sketch;
-            sk.curves[sk.curve_index(id).unwrap()].kind.point_ids().len()
+            // Its fit points, not their tangent handles (#6502).
+            match &sk.curves[sk.curve_index(id).unwrap()].kind {
+                solidcraft_engine::sketch::CurveKind::Spline { pts, .. } => pts.len(),
+                kind => kind.point_ids().len(),
+            }
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
@@ -3402,7 +3442,9 @@ mod tests {
         let places = |h: &crate::scenario::Harness| {
             let state = h.app.session.world_state().unwrap();
             let sk = &state.sketch(sid).unwrap().sketch;
-            sk.curves[sk.curve_index(&fit).unwrap()].kind.point_ids().iter().map(|i| sk.point(*i).unwrap()).collect::<Vec<_>>()
+            // Its fit points, not their tangent handles (#6502), which go with a removed point.
+            let solidcraft_engine::sketch::CurveKind::Spline { pts, .. } = &sk.curves[sk.curve_index(&fit).unwrap()].kind else { panic!("a spline") };
+            pts.iter().map(|i| sk.point(*i).unwrap()).collect::<Vec<_>>()
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
@@ -3614,5 +3656,32 @@ mod workspace_menu_tests {
         h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
         assert!(!crate::render_workspace::active(&h.app));
         assert!(h.app.viewport.context_menu.is_some());
+    }
+
+    /// Isocurve Analysis leaves its face-picking tool running. That tool edits nothing, so the
+    /// Render row stays enabled; choosing it ends the tool and keeps the curves (#14993). A
+    /// modelling operation still holds the workspace switcher.
+    #[test]
+    fn render_row_opens_while_isocurve_analysis_is_on() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1200,"height":1000}));
+        h.app.run("solid.cylinder", json!({"radius": 10, "height": 30})).unwrap();
+        h.settle();
+        let render_row = |app: &SolveApp| items(app, &Target::Workspace).iter().any(|i| i.id == "ui.workspace.render" && i.enabled);
+        h.step(&json!({"start": "inspect.isocurve"})).unwrap();
+        h.step(&json!({"click": {"world": [10, 0, 15]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("inspect.isocurve"));
+        assert_eq!(h.app.session.isocurves.len(), 1, "{:?}", h.app.status);
+        assert!(render_row(&h.app), "a look-only Inspect tool does not lock Render");
+        h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();
+        h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
+        assert!(crate::render_workspace::active(&h.app), "{:?}", h.app.status);
+        assert!(h.app.tool.is_none(), "the picking tool ended");
+        assert_eq!(h.app.session.isocurves.len(), 1, "the curves stay on");
+        crate::render_workspace::enter(&mut h.app, false).unwrap();
+        h.step(&json!({"start": "solid.fillet"})).unwrap();
+        assert!(h.app.tool.is_some() || h.app.dialog.is_some());
+        assert!(!render_row(&h.app), "a modelling operation still locks Render");
+        assert!(crate::render_workspace::enter(&mut h.app, true).is_err());
     }
 }

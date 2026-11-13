@@ -279,7 +279,7 @@ impl<'a> InsertionGeometry<'a> {
             .notifications
             .as_mut()
             .ok_or_else(|| invalid("missing insertion notification context"))?;
-        crate::topology::brep::p3::seed_records(notifications.records, body, &key_of);
+        crate::topology::brep::p3::seed_records_since(notifications.records, body, &key_of);
         let mut env = crate::topology::edge::NotifyEnv {
             records: notifications.records,
             attributes: notifications.attributes,

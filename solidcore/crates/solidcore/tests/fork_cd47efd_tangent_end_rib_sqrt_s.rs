@@ -12,8 +12,8 @@
 //! that; now it is fitted in `t` with zero speed at P (its first two control points
 //! coincide) and an exact second derivative there. The fork: "the end rib has zero speed
 //! at P, its second derivative along T", "SMLib's check passes, and refuses the same
-//! curve on no edge (tests 3 and 14)" (with WR-668's `curve_check_zero_speed_tangent_end`,
-//! the fork's ecf1963).
+//! curve on no edge (tests 3 and 14)" (WR-668's zero-speed tangent end, the fork's
+//! ecf1963).
 //!
 //! The curvature-continuous round is the G^n section (WR-685; the executive's blend-curve
 //! section, which the fork's cd47efd built and whose rib this case was first written for,
@@ -115,10 +115,7 @@ fn kernel() -> Kernel {
     k.fixes.fillet_run_on_past_far_end_only = true;
     k.fixes.fillet_run_on_bspline_trims = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_torus_span_from_start_section = true;
     k.fixes.cover_wraps_across_closed_seam = true;
-    k.fixes.bspline_check_min_radius = true;
-    k.fixes.curve_check_zero_speed_tangent_end = true;
     k.fixes.oscillating_skips_failed_guesses = true;
     k
 }

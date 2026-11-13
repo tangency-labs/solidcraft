@@ -202,16 +202,10 @@ pub fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview,
     let ribbon_height = if state.labels { 16.0 } else { 10.0 };
     let top = inset + ribbon_height + gap;
     let bottom = 80.0 - inset;
-    let left_history = if state.history == 1 { 10.0 + gap } else { 0.0 };
-    let bx = inset + left_history;
+    let bx = inset;
     let bw = 30.0;
-    let browser_height = if state.history == 2 {
-        (bottom - top - gap) * 0.5
-    } else if state.history == 0 {
-        bottom - top - 10.0 - gap
-    } else {
-        bottom - top
-    };
+    let viewport_bottom = if state.history_in_browser { bottom } else { bottom - 10.0 - gap };
+    let browser_height = viewport_bottom - top;
     let panel = |x: f32, y: f32, w: f32, h: f32, label: &str, fill: Color32| {
         let rect = Rect::from_min_max(c.at(x, y), c.at(x + w, y + h));
         p.rect(rect, if state.compact { 0 } else { t.radius_sm }, fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
@@ -228,8 +222,7 @@ pub fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview,
         rect
     };
     panel(inset, inset, 120.0 - inset * 2.0, ribbon_height, "", t.toolbar);
-    let browser =
-        panel(bx, top, bw, browser_height, "Browser", if state.translucent && !state.compact { t.panel.gamma_multiply(0.60) } else { t.panel });
+    let browser = panel(bx, top, bw, browser_height, "Browser", t.panel);
     solidcraft_ui_registry::publish_rect("prefs:layout_preview:browser", browser);
     // A full row of quiet tool symbols, with label marks only when labels are enabled.
     let quiet = t.form_dim.lerp_to_gamma(t.viewport_top, 0.55);
@@ -249,36 +242,14 @@ pub fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview,
         }
     }
     let viewport_left = bx + bw + gap;
-    let viewport_bottom = if state.history == 0 { bottom - 10.0 - gap } else { bottom };
     let object_centre = c.at((viewport_left + 120.0 - inset) * 0.5, (top + viewport_bottom) * 0.5);
     crate::icons::glyphs::brand_mark_silhouette(&p, object_centre, c.width(22.0), quiet);
     p.circle_filled(c.at(110.0 - inset, top + 7.0), c.width(3.5), quiet);
-    let history = match state.history {
-        1 => Some(panel(inset, top, 10.0, bottom - top, "", t.selected_bg)),
-        2 => Some(panel(bx, top + browser_height + gap, bw, bottom - top - browser_height - gap, "History", t.selected_bg)),
-        // In the browser: no history panel of its own.
-        3 => None,
-        _ => Some(panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", t.selected_bg)),
-    };
-    if let Some(history) = history {
+    if !state.history_in_browser {
+        let history = panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", t.selected_bg);
         solidcraft_ui_registry::publish_rect("prefs:layout_preview:history", history);
     }
-    if let Some(history) = history.filter(|_| state.history == 1) {
-        // A single vertical mark reads as the narrow icon-only history rail.
-        p.line_segment(
-            [history.center_top() + vec2(0.0, t.space_8), history.center_bottom() - vec2(0.0, t.space_8)],
-            Stroke::new(2.0, t.form_primary),
-        );
-    }
-    // An open command dialog demonstrates its placement without another UI host.
-    // The left-column dialog stays below the Browser caption and above any History sharing
-    // that column. Its bounds belong to the Browser region, never to the full column height.
-    let (dialog_x, dialog_top, dialog_height) = if state.dialog_left {
-        (bx, top + 12.0, (browser_height - 12.0 - gap).max(0.0))
-    } else {
-        (120.0 - inset - bw, top, (viewport_bottom - top) * 0.65)
-    };
-    let dialog = panel(dialog_x, dialog_top, bw, dialog_height, "Dialogs", t.dialog_footer);
+    let dialog = panel(120.0 - inset - bw, top, bw, (viewport_bottom - top) * 0.65, "Dialogs", t.dialog_footer);
     solidcraft_ui_registry::publish_rect("prefs:layout_preview:dialog", dialog);
     solidcraft_ui_registry::publish_rect("prefs:layout_preview", outer);
     ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover()).backing_on_hover_text(note);
@@ -308,7 +279,7 @@ mod tests {
     fn live_layout_preview_follows_each_choice_in_both_themes() {
         use crate::LayoutPreview;
         let previous = solidcraft_theme::is_dark();
-        let baseline = LayoutPreview { compact: false, labels: true, history: 0, translucent: false, dialog_left: false };
+        let baseline = LayoutPreview { compact: false, labels: true, history_in_browser: false };
         for dark in [false, true] {
             solidcraft_theme::set_dark(dark);
             let draw = |state| {
@@ -324,20 +295,16 @@ mod tests {
             for state in [
                 LayoutPreview { compact: true, ..baseline },
                 LayoutPreview { labels: false, ..baseline },
-                LayoutPreview { history: 1, ..baseline },
-                LayoutPreview { history: 2, ..baseline },
-                LayoutPreview { history: 3, ..baseline },
-                LayoutPreview { translucent: true, ..baseline },
-                LayoutPreview { dialog_left: true, ..baseline },
+                LayoutPreview { history_in_browser: true, ..baseline },
             ] {
                 assert_ne!(original, draw(state), "each actual choice changes the schematic");
             }
-            let _ = draw(LayoutPreview { compact: false, labels: false, history: 2, translucent: true, dialog_left: true });
+            let _ = draw(baseline);
             let browser = solidcraft_ui_registry::rect_of("prefs:layout_preview:browser").unwrap();
             let history = solidcraft_ui_registry::rect_of("prefs:layout_preview:history").unwrap();
             let dialog = solidcraft_ui_registry::rect_of("prefs:layout_preview:dialog").unwrap();
-            assert!(browser.contains_rect(dialog), "the left-column dialog remains inside the Browser region");
-            assert!(!dialog.intersects(history), "the dialog cannot cover the Under browser History caption");
+            assert!(dialog.left() > browser.right(), "the floating editor opens at the right edge");
+            assert!(dialog.bottom() < history.top(), "the editor leaves the History strip visible");
         }
         solidcraft_theme::set_dark(previous);
     }

@@ -139,6 +139,13 @@ fn operands(k: &mut Kernel, name: &str) -> solidcore::Result<(Brep, Brep, Op)> {
             api::create_box(k, p(6.5, -3.0, -3.0), 4.0, 6.0, 6.0)?,
             Op::Union,
         ),
+        // The box less its inscribed r=5 sphere, which touches every face at its centre:
+        // (10, 5, 5) on the sphere's seam meridian, as in `seam-sphere-box`.
+        "seam-box-minus-sphere" => (
+            api::create_box(k, p(0.0, 0.0, 0.0), 10.0, 10.0, 10.0)?,
+            api::create_sphere(k, p(5.0, 5.0, 5.0), 5.0)?,
+            Op::Difference,
+        ),
         "torus-minus-box" => (
             api::create_torus(k, p(0.0, 0.0, 0.0), 5.0, 1.5)?,
             api::create_box(k, p(0.0, -10.0, -10.0), 20.0, 20.0, 20.0)?,
@@ -243,57 +250,54 @@ fn run(case: &Case) -> Result<(), String> {
     Ok(())
 }
 
-/// A union of two solids touching at one point.
+/// A union of two solids touching at one point, or a difference whose cavity touches
+/// the outside.
 struct PointContact {
     name: &'static str,
-    /// Analytic volume: the sum of the operands'.
+    /// Analytic volume.
     volume: f64,
     /// Face count: every face of both operands.
     faces: usize,
-    /// The contact lies inside a seam edge: the result needs
-    /// `UpstreamFixes::topological_vertex_has_only_edge_uses` (WR-727, #2520), as the
-    /// cleanup joins the seam through the contact vertex and moves the other face's
-    /// vertex loop to the seam's far end.
-    on_seam_edge: bool,
 }
 
 fn point_contacts() -> Vec<PointContact> {
     let sphere = |r: f64| 4.0 / 3.0 * PI * r.powi(3);
     let torus = 2.0 * PI * PI * 5.0 * 1.5 * 1.5;
-    let contact = |name, volume, faces, on_seam_edge| PointContact {
+    let contact = |name, volume, faces| PointContact {
         name,
         volume,
         faces,
-        on_seam_edge,
     };
+    // A `seam-` contact lies inside a seam edge: the cleanup must not join the seam
+    // through the contact vertex, which would move the other face's vertex loop to the
+    // seam's far end (WR-727, #2520).
     vec![
         // At the sphere's pole, a seam vertex (also in `cases`).
-        contact("tangent-sphere-box", 1000.0 + sphere(3.0), 7, false),
-        contact("seam-sphere-box", 1312.5 + sphere(7.5), 7, true),
-        contact("seam-box-sphere", 1312.5 + sphere(7.5), 7, true),
-        contact("off-seam-sphere-box", 1312.5 + sphere(7.5), 7, false),
-        contact("seam-sphere-sphere", sphere(3.0) + sphere(2.0), 2, true),
-        contact("seam-cylinder-sphere", 40.0 * PI + sphere(3.0), 4, true),
-        contact(
-            "off-seam-cylinder-sphere",
-            40.0 * PI + sphere(3.0),
-            4,
-            false,
-        ),
-        contact("seam-torus-sphere", torus + sphere(2.0), 2, true),
-        contact("seam-torus-box", torus + 144.0, 7, true),
-        contact("seam-vertex-torus-box", torus + 144.0, 7, false),
+        contact("tangent-sphere-box", 1000.0 + sphere(3.0), 7),
+        contact("seam-sphere-box", 1312.5 + sphere(7.5), 7),
+        contact("seam-box-sphere", 1312.5 + sphere(7.5), 7),
+        contact("off-seam-sphere-box", 1312.5 + sphere(7.5), 7),
+        contact("seam-sphere-sphere", sphere(3.0) + sphere(2.0), 2),
+        contact("seam-cylinder-sphere", 40.0 * PI + sphere(3.0), 4),
+        contact("off-seam-cylinder-sphere", 40.0 * PI + sphere(3.0), 4),
+        contact("seam-torus-sphere", torus + sphere(2.0), 2),
+        contact("seam-torus-box", torus + 144.0, 7),
+        contact("seam-vertex-torus-box", torus + 144.0, 7),
+        contact("seam-box-minus-sphere", 1000.0 - sphere(5.0), 7),
     ]
 }
 
-/// The union of `case`, with `UpstreamFixes::topological_vertex_has_only_edge_uses` set
-/// to `fix`: a closed manifold solid with every face of both operands, the analytic
-/// volume and a clean Level2 check.
-fn run_point_contact(case: &PointContact, fix: bool) -> Result<(), String> {
+/// The boolean of `case`: a closed manifold solid with every face of both operands, the
+/// analytic volume and a clean Level2 check.
+fn run_point_contact(case: &PointContact) -> Result<(), String> {
     let mut k = Kernel::default();
-    k.fixes.topological_vertex_has_only_edge_uses = fix;
-    let (a, b, _) = operands(&mut k, case.name).map_err(|e| format!("operands: {e}"))?;
-    let mut brep = boolean_union(&mut k, a, b).map_err(|e| format!("boolean failed: {e}"))?;
+    let (a, b, op) = operands(&mut k, case.name).map_err(|e| format!("operands: {e}"))?;
+    let result = match op {
+        Op::Union => boolean_union(&mut k, a, b),
+        Op::Intersection => boolean_intersection(&mut k, a, b),
+        Op::Difference => boolean_difference(&mut k, a, b),
+    };
+    let mut brep = result.map_err(|e| format!("boolean failed: {e}"))?;
     let solid = solidcore::topology::brep::p2::is_manifold_solid(&brep)
         .map_err(|e| format!("is_manifold_solid: {e}"))?;
     if !solid {
@@ -328,28 +332,14 @@ fn run_point_contact(case: &PointContact, fix: bool) -> Result<(), String> {
 }
 
 // #2520: two solids touching at one point, on a seam edge (sphere, cylinder, torus),
-// at a seam vertex or off the seam, unite into a body that checks clean at Level2.
+// at a seam vertex or off the seam, unite into a body that checks clean at Level2, and so
+// does the box less the sphere inscribed in it.
 #[test]
 fn point_contact_unions_check_clean() {
     let failures: Vec<String> = point_contacts()
         .iter()
         .filter_map(|c| {
-            run_point_contact(c, true)
-                .err()
-                .map(|e| format!("{}: {e}", c.name))
-        })
-        .collect();
-    assert!(failures.is_empty(), "{failures:#?}");
-}
-
-// The contacts away from a seam edge need no fix: the pinned behaviour keeps them.
-#[test]
-fn point_contacts_off_seam_edges_check_clean_by_default() {
-    let failures: Vec<String> = point_contacts()
-        .iter()
-        .filter(|c| !c.on_seam_edge)
-        .filter_map(|c| {
-            run_point_contact(c, false)
+            run_point_contact(c)
                 .err()
                 .map(|e| format!("{}: {e}", c.name))
         })
@@ -525,4 +515,164 @@ fn a_bore_minus_its_copy_is_empty_when_the_sector_steps_off() {
         let b = with_step_tolerances(&k, b);
         assert_eq!(faces_left_by_own_copy(&mut k, b), 0, "r {r}");
     }
+}
+
+// ---- a box edge cutting a small sphere's circle just inside its tangent ---------------
+
+/// `|sphere(0, r) ∩ {y <= -delta} ∩ {z >= zmin}|`, by the midpoint rule over slices in y
+/// (each slice a disc less the segment below `zmin`); its error is far below the test's.
+fn sphere_box_corner_volume(r: f64, delta: f64, zmin: f64) -> f64 {
+    let n = 200_000;
+    let h = (r - delta) / f64::from(n);
+    let d = -zmin;
+    let slice = |y: f64| {
+        let s2 = (r * r - y * y).max(0.0);
+        let s = s2.sqrt();
+        let below = if d < s {
+            s2 * (d / s).acos() - d * (s2 - d * d).sqrt()
+        } else {
+            0.0
+        };
+        PI * s2 - below
+    };
+    (0..n)
+        .map(|i| slice(-r + (f64::from(i) + 0.5) * h))
+        .sum::<f64>()
+        * h
+}
+
+/// An r = 0.3 mm sphere and a box whose bottom face cuts a cap 1.2e-5 to 1.5e-5 high off
+/// it (about one tolerance, 1e-5) and whose side face y = -delta passes near the centre,
+/// away from the sphere's seam. The box's bottom edge crosses each of the two circles the
+/// faces cut from the sphere twice, the two crossings 1.2e-4 to 1.6e-4 apart. The
+/// circle/line intersector looks for a line within ten intersection tolerances (2e-4) of
+/// the circle and also merged two crossings closer than that into one point mid-chord, off
+/// the circle, so no crossing was found, the box edge was not split, and the boolean gave
+/// nothing, the sphere alone (57 % off) or "no radial sector" (`gen0150` of the golden unit
+/// `boolean.api_brep` is this case with the sphere's seam close to the side face). The
+/// crossings are now merged only when their midpoint lies on the circle within the
+/// intersection tolerance: union, intersection and difference integrate to the exact
+/// volume, have the expected faces, edges and vertices, every vertex on the sphere or
+/// the box, and check clean at Level2. The volume
+/// tolerance (1e-3 relative) allows for tolerance-wide slivers at a 0.3 mm scale
+/// (measured: below 1e-5).
+#[test]
+fn sphere_box_edge_cutting_a_shallow_cap() {
+    let r: f64 = 3e-4;
+    let sphere = 4.0 / 3.0 * PI * r.powi(3);
+    let mut failures = Vec::new();
+    for (delta, cap) in [(5e-5, 1.5e-5), (6e-5, 1.2e-5)] {
+        let zmin = -r + cap;
+        let size = [8e-4, 4e-4 - delta, 4e-4 - zmin];
+        let block = size[0] * size[1] * size[2];
+        let common = sphere_box_corner_volume(r, delta, zmin);
+        // Faces, edges, vertices. Intersection: the sphere piece and the two box face
+        // pieces, bounded by the two arcs and the box edge between its crossings (plus the
+        // sphere's seam piece); union: the box's six faces and the sphere; difference: the
+        // sphere and the two box face pieces. Measured, the same for both cases; a lost
+        // crossing or an unintended split changes them.
+        for (op, want, want_counts) in [
+            (Op::Union, sphere + block - common, [7, 17, 13]),
+            (Op::Intersection, common, [3, 4, 3]),
+            (Op::Difference, sphere - common, [3, 5, 5]),
+        ] {
+            let name = match op {
+                Op::Union => "union",
+                Op::Intersection => "intersection",
+                Op::Difference => "difference",
+            };
+            let mut k = Kernel::default();
+            let a = api::create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), r).unwrap();
+            let b = api::create_box(
+                &mut k,
+                Point3::new(-4e-4, -4e-4, zmin),
+                size[0],
+                size[1],
+                size[2],
+            )
+            .unwrap();
+            let result = match op {
+                Op::Union => boolean_union(&mut k, a, b),
+                Op::Intersection => boolean_intersection(&mut k, a, b),
+                Op::Difference => boolean_difference(&mut k, a, b),
+            };
+            let mut brep = match result {
+                Ok(b) => b,
+                Err(e) => {
+                    failures.push(format!("delta {delta:e} cap {cap:e} {name}: {e}"));
+                    continue;
+                }
+            };
+            let store = AttributeStore::new();
+            let key_of = |_| ObjectKey(0);
+            let attrs = PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            };
+            let v = brep_volume(&k, &mut brep, 1e-9, &attrs).unwrap();
+            let rel = (v - want).abs() / want;
+            // Written to accept: a NaN volume fails.
+            if rel.is_nan() || rel > 1e-3 {
+                failures.push(format!(
+                    "delta {delta:e} cap {cap:e} {name}: volume {v:e} vs {want:e} (rel {rel:.2e})"
+                ));
+            }
+            let counts = [
+                solidcore::topology::brep::p1::faces(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::edges(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::vertices(&brep, None)
+                    .unwrap()
+                    .len(),
+            ];
+            if counts != want_counts {
+                failures.push(format!(
+                    "delta {delta:e} cap {cap:e} {name}: faces/edges/vertices {counts:?} vs {want_counts:?}"
+                ));
+            }
+            // Every vertex lies on the sphere or on the box within the tolerance band.
+            let (lo, hi) = (
+                Point3::new(-4e-4, -4e-4, zmin),
+                Point3::new(-4e-4 + size[0], -delta, 4e-4),
+            );
+            for vid in solidcore::topology::brep::p1::vertices(&brep, None).unwrap() {
+                let p = brep.vertex(vid).unwrap().point;
+                let on_sphere = (p.length() - r).abs();
+                let inside = Point3::new(
+                    p.x.clamp(lo.x, hi.x),
+                    p.y.clamp(lo.y, hi.y),
+                    p.z.clamp(lo.z, hi.z),
+                );
+                let outside = p.distance(inside);
+                let to_planes = [
+                    p.x - lo.x,
+                    hi.x - p.x,
+                    p.y - lo.y,
+                    hi.y - p.y,
+                    p.z - lo.z,
+                    hi.z - p.z,
+                ]
+                .into_iter()
+                .map(f64::abs)
+                .fold(f64::INFINITY, f64::min);
+                let on_box = outside.max(to_planes);
+                if on_sphere.is_nan() || on_box.is_nan() || on_sphere.min(on_box) > 2e-5 {
+                    failures.push(format!(
+                        "delta {delta:e} cap {cap:e} {name}: vertex {p:?} is {on_sphere:e} off the sphere and {on_box:e} off the box"
+                    ));
+                }
+            }
+            let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
+            if !check.is_valid() {
+                failures.push(format!(
+                    "delta {delta:e} cap {cap:e} {name}: Level2 {:?}",
+                    check.lines()
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }
