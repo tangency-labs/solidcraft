@@ -97,14 +97,15 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
     use std::collections::BTreeMap;
 
     let (mut c, map) = crate::topology::brep::p3::brep_copy_mapped(k, b)?;
-    let original = |r: EntityRef| -> Result<Option<EntityRef>> { map.get_at(Some(r)) };
-    // before the merge: each copied edge's original, its middle and its faces
+    // the map holds each of `b`'s entities and its copy (source to copy)
+    let copy_of = |r: EntityRef| -> Result<Option<EntityRef>> { map.get_at(Some(r)) };
+    // before the merge: each edge of `b`, its copy, the copy's middle and its faces
     let mut copied_edges = Vec::new();
-    for ce in edges(&c, None)? {
-        let Some(EntityRef::Edge(oe)) = original(EntityRef::Edge(ce))? else {
+    for oe in edges(b, None)? {
+        let Some(EntityRef::Edge(ce)) = copy_of(EntityRef::Edge(oe))? else {
             return Err(SolidError::topology_failed(
                 OP_MERGED,
-                "a copied edge without its original",
+                "an edge without its copy",
             ));
         };
         let record = c.edge(ce)?;
@@ -124,11 +125,11 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
         copied_edges.push((oe, ce, middle, on));
     }
     let mut copied_faces = Vec::new();
-    for cf in faces(&c, None)? {
-        let Some(EntityRef::Face(of)) = original(EntityRef::Face(cf))? else {
+    for of in faces(b, None)? {
+        let Some(EntityRef::Face(cf)) = copy_of(EntityRef::Face(of))? else {
             return Err(SolidError::topology_failed(
                 OP_MERGED,
-                "a copied face without its original",
+                "a face without its copy",
             ));
         };
         copied_faces.push((of, cf));
