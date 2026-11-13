@@ -1459,6 +1459,30 @@ fn offset_chain_mirror_patterns_move_scale() {
     assert!(sk.center(sk.curve_index(&cp).unwrap()).unwrap().dist(Vec2::new(-110.0, 0.0)) < 1e-7);
 }
 
+/// #15697: rotating a rounded square picked by its sides and corner arcs (not its construction
+/// diagonal or centre point) turns it whole: every point lands where the rotation puts it, the
+/// centre point too, so the square does not come out as a trapezoid.
+#[test]
+fn move_rotation_turns_a_rounded_rectangle_whole() {
+    for (command, angle) in [("sketch.move", 45.0), ("sketch.move", 30.0), ("sketch.transform", 45.0), ("sketch.transform", 30.0)] {
+        let mut s = new_sketch();
+        let r = run(&mut s, "sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [20, 20], "radius": 3}));
+        let source = ids(&r["curves"]);
+        assert_eq!(source.len(), 8, "four sides and four corner arcs: {r}");
+        let before = sketch(&s);
+        let out = run(&mut s, command, json!({"entities": source, "angle": angle, "center": [0, 0]}));
+        assert_eq!(out["sketch"]["solved"], true, "{command} {angle}: {out}");
+        let after = sketch(&s);
+        let (sin, cos) = f64::to_radians(angle).sin_cos();
+        let turned = |p: Vec2| Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
+        for p in &before.points {
+            let q = after.points.iter().find(|q| q.id == p.id).unwrap();
+            let expected = turned(p.pos);
+            assert!(q.pos.dist(expected) < 1e-6, "{command} {angle}: point {} at {:?}, expected {expected:?}", p.id, q.pos);
+        }
+    }
+}
+
 /// #4645: rotating a constrained 40 × 10 rectangle turns it at its size. Horizontal and vertical
 /// relations and dimensions swap at odd quarter turns, stay at half turns and go at other angles;
 /// lengths stay. A rotated copy is unconstrained and leaves the original as it was.

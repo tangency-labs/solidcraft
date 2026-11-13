@@ -3682,6 +3682,22 @@ fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
     out
 }
 
+/// The free points that ride on the moved points alone (#15697): on no curve, neither fixed nor
+/// linked, and held only by constraints whose other points all move, like a rounded rectangle's
+/// centre kept at the middle of its construction diagonal. They move too: left behind, the solve
+/// drags the moved shape back toward them and bends it.
+fn riders(sk: &Sketch, moved: &[usize]) -> Vec<usize> {
+    (0..sk.points.len())
+        .filter(|q| !moved.contains(q))
+        .filter(|&q| sk.points.get(q).is_some_and(|p| !p.fixed && p.link.is_none()))
+        .filter(|&q| !sk.curves.iter().any(|c| c.kind.point_ids().contains(&q)))
+        .filter(|&q| {
+            let mut tied = sk.constraints.iter().map(|c| sk.constraint_points(&c.kind)).filter(|pts| pts.contains(&q)).peekable();
+            tied.peek().is_some() && tied.all(|pts| pts.iter().all(|p| *p == q || moved.contains(p)))
+        })
+        .collect()
+}
+
 /// Copy curves and points through `f`. `flip` reverses arcs (mirroring). `keep(p)`: reuse the
 /// original point instead of copying it (points on a mirror line). Returns the new curves and
 /// the point map (original → copy).
@@ -4088,6 +4104,8 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(ids);
         }
         with_ellipse_axes(sk, &mut cs);
+        let riding = riders(sk, &involved_points(sk, &cs, &ps));
+        ps.extend(riding);
         let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
         // Broken external holds must not make the rectangle's replacement relations look redundant.
@@ -4138,6 +4156,8 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
             text_curves.extend(super::sketch_create::transform_text(sk, cmd, &link, &f, ang, k, false)?);
         }
         with_ellipse_axes(sk, &mut cs);
+        let riding = riders(sk, &involved_points(sk, &cs, &ps));
+        ps.extend(riding);
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
         let moved = involved_points(sk, &cs, &ps);
         let _ = rotate_axis_constraints(sk, doc, &moved, ang)?;
