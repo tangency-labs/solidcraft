@@ -332,10 +332,16 @@ impl ExportMesh {
             } else {
                 u.limits.iter().map(|l| format!("{l:?}")).collect::<Vec<_>>().join(", ")
             };
-            notes.push(format!(
-                "face {}: smallest angle {:.2}°, short of the {}° asked (stopped by: {limits})",
-                u.face, u.smallest_angle, spec.min_angle
-            ));
+            // A bound can stop the shaping (too many points, a side kept whole) after every
+            // triangle already keeps the angle: that face is not short of it.
+            notes.push(if u.smallest_angle < spec.min_angle {
+                format!("face {}: smallest angle {:.2}°, short of the {}° asked (stopped by: {limits})", u.face, u.smallest_angle, spec.min_angle)
+            } else {
+                format!(
+                    "face {}: its shaping stopped at a bound ({limits}) with the {}° asked reached (smallest angle {:.2}°)",
+                    u.face, spec.min_angle, u.smallest_angle
+                )
+            });
         }
         for o in &self.stats.over_tolerance {
             let caps = o.caps.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ");

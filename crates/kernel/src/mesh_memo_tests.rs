@@ -148,3 +148,19 @@ fn export_mesh_refuses_a_spec_out_of_range_and_gives_a_mesh_bodys_own_triangles(
     assert_eq!(m.stats, PlanStats::default());
     assert!(m.notes(&MeshSpec::chord(0.01)).is_empty());
 }
+
+/// A face left short of the angle is said to be short of it; one whose shaping a bound stopped
+/// after it reached the angle is said to have reached it.
+#[test]
+fn notes_say_short_only_for_a_face_under_the_angle() {
+    let spec = MeshSpec::chord(0.01);
+    let unshaped =
+        |face: usize, smallest_angle: f64| solidcore_tess::Unshaped { face, smallest_angle, limits: vec![solidcore_tess::ShapeLimit::Rounds] };
+    let made =
+        ExportMesh { mesh: Mesh::default(), stats: PlanStats { unshaped: vec![unshaped(3, 18.5), unshaped(7, 27.25)], ..PlanStats::default() } };
+    let notes = made.notes(&spec);
+    assert_eq!(notes.len(), 2);
+    assert!(notes[0].starts_with("face 3: smallest angle 18.50°, short of the 25° asked"), "{}", notes[0]);
+    assert!(!notes[1].contains("short"), "{}", notes[1]);
+    assert!(notes[1].contains("face 7") && notes[1].contains("reached") && notes[1].contains("27.25°"), "{}", notes[1]);
+}
