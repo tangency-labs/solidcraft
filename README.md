@@ -226,10 +226,17 @@ reach past the open design are grouped: `file` (saving, exporting, importing, in
 libraries), `doc` (opening or switching designs), `app` (settings, window, diagnostics) and `plugin`
 (inspecting or running plugins). Each group is refused unless the manifest requests it in
 `runtime.permissions.command_groups` and the user grants it; this version has no grant UI yet.
-Filesystem calls require matching manifest permissions and approved folder grants. The clock
-requires its manifest permission; otherwise it returns a fixed epoch. No WASI, socket or process
-API is linked. A design container reserves `plugins/<plugin-id>/` for a plugin's own data, kept
-and saved back untouched when the plugin is missing; plugins cannot read or write it until the
+Filesystem calls require matching manifest permissions and approved folder grants. Native commands
+in the `file` and `doc` groups also stay within any caller file scope; a plugin grant cannot widen it.
+Automatic/default scopes exclude hidden children. Explicit caller approval remains effective within
+the approved plugin folders. The clock requires its manifest permission; otherwise it returns a
+fixed epoch. No WASI, socket or process API is linked.
+
+A design container reserves `plugins/<plugin-id>/` for a plugin's own data. Valid, readable files
+are kept and saved back untouched when the plugin is missing. The limit is 1024 files per design,
+across all plugins; see the [plugin data rules](docs/plugins.md#plugin-data-in-a-design).
+Unsupported names are ignored. Over-limit current-format data and unreadable supported container
+parts cause an error instead of silent omission. Plugins cannot read or write this data until the
 `storage` capability arrives.
 Inspection commands can disclose model data, so review them as permissions too. In particular, the optional
 `model.mesh` permission exposes the requested body's evaluated vertices and triangles in its owning
