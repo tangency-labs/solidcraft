@@ -1730,10 +1730,10 @@ fn keep_facing(s: &Session, sketch: u64, evaluated: Option<solidcore_record::Pla
         Some(plane) => plane,
         None => {
             let FeatureKind::Sketch { plane: now, .. } = &s.doc.feature(sketch)?.kind else { return None };
-            s.doc.resolve_plane_in(&vals, now, 0, Some(&state)).ok()?
+            s.doc.resolve_plane_in(&vals, now, 0, s.active_component, Some(&state)).ok()?
         }
     };
-    let next = s.doc.resolve_plane_in(&vals, next, 0, Some(&state)).ok()?;
+    let next = s.doc.resolve_plane_in(&vals, next, 0, s.active_component, Some(&state)).ok()?;
     if now.normal().dot(next.normal()) >= -1e-9 {
         return None;
     }
