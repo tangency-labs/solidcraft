@@ -5,7 +5,8 @@
 #[cfg(all(windows, target_env = "msvc"))]
 const KERNEL_STACK: u64 = 8 << 20;
 
-/// `SizeOfStackReserve` from the PE32+ optional header of the exe at `path`.
+/// `SizeOfStackReserve` from the optional header of the exe at `path`: 8 bytes at offset 72 in a
+/// PE32+ image (64-bit), 4 bytes there in a PE32 image (32-bit).
 #[cfg(all(windows, target_env = "msvc"))]
 fn stack_reserve(path: &str) -> u64 {
     let bytes = std::fs::read(path).expect("read the built exe");
@@ -13,8 +14,11 @@ fn stack_reserve(path: &str) -> u64 {
     let pe = u32_at(0x3c) as usize;
     assert_eq!(&bytes[pe..pe + 4], b"PE\0\0", "a PE file");
     let optional = pe + 24;
-    assert_eq!(u16::from_le_bytes([bytes[optional], bytes[optional + 1]]), 0x20b, "PE32+");
-    u64::from_le_bytes(bytes[optional + 72..optional + 80].try_into().expect("8 bytes"))
+    match u16::from_le_bytes([bytes[optional], bytes[optional + 1]]) {
+        0x20b => u64::from_le_bytes(bytes[optional + 72..optional + 80].try_into().expect("8 bytes")),
+        0x10b => u64::from(u32_at(optional + 72)),
+        magic => panic!("{path}: optional header magic {magic:#x} is neither PE32 nor PE32+"),
+    }
 }
 
 #[cfg(all(windows, target_env = "msvc"))]
