@@ -285,6 +285,10 @@ struct SecondBase<'target> {
         Option<crate::boolean::topology_intersector::p1::TopologyIntersector<FilletObject>>,
 }
 
+/// WR-459: the target's edges before filleting, each with its end vertices
+/// (`edge::vertices`): the clean-up keeps an edge by its id only while it has those ends.
+type CleanupKeptEdges = BTreeMap<EdgeId, Vec<Option<VertexId>>>;
+
 /// Owned objects and the target borrowed by the executive.
 #[derive(Debug)]
 struct SessionObjects<'target> {
@@ -303,8 +307,9 @@ struct SessionObjects<'target> {
     /// session took them, put back by `Drop` if handing the session's back fails.
     attributes_before: (AttributeStore, AttributeStore),
     merge_attributes: Option<Vec<AttributeHandle>>,
-    /// WR-459: the target's edges and faces before filleting, kept by the clean-up.
-    cleanup_kept: Option<(BTreeSet<EdgeId>, BTreeSet<FaceId>)>,
+    /// WR-459: the target's edges, each with its end vertices, and faces before filleting,
+    /// kept by the clean-up.
+    cleanup_kept: Option<(CleanupKeptEdges, BTreeSet<FaceId>)>,
     extended_surfaces: BTreeMap<FaceId, Surface>,
     edge_caches: BTreeMap<EdgeId, CurveCache<FilletObject>>,
     target_serial: u64,
