@@ -564,6 +564,52 @@ impl JsonSchema for MemberNames {
     }
 }
 
+/// A library profile's id or name as `frame.member` reads `library`: text that isn't blank. Whether
+/// the library has it is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LibraryKey(pub String);
+
+impl<'de> Deserialize<'de> for LibraryKey {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(k) if !k.trim().is_empty() => Ok(LibraryKey(k)),
+            _ => Err(D::Error::custom(whole("`library` must be a library profile's id or name"))),
+        }
+    }
+}
+
+impl JsonSchema for LibraryKey {
+    fn schema_name() -> Cow<'static, str> {
+        "LibraryKey".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A library profile's id (`lp1`) or name.", "type": "string", "pattern": not_blank_pattern()})
+    }
+}
+
+/// A placement point's name as `frame.member` reads `point`: 1…96 bytes once trimmed. Whether the
+/// profile has it is checked when the member is built.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointName(pub String);
+
+impl<'de> Deserialize<'de> for PointName {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(n) if !n.trim().is_empty() && n.trim().len() <= solidcraft_doc::frame_library::MAX_LIBRARY_NAME => Ok(PointName(n)),
+            _ => Err(D::Error::custom(whole("`point` must be a placement point's name (frame.profile.points lists them)"))),
+        }
+    }
+}
+
+impl JsonSchema for PointName {
+    fn schema_name() -> Cow<'static, str> {
+        "PointName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A placement point's name: `heel_inside`, `web_back`, a point a library profile names…", "type": "string", "pattern": not_blank_pattern()})
+    }
+}
+
 /// `angle` as `frame.member` reads it: a number of degrees or an expression, with its message. Whether
 /// the expression evaluates as an angle is the handler's to check.
 #[derive(Clone, Debug, PartialEq)]
@@ -616,12 +662,16 @@ impl JsonSchema for Participants {
     }
 }
 
-/// `sketch` is required and one of `profile` and `profile_sketch`, not both, as the schema says;
+/// `sketch` is required and one of `profile`, `profile_sketch` and `library`, as the schema says;
 /// the type leaves them to the handler's messages.
 fn member_required(schema: &mut Schema) {
     require(schema, "sketch");
-    let only = |key: &str, other: &str| json!({"required": [key], "not": {"required": [other]}});
-    schema.insert("anyOf".into(), json!([only("profile", "profile_sketch"), only("profile_sketch", "profile")]));
+    let keys = ["profile", "profile_sketch", "library"];
+    let only = |key: &str| {
+        let others: Vec<Value> = keys.iter().filter(|k| **k != key).map(|k| json!({"required": [k]})).collect();
+        json!({"required": [key], "not": {"anyOf": others}})
+    };
+    schema.insert("anyOf".into(), json!(keys.iter().map(|k| only(k)).collect::<Vec<_>>()));
 }
 
 /// Lay structural members along the lines of a frame sketch: one body per line, from its start
@@ -650,6 +700,11 @@ pub struct FrameMemberKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub profile_sketch: Option<SketchRef>,
+    /// The section as a profile of the design's profile library, by id or name: editing the
+    /// library profile changes the members. Give it, `profile` or `profile_sketch`, one of them.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "LibraryKey")]
+    pub library: Option<LibraryKey>,
     /// With `profile_sketch`: which of its profiles are the section, as `solid.extrude` takes
     /// them. Default: its material, nested loops alternating, so two circles make a tube. Not
     /// used with `profile`.
@@ -670,6 +725,11 @@ pub struct FrameMemberKeys {
     /// when the profile's size changes.
     #[serde(default)]
     pub locate: Option<[f64; 2]>,
+    /// The placement point that sits on each line, by name, used instead of `anchor`
+    /// (`frame.profile.points` lists a profile's). Default: a library profile's default point, else
+    /// `anchor`.
+    #[serde(default)]
+    pub point: Option<PointName>,
     /// How far the profile turns about the line, a number of degrees or an expression. Default:
     /// 0, which puts its y as near world up as the line allows (a vertical member's x along
     /// world X).
@@ -706,16 +766,16 @@ impl<'de> Deserialize<'de> for FrameMemberParams {
         let mut value = Value::deserialize(d)?;
         if let Some(keys) = value.as_object_mut() {
             // A key counts as given when it is there, `null` included, as the handler tests it.
-            match (keys.contains_key("profile"), keys.contains_key("profile_sketch")) {
-                // A built-in profile: the sketch's profile picks are never read.
-                (true, false) => {
+            match (keys.contains_key("profile"), keys.contains_key("profile_sketch"), keys.contains_key("library")) {
+                // A built-in or library profile: the sketch's profile picks are never read.
+                (true, false, false) | (false, false, true) => {
                     keys.remove("profiles");
                     keys.remove("exact_regions");
                 }
-                (false, true) => {}
-                // Both or neither: the handler refuses before it reads any of them.
+                (false, true, false) => {}
+                // More than one or none: the handler refuses before it reads any of them.
                 _ => {
-                    for key in ["profile", "profile_sketch", "profiles", "exact_regions"] {
+                    for key in ["profile", "profile_sketch", "library", "profiles", "exact_regions"] {
                         keys.remove(key);
                     }
                 }

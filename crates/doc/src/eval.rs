@@ -1869,6 +1869,14 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
             (None, None) => 0u8.hash(&mut h),
         }
     }
+    // Members made from a library profile are built from the entry and the parameters it uses.
+    if let Some(id) = f.kind.library_profile() {
+        let entry = doc.library_profile(id);
+        serde_json::to_string(&entry).unwrap_or_default().hash(&mut h);
+        for n in entry.map(|e| e.references()).unwrap_or_default() {
+            vals.get(&n).map(|v| v.v.to_bits()).hash(&mut h);
+        }
+    }
     h.finish()
 }
 
