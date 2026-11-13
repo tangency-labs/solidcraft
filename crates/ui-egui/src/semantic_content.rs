@@ -84,10 +84,6 @@ impl OwnerState {
         }
         self.order_len += 1;
     }
-
-    pub(crate) fn current_order(&self) -> &[String] {
-        self.order.get(..self.order_len).unwrap_or(&[])
-    }
 }
 
 #[derive(Default)]
@@ -177,10 +173,6 @@ fn row_capture_id() -> egui::Id {
 pub(crate) fn current_source(app: &SolveApp) -> Option<ContentSource> {
     let (owner, _) = app.tree.content.active?;
     (app.tree.content.session == Some(app.session.uid)).then_some(ContentSource { session: app.session.uid, owner })
-}
-
-pub(crate) fn same_document(ui: &Ui, source: ContentSource) -> bool {
-    ui.ctx().data(|data| data.get_temp::<ContentSource>(active_id())).is_some_and(|active| active.session == source.session)
 }
 
 pub(crate) fn source_present(app: &SolveApp, source: ContentSource) -> bool {
