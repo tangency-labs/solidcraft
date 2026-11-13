@@ -187,12 +187,49 @@ fn compatible(a: BSplineCurve, b: BSplineCurve) -> Result<[BSplineCurve; 2]> {
     Ok(pair)
 }
 
+/// The bilinear Coons patch bounded by `sides`, three or four B-spline curves running end to end
+/// round one loop in their order (`c0` from `P0` to `P1`, `c1` on to `P2`, `c2` on to `P3` and
+/// `c3` back to `P0`; with three, `c2` runs back to `P0` and the fourth side stays at `P0`, a
+/// degenerate patch). Its sides in the patch's order are `P0` to `P1` and `P3` to `P2` (in u, at
+/// v min and max) and `P0` to `P3` and `P1` to `P2` (in v, at u min and max); opposite sides are
+/// made compatible first, exactly (one degree, parameter range and knot vector each pair), so
+/// the patch's sides are the curves themselves (`create_coons_patch` with `tol`). Not upstream:
+/// the one sequence the modelling layer's boundary patch and [`face_spline_sheet`] share.
+///
+/// # Errors
+///
+/// `InvalidInput` for other than three or four curves; those of the reversal, the
+/// compatibility and the patch.
+pub fn coons_patch_of_loop(sides: Vec<BSplineCurve>, tol: f64) -> Result<BSplineSurface> {
+    let mut sides = sides.into_iter();
+    let (Some(c0), Some(c1), Some(c2)) = (sides.next(), sides.next(), sides.next()) else {
+        return Err(SolidError::invalid_input(
+            OP_SPLINE,
+            "a Coons patch of other than three or four sides",
+        ));
+    };
+    let c3 = match sides.next() {
+        Some(c3) => c3,
+        None => at_point(c0.ends()?.start)?,
+    };
+    if sides.next().is_some() {
+        return Err(SolidError::invalid_input(
+            OP_SPLINE,
+            "a Coons patch of other than three or four sides",
+        ));
+    }
+    let [u0, u1] = compatible(c0, reversed(c2)?)?;
+    let [v0, v1] = compatible(reversed(c3)?, c1)?;
+    let mut quad = [u0, u1, v0, v1];
+    BSplineSurface::create_coons_patch(tol, true, &mut quad, &mut [])
+}
+
 /// Face `f` of `b`, when its surface is a plane, rebuilt as a one-face sheet on the bilinear
 /// Coons patch of its edges: a spline surface whose whole box is the face. The edges are taken
 /// round the face's one loop as its upward use runs it, each as a B-spline copy of its curve
-/// over its interval (`CreateTrimmedNURBSCurve`), opposite sides made compatible, exactly; three
-/// edges give the patch with its fourth side collapsed to the corner where the third meets the
-/// first (as the modelling layer's boundary patch). The patch's sides are the edges themselves,
+/// over its interval (`CreateTrimmedNURBSCurve`), and bound the patch [`coons_patch_of_loop`]
+/// makes (three edges: its fourth side collapsed to the corner where the third meets the
+/// first). The patch's sides are the edges themselves,
 /// and each of its points is an affine combination of points of the edges, so it lies in their
 /// plane; its degrees are the edges' own (a skin of two cubic sections gives (3, 1), its wall).
 /// `None` for a face that is not on a plane.
@@ -243,24 +280,8 @@ pub fn face_spline_sheet(k: &mut Kernel, b: &Brep, f: FaceId) -> Result<Option<B
             "a planar face of other than three or four edges",
         ));
     }
-    // c0 runs P0 to P1, c1 P1 to P2, c2 P2 to P3 and c3 P3 to P0 (three edges: c2 runs P2 to P0
-    // and the fourth side stays at P0). The patch's sides in its order: P0 to P1 and P3 to P2
-    // (in u, at v min and max), P0 to P3 and P1 to P2 (in v, at u min and max).
-    let mut sides = sides.into_iter();
-    let (Some(c0), Some(c1), Some(c2)) = (sides.next(), sides.next(), sides.next()) else {
-        return Err(not_rebuilt(
-            "a planar face of other than three or four edges",
-        ));
-    };
-    let c3 = match sides.next() {
-        Some(c3) => c3,
-        None => at_point(c0.ends()?.start)?,
-    };
-    let [u0, u1] = compatible(c0, reversed(c2)?)?;
-    let [v0, v1] = compatible(reversed(c3)?, c1)?;
-    let mut quad = [u0, u1, v0, v1];
     let tol = context_zone_tol_3d(k, None, SmallTopoType::NormalSize);
-    let patch = BSplineSurface::create_coons_patch(tol, true, &mut quad, &mut [])?;
+    let patch = coons_patch_of_loop(sides, tol)?;
     let patch = Surface::from(patch);
     // no fold: the patch faces the face's way inside its box
     let bx = patch.natural_uv_domain_with_nurb(k)?;

@@ -12,9 +12,7 @@ use solidcore::geom::certified::Bounded;
 use solidcore::geom::tol::{context_zone_tol_3d, SmallTopoType, USE_DEFAULT};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
-use solidcore::nurbs::b_spline_curve::{
-    BSplineCurve, BSplineCurveForm, CanonicalData, Ends, KnotType,
-};
+use solidcore::nurbs::b_spline_curve::{BSplineCurve, Ends};
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use solidcore::nurbs::n_sided::{n_sided as kernel_n_sided, NSidedRefusal, MAX_SIDES, MIN_SIDES};
 use solidcore::primitive::api_curve_ops::make_curves_compatible;
@@ -22,7 +20,7 @@ use solidcore::query::api_queries::point_distance;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p4::stitch_faces;
-use solidcore::topology::brep::sheet::face_on;
+use solidcore::topology::brep::sheet::{coons_patch_of_loop, face_on};
 use solidcore::topology::Brep;
 use solidcore::SolidError;
 use solidcore_record::brep::{Brep as Record, Curve, Natural};
@@ -203,23 +201,6 @@ pub(crate) fn record(made: Result<Out<Brep>>) -> Result<Record> {
     Body::new(made??).to_record().map(|(r, _)| r)
 }
 
-/// The curve that stays at `p`: degree 1 on `[0, 1]`, both control points `p` (a side of a
-/// patch collapsed to a corner).
-fn at_point(p: Point3) -> solidcore::Result<BSplineCurve> {
-    let points = [p, p];
-    BSplineCurve::create_canonical(&CanonicalData {
-        dim: 3,
-        degree: 1,
-        control_points: &points,
-        form: BSplineCurveForm::Unspecified,
-        knot_multiplicities: &[2, 2],
-        knots: &[0.0, 1.0],
-        knot_type: KnotType::Unspecified,
-        weights: None,
-        trim: None,
-    })
-}
-
 /// `a` and `b` made compatible, exactly: one degree (the higher, by degree elevation), one
 /// parameter range (`[0, 1]` when theirs differ, by a linear change of parameter) and one knot
 /// vector (by knot insertion), each curve's shape unchanged (the kernel's
@@ -268,20 +249,7 @@ pub fn boundary(curves: &[Curve]) -> Result<Record> {
         // to P0, and the fourth side stays at P0). The kernel's sides, in its order: P0 to P1 and
         // P3 to P2 (running in u, at v min and max), P0 to P3 and P1 to P2 (running in v, at u
         // min and max).
-        let mut sides = sides.into_iter();
-        let (Some(c0), Some(c1), Some(mut c2)) = (sides.next(), sides.next(), sides.next()) else {
-            return Ok(Err(Error::Argument));
-        };
-        let mut c3 = match sides.next() {
-            Some(c3) => c3,
-            None => at_point(c0.ends()?.start)?,
-        };
-        reverse(&mut c2)?;
-        reverse(&mut c3)?;
-        let [u0, u1] = compatible(c0, c2)?;
-        let [v0, v1] = compatible(c3, c1)?;
-        let mut quad = [u0, u1, v0, v1];
-        match BSplineSurface::create_coons_patch(tol, true, &mut quad, &mut []) {
+        match coons_patch_of_loop(sides, tol) {
             Ok(s) => sheet(k, s),
             Err(e) => Ok(Err(status(e))),
         }
