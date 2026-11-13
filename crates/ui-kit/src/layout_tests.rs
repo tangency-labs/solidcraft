@@ -433,7 +433,7 @@ fn row_height_and_label_column_are_fixed_for_long_labels_and_expressions() {
 /// plane"); a short value keeps the ordinary row height.
 #[test]
 fn value_row_wraps_a_long_value_and_grows_to_hold_it() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::test_support::context();
     let long = "A construction plane with a long name, offset from the XY plane and seen from its other side";
     for _ in 0..3 {
         frame(&ctx, vec![], |ui| {
@@ -442,9 +442,9 @@ fn value_row_wraps_a_long_value_and_grows_to_hold_it() {
         });
     }
     let t = Tokens::get();
-    let grown = scenario::rect_of("dialog:row:Current plane").unwrap();
-    let control = scenario::rect_of("dialog:control:Current plane").unwrap();
-    let short = scenario::rect_of("dialog:row:Short").unwrap();
+    let grown = registry::rect_of("dialog:row:Current plane").unwrap();
+    let control = registry::rect_of("dialog:control:Current plane").unwrap();
+    let short = registry::rect_of("dialog:row:Short").unwrap();
     assert_eq!(short.height(), t.control_height);
     assert!(grown.height() > t.control_height, "the long value's row grows: {grown:?}");
     let lines = ctx.fonts_mut(|f| f.layout(long.to_owned(), egui::FontId::proportional(t.font_label), t.form_ink, control.width())).size().y;

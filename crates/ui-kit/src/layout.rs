@@ -205,7 +205,7 @@ pub fn row<R>(ui: &mut Ui, text: &str, control: impl FnOnce(&mut Ui) -> R) -> R 
 /// Aligned label/value row for read-only text (what a sketch is on now): the value wraps in the
 /// control column and the row grows to hold every line, so a long value is never clipped.
 /// One line keeps the 28 pt row. Tokens: `row, font_label, form_ink, space_8`.
-pub(crate) fn value_row(ui: &mut Ui, text: &str, value: &str) -> Response {
+pub fn value_row(ui: &mut Ui, text: &str, value: &str) -> Response {
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_label);
     let width = dimension(ui.available_width());
