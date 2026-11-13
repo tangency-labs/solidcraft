@@ -1603,6 +1603,31 @@ mod tests {
         assert!((after.y - before.y).abs() < 0.5, "selection count shifted the row from {} to {}", before.y, after.y);
     }
 
+    /// F2 on a clicked History folder opens its name, as a double-click does (#16213).
+    #[test]
+    fn f2_renames_the_clicked_folder() {
+        let mut harness = Harness::new();
+        harness.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
+        harness.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Feature"})).unwrap();
+        harness.frames(4);
+        harness.step(&json!({"click": {"handle": "timeline:Feature"}})).unwrap();
+        harness.step(&json!({"click": {"handle": "timeline:Feature"}, "button": "right"})).unwrap();
+        harness.step(&json!({"widget": "Add to New Folder"})).unwrap();
+        harness.frames(2);
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        let name = harness.app.session.doc.timeline_groups.first().unwrap().name.clone();
+
+        harness.step(&json!({"click": {"handle": format!("timeline-folder:{name}")}})).unwrap();
+        harness.frames(2);
+        assert!(handle_at(&format!("timeline-folder-rename:{name}")).is_none(), "a click alone does not rename");
+        harness.step(&json!({"key": "F2"})).unwrap();
+        harness.frames(2);
+        assert!(handle_at(&format!("timeline-folder-rename:{name}")).is_some(), "F2 did not open the folder's name");
+        harness.step(&json!({"text": "Renamed"})).unwrap();
+        harness.step(&json!({"key": "Enter"})).unwrap();
+        assert_eq!(harness.app.session.doc.timeline_groups.first().map(|group| group.name.as_str()), Some("Renamed"));
+    }
+
     #[test]
     fn new_folder_starts_inline_rename_with_its_name_selected() {
         let mut harness = Harness::new();
