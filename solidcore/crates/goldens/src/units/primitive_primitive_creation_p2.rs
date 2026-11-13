@@ -84,6 +84,7 @@ fn options(f: &[f64]) -> SweepOptions {
         orient_profile_perpendicular_to_path: f[3] != 0.,
         move_to_profile: f[4] != 0.,
         profile_at_path_start: false,
+        up: None,
     }
 }
 

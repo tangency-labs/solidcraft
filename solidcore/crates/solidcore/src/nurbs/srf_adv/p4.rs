@@ -32,7 +32,9 @@
 //!   `InvalidInput` with reason [`BARE_FLAG_REASON`].
 //! - `ST_GetRotationRateOfChange`'s optional pointers become a [`ZSource`]: a curve, or
 //!   a vector with its optional neighbours (both missing is the bare error). The rate
-//!   matrix `RM[i][j]` is a `[[f64; 3]; 3]` (rows `i`).
+//!   matrix `RM[i][j]` is a `[[f64; 3]; 3]` (rows `i`). Not upstream (the SolidCraft
+//!   fork's upright sweep): [`ZSource::Up`], z the up direction made square to the
+//!   trajectory's tangent, its derivative in closed form.
 //! - `N_SweepCrossTangentCrv` ignores failures of `N_CrvEval` on the cross section
 //!   (the accumulated sample parameter can round past the last knot) and keeps the
 //!   previous sample, as does the Rust function; only a failure on the very first
@@ -458,6 +460,10 @@ pub enum ZSource<'a> {
         /// `nextZ` and its parameter.
         next: Option<(Vec3, f64)>,
     },
+    /// Not upstream (the fork's upright sweep): the unit up direction `up`, z its part
+    /// square to the trajectory's unit tangent `x`, `w = up - (up . x) x`, made unit, and
+    /// `z'` from `w' = -(up . x') x - (up . x) x'`.
+    Up(Vec3),
 }
 
 /// Rate of change `[x' | y' | z']` of the sweep frame `M = [x | y | z]` at `u`
@@ -471,6 +477,22 @@ pub enum ZSource<'a> {
 /// [`ZSource::Samples`] without neighbours (upstream's return code 1).
 pub fn rotation_rate_of_change(traj: &Curve, u: f64, zsrc: ZSource<'_>) -> Result<Mat3> {
     const OP: &str = OP_ROT;
+    // Get sweep trajectory evaluations.
+    let t = traj.derivs(u, Side::Left, 2)?;
+    let (t1, t2) = (at(&t, 1, OP)?, at(&t, 2, OP)?);
+    let mag = (t1.x * t1.x + t1.y * t1.y + t1.z * t1.z).sqrt();
+    let mag3 = mag * mag * mag;
+    let d12 = t1.x * t2.x + t1.y * t2.y + t1.z * t2.z;
+
+    // X = t'/|t'|.
+    let x = Vec3::new(t1.x / mag, t1.y / mag, t1.z / mag);
+    // dX = t''/|t'| - t' (t'.t'')/|t'|**3.
+    let dx = Vec3::new(
+        t2.x / mag - t1.x * d12 / mag3,
+        t2.y / mag - t1.y * d12 / mag3,
+        t2.z / mag - t1.z * d12 / mag3,
+    );
+
     let (m_z, dm_z) = match zsrc {
         ZSource::Curve(cur_z) => {
             // Evaluate z and z'.
@@ -508,23 +530,24 @@ pub fn rotation_rate_of_change(traj: &Curve, u: f64, zsrc: ZSource<'_>) -> Resul
             );
             (z, dm_z)
         }
+        ZSource::Up(up) => {
+            // w = up - (up . x) x and w' = -(up . x') x - (up . x) x'
+            let (ux, udx) = (up.dot(x), up.dot(dx));
+            let w = up - x * ux;
+            let dw = -(x * udx) - dx * ux;
+            let mag = w.length();
+            #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+            if !(mag > 0.0) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "an up direction along the trajectory",
+                ));
+            }
+            let mag3 = mag * mag * mag;
+            let d = w.dot(dw);
+            (w * (1.0 / mag), dw * (1.0 / mag) - w * (d / mag3))
+        }
     };
-
-    // Get sweep trajectory evaluations.
-    let t = traj.derivs(u, Side::Left, 2)?;
-    let (t1, t2) = (at(&t, 1, OP)?, at(&t, 2, OP)?);
-    let mag = (t1.x * t1.x + t1.y * t1.y + t1.z * t1.z).sqrt();
-    let mag3 = mag * mag * mag;
-    let d12 = t1.x * t2.x + t1.y * t2.y + t1.z * t2.z;
-
-    // X = t'/|t'|.
-    let x = Vec3::new(t1.x / mag, t1.y / mag, t1.z / mag);
-    // dX = t''/|t'| - t' (t'.t'')/|t'|**3.
-    let dx = Vec3::new(
-        t2.x / mag - t1.x * d12 / mag3,
-        t2.y / mag - t1.y * d12 / mag3,
-        t2.z / mag - t1.z * d12 / mag3,
-    );
 
     // dy = cross_product(z',x) + cross_product(z,x').
     let dy = Vec3::new(

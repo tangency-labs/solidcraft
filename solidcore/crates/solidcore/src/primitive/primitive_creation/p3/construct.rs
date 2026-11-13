@@ -901,6 +901,9 @@ impl PrimitiveCreation {
             for (index, mut composite) in composites.composites.into_iter().enumerate() {
                 let profile = composite.make_composite_nurb()?;
                 let want_placements = index == 0 && opt_placements.is_some();
+                // (not upstream) an upright sweep's up direction, turned into the space the
+                // path was turned into
+                let up = options.up.map(|u| prepared.rotation.transform_vector(u));
                 let (net, trace) = BSplineSurface::create_sweep_surface_traced(
                     &profile,
                     &prepared.path,
@@ -908,6 +911,7 @@ impl PrimitiveCreation {
                     options.translational_sweep,
                     approx_tol,
                     want_placements.then_some(&mut placed),
+                    up,
                 )?;
                 // not upstream (#2572): a path sweep without a scale keeps its definition. A path of
                 // lines and circular arcs has its net built from the definition itself (exact to

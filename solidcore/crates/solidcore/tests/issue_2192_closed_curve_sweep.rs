@@ -59,6 +59,7 @@ fn closed_tube(k: &mut Kernel) -> Brep {
         orient_profile_perpendicular_to_path: false,
         move_to_profile: false,
         profile_at_path_start: false,
+        up: None,
     };
     sweeps::create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
         .unwrap()
