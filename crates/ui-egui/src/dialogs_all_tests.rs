@@ -1254,7 +1254,9 @@ fn dogbone_editor_keeps_a_pick_it_cannot_bring_back() {
     let FeatureKind::Dogbone { faces, .. } = &mut f.kind else { panic!("{:?}", f.kind) };
     faces[0].0 = Vec3::new(20.0, 10.0, 12.0);
     f.face_names.clear();
-    let (crate::dialogs::Kind::Dogbone(k), inputs, extra) = crate::dialogs_dogbone::for_feature(&h.app, &f).unwrap() else { panic!("no Dogbone editor") };
+    let (crate::dialogs::Kind::Dogbone(k), inputs, extra) = crate::dialogs_dogbone::for_feature(&h.app, &f).unwrap() else {
+        panic!("no Dogbone editor")
+    };
     assert!(inputs[0].items.iter().all(|p| matches!(p, Sel::Edge { .. })), "{:?}", inputs[0].items);
     assert_eq!(inputs[0].items.len(), 1, "the edge comes back, the face does not");
     let commands = crate::dialogs_dogbone::commands(&h.app, &k, &inputs, &extra).unwrap();
