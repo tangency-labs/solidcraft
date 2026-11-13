@@ -301,10 +301,49 @@ impl NavPreset {
     }
 }
 
+/// What a two-finger trackpad scroll does in a navigation preset (#15079).
+///
+/// Fusion orbits with Shift held and pans without it; Blender is the other way
+/// round; the other presets pan either way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrackpadScroll {
+    /// Bare and Shift scrolls both pan.
+    Pans,
+    /// Shift + two fingers orbits; bare two fingers pan (Fusion).
+    ShiftOrbits,
+    /// Bare two fingers orbit; Shift + two fingers pans (Blender).
+    BareOrbits,
+}
+
+impl TrackpadScroll {
+    /// Whether the two gestures differ, so a coast ends when the modifier changes.
+    pub fn modes_differ(self) -> bool {
+        self != TrackpadScroll::Pans
+    }
+
+    /// Whether a two-finger scroll with `shift` held orbits.
+    pub fn orbits(self, shift: bool) -> bool {
+        match self {
+            TrackpadScroll::Pans => false,
+            TrackpadScroll::ShiftOrbits => shift,
+            TrackpadScroll::BareOrbits => !shift,
+        }
+    }
+}
+
 impl Prefs {
     /// Touchpad scroll zooms without overwriting the user's preference for other presets.
     pub fn trackpad_pans(&self) -> bool {
         self.nav != TOUCHPAD_NAV && self.trackpad_pan
+    }
+
+    /// What a two-finger trackpad scroll does in the chosen preset (#15079).
+    pub fn trackpad_scroll(&self) -> TrackpadScroll {
+        match self.nav.as_str() {
+            "fusion" => TrackpadScroll::ShiftOrbits,
+            "blender" => TrackpadScroll::BareOrbits,
+            _ => TrackpadScroll::Pans,
+        }
     }
 }
 
@@ -1420,6 +1459,9 @@ preference_settings! {
     /// Shift with two-finger trackpad scrolling orbits the view the other way, both ways at once,
     /// as natural scrolling turns it (#8410).
     orbit_reverse: bool = false, PAGE_NAVIGATION => check("ui.reverse_trackpad_orbit_direction", "Shift with two-finger scrolling orbits the other way");
+    /// A two-finger twist on the trackpad turns the view about the world's up axis (#6286). Off
+    /// by default: the twist does nothing, as before.
+    trackpad_twist_turns: bool = false, PAGE_NAVIGATION => check_id_help("prefs.trackpad_twist_turns", "prefs.trackpad_twist_turns_tip");
     /// View changes (axis view, Look At, Home) animate; `look_at_speed` scales how fast.
     look_at_anim: bool = true, PAGE_NAVIGATION => check("Animate view changes", "ui.look_at_anim_desc");
     look_at_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => enabled_slider(look_at_anim, "Animation speed", 0.5..=3.0, 0.25, |v| format!("{v:.2}×"));
@@ -1433,6 +1475,12 @@ preference_settings! {
     /// Dragging Extrude's distance arrow stops at flat faces parallel to the profile over it and
     /// outlines them (`extrude_face_snap`, #2398). Off: the drag moves in round steps only.
     extrude_arrow_face_stops: bool = true, PAGE_TOOLS => check_id("prefs.extrude_arrow_face_stops");
+    /// Reapply a file's stand-up answer when its original bytes have not changed.
+    remember_stand_up: bool = true, PAGE_DESIGN => check_id("prefs.remember_stand_up");
+    /// Reopen an unchanged CAD import from the existing saved-design model cache.
+    reuse_imports: bool = true, PAGE_DESIGN => check_id("prefs.reuse_imports");
+    /// Oldest-first bounded file answers; resetting settings preserves user history.
+    stand_up_answers: crate::stand_up::Answers = Default::default();
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
     /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
     /// Profiles box makes the next picks profiles again.
@@ -1966,10 +2014,12 @@ impl Snapshot {
         let units_changed = app.preferences.default_units != self.prefs.default_units;
         // Update bookkeeping isn't a setting: a check that finished while the dialog was open stays.
         let update = std::mem::take(&mut app.preferences.update);
+        let stand_up_answers = std::mem::take(&mut app.preferences.stand_up_answers);
         app.preferences = self.prefs;
         crate::plugins::sync_policy(app);
         sync_surface_analysis(app);
         crate::render_workspace::apply_memory_policy(app);
+        app.preferences.stand_up_answers = stand_up_answers;
         app.preferences.update = update;
         if units_changed {
             default_units_changed(app);
@@ -2028,6 +2078,7 @@ impl Snapshot {
         let same_prefs = {
             let mut held = prefs.clone();
             held.update.clone_from(&app.preferences.update);
+            held.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
             held == app.preferences
         };
         same_prefs
@@ -2062,6 +2113,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
     let mut prefs = s.prefs.clone();
     // Same bookkeeping rule as `restore`: a check that finished while the dialog was open stays.
     prefs.update.clone_from(&app.preferences.update);
+    prefs.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
     let mut shortcut_box = app.sbox.prefs();
     if let Some(o) = shortcut_box.as_object_mut() {
         o.insert("pinned".into(), serde_json::json!(s.favourites));
@@ -3326,6 +3378,11 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         check_graphics_restart(app)?;
     }
     let stand_up = rest.remove("stand_up").and_then(|v| v.as_bool());
+    let forget = match rest.remove("forget_stand_up") {
+        None => false,
+        Some(serde_json::Value::Bool(true)) => true,
+        Some(_) => return Err("`forget_stand_up` must be true".into()),
+    };
     let mut staged = app.preferences.clone();
     let mut follow = app.prefs_window.follow.clone();
     let imported = rest
@@ -3367,7 +3424,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         None => {}
     }
     let export = rest.remove("theme_export").and_then(|v| v.as_bool()).unwrap_or(false);
-    let new = prepare_preferences(app, &staged, followed_theme(&staged, &follow), &serde_json::Value::Object(rest.clone()))?;
+    let mut new = prepare_preferences(app, &staged, followed_theme(&staged, &follow), &serde_json::Value::Object(rest.clone()))?;
     let stopped_following = !app.prefs_window.follow.path(&app.preferences.theme_follow).is_empty() && follow.path(&new.theme_follow).is_empty();
     if stand_up == Some(true) && app.stand_up.is_none() {
         return Err("no file is waiting to be stood up".into());
@@ -3381,6 +3438,14 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         Some(true) => crate::stand_up::stand_up(app)?,
         Some(false) => crate::stand_up::leave(app),
         None => {}
+    }
+    // Answering the offer records history after preferences were staged. Keep that answer
+    // when applying the staged settings; forgetting is an explicit action that takes precedence.
+    if stand_up.is_some() {
+        new.stand_up_answers = app.preferences.stand_up_answers.clone();
+    }
+    if forget {
+        new.stand_up_answers.clear();
     }
     if stopped_following {
         // Restore the selected theme's dark/light mode even when its saved id did not change.
@@ -3454,6 +3519,11 @@ fn theme_from_preferences(value: &serde_json::Value, strict: bool) -> Result<cra
 
 fn themes_that_read<'de, D: serde::Deserializer<'de>>(saved: D) -> Result<Vec<crate::theme_files::ThemeFile>, D::Error> {
     Vec::<serde_json::Value>::deserialize(saved)?.iter().map(|value| theme_from_preferences(value, false).map_err(serde::de::Error::custom)).collect()
+}
+
+/// Shared action for the Preferences button and `ui.prefs`.
+pub(super) fn forget_stand_up(app: &mut SolveApp) {
+    app.preferences.stand_up_answers.clear();
 }
 
 /// The saved 3D mouse calibrations that still read. One this version can't read (a hand edit, a
@@ -11640,6 +11710,9 @@ mod tests {
         // update bookkeeping (not a setting, and Cancel keeps it) does not.
         app.preferences.update.last_check += 1.0;
         assert_eq!(draw(&mut app, vec![]), Some(0.0), "update bookkeeping is not a change");
+        app.preferences.stand_up_answers.remember("a".repeat(64), crate::stand_up::Answer::YToZ);
+        assert_eq!(draw(&mut app, vec![]), Some(0.0), "a recorded stand-up answer is not a change either");
+        assert_eq!(control(&mut app, &json!({})).unwrap()["apply_enabled"], false);
         app.keymap.custom.insert("solid.extrude".into(), vec!["Shift+E".into()]);
         assert_eq!(draw(&mut app, vec![]), Some(1.0), "a rebinding is a change");
         let v = control(&mut app, &json!({"button": "apply"})).unwrap();
@@ -11719,6 +11792,126 @@ mod tests {
         app.open_path(&path);
         assert!(app.stand_up.is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stand_up_memory_reopens_changed_files_and_can_be_disabled_or_forgotten() {
+        use crate::stand_up::{Answer, Answers};
+        let dir = std::env::temp_dir().join(format!("solidcraft-standup-memory-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.step").to_string_lossy().to_string();
+        let mut src = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        src.run("solid.box", json!({"length": 10, "width": 40, "height": 5})).unwrap();
+        src.run("file.export", json!({"path": path})).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap().replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'");
+        std::fs::write(&path, &text).unwrap();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.preferences.stand_up_unknown = StandUpUnknown::Ask;
+        assert!(app.preferences.remember_stand_up);
+        app.open_path(&path);
+        assert!(app.stand_up.is_some());
+        let digest = app.stand_up_digest.clone().unwrap();
+        control(&mut app, &json!({"stand_up": true})).unwrap();
+        assert_eq!(app.preferences.stand_up_answers.get(&digest), Some(Answer::YToZ));
+        let stood = solidcraft_engine::view::bounds(&app.session).unwrap();
+        // Across app restarts, too: the user history round-trips through the real settings API.
+        let mut reopened = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        reopened.load_prefs(&app.prefs());
+        assert!(reopened.preferences.reuse_imports);
+        let hit = reopened.run("doc.open", json!({"path": path})).unwrap();
+        assert_eq!(hit["import_reused"], true, "remembered stand-up applies on a cache hit");
+        crate::stand_up::offer(&mut reopened, &path, &[], Some(&hit));
+        assert!(reopened.stand_up.is_none());
+        assert_eq!(solidcraft_engine::view::bounds(&reopened.session).unwrap(), stood);
+        reopened.run("edit.undo", json!({})).unwrap();
+        let b = solidcraft_engine::view::bounds(&reopened.session).unwrap();
+        assert!((b.max.y - b.min.y - 40.0).abs() < 1e-6, "remembered rotation is undoable");
+
+        control(&mut reopened, &json!({"reuse_imports": false})).unwrap();
+        assert_eq!(reopened.run("doc.open", json!({"path": path})).unwrap()["import_reused"], false);
+        let mut settings = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        settings.load_prefs(&reopened.prefs());
+        assert!(!settings.preferences.reuse_imports, "reuse preference survives restart");
+        control(&mut reopened, &json!({"reuse_imports": true})).unwrap();
+        let answers = reopened.preferences.stand_up_answers.clone();
+        reopened.run("file.import_cache_clear", json!({})).unwrap();
+        assert_eq!(reopened.preferences.stand_up_answers, answers, "clearing imports keeps stand-up answers");
+        assert_eq!(reopened.run("doc.open", json!({"path": path})).unwrap()["import_reused"], false);
+        assert_eq!(reopened.run("doc.open", json!({"path": path})).unwrap()["import_reused"], true);
+
+        // A byte change, even one that leaves the geometry alone, asks again.
+        std::fs::write(&path, format!("{text}\n")).unwrap();
+        reopened.open_path(&path);
+        assert!(reopened.stand_up.is_some());
+        assert_ne!(reopened.stand_up_digest.as_ref(), Some(&digest));
+        control(&mut reopened, &json!({"stand_up": false})).unwrap();
+        let left = solidcraft_engine::view::bounds(&reopened.session).unwrap();
+        reopened.open_path(&path);
+        assert!(reopened.stand_up.is_none());
+        assert_eq!(solidcraft_engine::view::bounds(&reopened.session).unwrap(), left);
+
+        let remembered = reopened.preferences.stand_up_answers.clone();
+        control(&mut reopened, &json!({"remember_stand_up": false})).unwrap();
+        for answer in [true, false] {
+            reopened.open_path(&path);
+            assert!(reopened.stand_up.is_some(), "memory off always offers");
+            control(&mut reopened, &json!({"stand_up": answer})).unwrap();
+            assert_eq!(reopened.preferences.stand_up_answers, remembered, "memory off stores no answers");
+        }
+        // Turned back on before the window opens, so Cancel below does not undo it with the rest.
+        control(&mut reopened, &json!({"remember_stand_up": true})).unwrap();
+        control(&mut reopened, &json!({"open": "Design"})).unwrap();
+        let before = reopened.preferences.clone();
+        for invalid in [json!({"forget_stand_up": false}), json!({"forget_stand_up": true, "theme": "missing-theme"})] {
+            assert!(control(&mut reopened, &invalid).is_err());
+            assert_eq!(reopened.preferences, before, "invalid requests cannot forget history or change settings");
+        }
+        control(&mut reopened, &json!({"forget_stand_up": true})).unwrap();
+        control(&mut reopened, &json!({"button": "cancel"})).unwrap();
+        assert_eq!(reopened.preferences.stand_up_answers, Answers::default(), "Cancel cannot restore forgotten history");
+        reopened.open_path(&path);
+        assert!(reopened.stand_up.is_some());
+        // A note's timeout is also a Leave it answer.
+        reopened.stand_up_note = true;
+        reopened.stand_up_note_since = Some(-crate::stand_up::NOTE_SECONDS);
+        let ctx = crate::fonts::test_context();
+        assert!(crate::stand_up::note_due(&mut reopened, &ctx).is_none());
+        reopened.open_path(&path);
+        assert!(reopened.stand_up.is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn stand_up_memory_is_bounded_and_ignores_corrupt_entries() {
+        use crate::stand_up::{Answer, Answers, MAX_ANSWERS};
+        let key = |i: usize| format!("{i:064x}");
+        let mut entries = Vec::new();
+        for i in 0..=MAX_ANSWERS {
+            entries.push(json!({"digest": key(i), "answer": "y_to_z"}));
+        }
+        entries.extend([
+            json!({"digest": "bad", "answer": "leave"}),
+            json!({"digest": "g".repeat(64), "answer": "leave"}),
+            json!({"digest": key(MAX_ANSWERS + 1), "answer": "rotate_infinity"}),
+            json!({"digest": key(MAX_ANSWERS + 2), "answer": {"angle": 90}}),
+            json!(null),
+        ]);
+        let mut prefs: Prefs = serde_json::from_value(json!({"stand_up_answers": entries, "remember_stand_up": false})).unwrap();
+        assert!(!prefs.remember_stand_up);
+        assert_eq!(prefs.stand_up_answers.get(&key(0)), None, "oldest was evicted");
+        assert_eq!(prefs.stand_up_answers.get(&key(1)), Some(Answer::YToZ));
+        assert_eq!(serde_json::to_value(&prefs.stand_up_answers).unwrap().as_array().unwrap().len(), MAX_ANSWERS);
+        prefs.stand_up_answers.remember(key(1), Answer::Leave);
+        prefs.stand_up_answers.remember(key(MAX_ANSWERS + 1), Answer::Leave);
+        assert_eq!(prefs.stand_up_answers.get(&key(1)), Some(Answer::Leave));
+        assert_eq!(prefs.stand_up_answers.get(&key(2)), None, "replacing an answer makes it newest");
+        let roundtrip: Prefs = serde_json::from_value(serde_json::to_value(&prefs).unwrap()).unwrap();
+        assert_eq!(roundtrip, prefs);
+        for bad in [json!(null), json!(5), json!({"bad": true})] {
+            let read: Prefs = serde_json::from_value(json!({"stand_up_answers": bad, "remember_stand_up": false})).unwrap();
+            assert_eq!(read.stand_up_answers, Answers::default());
+            assert!(!read.remember_stand_up);
+        }
     }
 
     /// Orbiting about the world origin keeps the origin where it was drawn, even when Pan has

@@ -24,7 +24,7 @@
 //! | [`circle_from_3_points`], [`Circle3Points`] | `smgu_CircleFrom3Points`                   |
 //! | [`circle_find_silhouette_points`], [`circle_find_silhouette_points_opt_in`], [`circle_find_silhouette_points_with_kernel`] | `smgu_CircleFindSilhouettePoints` |
 //! | [`cones_are_disjoint_perpen`]         | `smgu_ConesAreDisjointPerpen`                    |
-//! | [`line_coplanar_circle_intersect`]    | `smgu_LineCoPlanarCircleIntersect`               |
+//! | [`line_coplanar_circle_intersect`], [`line_coplanar_circle_intersect_distinct`] | `smgu_LineCoPlanarCircleIntersect` |
 //! | [`circle_coplanar_circle_intersect`], [`CircleCircle`] | `smgu_CircleCoPlanarCircleIntersect` |
 //! | [`line_intersect_sphere`], [`LineSphere`] | `smgu_LineIntersectSphere`                   |
 //! | [`intersect_three_planes`]            | `smgu_IntersectThreePlanes`                      |
@@ -829,6 +829,43 @@ pub fn line_coplanar_circle_intersect(
     circle_radius: f64,
     tolerance: f64,
 ) -> Result<Vec<f64>> {
+    line_coplanar_circle_intersect_distinct(
+        line_pnt,
+        line_vec,
+        circle_center,
+        circle_normal,
+        circle_radius,
+        tolerance,
+        tolerance,
+    )
+}
+
+/// [`line_coplanar_circle_intersect`] with the near-miss band and the point identity
+/// tolerance apart: a line passing within `tolerance` of the circle is still found
+/// (none beyond it), but its two crossings are merged into one tangent point only
+/// when that point (the chord's midpoint) lies within `point_tolerance` of the circle.
+/// A line tangent to the circle up to rounding stays one point however long its
+/// numerical chord.
+///
+/// Not upstream: `smgu_LineCoPlanarCircleIntersect` merges the two crossings whenever
+/// they are closer than its single tolerance, and the circle intersectors call it
+/// with ten times their intersection tolerance as a candidate band. Two crossings up
+/// to ten intersection tolerances apart then became one point in the middle of the
+/// chord, off the circle, so neither crossing was found (a box edge cutting a small
+/// sphere's circle a little inside its tangent line, `boolean_api`
+/// `sphere_box_edge_cutting_a_shallow_cap`).
+///
+/// # Errors
+/// As [`line_coplanar_circle_intersect`].
+pub fn line_coplanar_circle_intersect_distinct(
+    line_pnt: Point3,
+    line_vec: Vec3,
+    circle_center: Point3,
+    circle_normal: Vec3,
+    circle_radius: f64,
+    tolerance: f64,
+    point_tolerance: f64,
+) -> Result<Vec<f64>> {
     // project line to plane
     let line_pnt = point_project_to_plane(line_pnt, circle_center, circle_normal);
     let mut line_vec = vector_project_to_plane(line_vec, circle_normal);
@@ -871,8 +908,10 @@ pub fn line_coplanar_circle_intersect(
     }
 
     // Next test: if the resulting intersection points will be within
-    // tolerance of each other, then it's definitely one intersection.
-    if dist_to_move * 2.0 <= tolerance {
+    // tolerance of each other, then it's definitely one intersection. Not upstream:
+    // only when their midpoint, the tangent point, also lies on the circle within
+    // the point tolerance (identical to upstream when both tolerances are equal).
+    if dist_to_move * 2.0 <= tolerance && circle_radius - dist_to_ctr <= point_tolerance {
         return Ok(vec![t / scale]);
     }
 
@@ -1914,6 +1953,57 @@ mod tests {
             circle_coplanar_circle_intersect(Vec3::Z, Vec3::ZERO, 1.0, v(1., 0., 0.), 1.0, 1e-6)
                 .unwrap();
         assert_eq!(r.count(), 2);
+    }
+
+    /// A line 1.2e-5 inside a circle of radius 3e-4 crosses it twice, 1.66e-4 apart.
+    /// With a near-miss band of 2e-4 (ten intersection tolerances, as the circle
+    /// intersectors pass) the upstream merge made that one point mid-chord, 1.2e-5 off the
+    /// circle; merged only when the midpoint is on the circle within the intersection
+    /// tolerance 5e-6, both crossings stay.
+    #[test]
+    fn crossings_farther_apart_than_the_point_tolerance_stay_two() {
+        let (r, d) = (3e-4, 3e-4 - 1.2e-5);
+        let line = v(-1e-3, d, 0.0);
+        let merged =
+            line_coplanar_circle_intersect(line, Vec3::X, Vec3::ZERO, Vec3::Z, r, 2e-4).unwrap();
+        assert_eq!(merged.len(), 1);
+        assert!((merged[0] - 1e-3).abs() < 1e-15);
+        let hits = line_coplanar_circle_intersect_distinct(
+            line,
+            Vec3::X,
+            Vec3::ZERO,
+            Vec3::Z,
+            r,
+            2e-4,
+            5e-6,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 2);
+        for t in hits {
+            let p = line + t * Vec3::X;
+            assert!((p.length() - r).abs() < 1e-15, "{t}");
+        }
+    }
+
+    /// A line tangent to a circle of radius 3 up to rounding (1e-12 inside) has a
+    /// numerical chord of 4.9e-6, more than a point tolerance of 1e-6, but its
+    /// midpoint is on the circle: one tangent point, as upstream gives.
+    #[test]
+    fn line_tangent_up_to_rounding_stays_one_point() {
+        let r = 3.0;
+        let line = v(-10.0, r - 1e-12, 0.0);
+        let hits = line_coplanar_circle_intersect_distinct(
+            line,
+            Vec3::X,
+            Vec3::ZERO,
+            Vec3::Z,
+            r,
+            1e-5,
+            1e-6,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!((hits[0] - 10.0).abs() < 1e-12);
     }
 
     #[test]
