@@ -644,6 +644,8 @@ mod tests {
     /// a bolt size the head's standard lacks is said in words instead of filling anything.
     #[test]
     fn screw_head_fills_the_counterbore_or_says_the_size_is_missing() {
+        // The message is looked up in the catalogs, which only an app installs otherwise.
+        crate::i18n::install();
         let mut opts = HoleOpts { clearance: true, clearance_size: "M4".into(), ..HoleOpts::default() };
         assert_eq!((head_counterbore_texts(&opts), head_problem(&opts)), (None, None), "no head, nothing to fill");
         opts.head = 1;
