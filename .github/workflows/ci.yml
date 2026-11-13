@@ -21,7 +21,8 @@
 # sccache is on a Blacksmith sticky disk that only main commits.
 # A push to main runs only the repository checks when a passing merge-queue run tested that very
 # commit, or when nothing a build reads changed since the last push to main whose run passed.
-# Otherwise it runs everything.
+# Otherwise it runs everything; it also does when it changes a cache key (the toolchain, Cargo.lock,
+# the cache settings here), so that main saves the caches the next runs restore.
 # Heavy checks wait for review: a pull request without the `approved-for-ci` label runs only
 # Select checks, the format and repository checks and a quick compile. Adding the label (after
 # review) runs everything above, and every later push to the PR does too, except a push that only
@@ -49,6 +50,10 @@
 # other run restores read-only. Nightly and by hand, Build tests also makes an archive the matrix
 # jobs run; Blacksmith's image matches ubuntu-24.04, so the archive and the recorded goldens behave the
 # same.
+# A fork runs the full suite on GitHub's standard runners: set the repository variables
+# CI_RUNNER=ubuntu-24.04 and CI_RUNNER_WINDOWS=windows-latest on the fork, then Run workflow on the
+# branch (Actions, CI). Every Blacksmith label below reads `vars.CI_RUNNER || '<label>'`, and the
+# Blacksmith sticky-disk caches are skipped when CI_RUNNER is set. Unset, nothing changes here.
 name: CI
 
 on:
@@ -106,11 +111,11 @@ jobs:
     name: Dependency advisories
     needs: changes
     if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.deps == 'true') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 20
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 60 || 20 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       - name: Install advisory scanner
         run: cargo install cargo-deny --version 0.20.2 --locked
       - name: Check locked dependencies
@@ -126,7 +131,7 @@ jobs:
     # Not on a draft: every other check needs this one, so they skip too. Not on a label other than
     # approved-for-ci either (the same skip, for the same reason).
     if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     permissions:
       contents: read
       # To ask whether the merge queue already tested a commit pushed to main, and which labels the
@@ -240,6 +245,24 @@ jobs:
           solidcore_paths() {
             if grep -qz '^solidcore/' "$1"; then solidcore=true; fi
           }
+          # Whether the NUL-separated paths in $1 (the diff $2..$3) change what the build jobs' caches
+          # are keyed on, and which (cache_key): rust-cache hashes the toolchain file and the lockfile,
+          # and this workflow installs the toolchain and names the caches. Of ci.yml only the lines
+          # that set those count: the toolchain, rust-cache and sccache actions, the sticky disks,
+          # cache keys and the CARGO_, RUST and SCCACHE_ environment. solidcore/ has its own toolchain
+          # file and lockfile, which only the SolidCore checks read; solidcore_paths runs those.
+          cache_key_paths() {
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                rust-toolchain|rust-toolchain.toml|Cargo.lock) cache_key="${cache_key:+$cache_key, }$path" ;;
+              esac
+            done < "$1"
+            if grep -qxzF '.github/workflows/ci.yml' "$1" \
+              && git diff -U0 "$2" "$3" -- .github/workflows/ci.yml \
+                | grep -E '^[+-] .*(dtolnay/rust-toolchain@|Swatinem/rust-cache@|useblacksmith/stickydisk@|mozilla-actions/sccache-action@|[[:space:]](key|save-if|workspaces|prefix-key|shared-key|cache-[a-z-]+|toolchain|components|targets|CARGO_[A-Z_]+|RUST[A-Z_]*|SCCACHE_[A-Z_]+):)' > /dev/null; then
+              cache_key="${cache_key:+$cache_key, }the cache settings in ci.yml"
+            fi
+          }
           # Opt-in for a big render change: a pull request labelled render-tests, or a merge group
           # holding one (its pull requests are the (#N) of its squash commits), runs them whatever
           # the paths say.
@@ -255,11 +278,17 @@ jobs:
             # SolidCore checks for a push to main that changes solidcore/**, whatever the queue
             # tested: main saves their caches, which every pull request restores. A push that
             # can't be compared (new branch, force push) runs them.
+            # Likewise the build jobs for a push to main that changes a cache key (cache_key_paths),
+            # or can't be compared: only main saves their caches, so skipping them left every run cold
+            # until the nightly saved one.
+            cache_key=
             if [ "$GITHUB_REF_NAME" = main ]; then
               if git diff --no-renames --name-only -z "$BEFORE_SHA" "$PUSH_SHA" > "$RUNNER_TEMP/ci-solidcore-paths" 2>/dev/null; then
                 solidcore_paths "$RUNNER_TEMP/ci-solidcore-paths"
+                cache_key_paths "$RUNNER_TEMP/ci-solidcore-paths" "$BEFORE_SHA" "$PUSH_SHA"
               else
                 solidcore=true
+                cache_key="a push that can't be compared"
               fi
               echo "solidcore=$solidcore for $BEFORE_SHA..$PUSH_SHA"
             fi
@@ -267,10 +296,17 @@ jobs:
             # testing the push again proves nothing new; otherwise (a merge that skipped the
             # queue, or the API cannot answer) test everything.
             # The API through curl and grep, which every runner image has.
-            tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&head_sha=$PUSH_SHA&status=success&per_page=1" \
-              | grep -o '"total_count": *[0-9]*' | grep -o '[0-9]*$' || echo 0)
-            if [ "${tested:-0}" -gt 0 ]; then
+            if [ -z "$cache_key" ]; then
+              tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&head_sha=$PUSH_SHA&status=success&per_page=1" \
+                | grep -o '"total_count": *[0-9]*' | grep -o '[0-9]*$' || echo 0)
+            fi
+            if [ -n "$cache_key" ]; then
+              echo "$BEFORE_SHA..$PUSH_SHA changes a cache key ($cache_key): running the build jobs to save their caches."
+              full=true
+              packages=
+              native=true
+            elif [ "${tested:-0}" -gt 0 ]; then
               echo "The merge queue already tested $PUSH_SHA: repository checks only."
             elif tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=$GITHUB_REF_NAME&status=success&per_page=1" \
@@ -314,6 +350,8 @@ jobs:
             native=true
             windows=true
             gpu_paths=true
+            # Run workflow (a fork's full run too) checks SolidCore as the merge queue does.
+            if [ "$EVENT_NAME" = workflow_dispatch ]; then solidcore=true; fi
           else
             # Compare both old and new paths of renames; unknown paths run native checks.
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
@@ -370,7 +408,8 @@ jobs:
           # - in the merge queue, when the group's diff touches render code or one of its pull
           #   requests carries render-tests;
           # - in the nightly and by hand, always, so anything the above skipped is caught within a day;
-          # - not on a push to main: the queue tested that commit, or the nightly will.
+          # - not on a push to main: the queue tested that commit, or the nightly will; except a push
+          #   to main that changes a cache key (cache_key), so that main saves the GPU job's caches too.
           gpu=false
           if [ "$native" = true ]; then
             case "$EVENT_NAME" in
@@ -379,7 +418,7 @@ jobs:
                 gpu=$gpu_paths
                 if [ "$RENDER_LABEL" = true ]; then gpu=true; fi ;;
               merge_group) gpu=$gpu_paths ;;
-              push) gpu=false ;;
+              push) if [ -n "$cache_key" ]; then gpu=true; fi ;;
               *) gpu=true ;;
             esac
           fi
@@ -401,11 +440,11 @@ jobs:
   checks:
     name: Format and repository checks
     if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 25
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 75 || 25 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt
       # Main saves the cache; every other run restores it, read-only.
@@ -463,13 +502,13 @@ jobs:
     name: Quick compile
     needs: changes
     if: needs.changes.outputs.quick == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: quick-compile
@@ -481,11 +520,11 @@ jobs:
     name: Native Linux Clippy
     needs: changes
     if: needs.changes.outputs.native == 'true'
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: clippy
       # Main saves the cache; every other run restores it, read-only.
@@ -509,9 +548,9 @@ jobs:
     # hand. Pull requests, the merge queue and main build and run their tests in the `tests` job.
     needs: changes
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.native == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     # Fork builds start from main's cache, read-only; give them room to finish and upload.
-    timeout-minutes: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 60 || 45 }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 60 || 45) }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -521,12 +560,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
       - name: Mount the compiler cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-sccache-archive
@@ -576,8 +616,8 @@ jobs:
     # and download (3 GB on a full run), and the job starts beside the repository checks, not
     # after them. nextest hands tests to its threads as they free up, the slowest first (priority
     # in .config/nextest.toml), so they start at once and no core idles at the end.
-    runs-on: blacksmith-32vcpu-ubuntu-2404
-    timeout-minutes: 60
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-32vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     env:
       # Pictures (snapshots, screenshots, ui.render, the viewport's offscreen tests) are drawn on
       # the GPU. The runner has none: Mesa's lavapipe (software Vulkan) draws them, and a test that
@@ -600,12 +640,13 @@ jobs:
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
       - name: Mount the compiler cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-sccache-tests
@@ -665,8 +706,14 @@ jobs:
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
       # Every command label needs an English catalog entry (#8542). The label table is the CLI's
-      # command registry, so this builds the CLI in the profile the tests just used (the shared
-      # crates are cached) and reads it. Skipped when no selected package can change the table.
+      # command registry, so this reads it from a CLI built in the profile the tests just used.
+      # Skipped when no selected package can change the table.
+      # When solidcraft-cli was in the test run, its integration tests (CARGO_BIN_EXE) already made
+      # the binary in this run's feature set. `cargo build -p solidcraft-cli` would resolve features
+      # for the CLI alone (no dev-dependencies, no other members), so every workspace crate got new
+      # metadata and was compiled again: about 4 minutes. No feature that differs between the two
+      # touches the command table. The binary is only missing when the CLI was not tested (a
+      # change to solidcraft-ui-egui or xtask alone); then it is built as before.
       - name: Command labels in the translation catalogs
         env:
           FULL: ${{ needs.changes.outputs.full }}
@@ -676,8 +723,12 @@ jobs:
             true*|*" solidcraft-cli "*|*" solidcraft-ui-egui "*|*" xtask "*) ;;
             *) echo "No package that feeds the command table changed."; exit 0 ;;
           esac
-          cargo build -p solidcraft-cli --profile ci --locked
-          cargo xtask i18n --check --cli "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          cli="${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          case "$FULL $PACKAGES " in
+            true*|*" solidcraft-cli "*) echo "Reusing the CLI the test build made: $cli" ;;
+            *) cargo build -p solidcraft-cli --profile ci --locked ;;
+          esac
+          cargo xtask i18n --check --cli "$cli"
       - name: Compiler cache statistics
         if: always()
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
@@ -700,8 +751,8 @@ jobs:
     # budget (665 s, against 204 s for the same test in another run) and a shard took 35 minutes.
     needs: changes
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.gpu == 'true' }}
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    timeout-minutes: 45
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -727,13 +778,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
       # The shards build the same thing, so only the first one commits it (and saves the cache).
       - name: Mount the compiler cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-sccache-gpu
@@ -745,11 +797,23 @@ jobs:
       # shaders change. Same sticky disk rules as the compiler cache.
       - name: Mount lavapipe's shader cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-mesa-gpu
           path: /home/runner/.cache/mesa-gpu
           commit: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 && 'on-change' || 'false' }}
+      # On GitHub's runners (a fork with CI_RUNNER set) there is no sticky disk: keep Mesa's cache in
+      # GitHub's cache instead, keyed by the shaders, so only a fork's first run after a shader
+      # change compiles the pipeline cold.
+      - name: Restore lavapipe's shader cache (GitHub's runners)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: vars.CI_RUNNER != ''
+        continue-on-error: true
+        with:
+          path: /home/runner/.cache/mesa-gpu
+          key: mesa-gpu-${{ runner.os }}-${{ hashFiles('crates/gpu/src/**/*.wgsl') }}
+          restore-keys: mesa-gpu-${{ runner.os }}-
       # Main saves the cache; every other run restores it, read-only.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -802,8 +866,8 @@ jobs:
     name: Action matrix (${{ matrix.shard }}/16)
     needs: build-tests
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 55
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 165 || 55 }}
     strategy:
       fail-fast: false
       matrix:
@@ -818,7 +882,7 @@ jobs:
           name: nextest-archive
       - name: Run one shard of the matrix
         # A step limit below the job's, so the outcomes so far are still uploaded.
-        timeout-minutes: 45
+        timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
         env:
           SHARDS: 16
           SHARD: ${{ matrix.shard }}
@@ -844,8 +908,8 @@ jobs:
     name: Action matrix determinism
     needs: build-tests
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 45
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -866,8 +930,8 @@ jobs:
     name: Property tests (many cases)
     needs: build-tests
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 60
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -890,8 +954,8 @@ jobs:
     name: Doc tests
     needs: changes
     if: needs.changes.outputs.doctests == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 45
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 135 || 45 }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -901,12 +965,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
       - name: Mount the compiler cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-sccache-doc
@@ -954,8 +1019,8 @@ jobs:
     name: Reference tests
     needs: changes
     if: needs.changes.outputs.oracle == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 60
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -965,12 +1030,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
       - name: Mount the compiler cache
         uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        if: vars.CI_RUNNER == ''
         continue-on-error: true
         with:
           key: ${{ github.repository }}-sccache-oracle
@@ -1011,8 +1077,8 @@ jobs:
     name: Windows D3D12 FXC shaders
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    runs-on: blacksmith-8vcpu-windows-2025
-    timeout-minutes: 45
+    runs-on: ${{ vars.CI_RUNNER_WINDOWS || 'blacksmith-8vcpu-windows-2025' }}
+    timeout-minutes: ${{ vars.CI_RUNNER_WINDOWS && 135 || 45 }}
     env:
       WGPU_BACKEND: dx12
       WGPU_DX12_COMPILER: fxc
@@ -1024,7 +1090,7 @@ jobs:
       VIEWPORT_TEST_REQUIRE_GPU: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-fxc
@@ -1046,11 +1112,11 @@ jobs:
     name: Windows app build
     needs: changes
     if: needs.changes.outputs.windows == 'true'
-    runs-on: blacksmith-8vcpu-windows-2025
-    timeout-minutes: 45
+    runs-on: ${{ vars.CI_RUNNER_WINDOWS || 'blacksmith-8vcpu-windows-2025' }}
+    timeout-minutes: ${{ vars.CI_RUNNER_WINDOWS && 135 || 45 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-build
@@ -1094,7 +1160,7 @@ jobs:
     name: ci
     needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-standalone]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     permissions:
       contents: read
       # To read the commit's other runs of this workflow.
@@ -1225,11 +1291,11 @@ jobs:
     name: Compile WebAssembly
     needs: changes
     if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.cross_compile) || needs.changes.outputs.wasm == 'true') }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -1251,8 +1317,8 @@ jobs:
     name: SolidCore builds on its own
     needs: changes
     if: needs.changes.outputs.solidcore == 'true'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     env:
       CARGO_INCREMENTAL: 0
     steps:
@@ -1279,29 +1345,29 @@ jobs:
     needs: changes
     if: needs.changes.outputs.solidcore == 'true'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - check: fmt and clippy
             key: lint
-            runner: blacksmith-8vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
           - check: tests
             key: tests
-            runner: blacksmith-16vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
           - check: kernel rig and goldens
             key: rig
-            runner: blacksmith-16vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
           - check: wasm
             key: wasm
-            runner: blacksmith-4vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
           - check: deny
             key: deny
-            runner: blacksmith-4vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
           - check: publish dry run
             key: publish
-            runner: blacksmith-4vcpu-ubuntu-2404
+            runner: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
     defaults:
       run:
         working-directory: solidcore
@@ -1475,8 +1541,8 @@ jobs:
   riscv64-gates:
     name: Compile RISC-V (manual)
     if: github.event_name == 'workflow_dispatch' && inputs.cross_compile
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 30
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check out craft-fonts
@@ -1485,7 +1551,7 @@ jobs:
           repository: storytold/craft-fonts
           ref: ${{ env.CRAFT_FONTS_REF }}
           path: craft-fonts
-      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: riscv64gc-unknown-linux-gnu
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -1528,8 +1594,8 @@ jobs:
     name: Nightly alert
     needs: [dependency-advisories, changes, checks, ci, build-tests, action-matrix, action-matrix-determinism, property-tests]
     if: always() && github.event_name == 'schedule'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 15 || 5 }}
     permissions:
       issues: write
     steps:

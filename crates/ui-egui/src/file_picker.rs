@@ -541,19 +541,20 @@ mod tests {
             let center = [60 + 45 * (i % 4), 50 + 60 * (i / 4), 60];
             h.app.run("solid.torus", json!({"major": 30, "minor": 8, "center": center, "operation": "new_body"})).unwrap();
         }
-        for command in ["canvas.insert", "canvas.decal"] {
+        for (index, command) in ["canvas.insert", "canvas.decal"].into_iter().enumerate() {
             for step in [
                 json!({"make_image": "pic.png"}),
                 json!({"choose_file": "pic.png"}),
                 json!({"call": "ui.view", "params": {"view": "iso"}}),
                 json!({"start": command}),
+                json!({"call": "ui.camera", "params": {"target": [30, 30, 40], "distance": 450}}),
                 json!({"click": {"world": [30, 30, 40]}}),
             ] {
                 h.step(&step).unwrap();
             }
+            assert_eq!(h.app.session.doc.canvases.len(), index + 1, "{command}: the image is placed");
         }
         let doc = &h.app.session.doc;
-        assert_eq!(doc.canvases.len(), 2, "both images are placed");
         let (vals, _) = doc.param_values();
         for canvas in &doc.canvases {
             let plane = doc.canvas_plane(&vals, canvas).unwrap();

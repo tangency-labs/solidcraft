@@ -1,5 +1,5 @@
 //! `SmFace`, part 1: construction and destruction, loop insertion and removal, inner
-//! loop deletion, the surface swap and replacement, orientation flip, UV trim curve
+//! loop deletion, the surface swap and replacement, orientation flip and turn-over, UV trim curve
 //! removal, the trim boundary and UV domain built from the UV trim curves, the
 //! rectangular-trim test,
 //! geometry shrinking, and the seam repair of faces on periodic surfaces (`MoveSeam`,
@@ -15,6 +15,7 @@
 //! | [`create_oriented_trim_boundary`], [`OrientedTrimBoundary`] | `SmFace::CreateOrientedTrimBoundary` |
 //! | [`find_if_rectangular_trim`], [`RectangularTrim`] | `SmFace::FindIfRectangularTrim`          |
 //! | [`flip_face_orientation`]                    | `SmFace::FlipFaceOrientation`                |
+//! | [`turn_over`]                                | (none: [`swap_uv`] on a face of one shell)   |
 //! | [`set_surface`], [`set_surface_notified`]    | `SmFace::SetSurface`                         |
 //! | [`insert_loop`]                              | `SmFace::InsertLoop`                         |
 //! | [`remove_loop`]                              | `SmFace::RemoveLoop`                         |
@@ -1173,6 +1174,36 @@ pub fn flip_face_orientation(b: &mut Brep, f: FaceId) -> Result<()> {
 
     face_notify(b, f, NotifyOperation::PostEdit)?;
     Ok(())
+}
+
+/// (Not upstream) Turns face `f` over: [`swap_uv`] (`SmFace::SwapUV`), which swaps the
+/// surface's `u` and `v` (its natural normal the other way), mirrors the UV trims and makes
+/// the other face use and loop uses primary with the orientations to match, so the face's
+/// side is the other one and a valid face stays valid (its upward use the Same one, its loops
+/// counter-clockwise about the new normal). The surface is swapped exactly, for every kind
+/// [`swap_uv`] takes; the trims are mirrored about `u = v`. Turning a face over twice gives its
+/// uses, loops and surface back.
+///
+/// Only a face both of whose uses lie in one shell (a face of a sheet) is turned: a face
+/// between two shells has the side its material gives it.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face whose uses lie in two shells, or without face use
+/// or mate; those of [`swap_uv`].
+pub fn turn_over(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
+    let top = fp2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the face's upward face use"))?;
+    let bot = eu1::faceuse_mate(b, top)?.ok_or_else(|| {
+        SolidError::topology_missing(OP, "the mate of the face's upward face use")
+    })?;
+    if b.faceuse(top)?.shell != b.faceuse(bot)?.shell {
+        return Err(SolidError::invalid_input(
+            OP,
+            "turning over a face between two shells, whose side its material gives",
+        ));
+    }
+    swap_uv(k, b, f)
 }
 
 /// `SetSurface`: gives the face `surface` (owned by the face, `this`) and its natural

@@ -332,11 +332,16 @@ fn each_placement_lists_the_joints_that_attach_it() {
     let occ = |h: &Harness, name: &str| h.app.session.doc.occurrences.iter().find(|o| o.name == name).unwrap().id;
     let (a, b, c) = (occ(&h, "A:1"), occ(&h, "B:1"), occ(&h, "C:1"));
     let listed = |h: &Harness, o: u64| -> Vec<(String, String)> {
-        crate::dialogs_assembly::placement_joints(&h.app.session.doc, &[o]).into_iter().map(|j| (j.name, j.other)).collect()
+        crate::dialogs_assembly::placement_joints(&h.app.session.doc, &[o]).iter().map(|j| (j.name.clone(), j.other.clone())).collect()
     };
     let pair = |n: &str, o: &str| (n.to_string(), o.to_string());
     assert_eq!(listed(&h, a), [pair("Hinge", "B:1"), pair("Glue", "C:1")]);
     assert_eq!(listed(&h, b), [pair("Hinge", "A:1")]);
+    assert_eq!(listed(&h, c), [pair("Glue", "A:1")]);
+    // Remembered for the design as it is: a joint renamed is listed by its new name.
+    h.app.run("joint.edit", json!({"joint": "Glue", "name": "Weld"})).unwrap();
+    assert_eq!(listed(&h, c), [pair("Weld", "A:1")], "the listing follows the edited design");
+    h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(listed(&h, c), [pair("Glue", "A:1")]);
 
     // The folders start closed: only the root's lists rows.

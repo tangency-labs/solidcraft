@@ -535,6 +535,8 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
     /// one.
     pub fn note_error(&mut self, code: FilletErrorType, comment: Option<&str>) {
         self.code = code as i32;
+        // (not upstream: this overload names no site)
+        self.no_room_without_site = true;
         if comment.is_some() {
             self.comment = tblock_text(comment);
         }
@@ -554,6 +556,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         }
         self.edge = edge;
         self.code = code as i32;
+        self.no_room_without_site = false;
         self.status = status as i32;
         self.comment = tblock_text(comment);
     }
@@ -582,6 +585,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         self.vertex = vertex;
         self.location = location;
         self.code = code as i32;
+        self.no_room_without_site = false;
         self.status = status as i32;
         if comment.is_some() {
             self.comment = tblock_text(comment);
@@ -602,6 +606,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         comment: Option<&str>,
     ) {
         self.code = code as i32;
+        self.no_room_without_site = false;
         self.status = status as i32;
         self.edge = filleted_edge;
         self.side_face = side_face;
@@ -626,6 +631,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         comment: Option<&str>,
     ) {
         self.code = code as i32;
+        self.no_room_without_site = false;
         self.status = status as i32;
         self.corner_type = corner_type;
         self.vertex = vertex;
@@ -649,6 +655,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         comment: Option<&str>,
     ) {
         self.code = code as i32;
+        self.no_room_without_site = false;
         self.status = status as i32;
         self.edge_type = edge_type as i32;
         add_unique(&mut self.edges, fillet_edge);
@@ -672,6 +679,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         comment: Option<&str>,
     ) {
         self.code = code as i32;
+        self.no_room_without_site = false;
         self.status = status as i32;
         self.edge_type = FilletEdgeType::Unknown as i32; // (it's not a fillet edge)
         self.edge = filleted_edge;

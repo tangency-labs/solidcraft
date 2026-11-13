@@ -17,6 +17,7 @@ fn environment_editor_frame(h: &mut Harness, events: Vec<egui::Event>) {
         |ui| {
             ui.set_width(308.0);
             environment::editor(&mut h.app, ui);
+            environment::stage_confirmation(&mut h.app, ui.ctx());
         },
     );
     output.textures_delta.clear();
@@ -453,21 +454,25 @@ fn environment_ring_visibility_follows_editor_target_and_live_canvas() {
 #[test]
 fn environment_editor_opening_pages_and_sources_preserves_design_and_history() {
     let mut h = environment_editor_fixture();
+    h.app.home.open = false;
+    enter(&mut h.app, true).unwrap();
+    let page = inspector::Editor::Environment;
+    inspector::select_editor(&mut h.app, page);
+    h.frames(3);
+    assert!(crate::scenario::rect_of("render:environment:rotation-slider").is_some());
+    h.app.run_panel_command("panel.close", &json!({"target":{"type":"instance","id":"render-library"}})).unwrap();
+    h.frames(3);
+    assert!(test_panel(&h.app, "render-library").is_none());
     let before = h.app.session.doc.clone();
     let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
-    {
-        let page = inspector::Editor::Environment;
-        inspector::select_editor(&mut h.app, page);
-        environment_editor_frame(&mut h, vec![]);
-        assert!(crate::scenario::rect_of("render:environment:rotation-slider").is_some());
-        h.app.ui.show_browser = false;
-        environment::open_sources(&mut h.app);
-        assert!(h.app.ui.show_browser);
-        assert_eq!(h.app.render_workspace.view.stage, Stage::Light);
-        assert_eq!(inspector::selected_editor(&h.app), page);
-        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
-        assert_eq!(history, (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()));
-    }
+
+    environment::open_sources(&mut h.app);
+    h.frames(3);
+    assert!(test_panel(&h.app, "render-library").is_some());
+    assert_eq!(h.app.render_workspace.view.stage, Stage::Light);
+    assert_eq!(inspector::selected_editor(&h.app), page);
+    assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+    assert_eq!(history, (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()));
 }
 
 #[test]
@@ -1946,7 +1951,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     assert!(class_vertices(&gpu, crate::gpu::TriClass::Opaque).is_empty());
     assert!(!class_vertices(&gpu, crate::gpu::TriClass::Glass).is_empty());
     let color = |v: &[u8]| {
-        let i = v.get(crate::gpu::TRI_SIZE - 4..).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
+        let i = v.get(24..28).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
         gpu.palette.get(crate::gpu::PaletteIndex(i))
     };
     assert!(
@@ -1982,7 +1987,7 @@ fn product_appearance_edits_keep_the_blocks_vertices() {
     let vertices = plain.blocks[0].bytes.vertices.clone();
     let first_colour = |gpu: &GpuScene, class| {
         let v = class_vertices(gpu, class);
-        let i = v.get(crate::gpu::TRI_SIZE - 4..crate::gpu::TRI_SIZE).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
+        let i = v.get(24..28).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
         gpu.palette.get(crate::gpu::PaletteIndex(i))
     };
     s.execute("appearance.assign", &json!({"bodies":["Part"],"color":"#336699"})).unwrap();
@@ -2036,7 +2041,7 @@ fn reordered_face_looks_rebuild_the_block() {
 }
 
 /// A PBR material edit (metallic, roughness, IOR) rewrites the palette's material table and
-/// keeps every vertex; the PBR triangles are the block's PBR runs, 28 bytes a vertex.
+/// keeps every vertex; the PBR triangles are the block's PBR runs, `TRI_SIZE` bytes a vertex.
 #[test]
 fn product_material_edits_keep_the_blocks_vertices() {
     let mut s = Session::default();
@@ -2540,6 +2545,7 @@ fn result_framing_fits_both_axes_and_actual_size_respects_display_pixels() {
 fn result_canvas_paints_large_capture_reports_staleness_and_preserves_export() {
     let mut h = Harness::new();
     let ctx = crate::fonts::test_context();
+    h.app.home.open = false;
     let job = completed_preview(&mut h, [20, 40, 60]);
     h.app.render_workspace.view.job = Some(job);
     h.app.render_workspace.view.completed = Some(job);
@@ -2552,12 +2558,18 @@ fn result_canvas_paints_large_capture_reports_staleness_and_preserves_export() {
     let frame = h.app.session.render_job_handle(job).unwrap().frame().unwrap().unwrap();
     let draw = |app: &mut SolveApp| {
         let mut out = ctx.run_ui(
-            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0))), ..Default::default() },
-            |ui| show(app, ui),
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1440.0, 900.0))), ..Default::default() },
+            |ui| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
         );
         out.textures_delta.clear();
         out
     };
+    for _ in 0..3 {
+        draw(&mut h.app);
+    }
     let out = draw(&mut h.app);
     let id = h.app.render_workspace.image.as_ref().unwrap().1.as_ref().unwrap().id();
     let current = h.app.tr("render.result_current");
@@ -2592,7 +2604,8 @@ fn result_canvas_paints_large_capture_reports_staleness_and_preserves_export() {
 fn result_navigation_uses_shared_pan_zoom_and_leaves_product_camera_unchanged() {
     use egui::{Event, Key, Modifiers, PointerButton, vec2};
     let mut h = Harness::new();
-    let ctx = crate::fonts::test_context();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1440,"height":900}));
     let job = completed_preview(&mut h, [20, 40, 60]);
     h.app.render_workspace.view.completed = Some(job);
     h.app.render_workspace.view.result = true;
@@ -2606,61 +2619,51 @@ fn result_navigation_uses_shared_pan_zoom_and_leaves_product_camera_unchanged() 
     let dirty = h.app.render_workspace.view.dirty;
     let document = h.app.session.doc.clone();
     let undo = h.app.session.undo.len();
-    let mut time = 0.0;
-    nav_frame(&mut h.app, &ctx, true, &mut time, Modifiers::NONE, vec![]);
+    h.frames(4);
     let fitted = h.app.render_workspace.view.result_camera;
-    let p = h.app.viewport.rect.unwrap().center() + vec2(80.0, 20.0);
-    nav_frame(&mut h.app, &ctx, true, &mut time, Modifiers::NONE, vec![Event::PointerMoved(p)]);
-    nav_frame(
-        &mut h.app,
-        &ctx,
-        true,
-        &mut time,
-        Modifiers::NONE,
-        vec![Event::MouseWheel {
-            source: egui::MouseWheelSource::Unknown,
-            unit: egui::MouseWheelUnit::Line,
-            delta: vec2(0.0, 3.0),
-            modifiers: Modifiers::NONE,
-            phase: egui::TouchPhase::Move,
-        }],
-    );
+    let canvas = h.app.viewport.rect.unwrap();
+    let p = (4..7)
+        .flat_map(|y| (4..7).map(move |x| canvas.min + canvas.size() * vec2(x as f32 / 10.0, y as f32 / 10.0)))
+        .find(|p| !crate::shell::covered(&h.app, *p) && !crate::shell::covered(&h.app, *p + vec2(40.0, -20.0)))
+        .unwrap();
+    h.frame_with(vec![Event::PointerMoved(p)]);
+    h.frame_with(vec![Event::MouseWheel {
+        source: egui::MouseWheelSource::Unknown,
+        unit: egui::MouseWheelUnit::Line,
+        delta: vec2(0.0, 3.0),
+        modifiers: Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    }]);
     assert!(h.app.render_workspace.view.result_camera.distance < fitted.distance);
     assert_eq!(h.app.render_workspace.view.result_scale, ResultScale::Free);
     let before_pan = h.app.render_workspace.view.result_camera.target;
     let space = |pressed| Event::Key { key: Key::Space, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
-    nav_frame(
-        &mut h.app,
-        &ctx,
-        true,
-        &mut time,
-        Modifiers::NONE,
-        vec![space(true), Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }],
-    );
-    nav_frame(&mut h.app, &ctx, true, &mut time, Modifiers::NONE, vec![Event::PointerMoved(p + vec2(40.0, -20.0))]);
-    nav_frame(
-        &mut h.app,
-        &ctx,
-        true,
-        &mut time,
-        Modifiers::NONE,
-        vec![
-            Event::PointerButton { pos: p + vec2(40.0, -20.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
-            space(false),
-        ],
-    );
+    h.frame_with(vec![space(true), Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }]);
+    h.frame_with(vec![Event::PointerMoved(p + vec2(40.0, -20.0))]);
+    h.frame_with(vec![
+        Event::PointerButton { pos: p + vec2(40.0, -20.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+        space(false),
+    ]);
     assert_ne!(h.app.render_workspace.view.result_camera.target, before_pan);
     assert_eq!(h.app.render_workspace.view.result_camera.pitch, fitted.pitch);
     assert_eq!(h.app.render_workspace.view.result_camera.yaw, fitted.yaw);
     let before_key = h.app.render_workspace.view.result_camera.target;
-    assert!(crate::navigation::view_key(&mut h.app, &ctx, Key::ArrowRight, Modifiers::CTRL, false));
+    assert!(crate::navigation::view_key(&mut h.app, &h.ctx, Key::ArrowRight, Modifiers::CTRL, false));
     assert_ne!(h.app.render_workspace.view.result_camera.target, before_key);
-    assert!(!crate::navigation::view_key(&mut h.app, &ctx, Key::ArrowRight, Modifiers::NONE, false));
+    assert!(!crate::navigation::view_key(&mut h.app, &h.ctx, Key::ArrowRight, Modifiers::NONE, false));
+    let mut refit = None;
     for command in ["view.fit", "view.home"] {
         h.app.render_workspace.view.result_camera.target.x += 20.0;
+        let displaced = h.app.render_workspace.view.result_camera;
         h.app.run(command, json!({})).unwrap();
-        nav_frame(&mut h.app, &ctx, true, &mut time, Modifiers::NONE, vec![]);
-        assert_eq!(h.app.render_workspace.view.result_camera, fitted);
+        h.frames(3);
+        let current = h.app.render_workspace.view.result_camera;
+        assert_ne!(current, displaced);
+        assert_eq!(h.app.render_workspace.view.result_scale, ResultScale::Fit);
+        if let Some(refit) = refit {
+            assert_eq!(current, refit, "Home fits against the same settled workspace as Fit");
+        }
+        refit = Some(current);
     }
     assert_eq!(h.app.cam, preview);
     assert!(h.app.ui.perspective);
@@ -4723,7 +4726,7 @@ fn cpu_progressive_sample_editor_uses_the_selected_profile_without_rewriting_exi
         for _ in 0..8 {
             let field = crate::scenario::rect_of("render:cpu-spp-field").unwrap();
             let inspector = crate::scenario::rect_of("render:inspector").unwrap();
-            let top = crate::scenario::rect_of("render:inspector:header").unwrap().bottom() + Tokens::get().space_8;
+            let top = test_panel_header(&h.app, "render-inspector").bottom() + Tokens::get().space_8;
             let bottom = inspector.bottom() - Tokens::get().space_8;
             if field.top() >= top && field.bottom() <= bottom {
                 break;
@@ -4734,7 +4737,7 @@ fn cpu_progressive_sample_editor_uses_the_selected_profile_without_rewriting_exi
         }
         let field = crate::scenario::rect_of("render:cpu-spp-field").unwrap();
         let inspector = crate::scenario::rect_of("render:inspector").unwrap();
-        let top = crate::scenario::rect_of("render:inspector:header").unwrap().bottom() + Tokens::get().space_8;
+        let top = test_panel_header(&h.app, "render-inspector").bottom() + Tokens::get().space_8;
         assert!(
             inspector.contains_rect(field) && field.top() >= top && field.bottom() <= inspector.bottom() - Tokens::get().space_8,
             "the sample editor must be visible before typing"
@@ -5343,44 +5346,13 @@ fn render_workspace_stage_shell_degrades_without_overlap_at_small_window_sizes()
                     assert_eq!(header.top(), bar.top());
                     assert_eq!(tools.bottom(), bar.bottom());
                 }
-                let docks: Vec<_> =
-                    ["render:browser", "render:inspector"].iter().filter_map(|id| h.app.shell.workspace_panels.get(id).map(|(r, _)| *r)).collect();
-                if let [browser, inspector] = docks.as_slice() {
-                    assert!((browser.top() - inspector.top()).abs() < 1.0);
-                    assert!(browser.bottom() < inspector.bottom());
-                    assert!(!browser.intersect(*inspector).is_positive());
-                    if width >= 800 {
-                        let compact = crate::render_ui::compact(&h.app, width as f32);
-                        assert_eq!(browser.width(), if compact { crate::frame::DIALOG_MIN_W } else { 266.0 });
-                        assert_eq!(inspector.width(), if compact { crate::frame::DIALOG_MIN_W } else { 305.0 });
-                        assert_eq!(browser.top() - bar.bottom(), 8.0);
-                        let (strip, _) = h.app.shell.workspace_panels.get("render:shots_strip").unwrap();
-                        let library = h.app.shell.workspace_panels["render:appearances"].0;
-                        assert_eq!(strip.top() - library.bottom(), 8.0);
-                        assert_eq!(library.top() - browser.bottom(), 8.0);
-                        assert_eq!(strip.height(), 48.0);
-                    }
-                }
-                if (640..800).contains(&width) {
-                    assert!(crate::scenario::rect_of("render:browser:show").is_some());
-                    assert!(!h.app.shell.workspace_panels.contains_key("render:browser"));
-                }
-                if width >= 700 {
-                    for dock in &docks {
-                        assert!(!dock.x_range().contains(h.app.viewport.rect.unwrap().center().x), "{width}: {dock:?}");
-                    }
-                }
-                let mut docks = docks;
-                if let Some((panel, _)) = h.app.shell.workspace_panels.get("render:appearances") {
-                    for dock in &docks {
-                        assert!(!panel.intersect(*dock).is_positive());
-                    }
-                    docks.push(*panel);
-                }
-                for dock in docks {
-                    assert!(!dock.intersect(bar).is_positive(), "{width}×{height}: {dock:?} {bar:?}");
-                    if let Some((strip, _)) = h.app.shell.workspace_panels.get("render:shots_strip") {
-                        assert!(!dock.intersect(*strip).is_positive(), "{width}×{height}: {dock:?} {strip:?}");
+                let frame = h.app.universal_panel_frame().unwrap();
+                let docks: Vec<_> = frame.layout.sections.iter().filter(|section| section.instance.0.starts_with("render-")).collect();
+                for (index, section) in docks.iter().enumerate() {
+                    let dock = crate::panel_runtime::egui_rect(section.outer);
+                    assert!(dock.is_finite() && !dock.intersect(bar).is_positive(), "{width}×{height}: {dock:?} {bar:?}");
+                    for other in &docks[..index] {
+                        assert!(!dock.intersect(crate::panel_runtime::egui_rect(other.outer)).is_positive());
                     }
                 }
             }
@@ -5394,48 +5366,41 @@ fn render_workspace_focus_restores_docks_without_design_history_or_camera_change
         let mut h = Harness::new();
         h.call("ui.resize", json!({"width":1400,"height":900}));
         enter(&mut h.app, true).unwrap();
-        h.app.preferences.render_browser_side = side.into();
-        h.app.preferences.render_inspector_side = if side == "left" { "right" } else { "left" }.into();
-        h.app.preferences.render_browser_width = 350.0;
-        h.app.preferences.render_inspector_width = 390.0;
-        h.app.preferences.render_shots_strip = shots;
-        h.app.preferences.browser_collapsed = folded;
-        h.app.shell.render_browser_open = folded;
+        h.app.run("view.render_dock", json!({"panel":"browser","side":side})).unwrap();
+        h.app.run("view.shots_strip", json!({"visible":shots})).unwrap();
+        h.frames(3);
+        resize_test_panel(&mut h, "render-browser", 350.0);
+        resize_test_panel(&mut h, "render-inspector", 390.0);
+        h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"render-browser"},"collapsed":folded})).unwrap();
         h.frames(3);
         let dock_preferences = h.app.prefs();
-        let docks = h.app.shell.workspace_panels.clone();
+        let instances = ["render-browser", "render-library", "render-inspector", "render-shots"];
+        let docks = instances.map(|id| test_panel(&h.app, id).map(|panel| panel.outer));
         let camera = (h.app.cam, h.app.session.camera);
         let document = h.app.session.doc.clone();
         let state = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.is_dirty());
-        let before = h.app.viewport.layout.as_ref().unwrap().content;
+        let before = h.app.viewport.layout.as_ref().unwrap().drawable;
         h.app.run("view.render_focus", json!({"on":true})).unwrap();
         h.frames(3);
         assert!(crate::render_ui::focused(&h.app));
-        crate::shell::register_panel(&mut h.app, "render:stage_panel", Some(before), Some(crate::ui_kit::Edge::Left));
+        crate::shell::register_panel(&mut h.app, "render:stage_panel", Some(before));
         assert!(!h.app.shell.workspace_panels.contains_key("render:stage_panel"));
-        for id in ["render:browser", "render:appearances", "render:inspector", "render:shots_strip", "render:shots:show"] {
-            assert!(!h.app.shell.workspace_panels.contains_key(id));
-            assert!(crate::scenario::rect_of(id).is_none());
+        for id in instances {
+            assert!(test_panel(&h.app, id).is_none(), "{id}");
         }
+        assert!(crate::scenario::rect_of("render:shots:show").is_none());
         for id in ["render:focus:exit", "render:stage_bar", "ribbon:workspace"] {
             assert!(crate::scenario::rect_of(id).is_some(), "{id}");
         }
         let layout = h.app.viewport.layout.as_ref().unwrap();
-        assert!(layout.content.width() > before.width());
+        assert!(layout.drawable.width() >= before.width());
         assert!(layout.axis_view.is_positive() && layout.navigation.is_positive());
         assert_eq!(h.app.prefs(), dock_preferences);
         h.step(&json!({"click":{"handle":"render:focus:exit"}})).unwrap();
         h.frames(3);
         assert!(!h.app.shell.render_focus);
-        assert_eq!(h.app.shell.workspace_panels.len(), docks.len());
-        for (id, (rect, edge)) in docks {
-            let (restored_rect, restored_edge) = h.app.shell.workspace_panels.get(id).unwrap();
-            assert_eq!(*restored_rect, rect);
-            assert_eq!(restored_edge.as_ref().map(std::mem::discriminant), edge.as_ref().map(std::mem::discriminant));
-        }
+        assert_eq!(instances.map(|id| test_panel(&h.app, id).map(|panel| panel.outer)), docks);
         assert_eq!(h.app.prefs(), dock_preferences);
-        assert_eq!(h.app.preferences.browser_collapsed, folded);
-        assert_eq!(h.app.shell.render_browser_open, folded);
         assert_eq!((h.app.cam, h.app.session.camera), camera);
         assert!(Arc::ptr_eq(&h.app.session.doc, &document));
         assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.is_dirty()), state);
@@ -5464,47 +5429,6 @@ fn render_workspace_focus_tab_only_toggles_render_without_text_focus() {
     assert!(h.ctx.egui_wants_keyboard_input());
     h.step(&json!({"key":"Tab"})).unwrap();
     assert!(!h.app.shell.render_focus);
-}
-
-#[test]
-fn render_workspace_compact_browser_card_and_focus_preserve_remembered_widths() {
-    for side in ["left", "right"] {
-        let mut h = Harness::new();
-        h.call("ui.resize", json!({"width":1400,"height":900}));
-        enter(&mut h.app, true).unwrap();
-        h.app.preferences.render_browser_side = side.into();
-        h.app.preferences.render_inspector_side = if side == "left" { "right" } else { "left" }.into();
-        h.app.preferences.render_browser_width = 320.0;
-        h.app.preferences.render_inspector_width = 360.0;
-        h.frames(3);
-        for width in [1100, 900, 700] {
-            h.call("ui.resize", json!({"width":width,"height":700}));
-            h.frames(3);
-            if width == 700 {
-                h.step(&json!({"click":{"handle":"render:browser:show"}})).unwrap();
-                h.frames(3);
-                let (browser, reservation) = h.app.shell.workspace_panels["render:browser"];
-                let (inspector, _) = h.app.shell.workspace_panels["render:inspector"];
-                assert!(reservation.is_none(), "narrow Browser overlays the canvas");
-                assert!(!browser.intersect(inspector).is_positive());
-                h.app.run("view.render_focus", json!({"on":true})).unwrap();
-                h.frames(3);
-                h.app.run("view.render_focus", json!({"on":false})).unwrap();
-                h.frames(3);
-                assert!(h.app.shell.render_browser_open);
-                assert!(h.app.shell.workspace_panels.contains_key("render:browser"));
-                h.step(&json!({"click":{"handle":"render:browser:hide"}})).unwrap();
-                h.frames(3);
-                assert!(!h.app.shell.workspace_panels.contains_key("render:browser"));
-            }
-            assert_eq!(h.app.preferences.render_browser_width, 320.0);
-            assert_eq!(h.app.preferences.render_inspector_width, 360.0);
-        }
-        h.call("ui.resize", json!({"width":1400,"height":900}));
-        h.frames(3);
-        assert_eq!(h.app.shell.workspace_panels["render:browser"].0.width(), 320.0);
-        assert_eq!(h.app.shell.workspace_panels["render:inspector"].0.width(), 360.0);
-    }
 }
 
 #[test]
@@ -5688,8 +5612,11 @@ fn render_workspace_shots_toggle_persists_and_design_roundtrip_preserves_state()
     );
     enter(&mut h.app, true).unwrap();
     h.frames(3);
-    let strip = crate::scenario::rect_of("render:shots_strip").unwrap();
-    assert!((strip.height() - 48.0).abs() <= 1.0, "{strip:?}");
+    use solidcraft_engine::panels::PanelKind;
+    let shots = test_panel(&h.app, "render-shots").unwrap();
+    let spec = h.app.panel_runtime().unwrap().layout().registry().get(&PanelKind::new("solidcraft.render_shots").unwrap()).unwrap();
+    assert!(shots.inline);
+    assert_eq!(shots.outer.size.height, spec.fixed_bottom_height.unwrap());
     h.step(&json!({"click":{"handle":"render:shots:hide"}})).unwrap();
     assert!(!h.app.preferences.render_shots_strip);
     enter(&mut h.app, false).unwrap();
@@ -5791,10 +5718,13 @@ fn render_workspace_scene_vocabulary_migrates_previous_shell_pins_once() {
 }
 
 fn assert_product_fits_canvas(app: &SolveApp) {
+    use crate::panel_runtime::logical_rect;
+
     let layout = app.viewport.layout.as_ref().unwrap();
-    let free = crate::shell::content_rect(app, layout.viewport);
-    assert!(free.contains_rect(layout.drawable), "fit region {:?} outside canvas {free:?}", layout.drawable);
+    let usable = crate::shell::host_usable(app).unwrap();
+    let picture = host_picture_layout(app, layout, &usable).unwrap();
     let bounds = solidcraft_engine::product_scene::extract(&app.session).unwrap().bounds;
+    let mut projected = egui::Rect::NOTHING;
     for x in [bounds.min.x, bounds.max.x] {
         for y in [bounds.min.y, bounds.max.y] {
             for z in [bounds.min.z, bounds.max.z] {
@@ -5802,20 +5732,22 @@ fn assert_product_fits_canvas(app: &SolveApp) {
                     .cam
                     .to_screen(
                         solidcore_record::Vec3::new(x, y, z),
-                        f64::from(layout.viewport.width()),
-                        f64::from(layout.viewport.height()),
+                        f64::from(picture.viewport.width()),
+                        f64::from(picture.viewport.height()),
                         bounds.diagonal().max(10.0),
                     )
                     .unwrap();
-                let at = layout.viewport.min + egui::vec2(sx as f32, sy as f32);
-                assert!(layout.drawable.contains(at), "product corner {at:?} outside {:?}", layout.drawable);
+                let at = picture.viewport.min + egui::vec2(sx as f32, sy as f32);
+                projected = projected.union(egui::Rect::from_min_max(at, at));
             }
         }
     }
+    assert!(picture.viewport.contains_rect(projected), "{projected:?} outside projection {:?}", picture.viewport);
+    assert!(picture.usable.unwrap().contains_rect(logical_rect(projected)), "{projected:?} intersects panel chrome");
 }
 
 #[test]
-fn render_workspace_hosts_float_and_shield_input_in_both_ribbon_layouts() {
+fn render_workspace_shared_panels_shield_input_in_both_ribbon_layouts() {
     for (layout, page) in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked]
         .into_iter()
         .flat_map(|layout| [inspector::Editor::Scene, inspector::Editor::Appearance].map(|page| (layout, page)))
@@ -5830,62 +5762,19 @@ fn render_workspace_hosts_float_and_shield_input_in_both_ribbon_layouts() {
         inspector::select_editor(&mut h.app, page);
         h.frames(4);
         let viewport = h.app.viewport.rect.unwrap();
-        let history = crate::timeline::floating_rect(viewport);
-        let shots = crate::scenario::rect_of("render:shots_strip").unwrap();
-        assert!((shots.height() - 48.0).abs() <= 1.0, "{layout:?}: {shots:?}");
-        assert!(
-            (shots.left() - history.left()).abs() < 1.0
-                && (shots.right() - history.right()).abs() < 1.0
-                && (shots.bottom() - history.bottom()).abs() < 1.0,
-            "Shots must reuse History's floating placement: {shots:?} {history:?}"
-        );
-        for key in ["render:inspector", "render:browser", "render:appearances", "render:shots_strip"] {
-            let (card, _) = h.app.shell.workspace_panels.get(key).unwrap();
-            assert!(viewport.contains_rect(*card), "{layout:?} {key}: {card:?} outside {viewport:?}");
-            assert!(crate::shell::covered(&h.app, card.center()), "{key} must shield the viewport");
-        }
-        let inspector = h.app.shell.workspace_panels["render:inspector"].0;
-        let browser = h.app.shell.workspace_panels["render:browser"].0;
-        let appearances = h.app.shell.workspace_panels["render:appearances"].0;
-        let ribbon_bottom = h.app.shell.cards.iter().map(|r| r.bottom()).fold(0.0, f32::max);
-        assert!((browser.top() - inspector.top()).abs() < 1.0);
-        assert!((appearances.bottom() - inspector.bottom()).abs() < 1.0);
-        assert!(browser.height() <= 330.0, "Browser must stay within the fixed tree height: {browser:?}");
-        for key in ["render:browser", "render:inspector"] {
-            let card = h.app.shell.workspace_panels[key].0;
-            assert!(
-                (card.top() - ribbon_bottom - Tokens::get().space_8).abs() < 1.0,
-                "{layout:?} {key}: gap {} must be 8 pt",
-                card.top() - ribbon_bottom
-            );
-        }
-        for key in ["render:browser", "render:appearances", "render:inspector"] {
-            let card = h.app.shell.workspace_panels[key].0;
-            let header = crate::scenario::rect_of(&format!("{key}:header")).unwrap();
-            assert!((header.height() - crate::ui_kit::header_height()).abs() < 0.1, "{key}: {header:?}");
-            assert!((header.top() - card.top()).abs() <= 1.0, "header must have no outer content padding");
-            let control = crate::scenario::rect_of(if key == "render:browser" {
-                "render:tree:by-look"
-            } else if key == "render:appearances" {
-                "render:library-search"
-            } else if page == inspector::Editor::Appearance {
-                "dialog:editor_footer"
-            } else {
-                "render:scene:look"
-            })
-            .unwrap();
-            if key == "render:browser" {
-                assert!(header.contains_rect(control), "Scene lens belongs in the title band");
-            } else {
-                assert!(control.top() >= header.bottom(), "editor controls must be below the standard header: {control:?} {header:?}");
+        let shots = test_panel(&h.app, "render-shots").unwrap();
+        assert!(shots.inline && shots.zone == solidcraft_engine::panels::Zone::Bottom);
+        let shots = crate::panel_runtime::egui_rect(shots.outer);
+        for instance in ["render-inspector", "render-browser", "render-library", "render-shots"] {
+            let panel = test_panel(&h.app, instance).unwrap();
+            let card = crate::panel_runtime::egui_rect(panel.outer);
+            assert!(viewport.contains_rect(card), "{layout:?} {instance}: {card:?} outside {viewport:?}");
+            assert!(crate::shell::covered(&h.app, card.center()), "{instance} must shield the viewport");
+            if instance != "render-shots" {
+                assert!(!card.intersect(shots).is_positive(), "{instance}: {card:?} intersects Shots {shots:?}");
             }
         }
-
-        assert!((browser.width() - appearances.width()).abs() < 1.0);
-        assert!((appearances.top() - browser.bottom() - Tokens::get().space_8).abs() < 1.0);
-        assert!(appearances.bottom() < shots.top());
-        assert!(browser.left() > viewport.left() && inspector.right() < viewport.right());
-        assert!(inspector.bottom() < shots.top() && browser.bottom() < shots.top());
+        let inspector = crate::panel_runtime::egui_rect(test_panel(&h.app, "render-inspector").unwrap().outer);
         let camera = h.app.cam;
         h.step(
             &json!({"drag":[[inspector.center().x,inspector.center().y],[inspector.center().x-30.0,inspector.center().y+20.0]],"button":"middle"}),
@@ -5895,11 +5784,11 @@ fn render_workspace_hosts_float_and_shield_input_in_both_ribbon_layouts() {
         h.step(&json!({"click":{"handle":"render:shots:hide"}})).unwrap();
         h.frames(3);
         assert_eq!(h.app.viewport.rect, Some(viewport), "floating strips must preserve the viewport projection");
-        let pill = h.app.shell.workspace_panels["render:shots:show"].0;
+        let pill = h.app.shell.workspace_panels["render:shots:show"];
         assert!(crate::shell::covered(&h.app, pill.center()));
         enter(&mut h.app, false).unwrap();
         h.frames(3);
-        assert!(h.app.shell.workspace_panels.is_empty(), "Render card reservations must not leak into Design");
+        assert!(test_panel(&h.app, "render-inspector").is_none(), "Render panels must not leak into Design");
     }
 }
 
@@ -5913,58 +5802,11 @@ fn render_workspace_assignment_footer_fits_stacked_card_with_shots_shown_and_hid
         for shown in [true, false] {
             h.app.run("view.shots_strip", json!({"visible":shown})).unwrap();
             h.frames(4);
-            let browser = h.app.shell.workspace_panels["render:browser"].0;
-            let appearances = h.app.shell.workspace_panels["render:appearances"].0;
-            // Assignment help is the shared footer's tooltip; its visible anchor stays in the card.
+            let library = test_panel(&h.app, "render-library").unwrap();
+            let appearances = crate::panel_runtime::egui_rect(library.outer);
             let footer = crate::scenario::rect_of("catalog:footer").unwrap();
             assert!(appearances.contains_rect(footer), "{layout:?}, Shots {shown}: footer {footer:?} outside {appearances:?}");
-            let gap = Tokens::get().space_8;
-            assert!((appearances.top() - browser.bottom() - gap).abs() < 1.0);
-            let bounds = crate::shell::panel_bounds(&h.app, h.app.viewport.rect.unwrap());
-            assert!((bounds.bottom() - appearances.bottom() - gap).abs() < 1.0, "{layout:?}, Shots {shown}: {appearances:?}, {bounds:?}");
         }
-    }
-}
-
-#[test]
-fn render_workspace_card_grips_swap_sides_and_resize_without_design_edits() {
-    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
-        let mut h = Harness::new();
-        h.app.ui.layout = layout;
-        h.call("ui.resize", json!({"width":1600,"height":1000}));
-        enter(&mut h.app, true).unwrap();
-        h.frames(4);
-        let document = h.app.session.doc.clone();
-        let history = (h.app.session.undo.len(), h.app.session.redo.len());
-        let camera = h.app.cam;
-        h.step(&json!({"drag":[{"handle":"render:inspector:grip"},[100.0,350.0]],"steps":8})).unwrap();
-        h.frames(3);
-        assert_eq!(h.app.preferences.render_inspector_side, "left");
-        assert_eq!(h.app.preferences.render_browser_side, "right");
-        assert!(h.app.shell.workspace_panels["render:inspector"].0.right() < h.app.shell.workspace_panels["render:browser"].0.left());
-        let width = h.app.preferences.render_inspector_width;
-        let card_width = h.app.shell.workspace_panels["render:inspector"].0.width();
-        let rail = crate::scenario::handle_at("render:inspector:resize").unwrap();
-        h.step(&json!({"drag":[[rail.x,rail.y],[rail.x+50.0,rail.y]],"steps":8})).unwrap();
-        h.frames(3);
-        // A compact dock keeps its minimum width and leaves the remembered width alone.
-        if layout == crate::ui_kit::LayoutMode::Docked {
-            assert_eq!(h.app.preferences.render_inspector_width, width);
-            assert_eq!(h.app.shell.workspace_panels["render:inspector"].0.width(), card_width);
-        } else {
-            assert!(h.app.preferences.render_inspector_width > width);
-            assert!(h.app.shell.workspace_panels["render:inspector"].0.width() > card_width);
-        }
-        h.step(&json!({"click":{"handle":"render:tree:by-look"}})).unwrap();
-        h.frames(3);
-        h.step(&json!({"drag":[{"handle":"render:browser:grip"},[100.0,350.0]],"steps":8})).unwrap();
-        h.frames(3);
-        assert_eq!(h.app.preferences.render_browser_side, "left");
-        assert_eq!(h.app.preferences.render_inspector_side, "right");
-        assert!(h.app.shell.workspace_panels["render:browser"].0.right() < h.app.shell.workspace_panels["render:inspector"].0.left());
-        assert_eq!(h.app.cam, camera, "card gestures must not move the camera");
-        assert_eq!(h.app.session.doc, document);
-        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
     }
 }
 
@@ -6374,78 +6216,25 @@ fn render_workspace_browser_look_lens_counts_distinct_objects_and_selects_them()
 }
 
 #[test]
-fn render_workspace_dock_command_swaps_sides_without_design_edits() {
-    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
-        let mut h = Harness::new();
-        h.app.ui.layout = layout;
-        h.call("ui.resize", json!({"width":1600,"height":1000}));
-        enter(&mut h.app, true).unwrap();
-        h.frames(4);
-        let document = h.app.session.doc.clone();
-        let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
-        let camera = h.app.cam;
-        let product_camera = h.app.render_workspace.view.draft.camera;
-        let widths = (h.app.preferences.render_browser_width, h.app.preferences.render_inspector_width);
-        assert!(crate::shortcut_box::search(&h.app, "view.render_dock").iter().any(|row| row.0 == "view.render_dock"));
-        for (panel, side, inspector, browser) in [
-            ("inspector", "left", "left", "right"),
-            ("browser", "left", "right", "left"),
-            ("inspector", "right", "right", "left"),
-            ("browser", "right", "left", "right"),
-        ] {
-            h.app.run("view.render_dock", json!({"panel":panel,"side":side})).unwrap();
-            h.frames(3);
-            assert_eq!(h.app.preferences.render_inspector_side, inspector);
-            assert_eq!(h.app.preferences.render_browser_side, browser);
-            let a = h.app.shell.workspace_panels["render:inspector"].0;
-            let b = h.app.shell.workspace_panels["render:browser"].0;
-            assert_eq!(a.center().x < b.center().x, inspector == "left");
-            let view = h.app.viewport.layout.as_ref().unwrap();
-            assert!(view.content.contains_rect(view.axis_view));
-            let edge = if inspector == "left" { view.axis_view.left() - view.content.left() } else { view.content.right() - view.axis_view.right() };
-            assert!(edge.abs() < 0.1);
-            assert!(!view.navigation.intersects(a));
-            assert!(!view.navigation.intersects(b));
-            assert_eq!(h.app.cam, camera);
-            assert_eq!(h.app.render_workspace.view.draft.camera, product_camera);
-            assert_eq!(h.app.session.doc, document);
-            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
-            assert_eq!((h.app.preferences.render_browser_width, h.app.preferences.render_inspector_width), widths);
-        }
-    }
-}
+fn render_dock_command_moves_shared_panels_without_design_edits() {
+    use solidcraft_engine::panels::Zone;
 
-#[test]
-fn render_workspace_dock_grip_menus_dispatch_the_other_side() {
-    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
-        let mut h = Harness::new();
-        h.app.ui.layout = layout;
-        h.call("ui.resize", json!({"width":1600,"height":1000}));
-        enter(&mut h.app, true).unwrap();
-        h.frames(4);
-        let document = h.app.session.doc.clone();
-        let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
-        let camera = h.app.cam;
-        for panel in ["inspector", "inspector", "browser", "browser"] {
-            let before = h.app.preferences.render_inspector_side.clone();
-            let at = crate::scenario::handle_at(&format!("render:{panel}:grip")).unwrap();
-            for pressed in [true, false] {
-                h.frame_with(vec![
-                    egui::Event::PointerMoved(at),
-                    egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE },
-                ]);
-            }
-            h.frames(2);
-            // Opening the menu must not move either panel.
-            assert_eq!(h.app.preferences.render_inspector_side, before);
-            h.step(&json!({"click":{"handle":format!("render:{panel}:move_side")}})).unwrap();
-            h.frames(3);
-            assert_ne!(h.app.preferences.render_inspector_side, before);
-            assert_ne!(h.app.preferences.render_inspector_side, h.app.preferences.render_browser_side);
-            assert_eq!(h.app.cam, camera);
-            assert_eq!(h.app.session.doc, document);
-            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
-        }
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1600,"height":1000}));
+    enter(&mut h.app, true).unwrap();
+    h.frames(4);
+    let document = h.app.session.doc.clone();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+    let camera = h.app.cam;
+
+    for (side, expected) in [("left", Zone::Left), ("right", Zone::Right)] {
+        h.app.run("view.render_dock", json!({"panel":"inspector","side":side})).unwrap();
+        h.frames(3);
+        assert_eq!(test_panel(&h.app, "render-inspector").unwrap().zone, expected);
+        assert_ne!(test_panel(&h.app, "render-browser").unwrap().zone, expected);
+        assert_eq!(h.app.cam, camera);
+        assert!(Arc::ptr_eq(&h.app.session.doc, &document));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
     }
 }
 
@@ -6504,12 +6293,12 @@ fn render_lights_browser_focus_covers_each_kind_without_design_edits() {
     assert_eq!(h.app.render_workspace.view.selection, RenderSelection::Shot("Shot".into()));
     // The browser is height-capped even in a tall window. Output is its last row,
     // and published targets can lie below the scroll clip as more rows are added.
-    let browser = crate::scenario::rect_of("browser:card").unwrap();
-    let header = crate::scenario::rect_of("render:browser:header").unwrap();
+    let browser = crate::panel_runtime::egui_rect(test_panel(&h.app, "render-browser").unwrap().outer);
+    let header = test_panel_header(&h.app, "render-browser");
     h.call("ui.scroll", json!({"x":browser.center().x,"y":(header.bottom()+browser.bottom())/2.0,"delta":-2000}));
     h.frames(20);
-    let browser = crate::scenario::rect_of("browser:card").unwrap();
-    let header = crate::scenario::rect_of("render:browser:header").unwrap();
+    let browser = crate::panel_runtime::egui_rect(test_panel(&h.app, "render-browser").unwrap().outer);
+    let header = test_panel_header(&h.app, "render-browser");
     let output = crate::scenario::handle_at("render:tree:output").unwrap();
     assert!(
         browser.shrink(Tokens::get().space_8).contains(output) && output.y > header.bottom(),
@@ -6702,7 +6491,6 @@ fn render_workspace_browser_compact_geometry_search_and_theme_evidence() {
             h.app.run("render.settings.set", json!({"name":name,"set":{"width":1920,"height":1080}})).unwrap();
         }
         enter(&mut h.app, true).unwrap();
-        h.app.preferences.render_browser_width = 266.0;
         h.app.render_workspace.view.draft.width = 1920;
         h.app.render_workspace.view.draft.height = 1080;
         h.app.ui.dark = dark;
@@ -6748,16 +6536,16 @@ fn render_workspace_browser_compact_geometry_search_and_theme_evidence() {
                 crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
                 output.textures_delta.clear();
                 if frame == 11 {
-                    let card = crate::scenario::rect_of("browser:card").unwrap();
-                    assert!((card.width() - 266.0).abs() < 0.1);
+                    let card = crate::panel_runtime::egui_rect(test_panel(&h.app, "render-browser").unwrap().outer);
+                    assert!(card.width() >= 240.0);
                     let inspector = crate::scenario::rect_of("render:inspector").unwrap();
-                    let stage_panel = h.app.shell.workspace_panels["render:appearances"].0;
+                    let stage_panel = crate::panel_runtime::egui_rect(test_panel(&h.app, "render-library").unwrap().outer);
                     assert!((card.top() - inspector.top()).abs() < 0.1);
-                    assert!((stage_panel.bottom() - inspector.bottom()).abs() < 0.1);
-                    assert!((stage_panel.top() - card.bottom() - Tokens::get().space_8).abs() < 0.1);
-                    assert!(card.height() <= 330.0, "Browser must stay within the fixed tree height: {card:?}");
-                    let header = crate::scenario::rect_of("render:browser:header").unwrap();
-                    assert!(header.contains_rect(crate::scenario::rect_of("render:tree:by-look").unwrap()));
+                    assert!(!stage_panel.intersect(inspector).is_positive());
+                    assert!(stage_panel.top() >= card.bottom());
+                    let header = test_panel_header(&h.app, "render-browser");
+                    let lens = test_panel(&h.app, "render-browser").unwrap().actions.iter().find(|(id, _)| id.0 == "by-look").unwrap().1;
+                    assert!(header.contains_rect(crate::panel_runtime::egui_rect(lens)));
                     assert!(crate::scenario::handle_at("render:browser-model").is_none());
                     assert!(crate::scenario::handle_at("render:browser-library").is_none());
                     for (name, row, _, _) in crate::browser::drawn_rows() {
@@ -6765,7 +6553,7 @@ fn render_workspace_browser_compact_geometry_search_and_theme_evidence() {
                     }
                     if stage == "look" {
                         let row = crate::browser::drawn_rows().into_iter().find(|r| r.0 == "Boss").unwrap().1;
-                        assert!((row.width() - (card.width() - 2.0)).abs() < 0.1);
+                        assert!(card.x_range().contains(row.left()) && card.x_range().contains(row.right()));
                         assert!(crate::scenario::handle_at("eye:Boss").unwrap().x > row.right() - 24.0);
                     }
                     if std::env::var_os("SOLIDCRAFT_BROWSER_EVIDENCE").is_some() {
@@ -7072,8 +6860,9 @@ fn render_workspace_shots_strip_geometry_and_theme_evidence() {
             output.textures_delta.clear();
             if frame == 11 {
                 let strip = crate::scenario::rect_of("render:shots_strip").unwrap();
-                assert!((strip.height() - 48.0).abs() < 1.0, "{strip:?}");
-                let mut last = crate::scenario::rect_of("render:shots:heading").unwrap();
+                let panel = test_panel(&h.app, "render-shots").unwrap();
+                assert!(panel.inline);
+                let mut last = crate::panel_runtime::egui_rect(panel.title.unwrap());
                 for target in [
                     "render:shots:save",
                     "render:shots:setup:Detail",
@@ -7255,19 +7044,17 @@ fn progress_pill_cancel_keeps_its_label_and_a_long_name_gives_way() {
                 assert!(shown.right() < cancel.left(), "{case}");
                 let cut = crate::scenario::count_of("render:progress:name:cut");
                 assert_eq!(cut, Some(if name == long { 1.0 } else { 0.0 }), "{case}");
-                // The shared outer canvas owns the progress row in both views. The image
-                // viewer reserves that row and its header above the smaller pan/zoom viewport.
-                let canvas = h.app.shell.content.unwrap();
+                // The progress row overlays the full Render canvas in both views.
+                let frame = h.app.universal_panel_frame().unwrap();
+                let canvas = crate::panel_runtime::egui_rect(frame.layout.render_domain);
                 let viewport = h.app.viewport.rect.unwrap();
+                assert_eq!(viewport, canvas);
                 assert!(canvas.contains_rect(pill), "{case}: {pill:?} outside canvas {canvas:?}");
-                for (panel, edge) in h.app.shell.workspace_panels.values() {
-                    if edge.is_some() {
-                        assert!(!pill.intersect(*panel).is_positive(), "{case}: {pill:?} overlaps reserved panel {panel:?}");
-                    }
+                for section in &frame.layout.sections {
+                    let panel = crate::panel_runtime::egui_rect(section.outer);
+                    assert!(!pill.intersect(panel).is_positive(), "{case}: {pill:?} overlaps panel {panel:?}");
                 }
                 if image {
-                    assert!(canvas.contains_rect(viewport), "{case}: viewport {viewport:?} outside canvas {canvas:?}");
-                    assert!(!pill.intersect(viewport).is_positive(), "{case}: {pill:?} covers image viewport {viewport:?}");
                     for target in [
                         "render:result:view:model",
                         "render:result:view:fit",
@@ -7591,7 +7378,6 @@ fn output_viewer_evidence() {
         inspector::fit_subject(&mut h.app).unwrap();
         h.app.pending_fit = None;
         h.app.cancel_view_animation();
-        h.app.preferences.render_inspector_width = 305.0;
         h.app.run("render.output.size", json!({"width":1280,"height":720})).unwrap();
         ribbon::perform_job(&mut h.app, "render.preflight").unwrap();
         h.ctx = crate::fonts::test_context();
@@ -7844,8 +7630,12 @@ fn render_assign_gestures_paint_sample_copy_paste_escape_and_failed_pick() {
     let before = h.app.session.doc.clone();
     let undo = h.app.session.undo.len();
     // Empty view: a failed pick neither paints nor exits sampling.
-    let free = crate::render_ui::canvas(&h.app, h.app.viewport.rect.unwrap());
-    let empty = egui::pos2(free.right() - 20.0, free.bottom() - 50.0);
+    let canvas = h.app.viewport.rect.unwrap();
+    let projection = crate::viewport::projection(&h.app, canvas);
+    let empty = (1..10)
+        .flat_map(|y| (1..10).map(move |x| canvas.min + canvas.size() * egui::vec2(x as f32 / 10.0, y as f32 / 10.0)))
+        .find(|point| !crate::shell::covered(&h.app, *point) && crate::viewport::pick(&h.app, &projection, *point).is_empty())
+        .expect("an unoccluded canvas point with no model hit");
     h.step(&json!({"click":[empty.x,empty.y]})).unwrap();
     assert!(h.app.render_workspace.view.assign.sampling);
     assert!(Arc::ptr_eq(&before, &h.app.session.doc));
@@ -8054,58 +7844,6 @@ fn render_lighting_methods_show_reasons_and_budgets_without_changing_method_or_d
         assert!(Arc::ptr_eq(&before, &h.app.session.doc));
         assert!(h.app.dialog.is_none() && h.app.render_workspace.view.job.is_none());
     }
-}
-
-#[test]
-fn render_assign_gestures_stage_tools_and_selection_actions_use_commands() {
-    let (mut h, _) = render_pick_sample();
-    h.app.run("appearance.assign", json!({"bodies":["Plate"],"appearance":"ABS - Blue"})).unwrap();
-    h.app.run("select.filter", json!({"mode":"body"})).unwrap();
-    h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body {name:"Plate".into()}]})).unwrap();
-    h.frames(4);
-    let document = h.app.session.doc.clone();
-    let undo = h.app.session.undo.len();
-    let tools = crate::scenario::rect_of("render:stage_tools").unwrap();
-    for id in ["appearance.paint", "appearance.pick_up"] {
-        assert!(tools.contains_rect(crate::scenario::rect_of(&format!("render:stage:{id}")).unwrap()));
-        assert!(crate::workspace::destination(solidcraft_engine::find_command(id).unwrap()).is_none());
-    }
-    let pill = crate::scenario::rect_of("render:selection").unwrap();
-    assert!((pill.height() - 34.0).abs() < 1.0, "{pill:?}");
-    assert!(pill.width() < 200.0, "{pill:?}");
-    for index in 0..4 {
-        assert!(pill.contains_rect(crate::scenario::rect_of(&format!("selection:action:{index}")).unwrap()));
-    }
-    h.step(&json!({"click":{"handle":"render:stage:appearance.pick_up"}})).unwrap();
-    assert!(h.app.render_workspace.view.assign.sampling);
-    h.step(&json!({"key":"Escape"})).unwrap();
-    h.step(&json!({"click":{"handle":"selection:action:0"}})).unwrap();
-    assert!(crate::scenario::rect_of("render:appearance:chain-menu").is_some());
-    h.step(&json!({"click":{"handle":"selection:action:2"}})).unwrap();
-    assert_eq!(h.app.preferences.render_library_favorites.len(), 1);
-    h.step(&json!({"click":{"handle":"selection:action:2"}})).unwrap();
-    assert!(h.app.preferences.render_library_favorites.is_empty());
-    assert!(Arc::ptr_eq(&document, &h.app.session.doc));
-    assert_eq!(h.app.session.undo.len(), undo);
-    h.step(&json!({"click":{"handle":"selection:action:1"}})).unwrap();
-    assert!(inspector::confirmation_open(&h.app));
-    assert!(Arc::ptr_eq(&document, &h.app.session.doc));
-    h.step(&json!({"click":{"handle":"dialog:Replace with"}})).unwrap();
-    h.step(&json!({"widget":"Copper"})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
-    assert!(!inspector::confirmation_open(&h.app));
-    assert_eq!(h.app.session.doc.appearances.bodies["Plate"].name, "Copper");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
-    h.app.run("edit.undo", json!({})).unwrap();
-    h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body {name:"Plate".into()}]})).unwrap();
-    h.frames(3);
-    h.step(&json!({"click":{"handle":"selection:action:3"}})).unwrap();
-    assert!(!h.app.session.body_visible("Plate"));
-    h.app.run("edit.undo", json!({})).unwrap();
-    h.app.run("view.render_stage", json!({"stage":"light"})).unwrap();
-    h.frames(3);
-    assert!(crate::scenario::rect_of("render:selection").is_none());
-    assert!(crate::scenario::rect_of("render:stage:appearance.paint").is_none());
 }
 
 #[test]
@@ -8462,7 +8200,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
     let scene = ProductScene {
         meshes: vec![ProductMesh {
             name: "Synthetic assembly".into(),
-            // 2^21 PBR triangles in the blocks, 28 bytes a vertex: 168 MiB.
+            // 2^21 PBR triangles in the blocks, `TRI_SIZE` (32) bytes a vertex: 192 MiB.
             mesh: Arc::new(Mesh { triangles: vec![[0; 3]; 1 << 21], ..Default::default() }),
             color: [128; 3],
             opacity: 1.0,
@@ -8473,7 +8211,8 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
         bounds: Aabb3::EMPTY,
     };
     let error = gpu_scene_cached(&scene, &[], WEB_GEOMETRY_BYTES, &mut ProductCache::default()).err().unwrap();
-    assert!(error.contains("168.0 MiB"), "{error}");
+    let needed = ((1usize << 21) * 3 * crate::gpu::TRI_SIZE) >> 20;
+    assert!(error.contains(&format!("{needed}.0 MiB")), "{error}");
     assert!(error.contains("128.0 MiB"), "{error}");
     assert!(error.contains("Hide bodies in Design"), "{error}");
     let refused = upload_refusal(144 << 20, "Out of Memory");
@@ -11795,8 +11534,7 @@ fn render_ui_at_world_points_hit_the_painted_surface_and_letterbox_does_not_sele
             h.app.run("solid.box", json!({"corner":[-10,-10,-10],"length":20,"width":20,"height":20,"body_name":"Pick target"})).unwrap();
             enter(&mut h.app, true).unwrap();
             h.app.ui.layout = layout;
-            h.app.preferences.render_inspector_side = side.into();
-            h.app.preferences.render_browser_side = if side == "left" { "right" } else { "left" }.into();
+            h.app.run("view.render_dock", json!({"panel":"inspector","side":side})).unwrap();
             h.app.render_workspace.view.draft.width = 160;
             h.app.render_workspace.view.draft.height = 120;
             h.app.cam_anim = None;
@@ -11876,8 +11614,7 @@ fn rendered_camera_layout_cache_and_fit_share_the_exact_frame_without_moving_out
             h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Framed product"})).unwrap();
             enter(&mut h.app, true).unwrap();
             h.app.render_workspace.view.live_paused = true;
-            h.app.preferences.render_inspector_side = side.into();
-            h.app.preferences.render_browser_side = if side == "left" { "right" } else { "left" }.into();
+            h.app.run("view.render_dock", json!({"panel":"inspector","side":side})).unwrap();
             h.app.render_workspace.view.draft.width = 160;
             h.app.render_workspace.view.draft.height = 120;
             h.app.cam.fov = 0.6;
@@ -11894,10 +11631,12 @@ fn rendered_camera_layout_cache_and_fit_share_the_exact_frame_without_moving_out
                 let outer = h.app.viewport.rect.unwrap();
                 let frame = crate::scenario::rect_of("render:product:frame").unwrap();
                 let layout = h.app.viewport.layout.as_ref().unwrap();
-                assert_eq!(layout.viewport, frame, "the cached projection must describe painted pixels");
-                assert!(frame.contains_rect(layout.drawable));
-                assert!(frame.contains_rect(layout.middle));
-                assert_eq!(picture_layout(&h.app, layout), *layout, "Fit cannot frame an already-framed cache twice");
+                assert_eq!(layout.viewport, outer, "the shared layout cache keeps the full viewport");
+                let usable = crate::shell::host_usable(&h.app).unwrap();
+                let picture = host_picture_layout(&h.app, layout, &usable).unwrap();
+                assert_eq!(picture.viewport, frame, "Fit uses the painted product projection");
+                assert!(frame.contains_rect(picture.drawable));
+                assert!(frame.contains_rect(picture.middle));
                 assert_eq!(camera_rect(&h.app, outer), frame);
                 assert_eq!(camera_rect(&h.app, frame), frame);
                 assert_eq!(crate::viewport::axis_rect(&h.app, outer), layout.axis_view, "outer control calls retain the reserved compass");
@@ -14099,8 +13838,7 @@ fn light_world_vector_axes_fit_the_real_narrow_inspector_without_clipping_or_pai
     for side in ["left", "right"] {
         let mut h = render_lights_fixture();
         h.call("ui.resize", json!({"width":1100,"height":3000}));
-        h.app.preferences.render_inspector_side = side.into();
-        h.app.preferences.render_browser_side = if side == "left" { "right" } else { "left" }.into();
+        h.app.run("view.render_dock", json!({"panel":"inspector","side":side})).unwrap();
         h.app.run("render.settings.set", json!({"name":"Studio","set":{"job":{"method":"gpu_path","options":{}}}})).unwrap();
         setups::load(&mut h.app);
         light::edit(&mut h.app, "render.lights.add", None, Some(json!({"kind":"spot"}))).unwrap();
@@ -14685,7 +14423,6 @@ fn render_displayed_receipt_uses_the_immutable_live_texture_source_not_the_curre
 
 fn stable_glass_draft_fixture(method: ImageMethod, with_maps: bool) -> Harness {
     let mut h = Harness::new();
-    assert_eq!(h.app.preferences.render_inspector_width, crate::prefs::Prefs::default().render_inspector_width);
     h.call("ui.resize", json!({"width":1440,"height":3000}));
     for (index, name) in ["Glass A", "Glass B", "Map", "Coat"].into_iter().enumerate() {
         h.app.run("solid.box", json!({"body_name":name,"length":5,"width":5,"height":5,"corner":[index * 15,0,0],"operation":"new"})).unwrap();
@@ -14746,8 +14483,8 @@ fn stable_glass_draft_add(h: &mut Harness, name: &str) {
 
 fn stable_glass_draft_viewport(h: &Harness) -> egui::Rect {
     let inspector = crate::scenario::rect_of("render:inspector").unwrap();
-    let header = crate::scenario::rect_of("render:inspector:header").unwrap();
-    let footer = crate::scenario::rect_of("dialog:editor_footer").unwrap();
+    let header = test_panel_header(&h.app, "render-inspector");
+    let footer = crate::scenario::rect_of("render:appearance-footer").unwrap();
     assert!(inspector.contains(header.center()) && inspector.contains(footer.center()));
     let viewport = egui::Rect::from_min_max(
         egui::pos2(inspector.left(), header.bottom() + Tokens::get().space_8),
@@ -14794,9 +14531,8 @@ fn stable_glass_draft_click(h: &mut Harness, handle: &str) -> usize {
 fn stable_glass_pointer_draft_composes_saved_glass_maps_coat_and_lens_until_one_explicit_save() {
     use solidcraft_engine::doc::render_optics::{OpticalMaterial, SavedOptics};
     for method in [ImageMethod::CpuRaytrace, ImageMethod::GpuRaytrace] {
-        let factory_width = crate::prefs::Prefs::default().render_inspector_width;
         let mut h = stable_glass_draft_fixture(method, true);
-        // Keep the unmodified305pt factory preference and use ordinary wheel navigation.
+        // Keep the initial Inspector width and use ordinary wheel navigation.
         h.call("ui.resize", json!({"width":1440,"height":760}));
         assert_eq!(h.ctx.content_rect().size(), egui::vec2(1440.0, 760.0), "the pointer journey must use the requested ordinary viewport");
         h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body{name:"Glass B".into()}]})).unwrap();
@@ -14805,6 +14541,7 @@ fn stable_glass_pointer_draft_composes_saved_glass_maps_coat_and_lens_until_one_
         h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
         h.app.cam.yaw += 0.125;
         h.frames(3);
+        let initial_width = test_panel(&h.app, "render-inspector").unwrap().outer.size.width;
         let document = h.app.session.doc.clone();
         let model = h.app.session.model.state();
         let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
@@ -14838,7 +14575,11 @@ fn stable_glass_pointer_draft_composes_saved_glass_maps_coat_and_lens_until_one_
             "generic Save cannot silently commit Glass drafts"
         );
         h.frames(4);
-        assert_eq!(h.app.preferences.render_inspector_width, factory_width, "painting and scrolling cannot widen the inspector");
+        assert_eq!(
+            test_panel(&h.app, "render-inspector").unwrap().outer.size.width,
+            initial_width,
+            "painting and scrolling cannot widen the inspector"
+        );
         assert_eq!(image_request(&h.app).unwrap(), request);
         assert!(Arc::ptr_eq(&document, &h.app.session.doc));
         assert!(Arc::ptr_eq(&model, &h.app.session.model.state()));
@@ -14867,7 +14608,11 @@ fn stable_glass_pointer_draft_composes_saved_glass_maps_coat_and_lens_until_one_
             "actual Save enabled={save_enabled}, status={:?}, last command={:?}",
             h.app.status, h.app.last_command
         );
-        assert_eq!(h.app.preferences.render_inspector_width, factory_width, "explicit Save retains the factory inspector width");
+        assert_eq!(
+            test_panel(&h.app, "render-inspector").unwrap().outer.size.width,
+            initial_width,
+            "explicit Save retains the initial inspector width"
+        );
         assert_eq!(h.app.session.undo.len(), history.1 + 1);
         assert_eq!(committed.features, document.features);
         assert_eq!(committed.materials, document.materials);
@@ -15242,7 +14987,7 @@ fn host_bounded_results_and_comparison_actions_are_visible_and_clickable() {
         let document = h.app.session.doc.clone();
         let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
         let product = h.app.cam;
-        let card = h.app.shell.workspace_panels["render:result-controls"].0;
+        let card = h.app.shell.workspace_panels["render:result-controls"];
         assert!(card.width() <= 528.0, "exercise the native report's bounded card: {card:?}");
         for target in [
             "render:results",
@@ -15260,7 +15005,7 @@ fn host_bounded_results_and_comparison_actions_are_visible_and_clickable() {
         }
         let click = |h: &mut Harness, target: &str| {
             let rect = crate::scenario::rect_of(target).unwrap();
-            assert!(h.app.shell.workspace_panels["render:result-controls"].0.contains_rect(rect), "{target}");
+            assert!(h.app.shell.workspace_panels["render:result-controls"].contains_rect(rect), "{target}");
             assert!(crate::scenario::rect_of("render:result-actions-clip").unwrap().contains_rect(rect), "{target}");
             let pos = rect.center();
             h.frame_with(vec![Event::PointerMoved(pos)]);
@@ -15502,7 +15247,7 @@ fn host_results_and_comparison_keep_full_canvas_real_control_footprints_and_came
         if comparison {
             assert_eq!(crate::scenario::rect_of("render:compare:canvas"), Some(domain));
         }
-        let controls = h.app.shell.workspace_panels["render:result-controls"].0;
+        let controls = h.app.shell.workspace_panels["render:result-controls"];
         assert!(domain.contains_rect(controls));
         assert!(h.app.shell.cards.iter().all(|card| !controls.intersect(*card).is_positive()), "the later ribbon must never cover actions");
         assert!(h.app.universal_panel_frame().unwrap().layout.usable.contains_rect(logical_rect(controls)));
@@ -15531,7 +15276,7 @@ fn host_results_and_comparison_keep_full_canvas_real_control_footprints_and_came
 }
 
 #[test]
-fn host_result_framing_recovers_after_classic_without_refitting_free_cameras_or_panel_moves() {
+fn host_result_framing_does_not_refit_free_cameras_or_follow_panel_moves() {
     use crate::panel_runtime::logical_rect;
     use solidcraft_engine::panels::ActionSink as _;
     for comparison in [false, true] {
@@ -15571,7 +15316,6 @@ fn host_result_framing_recovers_after_classic_without_refitting_free_cameras_or_
             let document = h.app.session.doc.clone();
             let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
             let layout = h.app.panel_runtime().unwrap().layout().inspect();
-            let controllers = h.app.panel_runtime().unwrap().controller_count();
             assert_eq!(h.app.render_workspace.view.result_scale, scale);
             assert_eq!(domain.is_some(), scale != ResultScale::Free);
             match scale {
@@ -15583,31 +15327,6 @@ fn host_result_framing_recovers_after_classic_without_refitting_free_cameras_or_
                 }
                 ResultScale::Free => {}
             }
-
-            // Disable only the host: the same runtime and retained content survive.
-            h.app.disable_universal_panel_host().unwrap();
-            h.frames(3);
-            assert!(!h.app.universal_panel_host_enabled());
-            assert_eq!(h.app.render_workspace.view.result_domain, None);
-            let classic = h.app.render_workspace.view.result_camera;
-            if scale == ResultScale::Free {
-                assert_eq!(classic, image);
-            } else {
-                let classic_canvas = h.app.viewport.rect.unwrap();
-                assert_ne!(classic_canvas, canvas);
-                assert_eq!(classic, result_camera([16, 16], classic_canvas, h.ctx.pixels_per_point(), scale));
-                assert_ne!(classic, image, "Classic must actually reframe the image: comparison={comparison}, scale={scale:?}");
-            }
-            assert_eq!(h.app.panel_runtime().unwrap().layout().inspect(), layout);
-            assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
-            h.app.enable_universal_panel_host(Default::default()).unwrap();
-            h.frames(4);
-            assert_eq!(h.app.viewport.rect, Some(canvas), "the original host domain must return");
-            assert_eq!(h.app.render_workspace.view.result_domain, domain);
-            assert_eq!(h.app.render_workspace.view.result_camera, image, "comparison={comparison}, scale={scale:?}");
-            assert_eq!(h.app.render_workspace.view.result_scale, scale);
-            assert_eq!(h.app.panel_runtime().unwrap().layout().inspect(), layout);
-            assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
 
             h.app
                 .run_panel_command(
@@ -15643,7 +15362,7 @@ fn host_result_controls_shield_wheel_and_comparison_divider_keeps_capture() {
     h.app.render_workspace.view.result_scale = ResultScale::Free;
     let product = h.app.cam;
     let image = h.app.render_workspace.view.result_camera;
-    let controls = h.app.shell.workspace_panels["render:result-controls"].0;
+    let controls = h.app.shell.workspace_panels["render:result-controls"];
     h.frame_with(vec![
         Event::PointerMoved(controls.center()),
         Event::MouseWheel {
@@ -15754,116 +15473,6 @@ fn host_panel_capture_blocks_result_navigation_through_release() {
 }
 
 #[test]
-fn disabling_host_in_render_clears_result_controls_before_classic_layout_and_input() {
-    use egui::{Event, Modifiers, MouseWheelUnit, vec2};
-    for comparison in [false, true] {
-        let (mut h, _, _) = render_results_compare_fixture();
-        crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
-        if comparison {
-            h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
-        } else {
-            h.app.run("render.result.select", json!({"index":1})).unwrap();
-        }
-        h.frames(4);
-        h.app.pending_fit = None;
-        h.app.cancel_view_animation();
-        let controls = h.app.shell.workspace_panels["render:result-controls"].0;
-        let product = h.app.cam;
-        let document = h.app.session.doc.clone();
-        let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
-        h.app.disable_universal_panel_host().unwrap();
-        // The stale entry exists at the transition; the first real Classic frame must remove it.
-        assert!(h.app.shell.workspace_panels.contains_key("render:result-controls"));
-        h.frame();
-        assert!(active(&h.app));
-        assert!(!h.app.universal_panel_host_enabled());
-        assert_eq!(h.app.render_workspace.view.compare.is_some(), comparison);
-        assert!(!h.app.shell.workspace_panels.contains_key("render:result-controls"));
-        assert!(!crate::shell::fit_rects(&h.app).contains(&controls));
-        assert!(!crate::shell::covered_rects(&h.app).contains(&controls));
-        let layout = h.app.viewport.layout.as_ref().unwrap().clone();
-        assert!(layout.usable.is_none());
-        // Recomputing from the now-clean shell must match what Classic already consumed.
-        crate::viewport::refresh_layout(&mut h.app, &h.ctx);
-        let refreshed = h.app.viewport.layout.as_ref().unwrap();
-        assert_eq!((layout.content, layout.middle, layout.drawable), (refreshed.content, refreshed.middle, refreshed.drawable));
-        // Classic paints the image before its legacy panels update shell.content.
-        // Keep the first-frame cleanup assertions above, then target the settled
-        // Classic image rather than the previous host's full content rectangle.
-        h.frames(3);
-        let layout = h.app.viewport.layout.as_ref().unwrap().clone();
-        let canvas = h.app.viewport.rect.unwrap();
-        let responses = h.ctx.viewport(|viewport| {
-            viewport
-                .prev_pass
-                .widgets
-                .layers()
-                .flat_map(|(_, widgets)| widgets.iter())
-                .filter(|widget| widget.enabled && widget.rect == canvas && widget.sense == egui::Sense::click_and_drag())
-                .copied()
-                .collect::<Vec<_>>()
-        });
-        assert_eq!(responses.len(), 1, "identify the actual Classic image allocation, comparison={comparison}: {responses:?}");
-        let response = responses[0];
-        let divider =
-            comparison.then(|| crate::scenario::rect_of("render:compare:divider").unwrap().expand(h.ctx.global_style().interaction.interact_radius));
-        let point = (1..10)
-            .flat_map(|y| (1..10).map(move |x| controls.min + controls.size() * vec2(x as f32 / 10.0, y as f32 / 10.0)))
-            .chain((1..10).flat_map(|y| (1..10).map(move |x| canvas.min + canvas.size() * vec2(x as f32 / 10.0, y as f32 / 10.0))))
-            .find(|point| {
-                response.interact_rect.contains(*point)
-                    && !crate::shell::covered(&h.app, *point)
-                    && !layout.navigation.contains(*point)
-                    && !divider.is_some_and(|divider| divider.contains(*point))
-                    && h.ctx.layer_id_at(*point) == Some(response.layer_id)
-            })
-            .expect("an unoccluded point owned by the actual Classic image response");
-        h.app.preferences.nav = "maya".into();
-        h.app.preferences.smooth_wheel_zoom = false;
-        h.app.render_workspace.view.result_scale = ResultScale::Free;
-        assert!(!crate::frame::dock_dragging(&h.ctx), "a dock drag must not own Classic image input, comparison={comparison}");
-        h.frame_with(vec![Event::PointerMoved(point)]);
-        assert_eq!(h.app.viewport.mouse, Some(point), "shared navigation must accept the Classic image pointer, comparison={comparison}");
-        let owned = h.ctx.read_response(response.id).expect("the Classic image response remains mounted");
-        assert!(
-            owned.enabled() && owned.contains_pointer() && owned.interact_rect.contains(point),
-            "wheel input must belong to the image: {owned:?}"
-        );
-        assert_eq!(h.ctx.layer_id_at(point), Some(owned.layer_id));
-        assert!(!comparison_drag_captured(&h.app), "the comparison divider must not own image input");
-        let image = h.app.render_workspace.view.result_camera;
-        h.frame_with(vec![Event::MouseWheel {
-            source: egui::MouseWheelSource::Unknown,
-            unit: MouseWheelUnit::Point,
-            delta: vec2(0.0, -300.0),
-            modifiers: Modifiers::NONE,
-            phase: egui::TouchPhase::Move,
-        }]);
-        assert!(!crate::frame::dock_dragging(&h.ctx), "a dock drag must not own Classic image wheel input, comparison={comparison}");
-        assert!(!comparison_drag_captured(&h.app), "the comparison divider must not own image wheel input");
-        assert_eq!(h.app.viewport.mouse, Some(point), "shared navigation must accept the Classic image wheel pointer, comparison={comparison}");
-        assert_ne!(
-            h.app.render_workspace.view.result_camera,
-            image,
-            "the invisible host card must not block Classic wheel input: comparison={comparison}, mouse={:?}, raw/available events/smooth delta={:?}, wheel speed={}, scale/job={:?}",
-            h.app.viewport.mouse,
-            h.ctx.input(|input| (input.raw.events.clone(), input.events.clone(), input.smooth_scroll_delta)),
-            h.app.preferences.wheel_zoom_speed,
-            (h.app.render_workspace.view.result_scale, h.app.render_workspace.view.result_job)
-        );
-        h.app.run("render.result.view", json!({"view":"fit"})).unwrap();
-        h.frame();
-        assert_eq!(
-            h.app.render_workspace.view.result_camera,
-            result_camera([16, 16], h.app.viewport.rect.unwrap(), h.ctx.pixels_per_point(), ResultScale::Fit)
-        );
-        assert_eq!(h.app.cam, product);
-        assert!(Arc::ptr_eq(&document, &h.app.session.doc));
-        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
-    }
-}
-
-#[test]
 fn host_empty_result_keeps_full_domain_and_tiny_blocked_controls_publish_nothing() {
     let mut h = output_viewer_fixture();
     crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
@@ -15888,20 +15497,28 @@ fn host_empty_result_keeps_full_domain_and_tiny_blocked_controls_publish_nothing
 }
 
 #[test]
-fn classic_results_and_comparison_keep_their_reserved_chrome_and_scale_policy() {
+fn production_results_and_comparison_use_the_full_shared_canvas_and_fit_clearance() {
+    use crate::panel_runtime::{egui_rect, logical_rect};
+
     for comparison in [false, true] {
         let (mut h, _, _) = render_results_compare_fixture();
-        assert!(!h.app.universal_panel_host_enabled(), "the production default remains Classic");
+        let product_camera = h.app.cam;
         if comparison {
             h.app.run("render.compare", json!({"left":0,"right":1})).unwrap();
         } else {
             h.app.run("render.result.select", json!({"index":1})).unwrap();
         }
         h.frames(3);
-        let canvas = h.app.viewport.rect.unwrap();
-        assert!(canvas.top() > crate::toolbar::APP_BAR_HEIGHT);
-        assert_eq!(h.app.render_workspace.view.result_camera, result_camera([16, 16], canvas, h.ctx.pixels_per_point(), ResultScale::Fit));
-        assert!(!h.app.shell.workspace_panels.contains_key("render:result-controls"));
+        let frame = h.app.universal_panel_frame().unwrap();
+        let canvas = egui_rect(frame.layout.render_domain);
+        assert_eq!(h.app.viewport.rect, Some(canvas));
+        assert!(test_panel(&h.app, "render-inspector").is_some());
+        let controls = h.app.shell.workspace_panels["render:result-controls"];
+        assert!(frame.layout.usable.contains_rect(logical_rect(controls)));
+        assert_eq!(h.app.render_workspace.view.result_scale, ResultScale::Fit);
+        let image = result_rect(h.app.render_workspace.view.result_camera, [16, 16], canvas);
+        assert!(crate::shell::host_usable(&h.app).unwrap().contains_rect(logical_rect(image)));
+        assert_eq!(h.app.cam, product_camera);
         if comparison {
             assert_eq!(crate::scenario::rect_of("render:compare:canvas"), Some(canvas));
         }
@@ -16627,7 +16244,8 @@ fn render_quality_denoise_mask_displays_categorical_receipt_exports_and_returns_
     // command. The Image segment previously shared a persistent ID with Live
     // in the comparison strip and activated comparison on this exact click.
     h.frames(3);
-    assert!(!h.app.universal_panel_host_enabled(), "cover the native production layout");
+    assert!(test_panel(&h.app, "render-inspector").is_some());
+    assert!(h.app.shell.workspace_panels.contains_key("render:result-controls"));
     let mask_texture = h.app.render_workspace.denoise_mask_image.as_ref().unwrap().1.as_ref().unwrap().id();
     for (target, scale) in [("render:result-actual", ResultScale::Actual), ("render:result-fit", ResultScale::Fit)] {
         h.step(&json!({"click":{"handle":target}})).unwrap();

@@ -1,0 +1,21 @@
+[package]
+name = "craft-plugin-wasm"
+description = "App-independent WebAssembly component runtime for Craft plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+craft-plugin = { path = "../craft-plugin" }
+serde_json = { workspace = true }
+
+[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
+cap-std = "4"
+log = { workspace = true }
+wasmtime = { version = "48.0.8", default-features = false, features = ["component-model", "cranelift", "runtime", "parallel-compilation", "std"] }
+
+[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dev-dependencies]
+wat = "1"

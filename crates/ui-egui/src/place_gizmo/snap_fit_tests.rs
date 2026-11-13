@@ -40,6 +40,7 @@ fn hook(h: &Harness) -> usize {
 #[test]
 fn marker_drags_the_snap_fit_onto_a_sketch_point_and_the_grip_points_the_catch() {
     let mut h = plate();
+    h.call("ui.camera", json!({"target":[40,25,5],"distance":175}));
     h.app.run("sketch.create", json!({"plane": {"face": [40, 25, 10]}})).unwrap();
     h.app.run("sketch.point", json!({"point": [50, 30]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();

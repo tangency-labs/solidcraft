@@ -514,10 +514,7 @@ fn orbit_after_home_turns_the_model_in_place_beside_the_browser() {
         h.app.ui.show_browser = browser;
         h.settle();
         assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
-        let layout = h.app.viewport.layout.clone().unwrap();
-        let middle = layout.middle.center();
-        let aside = middle.x - layout.viewport.center().x;
-        assert_eq!(aside > 50.0, browser, "browser {browser}: the middle of the free view is {aside} pt right of the view's centre");
+        assert_eq!(h.app.shell.browser.is_some(), browser, "exercise both Browser visibility states");
         h.app.animate_view("home");
         h.settle();
         let rect = h.app.viewport.rect.unwrap();
@@ -526,6 +523,7 @@ fn orbit_after_home_turns_the_model_in_place_beside_the_browser() {
         let middle =
             crate::viewport_layout::framing_centre(h.app.cam, &crate::viewport::view_bounds(&h.app), h.app.viewport.layout.as_ref().unwrap())
                 .unwrap();
+        assert!(!crate::shell::covered(&h.app, middle), "the framing point is in free canvas");
         let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
         // The model's middle, and the point at the camera target's depth under the free view's middle.
         let centre = crate::viewport::view_bounds(&h.app).center();
@@ -572,5 +570,51 @@ fn the_orbit_pivot_is_the_point_home_centres_on() {
         let at = proj.to_screen(pivot).unwrap();
         assert!(at.distance(home) < 0.5, "browser {browser}: the pivot is at {at:?}, Home centres on {home:?}");
         assert!(at.distance(centre) < 1.5, "browser {browser}: Home left the model at {centre:?}, the pivot is at {at:?}");
+    }
+}
+
+/// With the navigators' Fit on, an orbit drag straight after Home or Fit and continuous orbit
+/// straight after Home keep the model's middle at its framed position, with the Browser shown
+/// and hidden, in parallel and perspective views (#14651).
+#[test]
+fn orbit_after_the_navigators_home_turns_the_model_in_place() {
+    for (browser, perspective) in [(true, false), (false, false), (true, true)] {
+        let case = format!("browser {browser}, perspective {perspective}");
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        moved_block(&mut h);
+        h.app.ui.show_browser = browser;
+        h.app.ui.perspective = perspective;
+        h.app.preferences.navigator_fit = true;
+        h.settle();
+        assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
+        let rect = h.app.viewport.rect.unwrap();
+        let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
+        let centre = crate::viewport::view_bounds(&h.app).center();
+        let frame = |h: &mut Harness, view: &str| {
+            h.app.animate_view(view);
+            h.settle();
+            proj(h).to_screen(centre).unwrap()
+        };
+        let drag = |h: &mut Harness, view: &str| {
+            let before = frame(h, view);
+            let (yaw, pitch) = (h.app.cam.yaw, h.app.cam.pitch);
+            // Fusion's orbit (the default preset): Shift and the middle button.
+            let p = spot(h);
+            h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x + 60.0, "y1": p.y + 30.0, "button": "middle", "shift": true, "steps": 6}));
+            h.settle();
+            assert!((h.app.cam.yaw - yaw).abs() > 0.1 && (h.app.cam.pitch - pitch).abs() > 0.05, "{case}, {view}: the drag orbits");
+            let after = proj(h).to_screen(centre).unwrap();
+            assert!(after.distance(before) < 0.5, "{case}, {view}: the model's middle went from {before:?} to {after:?}");
+        };
+        drag(&mut h, "home");
+        drag(&mut h, "fit");
+        let before = frame(&mut h, "home");
+        let yaw = h.app.cam.yaw;
+        h.app.viewport.spin = true;
+        h.frames(60);
+        assert!(h.app.viewport.spin && (h.app.cam.yaw - yaw).abs() > 0.05, "{case}: the view spins");
+        let after = proj(&h).to_screen(centre).unwrap();
+        assert!(after.distance(before) < 0.5, "{case}: spinning, the model's middle went from {before:?} to {after:?}");
     }
 }

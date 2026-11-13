@@ -453,6 +453,19 @@ impl Profile {
         }
     }
 
+    /// The profile's own origin, in the bounding-box-centred coordinates [`Self::region`] uses:
+    /// the point its dimensions are measured from (a bar's or an angle's bottom-left corner, the
+    /// heel for an angle; the middle of a channel's web back; the centre of a round bar, a tube
+    /// or an I beam). A member placed with `locate` keeps that profile point on its line when the
+    /// section's size changes.
+    pub fn origin(&self) -> Vec2 {
+        match *self {
+            Profile::Bar { width, height, .. } | Profile::Angle { width, height, .. } => Vec2::new(-width / 2.0, -height / 2.0),
+            Profile::RoundBar { .. } | Profile::RoundTube { .. } | Profile::RectTube { .. } | Profile::IBeam { .. } => Vec2::ZERO,
+            Profile::Channel { width, .. } => Vec2::new(-width / 2.0, 0.0),
+        }
+    }
+
     /// The profile's cross-section, the bounding box centred on the origin. An error names the
     /// dimension that is out of range or does not fit.
     pub fn region(&self) -> Result<Region2> {

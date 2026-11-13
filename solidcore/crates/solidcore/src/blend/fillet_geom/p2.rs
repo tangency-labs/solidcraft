@@ -1719,11 +1719,11 @@ impl FilletBrep {
         // Get the TsectPnts and call the solver.
         let (vu1, mut tsect1) = self.rail_end_tsect(v, Some(fillet_geom1), None, OP)?;
         let (vu2, mut tsect2) = self.rail_end_tsect(v, Some(fillet_geom2), None, OP)?;
-        // Fork tangency-labs/smlib@465b62b (`fixes.fillet_retry_radius_as_first`, WR-300):
-        // the radii are held at their end values only at a corner calculated as constant
-        // radius, as the rail/side-edge search holds them; upstream holds them anywhere.
-        let hold_end_radii =
-            !k.fixes.fillet_retry_radius_as_first || corners.corner(corner)?.is_calc_as_const_rad();
+        // WR-300 (the fork's tangency-labs/smlib@465b62b): the radii are held at their
+        // end values only at a corner calculated as constant radius, as the rail/side-edge
+        // search holds them; upstream holds them anywhere, so the rails met at a ball that
+        // is not the law's.
+        let hold_end_radii = corners.corner(corner)?.is_calc_as_const_rad();
         let found = solvers.rail_rail_intersect(
             k,
             target,
@@ -2053,14 +2053,19 @@ impl FilletBrep {
             // the corner, so the search starts where that section touches the side edge, not
             // at a fraction of the edge's length. Where the faces meet the rail end's solve
             // twice (two cylinders crossing: the round at each of their crossings), the first
-            // guess decides which ball the solve finds.
+            // guess decides which ball the solve finds. The section is the one at the corner's
+            // vertex also where the rail's end is looked for on a side edge past it (a rail
+            // rolled over a smooth far edge of its face, or one running on across a seam's
+            // vertex), where the side edge's near end `cp_vertex` ends no end of the solver's
+            // edge.
             let mut guess_edge_parameters = guess_edge_parameters;
             let si = RailSolvers::geom_solver(self, g1)?;
+            let section_vertex = corners.corner(corner)?.filleted_vertex();
             if let Some(t) = corner_section_on_side_edge(
                 k,
                 solvers.solver_ops_mut(si)?,
                 target,
-                cp_vertex,
+                section_vertex,
                 rail_index,
                 side_edge,
                 &ivl,
@@ -2111,14 +2116,12 @@ impl FilletBrep {
                 fs.set_extension_factor(2.0 * ext_factor);
 
                 // WR-300 (#1023): upstream's retry holds the radius at a corner not
-                // calculated as constant radius too; the fix holds it only as the first
+                // calculated as constant radius too; this holds it only as the first
                 // search did.
-                let retry_si = if k.fixes.fillet_retry_radius_as_first
-                    && !corners.corner(corner)?.is_calc_as_const_rad()
-                {
-                    None
-                } else {
+                let retry_si = if corners.corner(corner)?.is_calc_as_const_rad() {
                     Some(si)
+                } else {
+                    None
                 };
                 for &guess in &guess_edge_parameters {
                     let _ = solvers.solver(si)?;
@@ -2308,13 +2311,23 @@ impl FilletBrep {
                 // Temporarily change this to a constant-radius function.
                 let si = RailSolvers::geom_solver(self, g2)?;
                 let _ = solvers.solver(si)?;
+                // WR-300 (#1023): upstream holds the adjacent round's radius here at every
+                // corner; this holds it only at a corner calculated as constant radius, as
+                // the first round's search and retry do. Where the side edge is not square
+                // to the round's edge, the ball meeting it is not the end's, and the end
+                // radius put the rail's end off the round.
+                let temp_si = if corners.corner(corner)?.is_calc_as_const_rad() {
+                    Some(si)
+                } else {
+                    None
+                };
                 let r = rail_edgeuse_intersect(
                     self,
                     k,
                     g2,
                     solvers,
                     target,
-                    Some(si),
+                    temp_si,
                     other_rail_index,
                     side_eu2,
                     guess,
@@ -3501,11 +3514,9 @@ impl FilletBrep {
                         corners.corner(corner)?.filleted_vertex().ok_or_else(|| {
                             SolidError::blend_missing(OP, "the corner's filleted vertex")
                         })?;
-                    // Fork tangency-labs/smlib@465b62b (`fixes.fillet_retry_radius_as_first`):
-                    // the rails' meeting point holds the radii only at a corner calculated
-                    // as constant radius.
-                    let hold_end_radii =
-                        !k.fixes.fillet_retry_radius_as_first || the_corner.is_calc_as_const_rad();
+                    // WR-300 (the fork's tangency-labs/smlib@465b62b): the rails' meeting
+                    // point holds the radii only at a corner calculated as constant radius.
+                    let hold_end_radii = the_corner.is_calc_as_const_rad();
                     let new_uv = solvers.cubic(si1, si2, OP, |s1, s2| {
                         create_cubic_rail_rail_interpolant(
                             k,
