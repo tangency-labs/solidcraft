@@ -5,7 +5,7 @@
 //! sections, its surface at the start of the loft (u min) and across the middle of its
 //! profile span passes through that curve's midpoint in the first section, and at the
 //! end of the loft (u max) through the matching curve's midpoint in the second.
-//! A flat wall is a plane (WR-781), whose u and v are its own, so it is checked by both
+//! A flat wall is a plane (WR-782), whose u and v are its own, so it is checked by both
 //! midpoints lying in it.
 #![allow(
     clippy::unwrap_used,
@@ -97,7 +97,7 @@ fn traced(s: SkinSources) -> Vec<(FaceId, Vec<usize>)> {
 }
 
 /// How far `p` is from `surface` when the surface is a plane, `None` for any other
-/// surface. A skin's flat walls are planes (WR-781), whose u and v are the plane's own,
+/// surface. A skin's flat walls are planes (WR-782), whose u and v are the plane's own,
 /// not the loft's, so a flat wall is checked by its points lying in it.
 fn off_plane(surface: &Surface, p: Point3) -> Option<f64> {
     let SurfaceKind::Plane(plane) = surface.kind() else {
@@ -223,7 +223,7 @@ fn sections_whose_knots_differ_are_traced_through_the_skin_s_maps() {
             seen[c] = true;
         }
         let surface = face2::surface(&made.brep, *f).unwrap().unwrap();
-        // a flat wall is a plane (WR-781): each of its curves' midpoints lies in it
+        // a flat wall is a plane (WR-782): each of its curves' midpoints lies in it
         if matches!(surface.kind(), SurfaceKind::Plane(_)) {
             for &c in of {
                 let m = midpoint(&k, &curves[c]);
