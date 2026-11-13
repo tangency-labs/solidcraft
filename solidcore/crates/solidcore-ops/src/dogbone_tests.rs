@@ -50,7 +50,8 @@ fn point(r: &Brep, v: u32) -> [f64; 3] {
     r.vertices[v as usize].point
 }
 
-/// The straight edges along z with both ends at (x, y) in `corners`.
+/// The straight edges along z with both ends at one (x, y) in `corners` (a sloped rim edge from
+/// one corner to the next is not one).
 fn vertical_edges(r: &Brep, corners: &[[f64; 2]]) -> Vec<usize> {
     let at = |p: [f64; 3]| {
         corners
@@ -61,7 +62,11 @@ fn vertical_edges(r: &Brep, corners: &[[f64; 2]]) -> Vec<usize> {
         .filter(|&i| {
             let e = &r.edges[i];
             let (a, b) = (point(r, e.vertices[0]), point(r, e.vertices[1]));
-            matches!(e.curve, Curve::Line { .. }) && at(a) && at(b) && (a[2] - b[2]).abs() > 1e-9
+            matches!(e.curve, Curve::Line { .. })
+                && at(a)
+                && (a[0] - b[0]).abs() < 1e-9
+                && (a[1] - b[1]).abs() < 1e-9
+                && (a[2] - b[2]).abs() > 1e-9
         })
         .collect()
 }
@@ -640,9 +645,7 @@ fn a_relief_runs_past_a_sloped_open_end_by_more_than_the_radius() {
     );
     let r = record(&body);
     let corners = [[10.0, 12.0], [30.0, 12.0], [30.0, 18.0], [10.0, 18.0]];
-    // The record may run a corner as more than one edge (the cut leaves 6 here for the 4
-    // corners): every piece is picked, and the pieces at a corner together run the whole
-    // corner, from the flat bottom (z = 0) to the sloped top.
+    // One edge up each corner, from the flat bottom (z = 0) to the sloped top.
     let edges = vertical_edges(&r, &corners);
     let pieces: Vec<_> = edges
         .iter()
@@ -651,7 +654,7 @@ fn a_relief_runs_past_a_sloped_open_end_by_more_than_the_radius() {
             (point(&r, e.vertices[0]), point(&r, e.vertices[1]))
         })
         .collect();
-    assert!(edges.len() >= 4, "{pieces:?}");
+    assert_eq!(edges.len(), 4, "{pieces:?}");
     let p = plan(&r, &edges, &[], &options(Style::Normal)).unwrap();
     assert!(p.skipped.is_empty(), "{:?} {pieces:?}", p.skipped);
     assert_eq!(p.tools.len(), edges.len(), "{pieces:?}");
