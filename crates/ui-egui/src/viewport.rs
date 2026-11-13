@@ -7174,6 +7174,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
         let scoped_bodies =
             dialog_accept.unwrap_or(BODIES) == BODIES && app.dialog.as_ref().is_none_or(|d| matches!(d.kind, crate::dialogs::Kind::Move { .. }));
         let active_bodies = if scoped_bodies { active_body_names(app) } else { None };
+        let measuring = measuring_mesh_edges(app);
         for b in &st.bodies {
             if !app.body_visible(&b.name) || (scoped_bodies && body_faded(app, b, &active_bodies)) {
                 continue;
@@ -7183,10 +7184,14 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
                 for (ei, e) in m.edges.iter().enumerate() {
                     // A window takes an edge when all its pieces are inside: only an edge that is
                     // itself inside is asked for them, so a marquee over a large model does not
-                    // walk every edge's record.
+                    // walk every edge's record. Measure measures pieces, so there a window takes
+                    // each piece inside it, as a pick does (a whole circle still needs all its pieces).
                     let takes = edge_pickable(app, &m, ei)
                         && bx.takes(&to2(e))
-                        && (bx.crossing || edge_pieces(b, &m, ei).iter().all(|&i| m.edges.get(i).is_some_and(|p| bx.takes(&to2(p)))));
+                        && (bx.crossing
+                            || if measuring { m.circular_rim(ei) } else { edge_pieces(b, &m, ei) }
+                                .iter()
+                                .all(|&i| m.edges.get(i).is_some_and(|p| bx.takes(&to2(p)))));
                     if takes {
                         out.push(Sel::Edge { body: b.name.clone(), index: ei, point: polyline_mid(e) });
                     }
@@ -7268,9 +7273,13 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             }
         }
     }
+    // Measure measures pieces: a box there keeps each edge piece it took alone, as a pick does
+    // (Measure still takes a whole circle's pieces as one item).
+    let measuring = measuring_mesh_edges(app);
     let mut grouped = Vec::new();
     for item in out {
-        for piece in grouped_selection(&app.session, &item) {
+        let pieces = if measuring && matches!(item, Sel::Edge { .. }) { vec![item] } else { grouped_selection(&app.session, &item) };
+        for piece in pieces {
             if !grouped.iter().any(|x| crate::selection::same_item(x, &piece)) {
                 grouped.push(piece);
             }
@@ -12382,6 +12391,27 @@ mod tests {
         app.session.selection = edges;
         let d = crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap();
         assert_eq!(d.items().len(), 1);
+        // A box in Measure, looking down on the top, takes the closed rim as one item: a crossing
+        // box touching it and a window round it alike.
+        let rim_selected = std::mem::take(&mut app.session.selection);
+        let rim = edge_indices(&rim_selected);
+        app.cam = app.cam.looking_from(Vec3::Z);
+        app.cam.target = Vec3::new(0.0, 0.0, 20.0);
+        app.cam.distance = 60.0;
+        app.ui.perspective = false;
+        let boxed = |app: &mut SolveApp, pts: Vec<Vec3>, crossing: bool| -> Vec<usize> {
+            let proj = projection(app, Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)));
+            let screen: Vec<Pos2> = pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
+            let r = Rect::from_points(&screen).expand(2.0);
+            let bx = if crossing { BoxSel::from_drag(r.right_bottom(), r.left_top()) } else { BoxSel::from_drag(r.left_top(), r.right_bottom()) };
+            app.dialog = Some(crate::dialogs::Dialog::for_command(app, "inspect.measure").unwrap());
+            box_select(app, &proj, bx, false);
+            edge_indices(&app.dialog.take().unwrap().items()).into_iter().filter(|i| rim.contains(i)).collect()
+        };
+        let mid = polyline_mid(&m.edges[rim[0]]);
+        assert_eq!(boxed(&mut app, vec![mid, mid], true).len(), 1, "a crossing box touching the rim in Measure");
+        assert_eq!(boxed(&mut app, rim.iter().flat_map(|&i| m.edges[i].clone()).collect(), false).len(), 1, "a window round the rim in Measure");
+        app.session.selection = rim_selected;
 
         let faces = m.edge_faces.iter().zip(&m.seams).find(|(_, seam)| **seam).unwrap().0;
         assert_eq!(faces.len(), 1, "the seam is inside the one wall");
@@ -12684,6 +12714,30 @@ mod tests {
             let d = crate::dialogs::Dialog::for_command(&app, "inspect.measure").unwrap();
             assert_eq!(d.items(), vec![edge(half)], "Measure takes the clicked half");
         }
+        // A box in Measure, looking at the x = +5 wall, takes each piece it takes, as a pick does:
+        // a window round one half or a crossing box touching it that half alone, a window round
+        // both the two halves.
+        app.session.selection.clear();
+        app.cam = app.cam.looking_from(Vec3::X);
+        app.cam.target = Vec3::new(0.0, 0.0, 15.0);
+        app.cam.distance = 40.0;
+        app.ui.perspective = false;
+        let boxed = |app: &mut SolveApp, pts: Vec<Vec3>, crossing: bool| -> Vec<usize> {
+            let proj = projection(app, Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)));
+            let screen: Vec<Pos2> = pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
+            let r = Rect::from_points(&screen).expand(2.0);
+            let bx = if crossing { BoxSel::from_drag(r.right_bottom(), r.left_top()) } else { BoxSel::from_drag(r.left_top(), r.right_bottom()) };
+            assert_eq!(bx.crossing, crossing);
+            app.dialog = Some(crate::dialogs::Dialog::for_command(app, "inspect.measure").unwrap());
+            box_select(app, &proj, bx, false);
+            edge_indices(&app.dialog.take().unwrap().items()).into_iter().filter(|i| plus.contains(i)).collect()
+        };
+        for &half in &plus {
+            assert_eq!(boxed(&mut app, m.edges[half].clone(), false), vec![half], "a window round half {half} in Measure");
+            let mid = polyline_mid(&m.edges[half]);
+            assert_eq!(boxed(&mut app, vec![mid, mid], true), vec![half], "a crossing box touching half {half} in Measure");
+        }
+        assert_eq!(boxed(&mut app, plus.iter().flat_map(|&h| m.edges[h].clone()).collect(), false), plus, "a window round both in Measure");
     }
 
     /// The ball of [`slotted_ball_app`], whole, with a hole of radius 1 drilled down right

@@ -1305,7 +1305,7 @@ impl Dialog {
                     (Kind::Fillet { chain, .. }, _) => fillet_edges(s, sel, *chain),
                     // One item per edge: a click selects all the pieces of an edge a seam splits,
                     // the clicked one first, and Measure takes that one.
-                    (Kind::Measure { .. }, _)
+                    (Kind::Measure { .. }, Sel::Edge { .. })
                         if crate::viewport::grouped_selection(s, sel).iter().any(|x| inp.items.iter().any(|y| selection::same_item(x, y))) =>
                     {
                         Vec::new()
