@@ -60,6 +60,47 @@ pub(crate) fn nest(s: &mut Session, level: u64) {
     doc.occurrences.push(serde_json::from_value(occurrence).unwrap());
 }
 
+/// `change` run on the model with the drawing open closed, as the model can only be changed then,
+/// and the drawing opened again; what `change` gave. Both through the commands, so the lines a
+/// close keeps for the reopen are kept.
+pub(crate) fn with_the_model<R>(s: &mut Session, change: impl FnOnce(&mut Session) -> R) -> R {
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(s, "drawing.close", json!({}));
+    let changed = change(s);
+    run(s, "drawing.open", json!({"drawing": drawing}));
+    changed
+}
+
+/// Model command `id` run with `p` as [`with_the_model`] runs a change: its reply.
+pub(crate) fn in_the_model(s: &mut Session, id: &str, p: Value) -> Value {
+    with_the_model(s, |s| run(s, id, p))
+}
+
+/// `s` saved to a file called `file` (its extension picks the form) and opened from it in a new
+/// session, with its drawing `drawing` open there.
+pub(crate) fn reopened(s: &mut Session, drawing: u64, file: &str) -> Session {
+    // A folder of each call's own: tests run side by side in one process.
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let folder = crate::tests::Folder::new(&format!("reopened-{}", CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let path = folder.path(file);
+    run(s, "file.save", json!({"path": path}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": path}));
+    run(&mut opened, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    opened
+}
+
+/// The drawing milestone's plate (acceptance case 84, #4894) by its script: 100 x 80 x 20 mm with
+/// two bores of 10, sized from its parameters, and a drawing of it, open, with a top view at 1:2 on
+/// its A3 sheet. The session and the top view's reply.
+pub(crate) fn milestone_plate_script() -> (Session, Value) {
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../examples/acceptance/drawing_m2.json")).unwrap();
+    let mut made = s.run_script(&script).unwrap();
+    let top = made.pop().unwrap();
+    (s, top)
+}
+
 /// Part `Part` with a 10 mm cube `Cube` from the origin, placed twice: the second copy 30 mm along
 /// X. The session and the two occurrences.
 pub(crate) fn two_cubes() -> (Session, [u64; 2]) {
@@ -2281,13 +2322,10 @@ fn out_of_date_dimensions(reply: &Value) -> Vec<Value> {
 fn held_after(mark: fn(&mut Session, u64) -> u64, change: impl FnOnce(&mut Session)) -> (Session, u64, u64) {
     let (mut s, sheet, [front, _]) = front_and_top();
     let id = mark(&mut s, front);
-    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
     settled(&mut s, sheet);
-    run(&mut s, "drawing.close", json!({}));
-    change(&mut s);
-    run(&mut s, "drawing.open", drawing);
+    with_the_model(&mut s, change);
     (s, sheet, id)
 }
 
@@ -3120,15 +3158,6 @@ fn cube_on_block() -> (Session, u64, Value) {
     run(&mut s, "component.activate", json!({"component": "root"}));
     let (s, sheet, _) = front_and_top_of(s);
     (s, sheet, cube)
-}
-
-/// Runs model command `id` with the drawing closed, as the model can only be changed then, and
-/// opens the drawing again.
-fn in_the_model(s: &mut Session, id: &str, p: Value) {
-    let drawing = ids::encode(s.open_drawing.unwrap());
-    run(s, "drawing.close", json!({}));
-    run(s, id, p);
-    run(s, "drawing.open", json!({"drawing": drawing}));
 }
 
 /// Lines worked out beside the window (#4892 B7) on another thread are taken once they come back,

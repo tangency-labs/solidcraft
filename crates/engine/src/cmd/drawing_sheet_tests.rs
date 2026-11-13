@@ -3,6 +3,7 @@ use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
 use crate::cmd::drawing_view::tests::three_views;
+use crate::drawing_scene::tests::in_the_model;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"))
@@ -326,15 +327,6 @@ fn cells(s: &mut Session) -> BTreeMap<String, (String, Option<String>)> {
     cells.iter().map(|c| (text(&c["name"]).unwrap(), (text(&c["text"]).unwrap(), text(&c["value"])))).collect()
 }
 
-/// Runs model command `id` with the drawing closed (an open drawing locks the model), then opens
-/// it again.
-fn on_model(s: &mut Session, id: &str, p: Value) {
-    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
-    run(s, "drawing.close", json!({}));
-    run(s, id, p);
-    run(s, "drawing.open", drawing);
-}
-
 /// The built-in block's cells read the model: the sheet's component, a steel block 100 x 50 x 10
 /// (50,000 mm³ at 7.85 g/cm³: 392.5 g), holding a steel gauge of 10 mm (7.85 g) that counts until
 /// it is a reference. A property taken away shows nothing. An override shows its text and the value
@@ -365,13 +357,13 @@ fn a_title_blocks_cells_read_the_model() {
     // of its own, the drawing is numbered by the component's name.
     let expected = ["Block", "Block", "Steel", "Zinc plated", "0.40 kg", "1/1", solidcraft_doc::drawing::template::ASSEMBLY_NOTE, ""];
     assert_eq!(shown(&mut s, &read), expected);
-    on_model(&mut s, "component.metadata.set", json!({"component": "Gauge", "bom_type": "reference"}));
-    on_model(&mut s, "component.metadata.set", json!({"component": "Block", "properties": {"finish": null}}));
+    in_the_model(&mut s, "component.metadata.set", json!({"component": "Gauge", "bom_type": "reference"}));
+    in_the_model(&mut s, "component.metadata.set", json!({"component": "Block", "properties": {"finish": null}}));
     assert_eq!(shown(&mut s, &["mass", "finish"]), ["0.39 kg", ""]);
     // An override, and the value under it moving on.
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": {"material": "See note 3"}}));
     assert_eq!(cells(&mut s)["material"], ("See note 3".to_string(), Some("Steel".to_string())));
-    on_model(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Aluminum"}));
+    in_the_model(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Aluminum"}));
     assert_eq!(cells(&mut s)["material"], ("See note 3".to_string(), Some("Aluminum".to_string())));
     let steps = s.undo.len();
     for (overrides, why) in [
