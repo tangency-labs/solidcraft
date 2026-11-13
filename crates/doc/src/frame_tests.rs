@@ -595,8 +595,33 @@ fn a_rect_tube_takes_its_inner_radius_apart_from_the_outer() {
         let err = profile(j.clone()).region().unwrap_err().to_string();
         assert!(err.contains(why), "{j}: {err}");
     }
-    // A default inner radius under the smallest radius is drawn, as before.
-    assert!(profile(serde_json::json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 3.005})).region().is_ok());
+    // A default inner radius under the smallest radius is a sharp corner, and the filled profile
+    // (what `frame.profile.properties` hands back) builds the same section as the request.
+    let asked = profile(serde_json::json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 3.005}));
+    let filled = asked.filled();
+    assert_eq!(filled, Profile::RectTube { width: 40.0, height: 40.0, wall: 3.0, outer_radius: Some(3.005), inner_radius: Some(0.0) });
+    assert_eq!(filled.region().unwrap(), asked.region().unwrap());
+    close(sec(&filled).area, sec(&asked).area, "filled area");
+}
+
+#[test]
+fn a_rect_tube_hole_stays_inside_its_outline() {
+    // A round outline (radius 20 on 40 x 40) round a sharp 34 x 34 hole: the hole's corners at
+    // (±17, ±17) are 24.04 from the middle, outside the circle.
+    let tube = |w: f64, ro: f64, ri: f64| {
+        profile(serde_json::json!({"kind": "rect_tube", "width": w, "height": 40, "wall": 3, "outer_radius": ro, "inner_radius": ri}))
+    };
+    for (w, ro, ri) in [(40.0, 20.0, 0.0), (60.0, 20.0, 0.0), (40.0, 12.0, 0.0), (40.0, 20.0, 8.0)] {
+        let err = tube(w, ro, ri).region().unwrap_err().to_string();
+        assert!(err.contains("`inner_radius`") && err.contains("outer corners"), "{w} {ro} {ri}: {err}");
+    }
+    // Pairs that keep a wall at every corner still build: sharp, the default 2 t and t, the
+    // standard 1.5 t and 1.0 t, an inner radius larger than the outer less the wall, a sharp hole
+    // in a small outer radius, and one whose corner wall is 0.1 mm on the diagonal
+    // (10 - 7√2 = 0.1005).
+    for (ro, ri) in [(0.0, 0.0), (6.0, 3.0), (4.5, 3.0), (6.0, 5.0), (20.0, 17.0), (6.0, 0.0), (10.0, 0.0)] {
+        assert!(tube(40.0, ro, ri).region().is_ok(), "{ro} {ri}");
+    }
 }
 
 #[test]

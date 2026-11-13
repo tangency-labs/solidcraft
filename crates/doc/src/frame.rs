@@ -18,6 +18,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use solidcore_ops::prism::tapered_flange_ends;
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 use crate::expr::Kind;
@@ -497,7 +498,12 @@ impl Profile {
             Profile::Bar { width, height, corner_radius } => Profile::Bar { width, height, corner_radius: Some(corner_radius.unwrap_or(0.0)) },
             Profile::RectTube { width, height, wall, outer_radius, inner_radius } => {
                 let r = outer_radius.unwrap_or_else(|| (2.0 * wall).min(width.min(height) / 2.0));
-                let ri = inner_radius.unwrap_or_else(|| room(r - wall));
+                // The default is the outer radius less the wall; one under the smallest radius is
+                // a sharp corner, so the filled profile passes the checks the original did.
+                let ri = inner_radius.unwrap_or_else(|| {
+                    let ri = room(r - wall);
+                    if ri < MIN_PROFILE_DIMENSION { 0.0 } else { ri }
+                });
                 Profile::RectTube { width, height, wall, outer_radius: Some(r), inner_radius: Some(ri) }
             }
             Profile::Angle { width, height, thickness: t, root_radius, toe_radius } => {
@@ -517,7 +523,7 @@ impl Profile {
             Profile::Channel { height, width, web, flange, root_radius, toe_radius, flange_slope } => {
                 let r2 = toe_radius.unwrap_or(0.0);
                 let slope = flange_slope.unwrap_or(0.0);
-                let (_, at_web) = flange_ends(width, web, flange, slope);
+                let (_, at_web) = tapered_flange_ends(width - web, flange, slope);
                 // The root shares a flange's inside length with the toe, and the web's inside
                 // height with the other root.
                 let r1 = root_radius.unwrap_or_else(|| web.min(room(width - web - r2)).min(room(height - 2.0 * at_web) / 2.0));
@@ -564,14 +570,22 @@ impl Profile {
                 if ro > w.min(h) / 2.0 {
                     return Err(invalid(format!("profile `outer_radius` ({ro}) must be at most half the smaller side ({})", w.min(h) / 2.0)));
                 }
-                // A given inner radius is checked as a radius; the default (the outer one less
-                // the wall) may be any size down to 0.
-                let given = matches!(self, Profile::RectTube { inner_radius: Some(_), .. });
-                let ri = inner_radius.unwrap_or(0.0);
-                let ri = if given { radius("inner_radius", ri)? } else { ri.max(0.0) };
+                let ri = radius("inner_radius", inner_radius.unwrap_or(0.0))?;
                 let inside = (w - 2.0 * t).min(h - 2.0 * t);
                 if ri > inside / 2.0 {
                     return Err(invalid(format!("profile `inner_radius` ({ri}) must be at most half the inside's smaller side ({})", inside / 2.0)));
+                }
+                // The hole must stay inside the outline. Each corner's hole arc is centred `d`
+                // further out along both axes than the outer arc; with `d` 0 or less the wall is
+                // `wall` thick all round, and past 0 the two arcs come closest on the diagonal,
+                // `ro - ri - d√2` apart, which must be at least the smallest dimension (compared
+                // squared, as both sides are then positive).
+                let d = ro - t - ri;
+                let apart = ro - ri - MIN_PROFILE_DIMENSION;
+                if d > 0.0 && (apart < 0.0 || apart * apart < 2.0 * d * d) {
+                    return Err(invalid(format!(
+                        "profile `inner_radius` ({ri}) is too small for `outer_radius` ({ro}) and `wall` ({t}): the hole's corners come through the outer corners; an inner radius of at least the outer one less the wall always fits"
+                    )));
                 }
                 Ok(Region2 { outer: rounded_rect(w, h, ro)?, holes: vec![rounded_rect(w - 2.0 * t, h - 2.0 * t, ri)?.reversed()] })
             }
@@ -599,7 +613,7 @@ impl Profile {
                     return Err(invalid(format!("profile `flange_slope` must be between 0 and {MAX_FLANGE_SLOPE} degrees (got {slope})")));
                 }
                 // Each flange's thickness at its toe and at the web: `tf` both, without a slope.
-                let (at_toe, at_web) = flange_ends(b, tw, tf, slope);
+                let (at_toe, at_web) = tapered_flange_ends(b - tw, tf, slope);
                 if slope == 0.0 {
                     less_half("flange", tf, "the height", h)?;
                 } else {
@@ -639,13 +653,6 @@ impl Profile {
             }
         }
     }
-}
-
-/// A channel flange's thickness at its toe and at the web: `flange` at the middle of its inside
-/// length (width less web), changing by `slope` degrees across it.
-fn flange_ends(width: f64, web: f64, flange: f64, slope: f64) -> (f64, f64) {
-    let change = (width - web) / 2.0 * slope.to_radians().tan();
-    (flange - change, flange + change)
 }
 
 /// Points given with the heel at the origin, moved so a `w` × `h` bounding box is centred on it.
