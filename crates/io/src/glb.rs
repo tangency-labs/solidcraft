@@ -6,7 +6,8 @@
 //! An assembly keeps its shape (#5296): each occurrence a body is placed through is a node named
 //! after it, placed in its parent as the occurrence is, and the body's node sits under it with its
 //! mesh in the component's frame. A viewer can then pick and move a part on its own, turning it
-//! about the component's origin.
+//! about the component's origin. Without `hierarchy`, every body is a node of the root in world
+//! coordinates under its world name, as SolidCraft 0.40 wrote it.
 //!
 //! Only opaque looks are written. A transparent body or face is refused with a message that names
 //! it rather than written as an opaque colour; image textures are refused by the engine, which
@@ -108,13 +109,12 @@ pub(crate) struct GlbBody {
 }
 
 /// An occurrence's node: its name, the node it sits in (`None`: the root) and its placement there
-/// as a glTF translation (mm) and unit rotation quaternion (x, y, z, w).
+/// (millimetres, column-major, as glTF's node `matrix` and the document's [`Mat`] both are).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct GlbNode {
     pub name: String,
     pub parent: Option<usize>,
-    pub translation: [f64; 3],
-    pub rotation: [f64; 4],
+    pub matrix: Mat,
 }
 
 /// The occurrence nodes made so far, by occurrence path, each with its world transform.
@@ -149,48 +149,20 @@ impl Tree {
             return None;
         }
         let m = solidcraft_doc::mat_mul(&above, &o.transform);
-        let t = o.transform;
-        self.nodes.push(GlbNode { name: o.name.clone(), parent, translation: [t[3][0], t[3][1], t[3][2]], rotation: quaternion(&t) });
+        self.nodes.push(GlbNode { name: o.name.clone(), parent, matrix: o.transform });
         let found = (self.nodes.len() - 1, m);
         self.by_path.insert(path.to_vec(), found);
         Some(found)
     }
 }
 
-/// The unit quaternion (x, y, z, w) of a placement's rotation (`m[col][row]`).
-fn quaternion(m: &Mat) -> [f64; 4] {
-    let r = |row: usize, col: usize| m[col][row];
-    let trace = r(0, 0) + r(1, 1) + r(2, 2);
-    let q = if trace > 0.0 {
-        let s = 2.0 * (trace + 1.0).sqrt();
-        [(r(2, 1) - r(1, 2)) / s, (r(0, 2) - r(2, 0)) / s, (r(1, 0) - r(0, 1)) / s, s / 4.0]
-    } else if r(0, 0) >= r(1, 1) && r(0, 0) >= r(2, 2) {
-        let s = 2.0 * (1.0 + r(0, 0) - r(1, 1) - r(2, 2)).max(0.0).sqrt();
-        [s / 4.0, (r(0, 1) + r(1, 0)) / s, (r(0, 2) + r(2, 0)) / s, (r(2, 1) - r(1, 2)) / s]
-    } else if r(1, 1) >= r(2, 2) {
-        let s = 2.0 * (1.0 + r(1, 1) - r(0, 0) - r(2, 2)).max(0.0).sqrt();
-        [(r(0, 1) + r(1, 0)) / s, s / 4.0, (r(1, 2) + r(2, 1)) / s, (r(0, 2) - r(2, 0)) / s]
-    } else {
-        let s = 2.0 * (1.0 + r(2, 2) - r(0, 0) - r(1, 1)).max(0.0).sqrt();
-        [(r(0, 2) + r(2, 0)) / s, (r(1, 2) + r(2, 1)) / s, s / 4.0, (r(1, 0) - r(0, 1)) / s]
-    };
-    let len = q.iter().map(|x| x * x).sum::<f64>().sqrt();
-    if len.is_finite() && len > 0.0 { q.map(|x| x / len) } else { [0.0, 0.0, 0.0, 1.0] }
-}
-
 /// `mesh` moved by `m` (an inverse placement: a rotation and a translation), its normals turned.
 fn moved(mut mesh: Mesh, m: &Mat) -> Mesh {
     for p in &mut mesh.positions {
-        let (x, y, z) = (p.x, p.y, p.z);
-        p.x = m[0][0] * x + m[1][0] * y + m[2][0] * z + m[3][0];
-        p.y = m[0][1] * x + m[1][1] * y + m[2][1] * z + m[3][1];
-        p.z = m[0][2] * x + m[1][2] * y + m[2][2] * z + m[3][2];
+        *p = solidcraft_doc::apply_point(m, *p);
     }
     for n in &mut mesh.normals {
-        let (x, y, z) = (n.x, n.y, n.z);
-        n.x = m[0][0] * x + m[1][0] * y + m[2][0] * z;
-        n.y = m[0][1] * x + m[1][1] * y + m[2][1] * z;
-        n.z = m[0][2] * x + m[1][2] * y + m[2][2] * z;
+        *n = solidcraft_doc::apply_vector(m, *n);
     }
     mesh
 }
@@ -200,13 +172,26 @@ fn moved(mut mesh: Mesh, m: &Mat) -> Mesh {
 /// workspace resolves them (a face's look over its body's, a body's over its component's and
 /// material's, else the colour it was imported with). `model` is the model before placing, which
 /// says the occurrence each placed body comes through: those bodies sit under their occurrences'
-/// nodes. `name` names the scene. A transparent body or face is refused.
-pub fn export_glb(doc: &Document, model: &ModelState, world: &ModelState, bodies: &[String], name: &str, quality: MeshQuality) -> Result<Vec<u8>> {
+/// nodes; `doc`'s occurrences must place them as `world` has them. Without `hierarchy` every body
+/// is written in the world under the root, by its world name. `name` names the scene. A
+/// transparent body or face is refused.
+pub fn export_glb(
+    doc: &Document,
+    model: &ModelState,
+    world: &ModelState,
+    bodies: &[String],
+    name: &str,
+    quality: MeshQuality,
+    hierarchy: bool,
+) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "export_glb");
     let sel = selected(world, bodies)?;
     // Each placed body's occurrence path, by its world name.
-    let paths: BTreeMap<String, Vec<u64>> =
-        if doc.occurrences.is_empty() { BTreeMap::new() } else { doc.body_frames(model).into_iter().map(|(n, _, path, _)| (n, path)).collect() };
+    let paths: BTreeMap<String, Vec<u64>> = if !hierarchy || doc.occurrences.is_empty() {
+        BTreeMap::new()
+    } else {
+        doc.body_frames(model).into_iter().map(|(n, _, path, _)| (n, path)).collect()
+    };
     let mut tree = Tree::default();
     let mut materials: Vec<GlbMaterial> = Vec::new();
     let mut index: BTreeMap<(String, [u8; 3], u64, u64, u64), usize> = BTreeMap::new();
@@ -409,7 +394,7 @@ pub(crate) fn glb(name: &str, tree: &[GlbNode], bodies: &[GlbBody], materials: &
             return Err(IoError::Invalid(format!("occurrence node {i} sits in a later one")));
         }
         children[at].push(i + 1);
-        nodes.push(json!({"name": n.name, "translation": n.translation, "rotation": n.rotation}));
+        nodes.push(json!({"name": n.name, "matrix": n.matrix.iter().flatten().collect::<Vec<_>>()}));
     }
     let mut meshes = Vec::new();
     for b in bodies {
