@@ -416,11 +416,9 @@ macro_rules! upstream_fixes {
                 Self::NAMES.iter().copied().zip([$(self.$field),*])
             }
 
-            /// Every flag on: all the opt-in fixes, none of upstream's behaviour where
-            /// a fix exists. Unlike [`Default`] (every flag off, the pinned C++), this
-            /// includes fixes that are known not to combine cleanly or to be
-            /// incomplete; each field's doc and its `plan/upstream-issues/` record say
-            /// which.
+            /// Every flag on, the ones [`Default`] holds back too
+            /// ([`UpstreamFixes::HELD_BACK`]): each field's doc and its
+            /// `plan/upstream-issues/` record say why one is held back.
             pub fn all() -> Self {
                 Self {
                     $($field: true,)*
@@ -440,16 +438,18 @@ macro_rules! upstream_fixes {
 }
 
 upstream_fixes! {
-/// Opt-in fixes of upstream SMLib defects (`plan/upstream-issues/`), all off by default
-/// (upstream behaviour). Set them on [`Kernel::fixes`] before running operations; each
-/// field names its record (`WR-…`) and the `tangency-labs/solidcore` issue.
+/// solidcore's corrections of the defects it inherited from SMLib (`plan/upstream-issues/`),
+/// each a flag on [`Kernel::fixes`]: every one is on by default ([`Default`]), but those in
+/// [`UpstreamFixes::HELD_BACK`], which refuse sound geometry or build wrong volumes. Each field
+/// names its record (`WR-…`) and the `tangency-labs/solidcore` issue; a field's note of the
+/// behaviour "off" describes the defect it corrects.
 ///
 /// [`UpstreamFixes::flags`] lists every field with its value and
 /// [`UpstreamFixes::NAMES`] every field name, both in declaration order;
 /// [`UpstreamFixes::flag_mut`] finds a field by its name; [`UpstreamFixes::all`] turns
-/// every field on. `upstream_fixes!` generates
+/// every field on, the held-back ones too. `upstream_fixes!` generates
 /// them from this definition, so a new field needs no other edit to be listed.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 #[non_exhaustive]
 pub struct UpstreamFixes {
@@ -1062,6 +1062,11 @@ pub struct UpstreamFixes {
     /// With `fillet_overflow_trim_at_creases`, a crease of a blend past its faces that runs along an edge of the face it crosses, within the trim's tolerance, is taken as that edge: the sheet is split along it, its piece past the face is deleted, and the body's edge stands as the imprint where the material taken off stops and the sheet is sewn (as an extension's edges along the body do). The fork's `TrimAtCreases` (tangency-labs/smlib#79 step 6 at 5e8c9c1) keeps only the crease's runs inside the face (`sm_PiecesInFace`), so such a crease is dropped, the sheet keeps its piece past the face, the face is taken off with the rest, and the sewing is refused (`SM_FILERR_BAD_MERGE`): a disc 13 in radius and 2 high rounded 2.0001 to 2.01 on its top edge (the crease runs (r - 2)^2/4 inside the bottom edge) fails where r 2 and r 2.02 build. Not the fork's (WR-717, #2385).
     pub fillet_overflow_crease_along_edge: bool,
     /// A convex blend whose section between its rails would break through the part (leave its material through a face and come back into it, where one of the faces it crosses there shares no edge with the blended faces: a hollow behind a wall, such as a round on a wall thinner than it reaches into the hollow behind, or a blind pocket or cavity under a blended face, which the pinned construction builds into a body that intersects itself or has the wrong volume) is refused with `FilletErrorType::NoRoom` (`NoRoomReason::BreaksThrough`), naming the largest size whose sections do not break through, and that size less the fit margin is the refusal's fit (`SolidError::FilletRefused`). A section that runs off its face (past a cliff, into a hole or an opening: the part beyond it reaches a rail) or through a hole in a blended face does not break through. The same 32 sections as `BandCutsThePart` are judged; the faces at the blended edge's ends, which the corners trim, are not ([`crate::blend::fillet_executive::session::band_cuts::band_breaks_through_the_part`]). Not the fork's: fork 5e8c9c1 segfaults in `DoFilleting` on #2299's case (WR-707, #2299; addendum `plan/upstream-issues/WR-707--addendum-2026-11-02-rounds-running-off-their-faces.md`).
+    ///
+    /// Held back, off by default ([`UpstreamFixes::HELD_BACK`]): it refuses sound geometry. With
+    /// it on, SolidCraft's fillet rig case 1668-fillet-both-sides-of-thin-wall-r7 is refused as
+    /// breaking through the wall into the hollow behind it ("the largest radius that fits is
+    /// 6.828 mm"), where with it off it builds its closed form, 39509.938 mm³.
     pub fillet_refuse_rounds_breaking_through: bool,
     /// A face made from exact pcurves keeps them as its edge uses' trims where upstream drops them and projects each edge's curve again later, a fit: the draft extrusion's curvature-keeping and tangent-plane walls ([`crate::primitive::primitive_creation::p2::PrimitiveCreationAccess::face_with_curves`]) pass theirs to `SmBrep::MakeFaceWithCurves` with `pbOptCrvOnSurf` set, and `SmBrep::CopyFaces` without the merge passes a face's own trims (`CreateCurvesFromFace`) on to its copy. And `MakeFaceWithCurves`'s keep step (`CreateUVTrimCurves(&uv, &orients)`) flips the orientations for a face made with its surface's orientation opposite: they are given along the loop, and `sm_FindBestUVCurve` matches them against the upward face use's edge uses, which run the other way there, so upstream's tangent test refuses every exact curve and each is projected again. A draft half disc's cone wall then keeps its seam pcurves on their edges to 1.2e-13, where upstream's are 2.4e-6 off. And an arc's draft wall on its cone covers just its face (from its seams' least angle to their greatest, exact), not the seams' padded reach, which `SmBrep::ShrinkGeometry` trimmed to the face where the pad passed a thousandth of the face's size, removing the exact trims to project the edges again; so a seam cut at a span end of the cone keeps its quartics (#2497) (WR-722, #2405; solidcore-native, no fork commit).
     pub keep_exact_pcurves: bool,
@@ -1072,6 +1077,14 @@ pub struct UpstreamFixes {
     /// `N_SrfIsClosedSmooth` ([`crate::nurbs::srf_basic::Surface::is_closed_smooth_with_fixes`]) takes the G1 test across the seam at a station where the derivative across the seam vanishes (a collapsed row, a pole on the seam: shorter than `0.001 * NL_MTOL`, the pole test of `N_SrfEvalPtNormalAtPole`) by its limit, the mixed derivative `S_uv` (`S_uv` for the v seam), negated at the end of the domain, where upstream takes the angle of the two vanishing vectors: their rounding then decides between `NL_GEO_ERR` (two exact zeros), not smooth (two noise vectors at any angle) and smooth, so a sphere is not reported closed and smooth in u (WR-725, #2521; solidcore-native, no fork commit).
     pub closed_smooth_pole_tangent_limit: bool,
     /// With `fillet_cliff_overflow` (and `fillet_refuse_rails_leaving_faces` and `fillet_exact_round_classes`, which it builds on), a lone constant round bigger than the wall it rolls on ends on the body's outline instead of being built on the wall continued past its rim and cut from the body. Where the round's rail runs past a rim of its face (a convex, not tangent edge of the face that runs the filleted edge's whole length) and the ball rolling on the continued face passes inside that rim by more than the body's tolerance (so the round would take material beyond the face), the ball touches the rim instead: it stays tangent to the other face and its section passes through the rim. Where that ball would land on the other face past that face's own rim, it touches both rims, its section the arc through them. The solver rolls the ball on the surface tangent to it along each rim it touches, in place of the face: the face's plane turned about a straight rim, or the wall's cylinder leaned into the cone through a circular rim (both keep the face's parameterization along the rim), so the round is built as a round as tall as its wall, exactly (a cylinder or a torus). Decided in the round's section ([`crate::blend::fillet_outline::outline_supports`]) for a round along a straight edge between two planes, or along a circular edge between a plane square to its axis and a coaxial cylinder; any other round is left to the cliff overflow. A 100 x 100 x 10 plate rounded r 90 on a top edge keeps 86 577.030 mm³, and the round never takes the whole plate: past r = 505 its section runs from the bottom edge to the far top edge. Off: the round on the continued wall, as before (WR-730, #2541; solidcore-native, no fork commit).
+    ///
+    /// Held back, off by default ([`UpstreamFixes::HELD_BACK`]): volumes come out off their
+    /// closed forms and rounds too big for their faces build instead of being refused. With it
+    /// on, SolidCraft's `fillet_over_a_cliff` measures 721.832 mm³ against the closed form's
+    /// 693.205, `a_round_wider_than_its_faces_overflows_onto_its_tangent_sides` 6125.719 against
+    /// 6107.529 and `taper_follows_the_room_along_the_edge` 4210.926 against 4195.579; a round
+    /// larger than the cube builds, and overflowing corner rounds that build with it off are
+    /// refused.
     pub fillet_round_ends_on_outline: bool,
     /// A vertex of three constant circular rounds of one convexity where a face is a natural quadric (a cylinder, cone or sphere; the others planes) is the blend corner's Setback too ([`crate::blend::blend_corner::setback`]; the fork's 37c9e1d, smlib#85 part C, built in solidcore). Each round is set back from the vertex, at least to where the rails cross on the faces as they are. The hole is filled by a G1 fill with spring curves exact on the faces, each patch G1 to its face by construction and certified no more concave than what it is G1 to (`II >= k G`), its control net never turning back (`check_brep`'s test #5) and contained; the fill's programme also minimises the net's own thin-plate energy. A fill not certified grows its setbacks to the least scale on the grid of thousandths that is certified by more than its own rounding bound, and an asked setback that certifies only grown is refused naming the setback that builds. With `fillet_round_as_definition` the fill's patches are its definition, the curved faces kept as their quadrics. Off: such a corner is the N-by-N convex corner, unchanged (WR-697 addendum 2026-11-03, #2343; solidcore-native, no fork commit).
     pub fillet_setback_beside_curved_faces: bool,
@@ -1118,6 +1131,31 @@ pub struct UpstreamFixes {
     /// (WR-732, #2503; solidcore-native, no fork commit).
     pub brep_ray_classifies_current_trims: bool,
 }
+}
+
+impl UpstreamFixes {
+    /// The corrections [`Default`] leaves off, because they refuse sound geometry or build
+    /// wrong volumes (measured on SolidCraft's kernel rig and tests; each field's doc says how):
+    /// `fillet_refuse_rounds_breaking_through` (WR-707) refuses rounds that build their closed
+    /// form, and `fillet_round_ends_on_outline` (WR-730) builds volumes off their closed forms
+    /// and rounds too big for their faces.
+    pub const HELD_BACK: &'static [&'static str] = &[
+        "fillet_refuse_rounds_breaking_through",
+        "fillet_round_ends_on_outline",
+    ];
+}
+
+impl Default for UpstreamFixes {
+    /// Every correction on, but [`UpstreamFixes::HELD_BACK`].
+    fn default() -> Self {
+        let mut fixes = Self::all();
+        for name in Self::HELD_BACK {
+            if let Some(on) = fixes.flag_mut(name) {
+                *on = false;
+            }
+        }
+        fixes
+    }
 }
 
 /// Options for [`Kernel::new`].
@@ -1504,9 +1542,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_turns_every_flag_on_and_default_none() {
+    fn all_turns_every_flag_on_and_default_all_but_the_held_back() {
         assert!(UpstreamFixes::all().flags().all(|(_, on)| on));
-        assert!(UpstreamFixes::default().flags().all(|(_, on)| !on));
+        for (name, on) in UpstreamFixes::default().flags() {
+            assert_eq!(on, !UpstreamFixes::HELD_BACK.contains(&name), "{name}");
+        }
+        for name in UpstreamFixes::HELD_BACK {
+            assert!(UpstreamFixes::NAMES.contains(name), "{name}");
+        }
         assert_eq!(
             UpstreamFixes::all().flags().count(),
             UpstreamFixes::NAMES.len()

@@ -100,8 +100,11 @@ fn named<'a>(
     Ok(fixes)
 }
 
-/// The kernel runs with exactly the fixes named in `on` (each an `UpstreamFixes` field name;
-/// every other flag off) from the next call on. Nothing changes if a name is unknown.
+/// The kernel runs with its corrections, every one always on (`UpstreamFixes::default()`), and
+/// with those of the held-back ones (`UpstreamFixes::HELD_BACK`) named in `on` on too, from the
+/// next call on. `on` names `UpstreamFixes` fields; naming a correction that is always on is
+/// accepted and changes nothing. No correction can be turned off. Nothing changes if a name is
+/// unknown.
 ///
 /// # Errors
 /// [`FixesRefused::Unknown`] naming the first name `UpstreamFixes` does not have;
@@ -134,7 +137,8 @@ pub fn set_thread_fixes<'a>(
     Ok(())
 }
 
-/// The names of the fixes the kernel runs with now.
+/// The names of the fixes the kernel runs with now: every correction but the held-back ones
+/// not named to [`set_fixes`].
 #[must_use]
 pub fn fixes() -> Vec<&'static str> {
     current_fixes()

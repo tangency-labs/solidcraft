@@ -238,11 +238,12 @@ fn a_threads_fixes_are_its_own_call_by_call() {
         let turns = Arc::clone(&turns);
         std::thread::spawn(move || {
             set_thread_fixes(on.iter().copied()).unwrap();
-            assert_eq!(fixes(), on);
             let mut want = UpstreamFixes::default();
             for name in on {
                 *want.flag_mut(name).unwrap() = true;
             }
+            let named: Vec<&str> = want.flags().filter(|(_, f)| *f).map(|(n, _)| n).collect();
+            assert_eq!(fixes(), named);
             let mut own = true;
             for _ in 0..16 {
                 turns.wait();
@@ -251,8 +252,9 @@ fn a_threads_fixes_are_its_own_call_by_call() {
             assert!(own);
         })
     };
-    let first = thread(&UpstreamFixes::NAMES[..1]);
-    let second = thread(&UpstreamFixes::NAMES[1..2]);
+    // each thread turns on a different held-back fix
+    let first = thread(&UpstreamFixes::HELD_BACK[..1]);
+    let second = thread(&UpstreamFixes::HELD_BACK[1..2]);
     first.join().unwrap();
     second.join().unwrap();
     // an unknown name changes nothing, on this thread either
