@@ -137,7 +137,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_move")
         .key("G")
         .enabled(in_sketch)
-        .params("entities: [curve/point ids], factor?: number (scale), angle?: degrees (turn), center?: [x,y] or point ref (what scales and turns stay put; default [0,0]), translate?: [dx,dy] (applied last); scales, turns and moves in one step"),
+        .params("entities: [curve/point ids], factor?: number (scale), angle?: degrees (turn), center?: [x,y] or point ref (what scales and turns stay put; default [0,0]), translate?: [dx,dy] (applied last); scales, turns and moves in one step; a free point held only to the picked geometry (a rounded rectangle's centre) goes with it; returns `released`: the constraints tying the picked geometry to what stays that the change let go, as {id, kind}"),
     CommandSpec::new("sketch.move", "Move/Copy Sketch Entities", crate::checked!("sketch.move", move_copy))
         .contract(&MOVE_CONTRACT)
         .output(output_schema_for::<MoveResult>)
@@ -4134,6 +4134,7 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         None => 0.0,
     };
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
+    let mut released = Vec::new();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, mut ps) = entities(sk, p, cmd)?;
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
@@ -4158,15 +4159,19 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         with_ellipse_axes(sk, &mut cs);
         let riding = riders(sk, &involved_points(sk, &cs, &ps));
         ps.extend(riding);
+        // As Move does (#2980): what ties the picked geometry to what stays and no longer holds
+        // after the turn is let go, else the solve drags the shape back and bends it (#15697).
+        let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
         let moved = involved_points(sk, &cs, &ps);
         let _ = rotate_axis_constraints(sk, doc, &moved, ang)?;
         scale_dimensions(sk, doc, &cs, &moved, k)?;
+        released = release_broken(sk, &held);
         cs.extend(text_curves);
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
-    reply(cmd, TransformResult { curves: out, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, TransformResult { curves: out, released, sketch: info, param_warnings: Vec::new() })
 }
 
 /// The driving lengths wholly inside a transformed selection scale with it. Keep formulas

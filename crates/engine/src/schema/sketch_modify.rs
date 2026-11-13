@@ -1598,6 +1598,9 @@ pub struct ScaleResult {
 pub struct TransformResult {
     /// The curves that moved, by id (an ellipse's axes come with it).
     pub curves: Vec<String>,
+    /// The constraints tying the transformed geometry to what stays that the transform let go,
+    /// as `{id, kind}`.
+    pub released: Vec<Value>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

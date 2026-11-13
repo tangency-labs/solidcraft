@@ -1459,26 +1459,32 @@ fn offset_chain_mirror_patterns_move_scale() {
     assert!(sk.center(sk.curve_index(&cp).unwrap()).unwrap().dist(Vec2::new(-110.0, 0.0)) < 1e-7);
 }
 
-/// #15697: rotating a rounded square picked by its sides and corner arcs (not its construction
-/// diagonal or centre point) turns it whole: every point lands where the rotation puts it, the
-/// centre point too, so the square does not come out as a trapezoid.
+/// #15697: the Transform tool turns a rounded square about its middle. Picked by its sides and
+/// corner arcs, with a corner drawn on the origin, it turns whole: every point of its curves and
+/// its centre point land where the rotation puts them, so the square does not come out as a
+/// trapezoid (the corner's hold on the origin is let go, as Move does).
 #[test]
-fn move_rotation_turns_a_rounded_rectangle_whole() {
-    for (command, angle) in [("sketch.move", 45.0), ("sketch.move", 30.0), ("sketch.transform", 45.0), ("sketch.transform", 30.0)] {
-        let mut s = new_sketch();
-        let r = run(&mut s, "sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [20, 20], "radius": 3}));
-        let source = ids(&r["curves"]);
-        assert_eq!(source.len(), 8, "four sides and four corner arcs: {r}");
-        let before = sketch(&s);
-        let out = run(&mut s, command, json!({"entities": source, "angle": angle, "center": [0, 0]}));
-        assert_eq!(out["sketch"]["solved"], true, "{command} {angle}: {out}");
-        let after = sketch(&s);
-        let (sin, cos) = f64::to_radians(angle).sin_cos();
-        let turned = |p: Vec2| Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
-        for p in &before.points {
-            let q = after.points.iter().find(|q| q.id == p.id).unwrap();
-            let expected = turned(p.pos);
-            assert!(q.pos.dist(expected) < 1e-6, "{command} {angle}: point {} at {:?}, expected {expected:?}", p.id, q.pos);
+fn rotation_turns_a_rounded_square_whole() {
+    for command in ["sketch.transform", "sketch.move"] {
+        for angle in [45.0, 30.0] {
+            let at = format!("{command} {angle}");
+            let mut s = new_sketch();
+            let r = run(&mut s, "sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [20, 20], "radius": 3}));
+            let source = ids(&r["curves"]);
+            assert_eq!(source.len(), 8, "four sides and four corner arcs: {r}");
+            let before = sketch(&s);
+            let mut shape: Vec<usize> = source.iter().flat_map(|id| before.curves[before.curve_index(id).unwrap()].kind.point_ids()).collect();
+            shape.push(before.points.iter().position(|p| Some(p.id.as_str()) == r["centre"].as_str()).unwrap());
+            let out = run(&mut s, command, json!({"entities": source, "angle": angle, "center": [10, 10]}));
+            assert_eq!(out["sketch"]["solved"], true, "{at}: {out}");
+            let after = sketch(&s);
+            let (sin, cos) = f64::to_radians(angle).sin_cos();
+            let c = Vec2::new(10.0, 10.0);
+            for i in shape {
+                let (p, q) = (before.points[i].pos - c, after.points[i].pos);
+                let expected = c + Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
+                assert!(q.dist(expected) < 1e-6, "{at}: point {} at {q:?}, expected {expected:?}", before.points[i].id);
+            }
         }
     }
 }
